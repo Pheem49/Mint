@@ -96,7 +96,7 @@
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: 0.82rem;
     font-weight: 600;
     white-space: nowrap;
@@ -105,7 +105,7 @@
 }
 
 .pill-segmented-btn:hover {
-    color: var(--text-main);
+    color: var(--text-primary);
 }
 
 .pill-segmented-btn:disabled {
@@ -120,7 +120,7 @@
 .pill-segmented-btn.active {
     background: var(--surface-strong);
     border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-    color: var(--text-main);
+    color: var(--text-primary);
 }
 
 .toggle-card {
@@ -376,4 +376,242 @@
 .preset-swatch-label {
     font-size: 0.66rem;
     color: var(--text-muted);
+}
+
+/* Color Mode Cards Grid */
+.color-mode-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    width: 100%;
+}
+
+@media (max-width: 720px) {
+    .color-mode-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.color-mode-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px;
+    border-radius: var(--radius-md);
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    text-align: left;
+    position: relative;
+    transition: all 0.18s ease;
+    gap: 8px;
+}
+
+.color-mode-card:hover {
+    background: var(--surface-strong);
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+}
+
+.color-mode-card.active {
+    background: color-mix(in srgb, var(--accent) 10%, var(--input-bg));
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), var(--glow-accent-xs);
+}
+
+.mode-card-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-strong);
+    color: var(--text-main);
+}
+
+.color-mode-card.active .mode-card-icon {
+    background: var(--accent);
+    color: var(--accent-contrast, #ffffff);
+}
+
+.mode-card-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.mode-card-title {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.mode-card-desc {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.mode-card-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--accent-contrast, #ffffff);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Accent Flavor Grid */
+.flavor-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
+    width: 100%;
+}
+
+@media (max-width: 720px) {
+    .flavor-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+.flavor-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 8px;
+    border-radius: var(--radius-md);
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    gap: 6px;
+    transition: all 0.18s ease;
+}
+
+.flavor-card:hover {
+    background: var(--surface-strong);
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+}
+
+.flavor-card.active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--input-bg));
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.flavor-swatch {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.flavor-name {
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+/* Custom Accent */
+.custom-accent-toggle {
+    font-size: 0.74rem;
+    color: var(--accent);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: var(--radius-xs);
+}
+
+.custom-accent-toggle:hover {
+    text-decoration: underline;
+}
+
+.custom-accent-box {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    width: fit-content;
+}
+
+.custom-accent-input {
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+    background: transparent;
+}
+
+.custom-accent-value {
+    font-family: ui-monospace, monospace;
+    font-size: 0.82rem;
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+/* Surface Style Cards */
+.surface-style-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    width: 100%;
+}
+
+@media (max-width: 600px) {
+    .surface-style-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.surface-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    text-align: left;
+    gap: 4px;
+    transition: all 0.18s ease;
+}
+
+.surface-card:hover {
+    background: var(--surface-strong);
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+}
+
+.surface-card.active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--input-bg));
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.surface-card-title {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.surface-card-desc {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    line-height: 1.35;
 }

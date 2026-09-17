@@ -11,6 +11,7 @@ export const DEFAULT_CONFIG = {
   customBgStart: '#0f172a',
   customBgEnd: '#1e1b4b',
   customPanelBg: '#1e293b',
+  surfaceStyle: 'glass' as 'opaque' | 'glass',
   glassBlur: 'blur(16px)',
   fontFamily: "'Prompt', 'Noto Sans Thai', 'Inter', sans-serif",
   fontSize: '18px',

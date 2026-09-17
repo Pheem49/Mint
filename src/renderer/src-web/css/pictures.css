@@ -8,7 +8,7 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-surface-soft);
   color: var(--text-soft);
   border: 1px solid var(--border);
   cursor: pointer;
@@ -16,8 +16,8 @@
 }
 
 .picture-refresh-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--bg-surface-hover);
+  border-color: var(--border-strong);
   color: var(--text-main);
 }
 
@@ -90,7 +90,7 @@
   padding: 0 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-surface-soft);
   color: var(--text-main);
   font-size: 0.82rem;
   font-weight: 500;
@@ -102,8 +102,8 @@
 }
 
 .pictures-close-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--bg-surface-hover);
+  border-color: var(--border-strong);
 }
 
 .pictures-grid {
@@ -160,7 +160,7 @@
   padding: 0 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-surface-soft);
   color: var(--text-main);
   font-size: 0.82rem;
   font-weight: 500;
@@ -172,8 +172,8 @@
 }
 
 .picture-folder-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--bg-surface-hover);
+  border-color: var(--border-strong);
 }
 
 .picture-folder-btn:disabled {
@@ -197,7 +197,7 @@
   gap: 6px;
   padding: 6px 14px;
   border-radius: var(--radius-3xl);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-surface-soft);
   border: 1px solid var(--border);
   color: var(--text-soft);
   font-size: 0.8rem;
@@ -208,7 +208,7 @@
 }
 
 .filter-tab-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-surface-hover);
   color: var(--text-main);
   border-color: var(--accent);
 }
@@ -276,9 +276,9 @@
   width: 26px;
   height: 26px;
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(15, 23, 42, 0.75);
-  color: #ef4444;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--danger);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -295,9 +295,9 @@
 }
 
 .picture-card-delete-btn:hover {
-  background: #ef4444;
-  color: #ffffff;
-  border-color: #ef4444;
+  background: var(--danger);
+  color: var(--pure-white);
+  border-color: var(--danger);
 }
 
 .picture-delete-modal-overlay {
@@ -316,8 +316,8 @@
 .picture-delete-modal {
   width: 100%;
   max-width: 400px;
-  background: var(--surface-bg, #1e293b);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-2xl);
   padding: 20px;
   box-shadow: var(--shadow-lg);
@@ -332,12 +332,12 @@
   gap: 10px;
   font-size: 1.1rem;
   font-weight: 600;
-  color: var(--system-text-color, #f8fafc);
+  color: var(--text-main);
 }
 
 .picture-delete-modal-body {
   font-size: 0.9rem;
-  color: var(--text-soft, #94a3b8);
+  color: var(--text-soft);
   line-height: 1.5;
   margin: 0;
 }
@@ -360,22 +360,22 @@
 
 .picture-modal-btn.cancel {
   background: transparent;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
-  color: var(--system-text-color, #f8fafc);
+  border: 1px solid var(--border-default);
+  color: var(--text-main);
 }
 
 .picture-modal-btn.cancel:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bg-surface-soft);
 }
 
 .picture-modal-btn.delete {
-  background: #ef4444;
-  border: 1px solid #ef4444;
-  color: #ffffff;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  color: var(--pure-white);
 }
 
 .picture-modal-btn.delete:hover {
-  background: #dc2626;
+  background: color-mix(in srgb, var(--danger) 85%, black);
 }
 
 /* Saved Pictures Gallery Load More styles */
@@ -392,7 +392,7 @@
   padding: 0 24px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--card-bg, rgba(255, 255, 255, 0.04));
+  background: var(--bg-surface-soft);
   color: var(--text-main);
   font-size: 0.88rem;
   font-weight: 500;

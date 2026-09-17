@@ -454,7 +454,7 @@ export default function GeneralTab({
                       {currentTemp.toFixed(2)}
                     </span>
                   </div>
-                  <span style={{ fontSize: '0.75rem', opacity: 0.75, marginTop: '0.35rem', lineHeight: 1.4 }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', lineHeight: 1.4 }}>
                     Controls sampling entropy for <strong>{modelDisplayName || activeModelRaw}</strong>. {
                       isReasoningOmit
                         ? 'Reasoning models (o1/o3) automatically omit this parameter.'

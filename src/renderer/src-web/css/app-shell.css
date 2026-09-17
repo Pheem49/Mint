@@ -1,33 +1,6 @@
 /* web: app-shell.css — split from styles.css, rules kept in original order */
 
 :root {
-  /* Surface ladder — same relative order as before (bg < panel-soft <
-     chrome-bg < panel-bg < surface-bg < input-bg < panel-raised <
-     surface-strong), just spaced further apart. The old values sat within
-     ~25 points of each other on a 0-255 scale (input-bg and panel-raised
-     were literally the same lightness), so adjacent layers — a panel next
-     to the surface behind it, an input next to its panel — were hard to
-     tell apart. Each step here is a clear ~6-12 point jump. */
-  --bg-color: #0a0a0b;
-  --bg-gradient: #0a0a0b;
-  --panel-bg: #1e1e20;
-  --panel-raised: #343436;
-  --panel-soft: #121214;
-  --chrome-bg: #18181a;
-  --surface-bg: #252527;
-  --surface-strong: #404042;
-  --input-bg: #2c2c2e;
-  --text-main: #ececec;
-  --text-chat: var(--text-main);
-  --text-muted: #8e8e8e;
-  --text-soft: #d1d5db;
-  --placeholder: #818187;
-  --accent: #10b981;
-  --accent-hover: #34d399;
-  --border: rgba(255, 255, 255, 0.075);
-  --border-light: rgba(255, 255, 255, 0.11);
-  --shadow: none;
-  --glass-blur: none;
   --status-listening: #7dd3fc;
   --status-thinking: var(--accent);
   --status-speaking: #22c55e;
@@ -78,22 +51,6 @@
 }
 
 [data-theme="light"] {
-  --bg-color: #f8fafc;
-  --bg-gradient: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-  --panel-bg: rgba(255, 255, 255, 0.75);
-  --panel-raised: #ffffff;
-  --panel-soft: #eef2f7;
-  --chrome-bg: rgba(255, 255, 255, 0.88);
-  --surface-bg: #ffffff;
-  --surface-strong: #e2e8f0;
-  --input-bg: #f8fafc;
-  --text-main: #0f172a;
-  --text-muted: #64748b;
-  --text-soft: #334155;
-  --placeholder: #8590a2;
-  --border: rgba(0, 0, 0, 0.06);
-  --border-light: rgba(255, 255, 255, 0.6);
-  --shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
   --status-listening: #0284c7;
   --status-thinking: var(--accent);
   --status-speaking: #16a34a;
@@ -107,22 +64,6 @@
 }
 
 [data-theme="midnight"] {
-  --bg-color: #020617;
-  --bg-gradient: linear-gradient(135deg, #020617 0%, #080a22 55%, #120828 100%);
-  --panel-bg: rgba(5, 8, 24, 0.94);
-  --panel-raised: rgba(99, 102, 241, 0.085);
-  --panel-soft: rgba(99, 102, 241, 0.055);
-  --chrome-bg: rgba(2, 6, 23, 0.88);
-  --surface-bg: rgba(5, 8, 24, 0.88);
-  --surface-strong: rgba(99, 102, 241, 0.16);
-  --input-bg: rgba(0, 0, 0, 0.46);
-  --text-main: #e2e8f0;
-  --text-muted: #74809a;
-  --text-soft: #bac4d6;
-  --placeholder: #68708a;
-  --border: rgba(99, 102, 241, 0.16);
-  --border-light: rgba(99, 102, 241, 0.26);
-  --shadow: none;
   --status-listening: #7dd3fc;
   --status-thinking: var(--accent);
   --status-speaking: #22c55e;
@@ -159,7 +100,7 @@ body {
   flex-direction: column;
   background: var(--bg-gradient);
   border-radius: 0;
-  border: 1px solid rgba(255, 255, 255, 0.045);
+  border: 1px solid var(--border-subtle);
   box-shadow: var(--shadow);
   overflow: hidden;
   position: relative;
@@ -249,7 +190,7 @@ h1 {
 }
 
 .minimize-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-surface-hover);
   color: var(--text-main);
 }
 
@@ -321,8 +262,8 @@ h1 {
 }
 
 .maximize-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-color);
+  background: var(--bg-surface-hover);
+  color: var(--text-main);
 }
 
 /* Chat Area */
@@ -593,8 +534,8 @@ h1 {
 }
 
 .proactive-dismiss-btn:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
 }
 
 /* Chips row */
@@ -629,8 +570,8 @@ h1 {
 
 .suggestion-chip:hover {
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, #000000));
-  border-color: rgba(255, 255, 255, 0.3);
-  color: white;
+  border-color: var(--border-strong);
+  color: var(--text-on-accent);
   box-shadow: var(--glow-accent-md), inset 0 1px 1px rgba(255, 255, 255, 0.2);
   transform: translateY(-3px) scale(1.05);
 }
@@ -1160,13 +1101,13 @@ h1 {
 }
 
 .search-modal-header input::placeholder {
-  color: var(--text-muted, #64748b);
+  color: var(--placeholder);
 }
 
 .search-modal-close {
   background: transparent;
   border: 0;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1177,8 +1118,8 @@ h1 {
 }
 
 .search-modal-close:hover {
-  color: var(--text-main, #f8fafc);
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  background: var(--surface-hover);
 }
 
 /* Body */
@@ -1196,10 +1137,10 @@ h1 {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  color: var(--text-main, #f8fafc);
+  color: var(--text-primary);
   padding: 10px 14px;
   cursor: pointer;
   text-align: left;
@@ -1209,7 +1150,7 @@ h1 {
 }
 
 .search-new-chat-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
 }
 
 .search-modal-results {
@@ -1225,7 +1166,7 @@ h1 {
 }
 
 .search-group-title {
-  color: var(--accent, #10b981);
+  color: var(--accent);
   font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -1240,7 +1181,7 @@ h1 {
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
-  color: var(--text-soft, #94a3b8);
+  color: var(--text-secondary);
   padding: 8px 12px;
   cursor: pointer;
   text-align: left;
@@ -1254,19 +1195,19 @@ h1 {
 }
 
 .search-result-item svg {
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .search-result-item:hover,
 .search-result-item.active {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-main, #f8fafc);
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .search-result-item:hover svg,
 .search-result-item.active svg {
-  color: var(--text-main, #f8fafc);
+  color: var(--text-primary);
 }
 
 .search-result-title {

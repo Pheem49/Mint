@@ -28,9 +28,9 @@
   display: grid;
   place-items: center;
   position: relative;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--bg-surface-soft);
   border-radius: var(--radius-3xl);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
   box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.2);
   overflow: hidden;
 }
@@ -69,14 +69,14 @@
   pointer-events: none;
   padding: 7px 12px;
   border-radius: var(--radius-full);
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #f8fafc;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  color: var(--text-main);
   font-size: 0.76rem;
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-md);
   backdrop-filter: blur(10px);
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
@@ -121,14 +121,14 @@
   transform: translate(-50%, -50%);
   padding: 4px 8px;
   border-radius: var(--radius-full);
-  background: rgba(3, 7, 18, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #e0f2fe;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  color: var(--text-main);
   font-size: 0.68rem;
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.65);
+  text-shadow: none;
 }
 
 .zone-head {
@@ -202,13 +202,13 @@
   align-items: center;
   gap: 7px;
   padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-full);
-  background: rgba(18, 18, 22, 0.72);
+  background: var(--bg-surface);
   color: var(--text-main);
   font-size: 0.72rem;
   line-height: 1;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-sm);
   backdrop-filter: blur(12px);
   pointer-events: none;
 }
@@ -222,10 +222,10 @@
   align-items: center;
   gap: 6px;
   padding: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: rgba(18, 18, 22, 0.68);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
   backdrop-filter: blur(12px);
 }
 
@@ -261,7 +261,7 @@
 }
 
 .model-scale-control:hover {
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--bg-surface-soft);
   color: var(--text-main);
 }
 
@@ -303,7 +303,7 @@
   gap: 2px;
   margin-left: 2px;
   padding-left: 6px;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid var(--border-subtle);
 }
 
 .layout-preset-btn {
@@ -346,7 +346,7 @@
 }
 
 .model-status.is-error {
-  color: #fca5a5;
+  color: var(--status-error);
   display: block;
 }
 
@@ -385,9 +385,9 @@
   gap: 14px;
   padding: 40px 28px 28px;
   border-radius: var(--radius-3xl);
-  background: var(--surface-bg, #1e293b);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-lg);
 }
 
 .gemini-live-badge {
@@ -437,7 +437,7 @@
 .gemini-live-status {
   font-size: 0.95rem;
   font-weight: 600;
-  color: var(--system-text-color, #f8fafc);
+  color: var(--text-main);
 }
 
 .gemini-live-transcript {
@@ -462,7 +462,7 @@
 
 .gemini-live-transcript-speaker {
   font-weight: 600;
-  color: var(--system-text-color, #f8fafc);
+  color: var(--text-main);
 }
 
 .gemini-live-voice-picker {
@@ -485,8 +485,8 @@
 }
 
 .gemini-live-voice-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--system-text-color, #f8fafc);
+  background: var(--bg-surface-hover);
+  color: var(--text-main);
 }
 
 .gemini-live-voice-menu {
@@ -500,9 +500,9 @@
   min-width: 140px;
   padding: 6px;
   border-radius: var(--radius-2xl);
-  background: var(--surface-bg, #1e293b);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  box-shadow: 0 12px 30px -8px rgba(0, 0, 0, 0.55);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-md);
   z-index: 1;
 }
 
@@ -519,13 +519,13 @@
 }
 
 .gemini-live-voice-option:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--system-text-color, #f8fafc);
+  background: var(--bg-surface-hover);
+  color: var(--text-main);
 }
 
 .gemini-live-voice-option.active {
-  background: rgba(99, 102, 241, 0.18);
-  color: var(--system-text-color, #f8fafc);
+  background: color-mix(in srgb, var(--flavor-indigo) 18%, transparent);
+  color: var(--text-main);
 }
 
 .gemini-live-controls {
@@ -548,13 +548,13 @@
   border-radius: var(--radius-full);
   border: none;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--system-text-color, #f8fafc);
+  background: var(--bg-surface-soft);
+  color: var(--text-main);
   transition: background 0.15s ease, transform 0.1s ease;
 }
 
 .gemini-live-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--bg-surface-hover);
 }
 
 .gemini-live-btn:active {
@@ -562,12 +562,12 @@
 }
 
 .gemini-live-btn.gemini-live-end {
-  background: #ef4444;
-  color: #ffffff;
+  background: var(--danger);
+  color: var(--pure-white);
 }
 
 .gemini-live-btn.gemini-live-end:hover {
-  background: #dc2626;
+  background: color-mix(in srgb, var(--danger) 85%, black);
 }
 
 .model-stage {
@@ -589,9 +589,9 @@
   width: 100%;
   height: 100%;
   background: var(--panel-soft);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025), 0 18px 52px rgba(0, 0, 0, 0.16);
+  box-shadow: inset 0 0 0 1px var(--border-subtle), var(--shadow-sm);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
 }
@@ -602,8 +602,8 @@
 
 .model-shell.model-bg-grid {
   background:
-    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(var(--border-subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px),
     var(--panel-soft);
   background-size: 28px 28px;
 }
@@ -611,7 +611,7 @@
 .model-shell.model-bg-stage {
   background:
     radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 42%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(0, 0, 0, 0.08)),
+    linear-gradient(180deg, var(--border-subtle), transparent),
     var(--panel-soft);
 }
 

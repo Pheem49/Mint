@@ -38,9 +38,9 @@
 }
 
 .change-expression-btn:hover {
-  background: rgba(251, 191, 36, 0.15);
-  border-color: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
+  background: color-mix(in srgb, var(--flavor-amber) 15%, transparent);
+  border-color: color-mix(in srgb, var(--flavor-amber) 20%, transparent);
+  color: var(--flavor-amber);
 }
 
 .toggle-interaction-btn .interaction-off-mark {
@@ -48,15 +48,15 @@
 }
 
 .interaction-guide-btn:hover {
-  background: rgba(34, 211, 238, 0.14);
-  border-color: rgba(34, 211, 238, 0.2);
-  color: #67e8f9;
+  background: color-mix(in srgb, var(--flavor-cyan) 14%, transparent);
+  border-color: color-mix(in srgb, var(--flavor-cyan) 20%, transparent);
+  color: var(--flavor-cyan);
 }
 
 .clear-btn:hover {
-  background: rgba(251, 191, 36, 0.15);
-  border-color: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
+  background: color-mix(in srgb, var(--flavor-amber) 15%, transparent);
+  border-color: color-mix(in srgb, var(--flavor-amber) 20%, transparent);
+  color: var(--flavor-amber);
 }
 
 .settings-btn:hover {
@@ -133,7 +133,7 @@
   align-items: center;
   gap: 10px;
   padding: 0 8px 16px 2px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--border-subtle);
   margin-bottom: 14px;
   overflow: hidden;
   transition: all 0.22s ease;
@@ -203,10 +203,10 @@
 }
 
 .sidebar-new-chat {
-  background: var(--surface-strong);
-  color: var(--text-main);
+  background: var(--bg-surface-raised);
+  color: var(--text-primary);
   margin-bottom: 4px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-default);
 }
 
 .sidebar-new-chat:hover,
@@ -217,8 +217,8 @@
 .sidebar-settings:hover,
 .sidebar-bottom-actions .clear-btn:hover,
 .sidebar-bottom-actions .settings-btn:hover {
-  background: var(--surface-strong);
-  color: var(--text-main);
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
 }
 
 .sidebar-account-container {
@@ -233,9 +233,9 @@
   width: 100%;
   padding: 8px;
   border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  background: var(--panel-raised);
-  color: inherit;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface-raised);
+  color: var(--text-primary);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -243,7 +243,7 @@
 }
 
 .sidebar-account:hover {
-  background: var(--surface-strong);
+  background: var(--bg-surface-hover);
 }
 
 .sidebar-account-chevron {
@@ -260,22 +260,21 @@
   right: 0;
   bottom: calc(100% + 8px);
   z-index: 1000;
-  background: var(--surface-strong);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  background: var(--bg-surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg, 12px);
   padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  box-shadow: var(--shadow-md);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-lg);
 }
 
 .sidebar-account-menu-header {
-  padding: 6px 10px 8px;
+  padding: 8px 12px 6px;
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -284,7 +283,7 @@
 .sidebar-account-menu-divider {
   height: 1px;
   margin: 4px 2px;
-  background: var(--border);
+  background: var(--border-subtle);
 }
 
 .sidebar-more-container {
@@ -299,44 +298,43 @@
   top: 0;
   margin-left: 8px;
   z-index: 1000;
-  background: var(--surface-strong);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  background: var(--bg-surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md, 8px);
   padding: 6px;
   min-width: 160px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  box-shadow: var(--shadow-md);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-lg);
 }
 
 .sidebar-more-popover .popover-item,
 .sidebar-account-menu .popover-item {
   width: 100%;
-  height: 32px;
+  height: 36px;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-sm, 6px);
   background: transparent;
-  color: var(--text-soft);
+  color: var(--text-primary);
+  font-weight: 500;
   cursor: pointer;
-  padding: 0 10px;
+  padding: 0 12px;
   text-align: left;
   font: inherit;
   font-size: 0.9rem;
-  transition: background 0.16s ease, color 0.16s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .sidebar-more-popover .popover-item:hover,
 .sidebar-more-popover .popover-item.active,
 .sidebar-account-menu .popover-item:hover,
 .sidebar-account-menu .popover-item.active {
-  background: var(--surface-main);
-  color: var(--text-main);
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
 }
 
 .sidebar-account-avatar {
@@ -349,7 +347,7 @@
   align-items: center;
   justify-content: center;
   background: var(--accent);
-  color: #06120c;
+  color: var(--text-on-accent);
   font-size: 0.72rem;
   font-weight: 700;
 }
@@ -394,8 +392,8 @@
   justify-content: stretch;
   gap: 2px;
   padding: 10px 0 18px;
-  border-top: 1px solid rgba(255, 255, 255, 0.035);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
   margin-bottom: 6px;
 }
 
@@ -434,7 +432,7 @@
   min-height: 0;
   overflow: hidden;
   padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
 }
@@ -470,7 +468,7 @@
   align-items: center;
   gap: 9px;
   padding: 0 10px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-secondary);
   border-radius: 7px;
   white-space: nowrap;
   overflow: hidden;
@@ -517,11 +515,14 @@
 
 .sidebar-chat-item {
   cursor: pointer;
+  color: var(--text-secondary);
 }
 
-.sidebar-chat-item:hover {
-  background: var(--surface-strong);
-  color: var(--text-main);
+.sidebar-chat-item:hover,
+.sidebar-project:hover,
+.sidebar-project.active {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
 }
 
 .sidebar-chat-title {
@@ -532,6 +533,7 @@
   white-space: nowrap;
   font-size: 0.89rem;
   line-height: 1.45;
+  color: var(--text-primary);
 }
 
 .sidebar-chat-delete {
@@ -578,10 +580,10 @@
 }
 
 .sidebar-chat-rename-input {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-xs);
-  color: var(--text-main);
+  color: var(--text-primary);
   font-family: inherit;
   font-size: 0.82rem;
   padding: 2px 6px;
@@ -593,7 +595,7 @@
 
 .sidebar-chat-rename-input:focus {
   border-color: var(--accent);
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--bg-input-focus);
 }
 
 .sidebar-chat-item.active:hover .mint-status-pill {
@@ -677,7 +679,7 @@
   gap: 6px;
   padding: 3px 7px;
   border-radius: var(--radius-full);
-  background: rgba(255, 255, 255, 0.055);
+  background: var(--bg-surface-soft);
   color: var(--text-muted);
   font-size: 0.68rem;
   line-height: 1;
@@ -688,8 +690,8 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #94a3b8;
-  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.12);
+  background: var(--text-muted);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 12%, transparent);
   flex: 0 0 auto;
 }
 
@@ -818,3 +820,6 @@
 .sidebar-search-btn {
   margin-top: 4px;
 }
+
+
+

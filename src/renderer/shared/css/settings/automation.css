@@ -78,7 +78,7 @@
 .bridge-title {
     font-size: 14px;
     font-weight: 600;
-    color: var(--text-main, #f8fafc);
+    color: var(--text-primary);
     display: flex;
     align-items: center;
     gap: 8px;
@@ -94,14 +94,14 @@
 }
 
 .bridge-status-pill.inactive {
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--text-muted, #94a3b8);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--surface-strong);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
 }
 
 .bridge-subtitle {
     font-size: 12px;
-    color: var(--text-muted, #94a3b8);
+    color: var(--text-muted);
 }
 
 .bridge-inputs {
@@ -110,7 +110,7 @@
     gap: 10px;
     margin-top: 14px;
     padding-top: 12px;
-    border-top: 1px dashed var(--border, rgba(255, 255, 255, 0.08));
+    border-top: 1px dashed var(--border);
 }
 
 .bridge-input-row {
@@ -121,19 +121,19 @@
 .bridge-input {
     width: 100%;
     padding: 9px 12px;
-    background: var(--input-bg, rgba(0, 0, 0, 0.35));
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+    background: var(--input-bg);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    color: var(--text-main, #f8fafc);
+    color: var(--text-primary);
     font-size: 13px;
     transition: all 0.2s ease;
 }
 
 .bridge-input:focus {
     outline: none;
-    border-color: var(--accent, #10b981);
-    background: var(--input-focus-bg, rgba(0, 0, 0, 0.5));
-    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+    border-color: var(--accent);
+    background: var(--input-focus-bg);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .bridge-input[type="number"] {
