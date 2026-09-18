@@ -167,6 +167,12 @@ pub struct ChatRequest {
     /// `config.resolved_temperature()`.
     #[serde(default)]
     pub temperature: Option<f64>,
+    /// Optional per-request thinking/reasoning enabled override.
+    #[serde(default)]
+    pub thinking_enabled: Option<bool>,
+    /// Optional per-request thinking effort override ("low", "medium", "high", "extra_high").
+    #[serde(default)]
+    pub thinking_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -529,7 +535,9 @@ async fn call_gemini(
     let payload = if request.messages.is_some() {
         let mut p = gemini_native_payload(request)?;
         let temp = effective_temperature(config, request);
-        p["generationConfig"] = json!({ "temperature": temp });
+        let mut gen_cfg = json!({ "temperature": temp });
+        gemini_apply_thinking_config(&mut gen_cfg, config, request, &model);
+        p["generationConfig"] = gen_cfg;
         p
     } else {
         gemini_chat_payload(config, request)?
@@ -1009,6 +1017,10 @@ async fn call_ollama(
         "num_ctx": config.ollama_num_ctx,
         "temperature": temp,
     });
+    let (thinking_enabled, _) = effective_thinking(config, request, &model);
+    if MintConfig::is_thinking_supported_for_model("ollama", &model) {
+        body["think"] = json!(thinking_enabled);
+    }
     let response: Value = client
         .post(format!("{host}/api/chat"))
         .json(&body)
@@ -1203,11 +1215,27 @@ fn anthropic_chat_payload(
     stream: bool,
 ) -> Result<Value, ChatError> {
     let system = anthropic_system_blocks(&request.system_instruction);
-    let temp = effective_temperature(config, request);
+    let (thinking_enabled, thinking_effort) = effective_thinking(config, request, model);
+    let is_thinking_supported = MintConfig::is_thinking_supported_for_model("anthropic", model);
+    let use_thinking = thinking_enabled && is_thinking_supported;
+
+    let (budget, max_tokens, temp) = if use_thinking {
+        let b = match thinking_effort.as_str() {
+            "low" => 1024,
+            "medium" => 4096,
+            "high" => 16384,
+            "extra_high" => 32768,
+            _ => 4096,
+        };
+        (Some(b), b + 8192, 1.0)
+    } else {
+        (None, 8192, effective_temperature(config, request))
+    };
+
     let mut payload = if let Some(messages) = &request.messages {
         json!({
             "model": model,
-            "max_tokens": 8192,
+            "max_tokens": max_tokens,
             "system": system,
             "messages": anthropic_messages(messages)?,
             "temperature": temp,
@@ -1215,7 +1243,7 @@ fn anthropic_chat_payload(
     } else {
         json!({
             "model": model,
-            "max_tokens": 8192,
+            "max_tokens": max_tokens,
             "system": system,
             "messages": [{
                 "role": "user",
@@ -1224,6 +1252,12 @@ fn anthropic_chat_payload(
             "temperature": temp,
         })
     };
+    if let Some(b) = budget {
+        payload["thinking"] = json!({
+            "type": "enabled",
+            "budget_tokens": b,
+        });
+    }
     if stream {
         payload["stream"] = json!(true);
     }
@@ -1575,21 +1609,26 @@ where
     if let Some(images) = ollama_images(request) {
         user_message["images"] = json!(images);
     }
+    let (thinking_enabled, _) = effective_thinking(config, request, &model);
+    let mut payload = json!({
+        "model": model,
+        "stream": true,
+        "messages": [
+            { "role": "system", "content": request.system_instruction },
+            user_message
+        ],
+        // See `call_ollama`: pin the window instead of Ollama's ~4K default.
+        "options": {
+            "num_ctx": config.ollama_num_ctx,
+            "temperature": effective_temperature(config, request),
+        }
+    });
+    if MintConfig::is_thinking_supported_for_model("ollama", &model) {
+        payload["think"] = json!(thinking_enabled);
+    }
     let response = client
         .post(format!("{host}/api/chat"))
-        .json(&json!({
-            "model": model,
-            "stream": true,
-            "messages": [
-                { "role": "system", "content": request.system_instruction },
-                user_message
-            ],
-            // See `call_ollama`: pin the window instead of Ollama's ~4K default.
-            "options": {
-                "num_ctx": config.ollama_num_ctx,
-                "temperature": effective_temperature(config, request),
-            }
-        }))
+        .json(&payload)
         .send()
         .await?
         .error_for_status()?;
@@ -1913,13 +1952,15 @@ fn gemini_chat_payload(config: &MintConfig, request: &ChatRequest) -> Result<Val
         "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
         "contents": [{ "role": "user", "parts": gemini_parts(request)? }]
     });
-    if wants_agent_json(request) {
-        let mut gen_cfg = gemini_agent_generation_config(config);
-        gen_cfg["temperature"] = json!(temp);
-        payload["generationConfig"] = gen_cfg;
+    let mut gen_cfg = if wants_agent_json(request) {
+        let mut cfg = gemini_agent_generation_config(config);
+        cfg["temperature"] = json!(temp);
+        cfg
     } else {
-        payload["generationConfig"] = json!({ "temperature": temp });
-    }
+        json!({ "temperature": temp })
+    };
+    gemini_apply_thinking_config(&mut gen_cfg, config, request, &config.gemini_model);
+    payload["generationConfig"] = gen_cfg;
     Ok(payload)
 }
 
@@ -2042,6 +2083,47 @@ pub(crate) fn effective_temperature(config: &MintConfig, request: &ChatRequest) 
         .unwrap_or_else(|| config.resolved_temperature())
 }
 
+/// Resolves (enabled, effort) for this request and model, prioritizing request overrides.
+pub(crate) fn effective_thinking(
+    config: &MintConfig,
+    request: &ChatRequest,
+    model: &str,
+) -> (bool, String) {
+    let enabled = request
+        .thinking_enabled
+        .unwrap_or_else(|| config.resolved_thinking_enabled_for_model(&config.ai_provider, model));
+    let effort = request
+        .thinking_effort
+        .as_deref()
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_else(|| config.resolved_thinking_effort_for_model(model).to_string());
+    (enabled, effort)
+}
+
+pub(crate) fn gemini_apply_thinking_config(
+    gen_cfg: &mut Value,
+    config: &MintConfig,
+    request: &ChatRequest,
+    model: &str,
+) {
+    if !MintConfig::is_thinking_supported_for_model("gemini", model) {
+        return;
+    }
+    let (enabled, effort) = effective_thinking(config, request, model);
+    if !enabled {
+        gen_cfg["thinkingConfig"] = json!({ "thinkingBudget": 0 });
+    } else {
+        let budget = match effort.as_str() {
+            "low" => 1024,
+            "medium" => 4096,
+            "high" => 16384,
+            "extra_high" => 32768,
+            _ => 4096,
+        };
+        gen_cfg["thinkingConfig"] = json!({ "thinkingBudget": budget });
+    }
+}
+
 fn openai_chat_payload(
     config: &MintConfig,
     model: &str,
@@ -2084,7 +2166,20 @@ fn openai_chat_payload(
     });
     // OpenAI reasoning models (o1, o3, etc.) reject explicit temperature parameter.
     let is_reasoning_model = model.starts_with("o1") || model.starts_with("o3");
-    if !is_reasoning_model {
+    let (thinking_enabled, thinking_effort) = effective_thinking(config, request, model);
+    if is_reasoning_model {
+        if thinking_enabled {
+            let effort_str = match thinking_effort.as_str() {
+                "low" => "low",
+                "medium" => "medium",
+                "high" | "extra_high" => "high",
+                _ => "medium",
+            };
+            payload["reasoning_effort"] = json!(effort_str);
+        } else {
+            payload["reasoning_effort"] = json!("low");
+        }
+    } else {
         payload["temperature"] = json!(effective_temperature(config, request));
     }
     if wants_agent_json(request) {
@@ -2369,6 +2464,7 @@ mod tests {
             messages: None,
             tools: None,
             temperature: None,
+            ..Default::default()
         };
 
         let error = require_supported_attachments("openai", &request).unwrap_err();
@@ -2418,6 +2514,7 @@ mod tests {
             messages: None,
             tools: None,
             temperature: None,
+            ..Default::default()
         })
         .unwrap();
         assert_eq!(parts.len(), 3);
@@ -2453,6 +2550,7 @@ mod tests {
             messages: Some(messages),
             tools,
             temperature: None,
+            ..Default::default()
         }
     }
 
@@ -2673,6 +2771,7 @@ mod tests {
             messages: None,
             tools: None,
             temperature: None,
+            ..Default::default()
         };
         assert!(require_supported_attachments("openai", &request).is_ok());
     }
@@ -2698,6 +2797,7 @@ mod tests {
             messages: None,
             tools: None,
             temperature: None,
+            ..Default::default()
         };
         for provider in [
             "local_openai",
@@ -3231,6 +3331,7 @@ mod tests {
         let config = MintConfig {
             ai_provider: "anthropic".into(),
             anthropic_model: "claude-sonnet-5".into(),
+            thinking_enabled: false,
             ..MintConfig::default()
         };
         let payload = anthropic_chat_payload(&config, "claude-sonnet-5", &request, false).unwrap();

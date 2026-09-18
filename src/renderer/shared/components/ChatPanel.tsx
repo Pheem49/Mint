@@ -96,6 +96,7 @@ interface ChatPanelProps {
   onSelectWorkspace?: () => void
   onApproval: (approved: boolean, autoApproveSession?: boolean, answer?: string) => void
   settingsConfig: any
+  onUpdateSettings?: (config: any) => void
   onSetModel: (model: string) => void
   onSelectModelAndProvider?: (provider: string, model: string) => void
   onCancelMessage: () => void
@@ -152,6 +153,7 @@ export default function ChatPanel({
   onSelectWorkspace,
   onApproval,
   settingsConfig,
+  onUpdateSettings,
   onSetModel,
   onSelectModelAndProvider,
   onCancelMessage,
@@ -1836,6 +1838,7 @@ export default function ChatPanel({
                 onSetModel(model)
               }
             }}
+            onUpdateSettings={onUpdateSettings}
           />
           <button
             id="mic-btn"

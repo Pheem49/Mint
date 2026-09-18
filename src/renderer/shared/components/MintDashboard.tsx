@@ -1945,6 +1945,7 @@ export default function MintDashboard() {
             onSetProvider={changeProvider}
             onSelectWorkspace={isDesktopApp ? selectWorkspace : undefined}
             settingsConfig={settingsConfig}
+            onUpdateSettings={(updated) => setSettingsConfig(updated)}
             onSetModel={changeModel}
             onSelectModelAndProvider={changeProviderAndModel}
             onSetGeminiLiveVoice={changeGeminiLiveVoice}

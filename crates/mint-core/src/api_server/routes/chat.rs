@@ -33,6 +33,10 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 pinned_mcp_server: Option<String>,
                 #[serde(default)]
                 temperature: Option<f64>,
+                #[serde(default)]
+                thinking_enabled: Option<bool>,
+                #[serde(default)]
+                thinking_effort: Option<String>,
             }
 
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
@@ -52,6 +56,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                     messages: None,
                     tools: None,
                     temperature: req.temperature.or(config.temperature),
+                    thinking_enabled: req.thinking_enabled,
+                    thinking_effort: req.thinking_effort,
+                    ..Default::default()
                 };
                 let mut chat_req = match chat_req.with_document_context(&config) {
                     Ok(req) => req,
@@ -200,6 +207,10 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 pinned_mcp_server: Option<String>,
                 #[serde(default)]
                 temperature: Option<f64>,
+                #[serde(default)]
+                thinking_enabled: Option<bool>,
+                #[serde(default)]
+                thinking_effort: Option<String>,
             }
 
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
@@ -219,6 +230,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                     messages: None,
                     tools: None,
                     temperature: req.temperature.or(config.temperature),
+                    thinking_enabled: req.thinking_enabled,
+                    thinking_effort: req.thinking_effort,
+                    ..Default::default()
                 };
                 let mut chat_req = match chat_req.with_document_context(&config) {
                     Ok(req) => req,

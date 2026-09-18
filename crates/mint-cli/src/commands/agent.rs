@@ -607,6 +607,7 @@ pub async fn handle_chat(
                 messages: None,
                 tools: None,
                 temperature: config.temperature,
+                ..Default::default()
             },
         )
         .await?;

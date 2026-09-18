@@ -1226,6 +1226,7 @@ where
                             allow_subagent_dispatch,
                         )),
                         temperature: active_config.temperature,
+                        ..Default::default()
                     },
                     &mut progress,
                 )
@@ -1248,6 +1249,7 @@ where
                         messages: None,
                         tools: None,
                         temperature: active_config.temperature,
+                        ..Default::default()
                     },
                     &mut progress,
                 )
@@ -1374,6 +1376,7 @@ where
                                 messages: None,
                                 tools: None,
                                 temperature: active_config.temperature,
+                                ..Default::default()
                             },
                         )
                         .await?;
@@ -3075,6 +3078,7 @@ mod tests {
             messages: None,
             tools: None,
             temperature: None,
+            ..Default::default()
         };
         let config = MintConfig::default();
         assert!(

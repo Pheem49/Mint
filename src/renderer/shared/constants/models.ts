@@ -62,6 +62,25 @@ export const OPENROUTER_MODELS = [
   'deepseek/deepseek-v4-pro',
 ] as const
 
+export const OPENROUTER_POPULAR_MODELS = [
+  'anthropic/claude-3.7-sonnet',
+  'anthropic/claude-3.5-sonnet',
+  'openai/gpt-4o',
+  'openai/gpt-4o-mini',
+  'deepseek/deepseek-r1',
+  'deepseek/deepseek-chat',
+  'google/gemini-2.5-flash',
+  'google/gemini-2.5-pro',
+  'meta-llama/llama-3.3-70b-instruct',
+  'qwen/qwen-2.5-72b-instruct',
+] as const
+
+export function isFreeModel(modelId: string): boolean {
+  if (!modelId) return false
+  const lower = modelId.toLowerCase()
+  return lower.endsWith(':free') || lower.includes(':free')
+}
+
 export const DEEPSEEK_MODELS = [
   'deepseek-v4-flash',
   'deepseek-v4-pro',
@@ -170,3 +189,174 @@ export const IMAGE_GEN_PROVIDER_MODELS: Record<
   replicate: { listKey: 'replicate',  configField: 'replicateModel' },
   bfl:       { listKey: 'bfl',        configField: 'bflModel' },
 }
+
+export interface ModelMeta {
+  description: string
+  contextWindow: string
+  supportsThinking: boolean
+}
+
+export const MODEL_METADATA: Record<string, ModelMeta> = {
+  // Gemini
+  'gemini-2.5-flash': {
+    description: 'Google ultra-fast multimodal model with adaptive reasoning and high efficiency.',
+    contextWindow: '1M Context',
+    supportsThinking: true,
+  },
+  'gemini-2.5-pro': {
+    description: 'Google advanced flagship model for complex coding, mathematical reasoning, and multimodal analysis.',
+    contextWindow: '2M Context',
+    supportsThinking: true,
+  },
+  'gemini-3.6-flash': {
+    description: 'Next-gen Gemini Flash model with enhanced tool use and native speed.',
+    contextWindow: '1M Context',
+    supportsThinking: true,
+  },
+  'gemini-3.5-flash': {
+    description: 'High-throughput Gemini reasoning model for fast agentic workflows.',
+    contextWindow: '1M Context',
+    supportsThinking: true,
+  },
+  'gemini-3.5-flash-lite': {
+    description: 'Ultra-lightweight Gemini model optimized for latency and quick queries.',
+    contextWindow: '1M Context',
+    supportsThinking: true,
+  },
+  'gemini-3.1-flash-lite': {
+    description: 'Compact high-speed Gemini variant for real-time applications.',
+    contextWindow: '1M Context',
+    supportsThinking: true,
+  },
+
+  // Anthropic Claude
+  'claude-sonnet-5': {
+    description: 'Anthropic flagship hybrid model with extended thinking and deep coding comprehension.',
+    contextWindow: '200K Context',
+    supportsThinking: true,
+  },
+  'claude-opus-5': {
+    description: 'Anthropic frontier model for state-of-the-art reasoning, analysis, and architecture.',
+    contextWindow: '200K Context',
+    supportsThinking: true,
+  },
+  'claude-sonnet-4.6': {
+    description: 'High-intelligence Claude model optimized for precise software engineering.',
+    contextWindow: '200K Context',
+    supportsThinking: true,
+  },
+  'claude-opus-4.8': {
+    description: 'Heavyweight reasoning model designed for complex multi-turn logic.',
+    contextWindow: '200K Context',
+    supportsThinking: true,
+  },
+  'claude-haiku-4.5': {
+    description: 'Fast and responsive Claude model for lightweight conversational turns.',
+    contextWindow: '200K Context',
+    supportsThinking: false,
+  },
+
+  // OpenAI
+  'gpt-5.6-terra': {
+    description: 'Balanced frontier OpenAI model with robust multi-step reasoning capabilities.',
+    contextWindow: '128K Context',
+    supportsThinking: true,
+  },
+  'gpt-5.6-luna': {
+    description: 'Next-generation versatile model for coding, creative synthesis, and tool use.',
+    contextWindow: '128K Context',
+    supportsThinking: true,
+  },
+  'gpt-5.6-sol': {
+    description: 'High-performance OpenAI model designed for deep analysis and problem solving.',
+    contextWindow: '128K Context',
+    supportsThinking: true,
+  },
+  'gpt-5.5-thinking': {
+    description: 'OpenAI dedicated thinking model with extended chain-of-thought processing.',
+    contextWindow: '128K Context',
+    supportsThinking: true,
+  },
+  'gpt-5.5-pro': {
+    description: 'Flagship OpenAI model with high instruction precision and broad domain mastery.',
+    contextWindow: '128K Context',
+    supportsThinking: true,
+  },
+  'gpt-4o': {
+    description: 'OpenAI versatile multimodal model for text, vision, and high-speed chat.',
+    contextWindow: '128K Context',
+    supportsThinking: false,
+  },
+  'gpt-4o-mini': {
+    description: 'Compact and fast OpenAI model for everyday conversational tasks.',
+    contextWindow: '128K Context',
+    supportsThinking: false,
+  },
+
+  // DeepSeek
+  'deepseek-v4-flash': {
+    description: 'High-throughput DeepSeek model built for swift responses and programming.',
+    contextWindow: '128K Context',
+    supportsThinking: false,
+  },
+  'deepseek-v4-pro': {
+    description: 'Advanced DeepSeek model featuring deep multilingual and coding reasoning.',
+    contextWindow: '128K Context',
+    supportsThinking: true,
+  },
+  'deepseek-reasoner': {
+    description: 'DeepSeek native reasoning model (R1 architecture) with comprehensive chain-of-thought.',
+    contextWindow: '64K Context',
+    supportsThinking: true,
+  },
+  'deepseek-chat': {
+    description: 'General-purpose DeepSeek V3 conversational and coding model.',
+    contextWindow: '64K Context',
+    supportsThinking: false,
+  },
+}
+
+export function getModelMetadata(modelId: string, provider?: string): ModelMeta {
+  const clean = modelId.trim()
+  const lower = clean.toLowerCase()
+
+  if (MODEL_METADATA[clean]) return MODEL_METADATA[clean]
+  for (const [key, meta] of Object.entries(MODEL_METADATA)) {
+    if (key.toLowerCase() === lower || lower.endsWith(key.toLowerCase())) {
+      return meta
+    }
+  }
+
+  // Smart heuristic defaults
+  let contextWindow = '128K Context'
+  if (lower.includes('gemini') || provider === 'gemini') {
+    contextWindow = lower.includes('pro') ? '2M Context' : '1M Context'
+  } else if (lower.includes('claude') || provider === 'anthropic') {
+    contextWindow = '200K Context'
+  } else if (lower.includes('llama-3') || lower.includes('qwen')) {
+    contextWindow = '128K Context'
+  }
+
+  const supportsThinking =
+    lower.includes('reason') ||
+    lower.includes('thinking') ||
+    lower.includes('r1') ||
+    lower.includes('o1') ||
+    lower.includes('o3') ||
+    lower.includes('qwq') ||
+    lower.includes('sonnet-5') ||
+    lower.includes('opus-5') ||
+    lower.includes('3-7') ||
+    lower.includes('2.5') ||
+    lower.includes('glm') ||
+    lower.includes('deepseek') ||
+    lower.includes('qwen') ||
+    (provider === 'gemini')
+
+  const description = supportsThinking
+    ? `${clean} supports advanced multi-step reasoning and dynamic thinking effort.`
+    : `${clean} is an optimized model for responsive conversational interactions.`
+
+  return { description, contextWindow, supportsThinking }
+}
+

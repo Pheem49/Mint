@@ -318,6 +318,7 @@ Worth saving:
         messages: None,
         tools: None,
         temperature: config.temperature,
+        ..Default::default()
     };
 
     let response = send_chat(config, &request).await?;
@@ -546,6 +547,7 @@ Example response:
         messages: None,
         tools: None,
         temperature: config.temperature,
+        ..Default::default()
     };
 
     // Send the chat request to LLM
@@ -905,6 +907,7 @@ Emit at most {MAX_FACT_OPS_PER_TURN} ops."#
         messages: None,
         tools: None,
         temperature: config.temperature,
+        ..Default::default()
     };
 
     let response = send_chat(config, &request).await?;

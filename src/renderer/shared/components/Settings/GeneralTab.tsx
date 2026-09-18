@@ -11,6 +11,7 @@ import {
   IMAGE_STUDIO_MODELS,
   IMAGE_GEN_PROVIDER_MODELS,
   VEO_STUDIO_MODELS,
+  getModelMetadata,
 } from '../../constants/models'
 import type {
   CustomProviderConfig,
@@ -20,6 +21,7 @@ import type {
 import { setActiveModel } from '../../utils/modelManager'
 import { providerLabel as aiProviderLabel } from '../../utils/providers'
 import ApiKeyInput from './ApiKeyInput'
+import SearchableModelCombobox from './SearchableModelCombobox'
 
 // One card per image-gen provider (mirrors the chat "Provider & Model"
 // cards): a model dropdown plus either its own API-key field, or a note
@@ -468,6 +470,160 @@ export default function GeneralTab({
                 </div>
               )
             })()}
+
+            {/* Thinking / Reasoning Configuration */}
+            {(() => {
+              const activeModelRaw = (() => {
+                if (config.aiProvider === 'gemini') return config.geminiModel || 'gemini-2.5-flash'
+                if (config.aiProvider === 'anthropic') return config.anthropicModel || 'claude-sonnet-5'
+                if (config.aiProvider === 'openai') return config.openaiModel || 'gpt-5.6-luna'
+                if (config.aiProvider === 'openrouter') return config.openrouterModel || 'openai/gpt-5.6-terra'
+                if (config.aiProvider === 'deepseek') return config.deepseekModel || 'deepseek-chat'
+                if (config.aiProvider === 'local_openai') return config.localModelName || 'local-model'
+                if (config.aiProvider === 'ollama') return config.ollamaModel || 'llama3'
+                if (config.aiProvider === 'huggingface') return config.hfModel || 'Qwen/Qwen3.6-27B'
+                return ''
+              })()
+
+              const meta = getModelMetadata(activeModelRaw, config.aiProvider)
+              const modelConfigs = (config.modelThinkingConfigs ?? {}) as Record<string, { enabled?: boolean; effort?: string }>
+              const customModelThinking = activeModelRaw ? modelConfigs[activeModelRaw] : undefined
+              const hasCustomModel = customModelThinking !== undefined
+
+              const isThinkingSupported = meta.supportsThinking
+              const currentEnabled = customModelThinking?.enabled !== undefined
+                ? customModelThinking.enabled
+                : (config.thinkingEnabled ?? true)
+
+              const currentEffort = (customModelThinking?.effort || config.thinkingEffort || 'medium').toLowerCase()
+
+              const handleResetThinking = () => {
+                if (activeModelRaw && modelConfigs[activeModelRaw] !== undefined) {
+                  const updated = { ...modelConfigs }
+                  delete updated[activeModelRaw]
+                  updateField('modelThinkingConfigs', updated)
+                }
+              }
+
+              const handleToggleThinking = (enabled: boolean) => {
+                if (activeModelRaw) {
+                  const updated = {
+                    ...modelConfigs,
+                    [activeModelRaw]: { enabled, effort: currentEffort },
+                  }
+                  updateField('modelThinkingConfigs', updated)
+                }
+                updateField('thinkingEnabled', enabled)
+              }
+
+              const handleEffortChange = (effort: string) => {
+                if (activeModelRaw) {
+                  const updated = {
+                    ...modelConfigs,
+                    [activeModelRaw]: { enabled: currentEnabled, effort },
+                  }
+                  updateField('modelThinkingConfigs', updated)
+                }
+                updateField('thinkingEffort', effort)
+              }
+
+              const effortLabelMap: Record<string, string> = {
+                low: 'Low',
+                medium: 'Medium',
+                high: 'High',
+                extra_high: 'Extra High',
+              }
+
+              return (
+                <div className="setting-row stacked" style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '8px', background: 'var(--surface-strong)', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <label style={{ margin: 0, fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--accent, #10b981)' }}>
+                        <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" />
+                        <path d="M9 21h6" />
+                      </svg>
+                      <span>Thinking / Reasoning</span>
+                      {activeModelRaw && (
+                        <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>
+                          · {activeModelRaw.split('/').pop()}
+                        </span>
+                      )}
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span className="section-current-badge" style={{ fontSize: '0.75rem' }}>
+                        {currentEnabled
+                          ? `Thinking ON (${effortLabelMap[currentEffort] || 'Medium'})${!isThinkingSupported ? ' · Force' : ''}`
+                          : 'Thinking OFF'}
+                      </span>
+                      {hasCustomModel && (
+                        <button
+                          type="button"
+                          className="btn-secondary btn-small"
+                          style={{ padding: '0.15rem 0.45rem', fontSize: '0.75rem' }}
+                          onClick={handleResetThinking}
+                          title={`Reset ${activeModelRaw} thinking configuration`}
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Toggle Row */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0' }}>
+                    <div>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 500 }}>Enable Thinking</span>
+                      <p style={{ margin: '2px 0 0 0', fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                        {isThinkingSupported
+                          ? 'Allow model to output chain-of-thought tokens.'
+                          : currentEnabled
+                          ? 'Chain-of-thought token generation enabled (force toggle).'
+                          : 'Model not flagged as reasoning by default — toggle on to force enable.'}
+                      </p>
+                    </div>
+                    <label className="settings-toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={currentEnabled}
+                        onChange={(e) => handleToggleThinking(e.target.checked)}
+                      />
+                      <span className="settings-toggle-slider"></span>
+                    </label>
+                  </div>
+
+                  {/* Effort Level Row */}
+                  {currentEnabled && (
+                    <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          Reasoning Effort
+                        </span>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          {(['low', 'medium', 'high', 'extra_high'] as const).map((eff) => (
+                            <button
+                              key={eff}
+                              type="button"
+                              className={`btn-secondary btn-small ${currentEffort === eff ? 'active' : ''}`}
+                              style={{
+                                padding: '0.2rem 0.6rem',
+                                fontSize: '0.75rem',
+                                fontWeight: currentEffort === eff ? 600 : 400,
+                                background: currentEffort === eff ? 'rgba(16, 185, 129, 0.15)' : undefined,
+                                borderColor: currentEffort === eff ? 'var(--accent, #10b981)' : undefined,
+                                color: currentEffort === eff ? 'var(--accent, #10b981)' : undefined,
+                              }}
+                              onClick={() => handleEffortChange(eff)}
+                            >
+                              {effortLabelMap[eff]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
 
           <div className="provider-cards-container">
@@ -662,15 +818,17 @@ export default function GeneralTab({
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>OpenRouter Model</label>
-                  <select
+                  <SearchableModelCombobox
                     value={dynamicOpenRouterModels.includes(config.openrouterModel) ? config.openrouterModel : 'custom'}
-                    onChange={(e) => updateField('openrouterModel', e.target.value)}
-                  >
-                    {dynamicOpenRouterModels.map(model => (
-                      <option key={model} value={model}>{model}</option>
-                    ))}
-                    <option value="custom">Custom...</option>
-                  </select>
+                    models={dynamicOpenRouterModels}
+                    onChange={(val) => updateField('openrouterModel', val)}
+                    onCustomChange={(val) => {
+                      setCustomOpenRouter(val)
+                      updateField('openrouterModel', 'custom')
+                    }}
+                    customValue={customOpenRouter}
+                    placeholder="Select or search OpenRouter model..."
+                  />
                 </div>
                 {(!dynamicOpenRouterModels.includes(config.openrouterModel) || config.openrouterModel === 'custom') && (
                   <div className="setting-row">

@@ -96,6 +96,7 @@ pub(super) async fn compact_native_messages(
             messages: None,
             tools: None,
             temperature: config.temperature,
+            ..Default::default()
         },
     )
     .await?;

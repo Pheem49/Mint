@@ -139,6 +139,10 @@ pub enum SlashEffect {
     PlanModeChanged {
         enabled: bool,
     },
+    ThinkingChanged {
+        enabled: bool,
+        effort: String,
+    },
 }
 
 #[derive(serde::Serialize)]
@@ -207,7 +211,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             markdown: "🧹 Conversation history cleared.".into(),
             effects: vec![SlashEffect::HistoryCleared],
         },
-        "/thought" | "/think" => SlashResponse::Applied {
+        "/thought" => SlashResponse::Applied {
             markdown: "Thought process can be viewed in the collapsible **Thinking** accordion on Desktop & Web, or by pressing `Ctrl+T` / running `/thought` in the CLI.".into(),
             effects: vec![],
         },
@@ -284,6 +288,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         },
 
         "/models" => cmd_models(rest, config),
+        "/thinking" | "/think" => cmd_thinking(rest, config),
         "/temperature" | "/temp" => cmd_temperature(rest, config),
         // `/searchProvider` is a documented camelCase alias (see UNDOCUMENTED_ALIASES).
         "/search-provider" | "/searchprovider" => cmd_extra_provider(
@@ -650,9 +655,13 @@ fn cmd_models(rest: &str, config: &mut MintConfig) -> SlashResponse {
                 title: format!("Select {provider} model"),
                 options: options
                     .into_iter()
-                    .map(|m| SlashChoice {
-                        label: m.clone(),
-                        value: m,
+                    .map(|m| {
+                        let label = if models::is_free_model(&m) {
+                            format!("{m} [FREE]")
+                        } else {
+                            m.clone()
+                        };
+                        SlashChoice { label, value: m }
                     })
                     .collect(),
             };
@@ -824,6 +833,136 @@ fn cmd_temperature_status(config: &MintConfig) -> SlashResponse {
     );
 
     message(md)
+}
+
+fn capitalize_effort(s: &str) -> String {
+    if s == "extra_high" {
+        return "Extra High".into();
+    }
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+    }
+}
+
+fn cmd_thinking(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    let model = config.active_model().to_string();
+    let supported = config.is_thinking_supported();
+    let (current_enabled, current_effort) = config.resolved_thinking();
+    let raw = rest.trim().to_ascii_lowercase();
+
+    if raw.is_empty() {
+        let status_label = if !supported {
+            "Not supported by active model".to_string()
+        } else if current_enabled {
+            format!("ON (Effort: {})", capitalize_effort(current_effort))
+        } else {
+            "OFF".to_string()
+        };
+
+        let mut choices = Vec::new();
+        if current_enabled {
+            choices.push(SlashChoice {
+                label: "Turn Thinking OFF".into(),
+                value: "off".into(),
+            });
+        } else {
+            choices.push(SlashChoice {
+                label: "Turn Thinking ON".into(),
+                value: "on".into(),
+            });
+        }
+        for eff in &["Low", "Medium", "High", "Extra High"] {
+            let val = eff.to_ascii_lowercase().replace(' ', "_");
+            let is_sel = current_enabled && current_effort.to_ascii_lowercase() == val;
+            choices.push(SlashChoice {
+                label: if is_sel {
+                    format!("Effort: {eff} ✓")
+                } else {
+                    format!("Effort: {eff}")
+                },
+                value: val,
+            });
+        }
+
+        return SlashResponse::NeedsChoice {
+            command: "/thinking".into(),
+            title: format!("🧠 Thinking Configuration ({model}): {status_label}"),
+            options: choices,
+        };
+    }
+
+    if raw == "status" {
+        let status_label = if !supported {
+            "⚠️ Thinking is **not supported** by the current active model.".to_string()
+        } else if current_enabled {
+            format!("✅ Thinking is **ON** (Effort: **{}**)", capitalize_effort(current_effort))
+        } else {
+            "⏸️ Thinking is **OFF**".to_string()
+        };
+        return message(format!(
+            "🧠 **Thinking Status**\n\n- Active Model: `{model}`\n- Supported: **{supported}**\n- State: {status_label}\n\nUsage: `/thinking [on|off|low|medium|high|extra_high]`"
+        ));
+    }
+
+    let parts: Vec<&str> = raw.split_whitespace().collect();
+    let mut new_enabled = current_enabled;
+    let mut new_effort = current_effort.to_string();
+
+    for p in parts {
+        match p {
+            "on" | "enable" | "true" => new_enabled = true,
+            "off" | "disable" | "false" => new_enabled = false,
+            "low" => {
+                new_effort = "low".into();
+                new_enabled = true;
+            }
+            "medium" | "med" => {
+                new_effort = "medium".into();
+                new_enabled = true;
+            }
+            "high" => {
+                new_effort = "high".into();
+                new_enabled = true;
+            }
+            "extra_high" | "extra" | "extra-high" | "max" => {
+                new_effort = "extra_high".into();
+                new_enabled = true;
+            }
+            _ => {}
+        }
+    }
+
+    config.set_model_thinking(&model, new_enabled, &new_effort);
+    config.thinking_enabled = new_enabled;
+    config.thinking_effort = new_effort.clone();
+
+    let text = if !supported {
+        format!(
+            "🧠 Updated thinking preference for `{model}` to **{}** (Effort: **{}**).\n*Note: `{model}` may not natively emit reasoning tokens.*",
+            if new_enabled { "ON" } else { "OFF" },
+            capitalize_effort(&new_effort)
+        )
+    } else if new_enabled {
+        format!(
+            "🧠 Thinking **ON** for `{model}` (Effort: **{}**).",
+            capitalize_effort(&new_effort)
+        )
+    } else {
+        format!("🧠 Thinking **OFF** for `{model}`.")
+    };
+
+    SlashResponse::Applied {
+        markdown: text,
+        effects: vec![
+            SlashEffect::ConfigChanged,
+            SlashEffect::ThinkingChanged {
+                enabled: new_enabled,
+                effort: new_effort,
+            },
+        ],
+    }
 }
 
 fn cmd_temperature(rest: &str, config: &mut MintConfig) -> SlashResponse {
@@ -1082,9 +1221,13 @@ async fn cmd_models_async(rest: &str, config: &mut MintConfig) -> SlashResponse 
                 title: format!("Select {provider} model"),
                 options: options
                     .into_iter()
-                    .map(|m| SlashChoice {
-                        label: m.clone(),
-                        value: m,
+                    .map(|m| {
+                        let label = if models::is_free_model(&m) {
+                            format!("{m} [FREE]")
+                        } else {
+                            m.clone()
+                        };
+                        SlashChoice { label, value: m }
                     })
                     .collect(),
             };
@@ -2566,4 +2709,67 @@ mod tests {
             other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
         }
     }
+
+    #[test]
+    fn thinking_slash_command_inspection_override_and_reset() {
+        let mut cfg = MintConfig::default();
+        cfg.ai_provider = "anthropic".into();
+        cfg.anthropic_model = "claude-3-7-sonnet".into();
+
+        // 1. Without args: interactive menu
+        match execute(&req("/thinking"), &mut cfg) {
+            SlashResponse::NeedsChoice { options, .. } => {
+                assert!(!options.is_empty());
+            }
+            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 2. Set effort to High
+        match execute(&req("/thinking high"), &mut cfg) {
+            SlashResponse::Applied { effects, markdown } => {
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+                assert!(effects.contains(&SlashEffect::ThinkingChanged {
+                    enabled: true,
+                    effort: "high".into()
+                }));
+                assert!(markdown.contains("High"));
+                let (enabled, effort) = cfg.resolved_thinking();
+                assert!(enabled);
+                assert_eq!(effort, "high");
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 3. Turn thinking off
+        match execute(&req("/thinking off"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(effects.contains(&SlashEffect::ThinkingChanged {
+                    enabled: false,
+                    effort: "high".into()
+                }));
+                let (enabled, _) = cfg.resolved_thinking();
+                assert!(!enabled);
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 4. Status inspection
+        match execute(&req("/thinking status"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.to_ascii_uppercase().contains("OFF"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 5. Non-reasoning model accepts preference with advisory note
+        cfg.ai_provider = "openai".into();
+        cfg.openai_model = "gpt-4o".into();
+        match execute(&req("/thinking on"), &mut cfg) {
+            SlashResponse::Applied { markdown, .. } => {
+                assert!(markdown.contains("may not natively emit reasoning tokens"));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+    }
 }
+

@@ -68,6 +68,7 @@ where
                 messages: None,
                 tools: None,
                 temperature: config.temperature,
+                ..Default::default()
             },
         )
         .await?;

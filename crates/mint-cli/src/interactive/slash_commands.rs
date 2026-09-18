@@ -265,6 +265,9 @@ async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Op
                     SlashEffect::HistoryCleared => {
                         session.history.clear();
                     }
+                    SlashEffect::ThinkingChanged { .. } => {
+                        save_needed = true;
+                    }
                 }
             }
             if save_needed && !cfg!(test) {

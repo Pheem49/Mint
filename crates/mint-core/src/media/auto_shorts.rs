@@ -297,6 +297,7 @@ async fn detect_highlights(
             messages: None,
             tools: None,
             temperature: config.temperature,
+            ..Default::default()
         };
 
         if let Ok((res, _)) = crate::chat::send_chat_with_fallback(config, &chat_req).await {

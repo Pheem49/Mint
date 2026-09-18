@@ -770,6 +770,7 @@ pub async fn answer_channel(
             messages: None,
             tools: None,
             temperature: config.temperature,
+            ..Default::default()
         },
     )
     .await

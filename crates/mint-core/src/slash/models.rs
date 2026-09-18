@@ -39,6 +39,24 @@ pub const OPENROUTER_MODEL_PRESETS: &[&str] = &[
     "deepseek/deepseek-v4-pro",
 ];
 
+pub const OPENROUTER_POPULAR_MODELS: &[&str] = &[
+    "anthropic/claude-3.7-sonnet",
+    "anthropic/claude-3.5-sonnet",
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "deepseek/deepseek-r1",
+    "deepseek/deepseek-chat",
+    "google/gemini-2.5-flash",
+    "google/gemini-2.5-pro",
+    "meta-llama/llama-3.3-70b-instruct",
+    "qwen/qwen-2.5-72b-instruct",
+];
+
+pub fn is_free_model(model_id: &str) -> bool {
+    let lower = model_id.to_ascii_lowercase();
+    lower.ends_with(":free") || lower.contains(":free")
+}
+
 pub const DEEPSEEK_MODEL_PRESETS: &[&str] = &["deepseek-chat", "deepseek-reasoner"];
 
 pub const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
@@ -152,3 +170,26 @@ pub async fn model_options_for_provider_async(config: &MintConfig, provider: &st
         model_options_for_provider(config, provider)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_free_model() {
+        assert!(is_free_model("deepseek/deepseek-v4-flash-0731:free"));
+        assert!(is_free_model("meta-llama/llama-3.3-70b-instruct:free"));
+        assert!(is_free_model("qwen/qwen3.8-27b:free"));
+        assert!(!is_free_model("anthropic/claude-3.7-sonnet"));
+        assert!(!is_free_model("openai/gpt-4o"));
+    }
+
+    #[test]
+    fn test_openrouter_popular_models_list() {
+        assert!(OPENROUTER_POPULAR_MODELS.contains(&"anthropic/claude-3.7-sonnet"));
+        assert!(OPENROUTER_POPULAR_MODELS.contains(&"openai/gpt-4o"));
+        assert!(OPENROUTER_POPULAR_MODELS.contains(&"deepseek/deepseek-r1"));
+        assert!(OPENROUTER_POPULAR_MODELS.contains(&"google/gemini-2.5-flash"));
+    }
+}
+

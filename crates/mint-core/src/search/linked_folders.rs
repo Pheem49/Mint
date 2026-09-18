@@ -352,6 +352,7 @@ Worth saving:
         messages: None,
         tools: None,
         temperature: config.temperature,
+        ..Default::default()
     };
 
     let response = crate::chat::send_chat(config, &request).await?;
