@@ -559,17 +559,19 @@ input[type="color"] {
     bottom: 3px;
     border-radius: 50%;
     background: var(--text-muted);
-    transition: transform 0.18s, background 0.18s;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease;
 }
 
 input:checked + .settings-toggle-slider {
     background: var(--accent);
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 70%, var(--border-strong));
 }
 
 input:checked + .settings-toggle-slider::before {
     transform: translateX(20px);
-    background: var(--pure-white);
+    background: var(--accent-contrast, #ffffff);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 .slider-stack {

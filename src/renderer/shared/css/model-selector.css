@@ -491,6 +491,7 @@
 
 .model-detail-switch.checked {
   background: var(--accent, #10b981);
+  border: 1px solid color-mix(in srgb, var(--accent, #10b981) 70%, var(--border-strong, rgba(255, 255, 255, 0.2)));
 }
 
 .model-detail-switch.disabled {
@@ -504,12 +505,13 @@
   border-radius: 50%;
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease;
   transform: translateX(0);
 }
 
 .model-detail-switch.checked .model-detail-switch-thumb {
   transform: translateX(16px);
+  background: var(--accent-contrast, #ffffff);
 }
 
 .model-unsupported-note {
