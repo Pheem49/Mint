@@ -27,6 +27,7 @@ export interface ChatResponse {
   text: string
   thought?: string | null
   fallbackProvider?: string | null
+  fallbackReason?: string | null
 }
 
 export interface TtsUrl {

@@ -1137,12 +1137,18 @@ pub async fn run_code_agent_with_options(
     if should_show_verification(&res.verification) {
         println!("  Verification: {}", res.verification);
     }
-    let badge_plain = if let Some(fb_provider) = &res.fallback {
+    let badge_plain = if let Some(orig_provider) = &res.fallback {
+        let reason_suffix = if let Some(reason) = &res.fallback_reason {
+            format!(" ({reason})")
+        } else {
+            String::new()
+        };
         format!(
-            "{} • {} → fallback: {} • {}",
-            config.ai_provider,
-            crate::active_model(&config.ai_provider, config),
-            fb_provider,
+            "{} • {}{} → fallback: {} • {}",
+            orig_provider,
+            crate::active_model(orig_provider, config),
+            reason_suffix,
+            res.provider,
             res.model
         )
     } else {

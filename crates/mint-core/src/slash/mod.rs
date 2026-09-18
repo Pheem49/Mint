@@ -650,20 +650,25 @@ fn cmd_models(rest: &str, config: &mut MintConfig) -> SlashResponse {
     if model.is_none() {
         let options = models::model_options_for_provider(config, provider);
         if !options.is_empty() {
+            let mut choices: Vec<SlashChoice> = options
+                .into_iter()
+                .map(|m| {
+                    let label = if models::is_free_model(&m) {
+                        format!("{m} [FREE]")
+                    } else {
+                        m.clone()
+                    };
+                    SlashChoice { label, value: m }
+                })
+                .collect();
+            choices.push(SlashChoice {
+                label: "[Custom] Enter custom model ID...".into(),
+                value: "__action:custom".into(),
+            });
             return SlashResponse::NeedsChoice {
                 command: format!("/models {provider}"),
                 title: format!("Select {provider} model"),
-                options: options
-                    .into_iter()
-                    .map(|m| {
-                        let label = if models::is_free_model(&m) {
-                            format!("{m} [FREE]")
-                        } else {
-                            m.clone()
-                        };
-                        SlashChoice { label, value: m }
-                    })
-                    .collect(),
+                options: choices,
             };
         }
     }
@@ -1212,25 +1217,170 @@ async fn cmd_models_async(rest: &str, config: &mut MintConfig) -> SlashResponse 
         None => (rest.trim(), None),
     };
 
-    // Provider given but no model yet — offer the model picker using live fetch first.
-    if model.is_none() {
-        let options = models::model_options_for_provider_async(config, provider).await;
-        if !options.is_empty() {
-            return SlashResponse::NeedsChoice {
-                command: format!("/models {provider}"),
-                title: format!("Select {provider} model"),
-                options: options
+    let is_action_all = model == Some("__action:all");
+    let is_action_free = model == Some("__action:free");
+    let search_query = model.and_then(|m| m.strip_prefix("__action:search:"));
+
+    // Provider given but no model yet, or an action requested — offer model picker.
+    if model.is_none() || is_action_all || is_action_free || search_query.is_some() {
+        let all_options = models::model_options_for_provider_async(config, provider).await;
+        if !all_options.is_empty() {
+            if let Some(query) = search_query {
+                let q_lower = query.trim().to_lowercase();
+                let matched: Vec<String> = all_options
                     .into_iter()
-                    .map(|m| {
-                        let label = if models::is_free_model(&m) {
+                    .filter(|m| m.to_lowercase().contains(&q_lower))
+                    .collect();
+                if matched.is_empty() {
+                    return message(format!("No models found matching \"{query}\" for provider {provider}."));
+                }
+                return SlashResponse::NeedsChoice {
+                    command: format!("/models {provider}"),
+                    title: format!("Search results for \"{query}\" in {provider} ({})", matched.len()),
+                    options: matched
+                        .into_iter()
+                        .map(|m| {
+                            let label = if models::is_free_model(&m) {
+                                format!("{m} [FREE]")
+                            } else {
+                                m.clone()
+                            };
+                            SlashChoice { label, value: m }
+                        })
+                        .collect(),
+                };
+            }
+
+            if is_action_free {
+                let free_models: Vec<String> = all_options
+                    .into_iter()
+                    .filter(|m| models::is_free_model(m))
+                    .collect();
+                if free_models.is_empty() {
+                    return message(format!("No free models found for provider {provider}."));
+                }
+                return SlashResponse::NeedsChoice {
+                    command: format!("/models {provider}"),
+                    title: format!("Free {provider} models ({})", free_models.len()),
+                    options: free_models
+                        .into_iter()
+                        .map(|m| SlashChoice {
+                            label: format!("{m} [FREE]"),
+                            value: m,
+                        })
+                        .collect(),
+                };
+            }
+
+            if is_action_all {
+                return SlashResponse::NeedsChoice {
+                    command: format!("/models {provider}"),
+                    title: format!("All {provider} models ({})", all_options.len()),
+                    options: all_options
+                        .into_iter()
+                        .map(|m| {
+                            let label = if models::is_free_model(&m) {
+                                format!("{m} [FREE]")
+                            } else {
+                                m.clone()
+                            };
+                            SlashChoice { label, value: m }
+                        })
+                        .collect(),
+                };
+            }
+
+            // Normal provider selection menu
+            let has_free = all_options.iter().any(|m| models::is_free_model(m));
+            let total_count = all_options.len();
+
+            let mut choices: Vec<SlashChoice> = Vec::new();
+
+            if total_count > 8 || provider == "openrouter" {
+                let popular_presets = models::popular_models_for_provider(provider);
+                let mut added_popular = 0;
+                for pop in popular_presets {
+                    if all_options.iter().any(|m| m == pop) {
+                        let label = if models::is_free_model(pop) {
+                            format!("{pop} [FREE]")
+                        } else {
+                            pop.to_string()
+                        };
+                        choices.push(SlashChoice {
+                            label,
+                            value: pop.to_string(),
+                        });
+                        added_popular += 1;
+                    }
+                }
+
+                if added_popular == 0 {
+                    for m in all_options.iter().take(6) {
+                        let label = if models::is_free_model(m) {
                             format!("{m} [FREE]")
                         } else {
                             m.clone()
                         };
-                        SlashChoice { label, value: m }
-                    })
-                    .collect(),
-            };
+                        choices.push(SlashChoice {
+                            label,
+                            value: m.clone(),
+                        });
+                    }
+                }
+
+                choices.push(SlashChoice {
+                    label: "[Search] Filter models by keyword...".into(),
+                    value: "__action:search".into(),
+                });
+                if has_free {
+                    choices.push(SlashChoice {
+                        label: "[Free] Browse free models only (:free)".into(),
+                        value: "__action:free".into(),
+                    });
+                }
+                choices.push(SlashChoice {
+                    label: format!("[All] Browse all {total_count} models..."),
+                    value: "__action:all".into(),
+                });
+                choices.push(SlashChoice {
+                    label: "[Custom] Enter custom model ID...".into(),
+                    value: "__action:custom".into(),
+                });
+
+                return SlashResponse::NeedsChoice {
+                    command: format!("/models {provider}"),
+                    title: format!("Select {provider} model"),
+                    options: choices,
+                };
+            } else {
+                for m in &all_options {
+                    let label = if models::is_free_model(m) {
+                        format!("{m} [FREE]")
+                    } else {
+                        m.clone()
+                    };
+                    choices.push(SlashChoice {
+                        label,
+                        value: m.clone(),
+                    });
+                }
+                choices.push(SlashChoice {
+                    label: "[Custom] Enter custom model ID...".into(),
+                    value: "__action:custom".into(),
+                });
+
+                return SlashResponse::NeedsChoice {
+                    command: format!("/models {provider}"),
+                    title: format!("Select {provider} model"),
+                    options: choices,
+                };
+            }
+        }
+    }
+
+    if let Some(m) = model {
+        if m.starts_with("__action:") {
+            return SlashResponse::NotHandled;
         }
     }
 
@@ -2769,6 +2919,38 @@ mod tests {
                 assert!(markdown.contains("may not natively emit reasoning tokens"));
             }
             other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+    }
+
+    #[tokio::test]
+    async fn models_slash_command_actions_and_options() {
+        let mut cfg = MintConfig::default();
+        // 1. /models openrouter offers popular models and action shortcuts
+        match execute_async(&req("/models openrouter"), &mut cfg).await {
+            SlashResponse::NeedsChoice { command, options, .. } => {
+                assert_eq!(command, "/models openrouter");
+                assert!(options.iter().any(|o| o.value == "__action:search"));
+                assert!(options.iter().any(|o| o.value == "__action:all"));
+                assert!(options.iter().any(|o| o.value == "__action:custom"));
+            }
+            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 2. /models openrouter __action:all returns all models
+        match execute_async(&req("/models openrouter __action:all"), &mut cfg).await {
+            SlashResponse::NeedsChoice { title, options, .. } => {
+                assert!(title.contains("All openrouter models"));
+                assert!(!options.is_empty());
+            }
+            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 3. /models openrouter __action:search:gpt filters models
+        match execute_async(&req("/models openrouter __action:search:gpt"), &mut cfg).await {
+            SlashResponse::NeedsChoice { options, .. } => {
+                assert!(options.iter().all(|o| o.value.to_lowercase().contains("gpt")));
+            }
+            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
         }
     }
 }

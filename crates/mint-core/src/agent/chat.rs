@@ -63,8 +63,26 @@ pub async fn send_chat_with_fallback(
 /// away from `provider` — `None` for an ordinary transient failure, so routine
 /// hiccups don't get an extra notice while specific, actionable ones do.
 fn fallback_reason_text(provider: &str, error: &ChatError) -> Option<String> {
+    let provider_name = if provider.starts_with("custom:") {
+        provider.strip_prefix("custom:").unwrap_or(provider)
+    } else {
+        provider
+    };
     match error {
-        ChatError::InsufficientBalance(_) => Some(format!("{provider} ran out of balance")),
+        ChatError::InsufficientBalance(_) => Some(format!("{provider_name} ran out of balance")),
+        ChatError::Request(e) => {
+            if let Some(status) = e.status() {
+                if status == reqwest::StatusCode::PAYLOAD_TOO_LARGE {
+                    Some(format!("{provider_name} payload too large (HTTP 413)"))
+                } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    Some(format!("{provider_name} rate limit exceeded (HTTP 429)"))
+                } else {
+                    Some(format!("{provider_name} returned HTTP {status}"))
+                }
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -2152,17 +2170,30 @@ fn openai_chat_payload(
             }),
         ]
     };
+    // Left unset, several OpenAI-compatible providers (DeepSeek in
+    // particular) default to a much lower output cap than the model can
+    // actually produce, which silently truncates long structured answers
+    // (a code block followed by a couple of markdown tables is enough to
+    // hit it) — matches the explicit cap already used for Anthropic in
+    // `anthropic_chat_payload`/`stream_anthropic`.
+    // For Groq endpoints, free tiers enforce a tight 6,000–8,000 TPM limit
+    // where a static 8192 max_tokens triggers immediate HTTP 413 / rate limit errors.
+    let max_tokens = {
+        let is_groq = config
+            .resolve_custom_provider(&config.ai_provider)
+            .map(|cp| cp.base_url.contains("groq.com"))
+            .unwrap_or(false);
+        if is_groq {
+            if request.tools.is_some() { 2048 } else { 4096 }
+        } else {
+            8192
+        }
+    };
     let mut payload = json!({
         "model": model,
         "stream": stream,
         "messages": messages,
-        // Left unset, several OpenAI-compatible providers (DeepSeek in
-        // particular) default to a much lower output cap than the model can
-        // actually produce, which silently truncates long structured answers
-        // (a code block followed by a couple of markdown tables is enough to
-        // hit it) — matches the explicit cap already used for Anthropic in
-        // `anthropic_chat_payload`/`stream_anthropic`.
-        "max_tokens": 8192,
+        "max_tokens": max_tokens,
     });
     // OpenAI reasoning models (o1, o3, etc.) reject explicit temperature parameter.
     let is_reasoning_model = model.starts_with("o1") || model.starts_with("o3");

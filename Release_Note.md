@@ -1,5 +1,18 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Custom Provider Fallback & Groq TPM Optimization (CLI, Desktop & Web)
+
+Fixed provider failover tracking and optimized request payloads for custom providers (especially Groq):
+
+- **Correct Fallback Provider Attribution Across All 3 Surfaces (CLI, Desktop, Web)**:
+  - Fixed an inversion bug in `crates/mint-core/src/orchestration/mod.rs` where `final_fallback` stored the *new fallback provider* instead of the *original failed provider*. This previously caused the UI to render contradictory badges like `"Gemini unavailable, fell back to Gemini."`.
+  - Propagated `fallback_reason` through `AgentResult` to `ChatResponse` across `api_server`, `src-tauri`, and `mint-cli`, allowing Desktop and Web UI to explain why failover occurred (e.g. `Groq unavailable (Groq payload too large (HTTP 413)), fell back to Gemini.`).
+  - Updated CLI (`crates/mint-cli/src/agent.rs`) badge formatting to accurately reflect `original • original_model (reason) → fallback: new • new_model`.
+- **Groq Token Limit & TPM Optimization (`openai_chat_payload`)**:
+  - Dynamically throttles `max_tokens` for Groq custom endpoints (to `2048` when tools are present, or `4096` in chat) instead of hardcoding `8192`, preventing requests from instantly exceeding Groq free tier's strict 8,000 TPM limit with HTTP 413.
+- **Provider Label Formatting**:
+  - Updated `providerLabel` in `src/renderer/shared/utils/providers.ts` to automatically strip `custom:` prefixes and format provider names cleanly (e.g., `custom:groq` -> `Groq`).
+
 ## Theme Presets: 3 One-Click Visual Themes (Web & Desktop UI)
 
 Added ready-to-use **Theme Presets** to the **Settings > Appearance > Theme & UI** panel for Web and Desktop UI:

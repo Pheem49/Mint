@@ -598,6 +598,8 @@ pub struct AgentResult {
     pub summary: String,
     pub verification: String,
     pub fallback: Option<String>,
+    #[serde(default)]
+    pub fallback_reason: Option<String>,
     /// Sum of `total_tokens` across every step's API response this turn —
     /// see the doc comment on `turn_total_tokens` where it's accumulated.
     pub total_tokens: u64,
@@ -1065,6 +1067,7 @@ where
         #[allow(unused_assignments)]
         let mut final_model = "".to_string();
         let mut final_fallback = None;
+        let mut final_fallback_reason = None;
         let mut action_counts = BTreeMap::<String, usize>::new();
         // Track the most recent step (if any) that successfully modified a file
         // (`apply_patch`/`write_file`) and the most recent step that ran `verify`,
@@ -1264,14 +1267,10 @@ where
                 last_input_tokens = input as u64;
             }
             if fallback.is_some() {
-                // `fallback` (this function's own return value) is the provider
-                // that actually served this response; `response.fallback_provider`
-                // is a same-shaped but differently-populated field that
-                // `send_chat_with_fallback` sets to the *original* provider that
-                // failed over — using it here showed e.g. "gemini → fallback:
-                // gemini • Qwen..." in the CLI badge instead of "gemini →
-                // fallback: huggingface • Qwen...".
-                final_fallback = fallback.clone();
+                // Track the original provider that failed over (held in `response.fallback_provider`),
+                // so UI and logs correctly show `<original> unavailable, fell back to <current>`.
+                final_fallback = response.fallback_provider.clone();
+                final_fallback_reason = response.fallback_reason.clone();
                 if let Some(reason) = &response.fallback_reason {
                     progress(AgentProgress::Thought {
                         thought: format!(
@@ -1694,6 +1693,7 @@ where
                             summary,
                             verification,
                             fallback: final_fallback,
+                            fallback_reason: final_fallback_reason,
                             total_tokens: turn_total_tokens,
                             input_tokens: last_input_tokens,
                             generated_tokens: turn_generated_tokens,

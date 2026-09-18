@@ -57,6 +57,18 @@ pub fn is_free_model(model_id: &str) -> bool {
     lower.ends_with(":free") || lower.contains(":free")
 }
 
+pub fn popular_models_for_provider(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "openrouter" => OPENROUTER_POPULAR_MODELS,
+        "gemini" => GEMINI_MODEL_PRESETS,
+        "anthropic" => ANTHROPIC_MODEL_PRESETS,
+        "openai" => OPENAI_MODEL_PRESETS,
+        "deepseek" => DEEPSEEK_MODEL_PRESETS,
+        "huggingface" => HUGGINGFACE_MODEL_PRESETS,
+        _ => &[],
+    }
+}
+
 pub const DEEPSEEK_MODEL_PRESETS: &[&str] = &["deepseek-chat", "deepseek-reasoner"];
 
 pub const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[

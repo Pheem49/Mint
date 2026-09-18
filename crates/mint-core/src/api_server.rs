@@ -1311,7 +1311,7 @@ async fn run_web_agent_loop(
         model: result.model,
         text: result.summary,
         fallback_provider: result.fallback,
-        fallback_reason: None,
+        fallback_reason: result.fallback_reason,
         tool_calls: None,
         stop_reason: None,
         total_tokens: None,

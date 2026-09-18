@@ -288,6 +288,36 @@ async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Op
             match prompt_interactive_select(&title, &labels, &default_choice) {
                 Ok(Some(selected_label)) => {
                     if let Some(opt) = options.iter().find(|o| o.label == selected_label) {
+                        if opt.value == "__action:search" {
+                            print!("{BLUE}Search models: {RESET}");
+                            let _ = std::io::Write::flush(&mut std::io::stdout());
+                            let mut query = String::new();
+                            if std::io::stdin().read_line(&mut query).is_ok() {
+                                let trimmed = query.trim();
+                                if !trimmed.is_empty() {
+                                    let next_input = format!("{command} __action:search:{trimmed}");
+                                    return Box::pin(handle_slash_command(session, &next_input)).await;
+                                }
+                            }
+                            println!("Cancelled.\n");
+                            return Some(SlashResult::Handled);
+                        }
+
+                        if opt.value == "__action:custom" {
+                            print!("{BLUE}Enter custom model ID: {RESET}");
+                            let _ = std::io::Write::flush(&mut std::io::stdout());
+                            let mut custom_input = String::new();
+                            if std::io::stdin().read_line(&mut custom_input).is_ok() {
+                                let trimmed = custom_input.trim();
+                                if !trimmed.is_empty() {
+                                    let next_input = format!("{command} {trimmed}");
+                                    return Box::pin(handle_slash_command(session, &next_input)).await;
+                                }
+                            }
+                            println!("Cancelled.\n");
+                            return Some(SlashResult::Handled);
+                        }
+
                         let next_input = format!("{command} {}", opt.value);
                         return Box::pin(handle_slash_command(session, &next_input)).await;
                     }
