@@ -302,7 +302,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
               <span style={{ fontWeight: 600, fontSize: '0.86rem', color: '#10b981' }}>
                 Subagent Activity: {activeSubagent.name}
               </span>
-              <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({activeSubagent.tools.length} steps)</span>
+              <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({activeSubagent.tools.length})</span>
             </div>
             <button
               type="button"

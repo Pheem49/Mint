@@ -1,5 +1,26 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Unified Agent Loop Timeline & Unboxed Chat Stream (CLI, Desktop & Web UI)
+
+Overhauled the agent execution flow and timeline UI/UX across all 3 platforms (**CLI**, **Desktop UI**, and **Web UI**), aligning with modern developer assistant standards (Codex Desktop & Antigravity/Claude style):
+
+- **Unboxed Conversational Flow (Codex Desktop Standard)**:
+  - **Removed Monolithic Bounding Container**: Eliminated the rigid dark bounding box around `.agent-activity-list` (`border: none; background: transparent; overflow: visible;`).
+  - **Natural Unboxed Chat Text (`InlineThoughtNote`)**: Intermediate narration and speech spoken by the agent prior to tool calls (e.g. *"มิ้นจะลองดูไฟล์ CONTRIBUTING.md ให้ก่อนนะคะ ว่าเจอตรงไหน แล้วค่อยสรุปให้ฟังค่ะ"*) now flows directly as **normal, unboxed conversation text** in standard font size (`0.92rem`) and natural text color, completely freed from tool boxes.
+  - **Standalone Collapsible Thought Box (`[Brain] Thought >`)**: Deep model reasoning (`extendedThinking` / Chain-of-Thought) is isolated into its own sleek, standalone collapsible card (`.agent-activity-thought-step`) with subtle borders, rather than trapping the entire conversation.
+  - **Independent Compact Tool Rows**: Each tool call (e.g. `read_file`, `search_code`, `execute_command`) renders as an individual compact pill/row with smooth collapsible input/output drawers.
+- **Deduplication & Automatic Greeting Cleanup**:
+  - **Smart Greeting Stripping (`cleanIntermediateThought` & `strip_intermediate_greeting`)**: Automatically detects and strips repetitive conversational greetings (e.g. *"สวัสดีค่ะพี่ภีม 🌿"*, *"Hello..."*) from intermediate progress notes across Web/Desktop frontend (`agentActivity.ts`) and CLI live status (`crates/mint-cli/src/agent/live_status.rs`).
+  - **Prompt Guidance (`crates/mint-core/src/prompts/agent.rs`)**: Updated system instructions so models jump directly to describing the technical action during intermediate turns without repeating opening greetings.
+  - **Eliminated Redundant "Step" Badges**: Completely removed clutter labels like `"Step 1"`, `"(1 steps)"`, and `"{count} steps"` across `ThinkingBlock.tsx`, `AgentActivityTable.tsx`, and `agentActivity.ts`.
+  - **Fixed Duplicate Thought Boxes**: Removed the redundant external `ThinkingBlock` wrapper in `ChatMessageItem.tsx` that previously caused double thought boxes.
+- **Natural Multi-Language Reasoning (Chain-of-Thought)**:
+  - Removed obsolete English-only restrictions in JSON fallback mode (`crates/mint-core/src/prompts/agent.rs`), allowing models to think naturally in their preferred reasoning language (e.g., DeepSeek/Claude English CoT) while keeping all user-facing communication in natural Thai.
+- **Strict Platform Parity Across CLI, Desktop, and Web**:
+  - **CLI (`crates/mint-cli`)**: Streamlined terminal timeline with clean progress narration, greeting stripping, and collapsed reasoning (`  • Thought for Xs (Ctrl+T to view)`).
+  - **Desktop UI (`src/renderer/src`)**: Unboxed conversational stream, standalone thought boxes, and compact tool pills in `src/renderer/src/css/chat.css`.
+  - **Web UI (`src/renderer/src-web`)**: 100% visual and functional parity matching Desktop UI in `src/renderer/src-web/css/chat.css`.
+
 ## Custom Provider Fallback & Groq TPM Optimization (CLI, Desktop & Web)
 
 Fixed provider failover tracking and optimized request payloads for custom providers (especially Groq):

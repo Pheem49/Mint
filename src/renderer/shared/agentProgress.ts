@@ -6,19 +6,64 @@
 import type { AgentProgress, InteractionMemory, DiffHunk, FileChange } from './types'
 export type { AgentProgress, InteractionMemory }
 
+export function isInternalCot(text: string): boolean {
+  const trimmed = text.trim()
+  if (trimmed.startsWith('<think>') || trimmed.includes('</think>')) {
+    return true
+  }
+  const lineCount = trimmed.split('\n').length
+  const charCount = trimmed.length
+  if (trimmed.includes('\n\n') || lineCount > 2 || charCount > 180) {
+    return true
+  }
+  const lower = trimmed.toLowerCase()
+  if (
+    lower.startsWith('the user ') ||
+    lower.startsWith("let's think") ||
+    lower.startsWith('let me analyze') ||
+    lower.startsWith('per rule') ||
+    lower.startsWith('note the ') ||
+    lower.includes('thinking process:')
+  ) {
+    return true
+  }
+  return false
+}
+
+/** Short inline agent notes (excluding long chain-of-thought). */
 export function thoughtsFrom(progress: AgentProgress[]): string[] {
   return progress
     .filter((event) => event.type === 'Thought')
     .map((event) => (event as Extract<AgentProgress, { type: 'Thought' }>).data.thought)
-    .filter(Boolean)
+    .filter((t) => Boolean(t) && !isInternalCot(t))
+}
+
+/** Extended reasoning / chain-of-thought from the model's API thinking tokens or <think> tags. */
+export function extendedThoughtsFrom(progress: AgentProgress[]): string[] {
+  const extended: string[] = []
+  for (const event of progress) {
+    if (event.type === 'ExtendedThinking') {
+      if (event.data.thought?.trim()) extended.push(event.data.thought)
+    } else if (event.type === 'Thought' && event.data.thought && isInternalCot(event.data.thought)) {
+      extended.push(event.data.thought)
+    }
+  }
+  return extended
 }
 
 export function trimAgentProgress(progress: AgentProgress[], maxNonThought = 20): AgentProgress[] {
   if (progress.length === 0) return progress
   const keptNonThought = new Set(
-    progress.filter((event) => event.type !== 'Thought').slice(-maxNonThought),
+    progress
+      .filter((event) => event.type !== 'Thought' && event.type !== 'ExtendedThinking')
+      .slice(-maxNonThought),
   )
-  return progress.filter((event) => event.type === 'Thought' || keptNonThought.has(event))
+  return progress.filter(
+    (event) =>
+      event.type === 'Thought' ||
+      event.type === 'ExtendedThinking' ||
+      keptNonThought.has(event),
+  )
 }
 
 export function hasAgentToolActivity(progress: AgentProgress[]): boolean {

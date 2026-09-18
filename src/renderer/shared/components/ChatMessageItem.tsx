@@ -1,8 +1,6 @@
 import React, { useMemo } from 'react'
 import { renderFormattedMessage, renderCopyIcon, renderSpeakerIcon } from '../utils/markdown'
 import { fallbackNotice } from '../utils/providers'
-import { ThinkingBlock } from './ThinkingBlock'
-import { thoughtsFrom, hasAgentToolActivity } from '../agentProgress'
 import WeatherCard from './WeatherCard'
 import StockCard from './StockCard'
 import CalculationCard from './CalculationCard'
@@ -78,11 +76,9 @@ const ChatMessageItem = React.memo(
     }
 
     const progress = agentActivitySnapshots[String(interaction.id)] ?? interaction.agentActivity ?? []
-    const thoughts = thoughtsFrom(progress)
     const isUserCopied = copiedId === `user-${interaction.id}`
     const isAiCopied = copiedId === interaction.id
     const isSpeaking = speakingText === interaction.aiText
-    const isExpanded = thinkingExpanded[String(interaction.id)] ?? false
 
     const fallbackWeatherData = useMemo(() => {
       if (interaction.aiText && (interaction.aiText.includes('```weather_json') || interaction.aiText.includes('```weather-json'))) {
@@ -212,13 +208,6 @@ const ChatMessageItem = React.memo(
           <div className="bubble-wrapper">
             {renderCompletedActivity(interaction)}
             {renderFileChanges(interaction)}
-            <ThinkingBlock
-              blockKey={String(interaction.id)}
-              thoughts={thoughts}
-              expanded={isExpanded}
-              onExpandedChange={onThinkingExpandedChange}
-              showEmptyHint={hasAgentToolActivity(progress) && thoughts.length === 0}
-            />
             <div className="message-bubble">
               {fallbackWeatherData && <WeatherCard data={fallbackWeatherData} />}
               {fallbackStockData && <StockCard data={fallbackStockData} />}
@@ -283,6 +272,10 @@ const ChatMessageItem = React.memo(
     const prevExpanded = prevProps.thinkingExpanded[String(p.id)] ?? false
     const nextExpanded = nextProps.thinkingExpanded[String(n.id)] ?? false
     if (prevExpanded !== nextExpanded) return false
+
+    const prevExtExpanded = prevProps.thinkingExpanded[`extended-${p.id}`] ?? false
+    const nextExtExpanded = nextProps.thinkingExpanded[`extended-${n.id}`] ?? false
+    if (prevExtExpanded !== nextExtExpanded) return false
 
     const prevOpenActivity = prevProps.openActivityIds?.[String(p.id)] ?? false
     const nextOpenActivity = nextProps.openActivityIds?.[String(n.id)] ?? false

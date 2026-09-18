@@ -718,6 +718,23 @@ pub async fn run_code_agent_with_options(
                     render_live_status(&mut status);
                 }
             }
+            AgentProgress::ExtendedThinking { thought } => {
+                if !options.fast_mode
+                    && !progress_approval_active.load(Ordering::Relaxed)
+                    && let Ok(mut status) = progress_live_status.lock()
+                {
+                    commit_activity_snapshot(&mut status);
+                    let elapsed = started_at.elapsed();
+                    // Extended thinking gets the same timeline-note treatment
+                    // as regular Thought — `print_timeline_note` already
+                    // distinguishes internal CoT (long) from short notes via
+                    // `is_internal_cot` and renders accordingly.
+                    print_timeline_note(&mut status, &thought, elapsed);
+                    status.thinking = None;
+                    status.waiting_for_network = None;
+                    render_live_status(&mut status);
+                }
+            }
             AgentProgress::ToolStart {
                 action,
                 input,

@@ -9,9 +9,10 @@ import { renderFormattedMessage } from '../utils/markdown'
 
 const THINKING_LABELS = {
   live: 'Thinking…',
-  completed: (count: number) => `Thinking process (${count} steps)`,
-  step: (index: number) => `Step ${index}`,
-  emptyHint: 'Model didn\'t send thinking steps this time',
+  completed: 'Thinking process',
+  extendedLive: 'Thinking…',
+  extendedCompleted: 'Thought',
+  emptyHint: 'No thoughts recorded',
 } as const
 
 interface Props {
@@ -21,6 +22,8 @@ interface Props {
   expanded?: boolean
   onExpandedChange?: (key: string, open: boolean) => void
   showEmptyHint?: boolean
+  /** 'default' for short agent thoughts, 'extended' for model reasoning tokens */
+  variant?: 'default' | 'extended'
 }
 
 export function ThinkingBlock({
@@ -30,6 +33,7 @@ export function ThinkingBlock({
   expanded,
   onExpandedChange,
   showEmptyHint = false,
+  variant = 'default',
 }: Props) {
   const contentRef = useRef<HTMLDivElement>(null)
   const isControlled = expanded !== undefined && Boolean(onExpandedChange)
@@ -60,8 +64,10 @@ export function ThinkingBlock({
     )
   }
 
+  const variantClass = variant === 'extended' ? ' is-extended' : ''
+
   return (
-    <div className={`thinking-block${isLive ? ' is-live' : ''}${isOpen ? ' is-expanded' : ''}`}>
+    <div className={`thinking-block${isLive ? ' is-live' : ''}${isOpen ? ' is-expanded' : ''}${variantClass}`}>
       <button
         type="button"
         className="thinking-block-header"
@@ -70,7 +76,10 @@ export function ThinkingBlock({
       >
         <Brain size={14} className="thinking-block-icon" style={{ flexShrink: 0 }} />
         <span className="thinking-block-label">
-          {isLive ? THINKING_LABELS.live : THINKING_LABELS.completed(thoughts.length)}
+          {variant === 'extended'
+            ? (isLive ? THINKING_LABELS.extendedLive : THINKING_LABELS.extendedCompleted)
+            : (isLive ? THINKING_LABELS.live : THINKING_LABELS.completed)
+          }
         </span>
         {isLive && <span className="thinking-block-live-dot" aria-hidden="true" />}
         <span className={`thinking-block-chevron${isOpen ? ' is-open' : ''}`} aria-hidden="true">
@@ -82,9 +91,6 @@ export function ThinkingBlock({
           <div className="thinking-block-content" ref={contentRef}>
             {thoughts.map((thought, index) => (
               <div className="thinking-block-step" key={`${blockKey}-${index}`}>
-                {thoughts.length > 1 && (
-                  <div className="thinking-block-step-label">{THINKING_LABELS.step(index + 1)}</div>
-                )}
                 <div className="thinking-block-step-body">{renderFormattedMessage(thought)}</div>
               </div>
             ))}

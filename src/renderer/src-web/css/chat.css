@@ -1483,30 +1483,29 @@
 .agent-activity-list {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: var(--panel-bg, #141416);
+  gap: 6px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
 }
 
 .agent-activity-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 34px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
+  min-height: 32px;
+  padding: 5px 12px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-surface-soft, rgba(255, 255, 255, 0.03));
   color: var(--text-soft);
   font-size: 0.84rem;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.agent-activity-item:last-child {
-  border-bottom: 0;
-}
-
 .agent-activity-item:hover {
-  background: var(--panel-soft);
+  background: var(--panel-soft, rgba(255, 255, 255, 0.06));
   color: var(--text-main);
 }
 
@@ -1641,11 +1640,10 @@
 /* ── Grouped Activity Styling ───────────────────────────── */
 
 .agent-activity-group {
-  border-bottom: 1px solid var(--border);
-}
-
-.agent-activity-group:last-child {
-  border-bottom: 0;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-sm, 6px);
+  overflow: hidden;
+  background: var(--bg-surface-soft, rgba(255, 255, 255, 0.03));
 }
 
 .agent-activity-group-header {
@@ -2073,6 +2071,105 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* Extended Thinking inherits clean neutral styling directly from .thinking-block */
+
+/* Inline Thought Note (short agent notes rendered as normal plain text) */
+
+.inline-thought-note {
+  display: block;
+  padding: 4px 0 6px 0;
+  margin: 4px 0 6px 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-main, #f1f5f9);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  animation: agent-activity-slide-up-fade 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.inline-thought-note-text {
+  word-break: break-word;
+  white-space: pre-wrap;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.inline-thought-note .chat-formatted-body {
+  font-size: inherit;
+  color: inherit;
+  line-height: inherit;
+}
+
+.inline-thought-note .chat-formatted-body p {
+  margin: 0 0 6px 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.inline-thought-note .chat-formatted-body p:last-child {
+  margin-bottom: 0;
+}
+
+.agent-activity-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+/* Unified Timeline: Extended Thinking row inside Activity Drawer */
+.agent-activity-thought-step {
+  margin: 4px 0 6px 0;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-surface-soft, rgba(255, 255, 255, 0.03));
+  overflow: hidden;
+}
+
+.agent-activity-thought-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.76rem;
+  font-weight: 500;
+  transition: background 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+
+.agent-activity-thought-header:hover {
+  background: var(--bg-surface-soft, rgba(255, 255, 255, 0.04));
+  color: var(--text-main, #f1f5f9);
+}
+
+.agent-activity-thought-header .agent-activity-kind-icon {
+  color: var(--text-muted, #94a3b8);
+}
+
+.agent-activity-thought-title {
+  flex: 1;
+  letter-spacing: 0.01em;
+}
+
+.agent-activity-thought-body {
+  padding: 8px 12px 8px 28px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-muted, #cbd5e1);
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius-sm, 6px);
+  margin: 2px 0 4px 0;
+  max-height: 300px;
+  overflow-y: auto;
+  user-select: text;
 }
 
 /* Smart Context Toggle */

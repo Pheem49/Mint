@@ -946,26 +946,7 @@ pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
 }
 
 pub(super) fn is_internal_cot(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.starts_with("<think>") || trimmed.contains("</think>") {
-        return true;
-    }
-    let line_count = trimmed.lines().count();
-    let char_count = trimmed.chars().count();
-    if trimmed.contains("\n\n") || line_count > 2 || char_count > 180 {
-        return true;
-    }
-    let lower = trimmed.to_lowercase();
-    if lower.starts_with("the user ")
-        || lower.starts_with("let's think")
-        || lower.starts_with("let me analyze")
-        || lower.starts_with("per rule")
-        || lower.starts_with("note the ")
-        || lower.contains("thinking process:")
-    {
-        return true;
-    }
-    false
+    mint_core::orchestration::is_internal_cot(text)
 }
 
 pub(super) fn print_timeline_note(status: &mut LiveStatus, thought: &str, elapsed: Duration) {
@@ -987,6 +968,7 @@ pub(super) fn print_timeline_note(status: &mut LiveStatus, thought: &str, elapse
             .or_else(|| thought.strip_prefix("-"))
             .unwrap_or(thought)
             .trim();
+        let clean_note = strip_intermediate_greeting(clean_note);
         let (tw, _) = markdown::terminal_size_or_default();
         let width = (tw as usize).saturating_sub(4).max(20);
         let options = textwrap::Options::new(width).break_words(true);
@@ -994,6 +976,32 @@ pub(super) fn print_timeline_note(status: &mut LiveStatus, thought: &str, elapse
         let formatted = format!("\x1b[38;2;226;232;240m{}\x1b[0m", wrapped);
         insert_permanent_lines(status, &[formatted]);
     }
+}
+
+fn strip_intermediate_greeting(text: &str) -> &str {
+    let mut s = text.trim();
+    for prefix in &["สวัสดีค่ะ", "สวัสดีครับ", "หวัดดีค่ะ", "หวัดดีครับ", "สวัสดี", "Hello", "Hi", "Hey"] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            s = rest.trim_start();
+            break;
+        }
+    }
+    if let Some(rest) = s.strip_prefix("พี่") {
+        if let Some(space_idx) = rest.find(' ') {
+            s = rest[space_idx..].trim_start();
+        }
+    } else if let Some(rest) = s.strip_prefix("คุณ") {
+        if let Some(space_idx) = rest.find(' ') {
+            s = rest[space_idx..].trim_start();
+        }
+    }
+    for emoji in &["🌿", "🍃", "✨", "🌱"] {
+        if let Some(rest) = s.strip_prefix(emoji) {
+            s = rest.trim_start();
+        }
+    }
+    let trimmed = s.trim_start_matches(|c: char| c == ',' || c == '-' || c == '—' || c == ' ' || c == '•');
+    if trimmed.is_empty() { text } else { trimmed }
 }
 
 /// Inserts already ANSI-formatted `lines` as permanent content above the

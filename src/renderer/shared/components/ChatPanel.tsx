@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
-import { hasAgentToolActivity, thoughtsFrom, parseFileChangesFromProgress } from '../agentProgress'
+import { hasAgentToolActivity, thoughtsFrom, extendedThoughtsFrom, parseFileChangesFromProgress } from '../agentProgress'
 import {
   GEMINI_MODELS,
   OPENAI_MODELS,
@@ -1475,19 +1475,25 @@ export default function ChatPanel({
             {renderActiveFileChanges()}
             <div className="message ai-message thinking-message">
               <div className="bubble-wrapper">
-                <ThinkingBlock
-                  blockKey="live"
-                  thoughts={thoughtsFrom(agentProgress)}
-                  isLive={true}
-                  expanded={thinkingExpanded.live ?? true}
-                  onExpandedChange={onThinkingExpandedChange}
-                  showEmptyHint={
-                    agentMode
-                    && hasAgentToolActivity(agentProgress)
-                    && thoughtsFrom(agentProgress).length === 0
-                    && !streamedReply
-                  }
-                />
+                {!agentMode && extendedThoughtsFrom(agentProgress).length > 0 && (
+                  <ThinkingBlock
+                    blockKey="live-extended"
+                    thoughts={extendedThoughtsFrom(agentProgress)}
+                    isLive={true}
+                    variant="extended"
+                    expanded={thinkingExpanded['live-extended'] ?? true}
+                    onExpandedChange={onThinkingExpandedChange}
+                  />
+                )}
+                {!agentMode && thoughtsFrom(agentProgress).length > 0 && extendedThoughtsFrom(agentProgress).length === 0 && (
+                  <ThinkingBlock
+                    blockKey="live"
+                    thoughts={thoughtsFrom(agentProgress)}
+                    isLive={true}
+                    expanded={thinkingExpanded.live ?? true}
+                    onExpandedChange={onThinkingExpandedChange}
+                  />
+                )}
                 <div className="message-bubble">
                   <span>
                     {streamedReply ? (

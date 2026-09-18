@@ -514,6 +514,15 @@ pub enum AgentProgress {
     Thought {
         thought: String,
     },
+    /// Extended reasoning / chain-of-thought from the model's API thinking
+    /// tokens (e.g. Claude `<thinking>`, Gemini Thinking, DeepSeek Reasoner,
+    /// or `<think>` tags). Semantically distinct from `Thought`, which
+    /// carries short, one-line agent notes (fallback warnings, decision
+    /// summaries). The CLI renders this as a collapsible block; the web/
+    /// desktop UI shows it in a dedicated "Extended Thinking" panel.
+    ExtendedThinking {
+        thought: String,
+    },
     /// Emitted while retrying a step after every configured provider was
     /// unreachable (`ChatError::NetworkUnavailable`) — distinct from
     /// `Thinking` because there's nothing to wait *on* here except the
@@ -547,6 +556,31 @@ pub enum AgentProgress {
     RunCompleted {
         summary: RunTelemetrySummary,
     },
+}
+
+/// Determines whether a thought string represents long-form / internal chain-of-thought
+/// (reasoning tokens, <think> tags, or multi-line reasoning) versus a brief agent note.
+pub fn is_internal_cot(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.starts_with("<think>") || trimmed.contains("</think>") {
+        return true;
+    }
+    let line_count = trimmed.lines().count();
+    let char_count = trimmed.chars().count();
+    if trimmed.contains("\n\n") || line_count > 2 || char_count > 180 {
+        return true;
+    }
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with("the user ")
+        || lower.starts_with("let's think")
+        || lower.starts_with("let me analyze")
+        || lower.starts_with("per rule")
+        || lower.starts_with("note the ")
+        || lower.contains("thinking process:")
+    {
+        return true;
+    }
+    false
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1387,6 +1421,13 @@ where
                         })?
                     }
                 };
+                // If the model's inline JSON `thought` is empty but the API
+                // sent separate thinking tokens (reasoning models), emit them
+                // as `ExtendedThinking` so the UI can display them in a
+                // dedicated collapsible block instead of the short-thought
+                // timeline.  Still copy into `decision.thought` so the text
+                // is available downstream, but the *progress event* uses the
+                // correct variant.
                 if decision.thought.trim().is_empty() {
                     if let Some(t) = &response.thought {
                         decision.thought = t.trim().to_string();
@@ -1394,6 +1435,17 @@ where
                 }
                 vec![(format!("call_{step}"), decision)]
             };
+
+            let mut extended_emitted = false;
+            if !fast_mode
+                && let Some(t) = &response.thought
+                && !t.trim().is_empty()
+            {
+                progress(AgentProgress::ExtendedThinking {
+                    thought: t.trim().to_owned(),
+                });
+                extended_emitted = true;
+            }
 
             let mut step_tool_results: Vec<(String, String, Value, String)> = Vec::new();
             // Screenshots (and any future binary/image tool result) are kept out of
@@ -1438,21 +1490,22 @@ where
                 )
                 .await;
             } else {
-                if !fast_mode
-                    && response.tool_calls.as_ref().is_some_and(|calls| !calls.is_empty())
-                    && let Some(t) = &response.thought
-                    && !t.trim().is_empty()
-                {
-                    progress(AgentProgress::Thought {
-                        thought: t.trim().to_owned(),
-                    });
-                }
-
                 for (call_id, decision) in decisions {
-                    if !fast_mode && !decision.thought.trim().is_empty() {
-                        progress(AgentProgress::Thought {
-                            thought: decision.thought.trim().to_owned(),
-                        });
+                    let d_thought = decision.thought.trim();
+                    if !fast_mode && !d_thought.is_empty() {
+                        let already_extended = extended_emitted
+                            && response.thought.as_deref().map(str::trim) == Some(d_thought);
+                        if !already_extended {
+                            if is_internal_cot(d_thought) {
+                                progress(AgentProgress::ExtendedThinking {
+                                    thought: d_thought.to_owned(),
+                                });
+                            } else {
+                                progress(AgentProgress::Thought {
+                                    thought: d_thought.to_owned(),
+                                });
+                            }
+                        }
                     }
 
                     if decision.action == "finish" {
@@ -2488,10 +2541,17 @@ async fn run_parallel_read_only_batch(
 
         tasks.push(async move {
             if !fast_mode && !thought.trim().is_empty() {
+                let t = thought.trim();
                 let mut guard = progress_mutex.lock().unwrap();
-                (*guard)(AgentProgress::Thought {
-                    thought: thought.trim().to_owned(),
-                });
+                if is_internal_cot(t) {
+                    (*guard)(AgentProgress::ExtendedThinking {
+                        thought: t.to_owned(),
+                    });
+                } else {
+                    (*guard)(AgentProgress::Thought {
+                        thought: t.to_owned(),
+                    });
+                }
             }
 
             {

@@ -43,7 +43,7 @@ export function AgentActivityDrawer({
     .find((e): e is { type: 'RunCompleted'; data: { summary: RunTelemetrySummary } } => e.type === 'RunCompleted')
     ?.data.summary
 
-  if (activityView.items.length === 0 && !latestPlan && !latestRunSummary) return null
+  if (activityView.items.length === 0 && (!activityView.timeline || activityView.timeline.length === 0) && !latestPlan && !latestRunSummary) return null
 
   const hasSubagents = (rawProgress || []).some(
     (e) =>
@@ -142,7 +142,7 @@ export function AgentActivityDrawer({
 
       {viewMode === 'dag' && hasSubagents ? (
         <SubagentDagView progress={rawProgress || []} isLive={!isHistorical} />
-      ) : activityView.items.length > 0 ? (
+      ) : activityView.items.length > 0 || (activityView.timeline && activityView.timeline.length > 0) ? (
         <AgentActivityTable activityView={activityView} />
       ) : null}
     </>

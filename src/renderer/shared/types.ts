@@ -75,6 +75,7 @@ export interface RunTelemetrySummary {
 export type AgentProgress =
   | { type: 'Thinking'; data: { elapsed_secs: number; agent_name?: string; model_name?: string } }
   | { type: 'Thought'; data: { thought: string } }
+  | { type: 'ExtendedThinking'; data: { thought: string } }
   | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown>; subagent?: string } }
   | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string; subagent?: string } }
   | { type: 'PlanUpdated'; data: { plan: ActivePlan } }

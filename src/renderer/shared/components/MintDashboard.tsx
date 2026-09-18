@@ -442,6 +442,7 @@ export default function MintDashboard() {
   const [agentActivitySnapshots, setAgentActivitySnapshots] = useState<Record<string, AgentProgress[]>>({})
   const [thinkingExpanded, setThinkingExpanded] = useState<Record<string, boolean>>({})
   const liveThinkingOpenRef = useRef(true)
+  const liveExtendedThinkingOpenRef = useRef(true)
   const [imageAttachments, setImageAttachments] = useState<Array<{ dataUri: string; name: string; previewDataUri?: string }>>([])
   const [videoAttachments, setVideoAttachments] = useState<Array<{ dataUri: string; name: string }>>([])
   const [documentAttachment, setDocumentAttachment] = useState<DocumentAttachment | null>(null)
@@ -952,7 +953,8 @@ export default function MintDashboard() {
     setStreamedResponse(null)
     setAgentProgress([])
     liveThinkingOpenRef.current = true
-    setThinkingExpanded((current) => ({ ...current, live: true }))
+    liveExtendedThinkingOpenRef.current = true
+    setThinkingExpanded((current) => ({ ...current, live: true, 'live-extended': true }))
     const progressSnapshot: AgentProgress[] = []
     if (options.clearComposer) {
       setMessage('')
@@ -1011,12 +1013,11 @@ export default function MintDashboard() {
             ...current,
             [interactionKey]: progressSnapshot.slice(),
           }))
-          if (liveThinkingOpenRef.current) {
-            setThinkingExpanded((current) => ({
-              ...current,
-              [interactionKey]: true,
-            }))
-          }
+          setThinkingExpanded((current) => ({
+            ...current,
+            ...(liveThinkingOpenRef.current ? { [interactionKey]: true } : {}),
+            ...(liveExtendedThinkingOpenRef.current ? { [`extended-${interactionKey}`]: true } : {}),
+          }))
           await saveInteractionAgentActivity(newestInteraction.id, progressSnapshot)
         }
       }
@@ -1469,6 +1470,7 @@ export default function MintDashboard() {
 
   function handleThinkingExpandedChange(key: string, open: boolean) {
     if (key === 'live') liveThinkingOpenRef.current = open
+    if (key === 'live-extended') liveExtendedThinkingOpenRef.current = open
     setThinkingExpanded((current) => ({ ...current, [key]: open }))
   }
 
