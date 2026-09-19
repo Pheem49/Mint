@@ -644,6 +644,7 @@ export default function ChatPanel({
   const workspaceName = workspacePath
     ? workspacePath.split(/[\\/]/).filter(Boolean).pop() || workspacePath
     : 'Select Project'
+  const workspaceAction = workspacePath ? 'Change' : 'Choose folder'
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const slashRef = useRef<SlashSuggestionsHandle>(null)
 
@@ -1589,14 +1590,28 @@ export default function ChatPanel({
       <div className={`input-area ${voiceMode ? 'voice-active' : ''}`}>
         {isEmptyChat && <div className="empty-chat-prompt">Mint Agent is ready to work</div>}
         {onSelectWorkspace && (
-          <button type="button" className="workspace-select-btn" onClick={onSelectWorkspace}>
-            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <button
+            type="button"
+            className={`workspace-select-btn ${workspacePath ? 'has-workspace' : 'needs-workspace'}`}
+            onClick={onSelectWorkspace}
+            aria-label={`${workspaceAction}: ${workspaceName}`}
+            title={workspacePath || 'Choose a workspace folder'}
+          >
+            <span className="workspace-select-icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>
               </svg>
             </span>
-            <span>{workspaceName}</span>
-            <span aria-hidden="true">⌄</span>
+            <span className="workspace-select-copy">
+              <span className="workspace-select-label">Workspace</span>
+              <span className="workspace-select-name">{workspaceName}</span>
+            </span>
+            <span className="workspace-select-action" aria-hidden="true">
+              {workspaceAction}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            </span>
           </button>
         )}
         <div className="smart-context-bar">
@@ -1996,12 +2011,6 @@ export default function ChatPanel({
       ref={wrapperRef}
       className={`chat-panel-split-wrapper ${activeArtifact ? 'has-preview' : 'no-preview'}`}
       style={{
-        width: '100%',
-        height: '100%',
-        overflow: 'hidden',
-        position: 'relative',
-        gridColumn: '1 / -1',
-        zIndex: 1,
         '--preview-width': `${(splitRatio * 100).toFixed(2)}%`,
       } as React.CSSProperties}
     >

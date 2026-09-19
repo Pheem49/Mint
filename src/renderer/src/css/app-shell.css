@@ -659,6 +659,7 @@ h1 {
 .assistant-workspace {
   display: grid;
   grid-template-columns: minmax(320px, 1fr) minmax(360px, 520px);
+  grid-template-rows: minmax(0, 1fr);
   gap: 18px;
   margin-left: var(--sidebar-expanded-width);
   padding: 0;
@@ -779,11 +780,54 @@ h1 {
 }
 
 .chat-panel-split-wrapper.no-preview {
-  display: contents;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  align-self: stretch;
+  position: static;
+  z-index: 1;
+}
+
+.chat-panel-split-wrapper.no-preview .conversation-panel {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  align-self: stretch;
+}
+
+.assistant-workspace.model-hidden .chat-panel-split-wrapper.no-preview {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+.assistant-workspace.model-hidden .chat-panel-split-wrapper.no-preview .conversation-panel {
+  height: auto;
+  min-height: 0;
+  align-self: stretch;
+}
+
+@media (min-width: 761px) {
+  .assistant-workspace .chat-panel-split-wrapper.no-preview {
+    width: min(1100px, calc(100% - 64px));
+    justify-self: center;
+  }
+
+  .assistant-workspace.model-hidden .chat-panel-split-wrapper.no-preview {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: min(1100px, calc(100% - 64px));
+    height: auto;
+    transform: translateX(-50%);
+  }
 }
 
 .chat-panel-split-wrapper.has-preview {
   grid-column: 1 / -1;
+  grid-row: 1;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -885,13 +929,65 @@ h1 {
 }
 
 .assistant-workspace.model-hidden .conversation-panel.is-empty {
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   align-content: stretch;
   justify-content: stretch;
   width: min(840px, calc(100% - 64px));
   margin: 0 auto;
   padding-top: 16px;
   padding-bottom: 8px;
+}
+
+.assistant-workspace.model-hidden .conversation-panel.is-empty .chat-header {
+  grid-row: 1;
+  align-self: start;
+}
+
+.assistant-workspace.model-hidden .conversation-panel.is-empty .input-area {
+  grid-row: 2;
+  align-self: center;
+  margin: 0;
+}
+
+.assistant-workspace.model-hidden .conversation-panel.is-empty .input-disclaimer {
+  grid-row: 3;
+}
+
+/* WebKitGTK can resolve the no-preview wrapper to its intrinsic content
+   height. Anchor the desktop empty state to the full workspace instead, so
+   the header never follows the vertically-centered composer. */
+@media (min-width: 761px) {
+  .assistant-workspace .conversation-panel.is-empty {
+    position: static;
+  }
+
+  .assistant-workspace .conversation-panel.is-empty .chat-header {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    right: auto;
+    width: min(840px, calc(100% - 64px));
+    margin: 0;
+    transform: translateX(-50%);
+  }
+
+  .assistant-workspace .conversation-panel.is-empty .input-area {
+    position: absolute;
+    top: auto;
+    bottom: 44px;
+    left: 50%;
+    width: min(840px, calc(100% - 64px));
+    margin: 0;
+    transform: translateX(-50%);
+  }
+
+  .assistant-workspace .conversation-panel.is-empty .input-disclaimer {
+    position: absolute;
+    right: 32px;
+    bottom: 8px;
+    left: 32px;
+    margin: 0;
+  }
 }
 
 @keyframes toolMenuPopIn {
@@ -1041,6 +1137,10 @@ h1 {
   .assistant-workspace.model-hidden .input-area {
     width: 100%;
     flex-shrink: 0;
+  }
+
+  .assistant-workspace.model-hidden .conversation-panel.is-empty .input-area {
+    margin: auto 0;
   }
 }
 
