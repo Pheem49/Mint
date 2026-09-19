@@ -251,7 +251,7 @@ export function AgentActivityTable({ activityView }: Props) {
                     onClick={() => toggleExpandItem(itemKey)}
                   >
                     <span className="agent-activity-icon-wrap" aria-hidden="true">
-                      <Brain size={13} className="agent-activity-kind-icon" />
+                      <Brain size={14} className="agent-activity-kind-icon" />
                     </span>
                     <span className="agent-activity-thought-title">
                       Thought
@@ -260,7 +260,7 @@ export function AgentActivityTable({ activityView }: Props) {
                       className={`agent-activity-chevron${isThoughtExpanded ? ' is-open' : ''}`}
                       aria-hidden="true"
                     >
-                      <ChevronRight size={12} strokeWidth={2.2} />
+                      <ChevronRight size={13} strokeWidth={2.2} />
                     </span>
                   </div>
                   {isThoughtExpanded && (

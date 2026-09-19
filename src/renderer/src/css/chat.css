@@ -1494,18 +1494,18 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 32px;
-  padding: 5px 12px;
+  min-height: 36px;
+  padding: 6px 12px;
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   border-radius: var(--radius-sm, 6px);
-  background: var(--bg-surface-soft, rgba(255, 255, 255, 0.03));
+  background: color-mix(in srgb, var(--panel-soft) 40%, transparent);
   color: var(--text-soft);
-  font-size: 0.84rem;
+  font-size: 0.82rem;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .agent-activity-item:hover {
-  background: var(--panel-soft, rgba(255, 255, 255, 0.06));
+  background: var(--panel-soft);
   color: var(--text-main);
 }
 
@@ -1791,13 +1791,14 @@
 .thinking-block-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  padding: 7px 12px;
-  background: transparent;
+  min-height: 36px;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--panel-soft) 40%, transparent);
   border: 0;
   color: var(--text-muted, #94a3b8);
-  font-size: 0.76rem;
+  font-size: 0.82rem;
   font-weight: 500;
   cursor: pointer;
   text-align: left;
@@ -1806,7 +1807,7 @@
 }
 
 .thinking-block-header:hover {
-  background: var(--bg-surface-soft);
+  background: var(--panel-soft);
   color: var(--text-main);
 }
 
@@ -2124,7 +2125,7 @@
 
 /* Unified Timeline: Extended Thinking row inside Activity Drawer */
 .agent-activity-thought-step {
-  margin: 4px 0 6px 0;
+  margin: 0;
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   border-radius: var(--radius-sm, 6px);
   background: var(--bg-surface-soft, rgba(255, 255, 255, 0.03));
@@ -2134,19 +2135,21 @@
 .agent-activity-thought-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 12px;
   border-radius: var(--radius-sm, 6px);
   cursor: pointer;
   color: var(--text-muted, #94a3b8);
-  font-size: 0.76rem;
+  font-size: 0.82rem;
   font-weight: 500;
+  background: color-mix(in srgb, var(--panel-soft) 40%, transparent);
   transition: background 0.15s ease, color 0.15s ease;
   user-select: none;
 }
 
 .agent-activity-thought-header:hover {
-  background: var(--bg-surface-soft, rgba(255, 255, 255, 0.04));
+  background: var(--panel-soft);
   color: var(--text-main, #f1f5f9);
 }
 
@@ -2156,6 +2159,13 @@
 
 .agent-activity-thought-title {
   flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-main, #f1f5f9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   letter-spacing: 0.01em;
 }
 
