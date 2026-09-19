@@ -339,6 +339,18 @@ h1 {
   box-shadow: 0 30px 80px rgba(0,0,0,0.6);
 }
 
+[data-theme="light"] .settings-modal-overlay {
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+[data-theme="light"] .settings-modal {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
 @keyframes modelFloat {
   0%,
   100% {
@@ -761,7 +773,7 @@ h1 {
   height: 100%;
   max-width: none;
   margin: 0 auto;
-  padding: 32px 0 8px;
+  padding: 16px 0 8px;
   grid-column: 1 / -1;
   z-index: 1;
 }
@@ -878,7 +890,7 @@ h1 {
   justify-content: stretch;
   width: min(840px, calc(100% - 64px));
   margin: 0 auto;
-  padding-top: 0;
+  padding-top: 16px;
   padding-bottom: 8px;
 }
 

@@ -992,3 +992,271 @@ kbd {
     font-weight: 600;
     letter-spacing: 0.04em;
 }
+
+/* ─── Light Mode Overrides for Settings ───────────────────────────────────── */
+
+[data-theme="light"] .settings-container {
+    background: #ffffff;
+    color: #0f172a;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+}
+
+[data-theme="light"] .settings-header {
+    background: #ffffff;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+[data-theme="light"] .settings-header h1 {
+    color: #0f172a;
+}
+
+[data-theme="light"] .settings-header p {
+    color: #64748b;
+}
+
+[data-theme="light"] .settings-header .settings-icon {
+    background: rgba(16, 185, 129, 0.1);
+    color: #059669;
+    border-color: rgba(16, 185, 129, 0.25);
+}
+
+[data-theme="light"] .close-btn {
+    color: #64748b;
+}
+
+[data-theme="light"] .close-btn:hover {
+    background: #fee2e2;
+    border-color: #fca5a5;
+    color: #dc2626;
+}
+
+[data-theme="light"] .settings-sidebar {
+    background: #f8fafc;
+    border-right: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .settings-nav-search {
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.14);
+    color: #64748b;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .settings-nav-search input {
+    color: #0f172a;
+}
+
+[data-theme="light"] .settings-nav-search input::placeholder {
+    color: #94a3b8;
+}
+
+[data-theme="light"] .settings-nav-group-label {
+    color: #64748b;
+    font-weight: 700;
+}
+
+[data-theme="light"] .tab-btn {
+    color: #475569;
+}
+
+[data-theme="light"] .tab-btn:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+
+[data-theme="light"] .tab-btn.active {
+    background: #ffffff;
+    color: #0f172a;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+    font-weight: 600;
+}
+
+[data-theme="light"] .tab-btn.active span {
+    color: #059669;
+}
+
+[data-theme="light"] .settings-content {
+    background: #ffffff;
+    color: #0f172a;
+}
+
+[data-theme="light"] .web-safe-notice {
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .web-safe-notice strong {
+    color: #0f172a;
+}
+
+[data-theme="light"] .web-safe-notice span {
+    color: #64748b;
+}
+
+[data-theme="light"] .section-kicker {
+    color: #059669;
+    font-weight: 700;
+}
+
+[data-theme="light"] .section-title {
+    color: #0f172a;
+    font-weight: 600;
+}
+
+[data-theme="light"] .section-description {
+    color: #475569;
+}
+
+[data-theme="light"] .setting-section {
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .section-heading {
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .setting-row {
+    border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .setting-row label,
+[data-theme="light"] .toggle-row label {
+    color: #1e293b;
+    font-weight: 500;
+}
+
+[data-theme="light"] .hint {
+    color: #64748b;
+}
+
+/* Form inputs */
+[data-theme="light"] input[type="text"],
+[data-theme="light"] input[type="password"],
+[data-theme="light"] input[type="email"],
+[data-theme="light"] input[type="url"],
+[data-theme="light"] textarea {
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.16);
+    color: #0f172a;
+}
+
+[data-theme="light"] input[type="text"]:focus,
+[data-theme="light"] input[type="password"]:focus,
+[data-theme="light"] input[type="email"]:focus,
+[data-theme="light"] input[type="url"]:focus,
+[data-theme="light"] textarea:focus {
+    background: #ffffff;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+}
+
+[data-theme="light"] select {
+    color-scheme: light;
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    border: 1px solid rgba(15, 23, 42, 0.16);
+}
+
+[data-theme="light"] select:focus {
+    background-color: #ffffff !important;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+}
+
+[data-theme="light"] select option {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .toggle-visibility {
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.16);
+    color: #64748b;
+}
+
+[data-theme="light"] .toggle-visibility:hover {
+    background: #f1f5f9;
+    border-color: rgba(15, 23, 42, 0.28);
+    color: #0f172a;
+}
+
+/* Toggle switch */
+[data-theme="light"] .settings-toggle-slider {
+    background: #cbd5e1;
+    border: 1px solid #94a3b8;
+}
+
+[data-theme="light"] .settings-toggle-slider::before {
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+}
+
+[data-theme="light"] input:checked + .settings-toggle-slider {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+[data-theme="light"] input:checked + .settings-toggle-slider::before {
+    background: #ffffff;
+}
+
+/* Range slider */
+[data-theme="light"] .range-slider::-webkit-slider-runnable-track {
+    background: #e2e8f0;
+}
+
+[data-theme="light"] .range-slider::-webkit-slider-thumb {
+    background: var(--accent);
+    border: 3px solid #ffffff;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.25);
+}
+
+/* Buttons */
+[data-theme="light"] .btn-secondary {
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.16);
+    color: #1e293b;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+[data-theme="light"] .btn-secondary:hover {
+    background: #f8fafc;
+    border-color: rgba(15, 23, 42, 0.28);
+    color: #0f172a;
+}
+
+[data-theme="light"] .btn-primary {
+    background: var(--accent);
+    color: #ffffff;
+    border: 1px solid transparent;
+    box-shadow: 0 1px 3px rgba(16, 185, 129, 0.3);
+}
+
+[data-theme="light"] .btn-primary:hover {
+    background: var(--accent-hover);
+    box-shadow: 0 3px 8px rgba(16, 185, 129, 0.4);
+}
+
+/* Footer */
+[data-theme="light"] .settings-footer {
+    background: #f8fafc;
+    border-top: 1px solid rgba(15, 23, 42, 0.08);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+[data-theme="light"] .settings-footer-version,
+[data-theme="light"] .settings-footer-link {
+    color: #64748b;
+}
+
+[data-theme="light"] .settings-footer-link:hover {
+    color: #0f172a;
+}
+
+[data-theme="light"] .settings-footer-separator {
+    color: rgba(15, 23, 42, 0.16);
+}

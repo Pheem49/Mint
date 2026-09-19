@@ -500,3 +500,153 @@
     color: var(--text-muted, #a1a1aa);
 }
 
+/* ─── Light Mode Overrides for General Settings ──────────────────────────── */
+
+[data-theme="light"] .provider-card {
+    background: #f8fafc;
+    border: 1px solid rgba(15, 23, 42, 0.1);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .provider-card:hover {
+    border-color: rgba(15, 23, 42, 0.22);
+}
+
+[data-theme="light"] .provider-card.active-provider {
+    background: #ffffff;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 2px 10px rgba(16, 185, 129, 0.1);
+}
+
+[data-theme="light"] .provider-card-header {
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .provider-card-title {
+    color: #0f172a;
+}
+
+[data-theme="light"] .provider-active-badge {
+    color: #059669;
+    font-weight: 700;
+}
+
+[data-theme="light"] .model-combobox-trigger {
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.16);
+    color: #0f172a;
+}
+
+[data-theme="light"] .model-combobox-trigger:hover {
+    background: #f8fafc;
+    border-color: rgba(15, 23, 42, 0.28);
+}
+
+[data-theme="light"] .model-combobox-dropdown {
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.14);
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+[data-theme="light"] .model-combobox-search-box {
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    background: #f8fafc;
+}
+
+[data-theme="light"] .model-combobox-search-input {
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .model-combobox-search-input::placeholder {
+    color: #64748b;
+}
+
+[data-theme="light"] .model-combobox-group-title {
+    color: #64748b;
+}
+
+[data-theme="light"] .model-combobox-item {
+    color: #0f172a;
+}
+
+[data-theme="light"] .model-combobox-item:hover,
+[data-theme="light"] .model-combobox-item.is-highlighted {
+    background: #f1f5f9;
+}
+
+[data-theme="light"] .model-combobox-item.is-selected {
+    background: rgba(16, 185, 129, 0.12);
+}
+
+[data-theme="light"] .combobox-item-name {
+    color: #0f172a;
+}
+
+[data-theme="light"] .combobox-item-repo {
+    color: #64748b;
+}
+
+[data-theme="light"] .combobox-clear-btn {
+    color: #64748b;
+}
+
+[data-theme="light"] .combobox-clear-btn:hover {
+    color: #0f172a;
+    background: #e2e8f0;
+}
+
+[data-theme="light"] .combobox-see-more-btn {
+    background: #f8fafc;
+    border-color: rgba(15, 23, 42, 0.15);
+    color: #475569;
+}
+
+[data-theme="light"] .combobox-see-more-btn:hover {
+    background: #f1f5f9;
+    border-color: rgba(15, 23, 42, 0.28);
+    color: #0f172a;
+}
+
+[data-theme="light"] .combobox-see-more-btn.collapse-btn {
+    background: transparent;
+    border-color: rgba(15, 23, 42, 0.1);
+    color: #64748b;
+}
+
+[data-theme="light"] .custom-query-item {
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(16, 185, 129, 0.08);
+}
+
+[data-theme="light"] .combobox-custom-badge {
+    background: #e2e8f0;
+    color: #475569;
+}
+
+/* Feature cards in settings (e.g. Temperature, Thinking) */
+.setting-feature-card {
+    margin-top: 0.75rem;
+    padding: 0.85rem 1rem;
+    border-radius: var(--radius-lg);
+    background: var(--surface-strong);
+    border: 1px solid var(--border);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+[data-theme="light"] .setting-feature-card {
+    background: #f8fafc;
+    border: 1px solid rgba(15, 23, 42, 0.1);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+[data-theme="light"] .setting-feature-card:hover {
+    border-color: rgba(15, 23, 42, 0.18);
+}
+
+[data-theme="light"] .setting-feature-card .btn-secondary.active {
+    background: rgba(16, 185, 129, 0.12) !important;
+    border-color: #059669 !important;
+    color: #047857 !important;
+    font-weight: 600;
+}
+

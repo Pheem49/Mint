@@ -1958,6 +1958,7 @@ export default function MintDashboard() {
             isCliSession={conversationId.startsWith('cli') || conversationId === 'cli'}
             cliSessionId={conversationId.startsWith('cli') ? conversationId : undefined}
             onBackToCode={() => changeView('code')}
+            conversationTitle={chatSessions.find((s) => s.id === conversationId)?.title}
           />
         </main>
         {view === 'skills' && (

@@ -135,40 +135,40 @@
   --syntax-punctuation: #cbd5e1;
 }
 
-/* ── Light Theme (Clean, Crisp, Solid Opaque Modals) ─────────────────────── */
+/* ── Light Theme (Clean, Crisp, High-Contrast & Comfortable Clarity) ─────── */
 [data-theme="light"] {
   color-scheme: light;
 
-  /* Surfaces */
-  --bg-canvas: #f8fafc;
+  /* Surfaces: Soft neutral canvas + crisp white cards for depth & eye comfort */
+  --bg-canvas: #f0f2f5;
   --bg-surface: #ffffff;
   --bg-surface-raised: #ffffff;
-  --bg-surface-soft: #f1f5f9;
-  --bg-surface-hover: #e2e8f0;
+  --bg-surface-soft: #f8fafc;
+  --bg-surface-hover: #f1f5f9;
   --bg-overlay: #ffffff; /* 100% Solid Opaque White - NO bleed-through! */
-  --bg-input: #f1f5f9;
+  --bg-input: #ffffff;
   --bg-input-focus: #ffffff;
 
-  /* Typography: Crisp, high-contrast normal black */
-  --text-primary: #000000;
-  --text-secondary: #18181b;
-  --text-muted: #3f3f46;
-  --text-disabled: #71717a;
-  --text-main: #000000;
-  --text-soft: #18181b;
-  --text-chat: #000000;
-  --placeholder: #3f3f46;
+  /* Typography: Rich slate darks for crisp readability, eliminating faded text */
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --text-disabled: #94a3b8;
+  --text-main: #0f172a;
+  --text-soft: #334155;
+  --text-chat: #0f172a;
+  --placeholder: #94a3b8;
 
-  /* Borders */
+  /* Borders: Visible, refined boundaries between components */
   --border-subtle: rgba(15, 23, 42, 0.08);
-  --border-default: rgba(15, 23, 42, 0.15);
-  --border-strong: rgba(15, 23, 42, 0.25);
+  --border-default: rgba(15, 23, 42, 0.14);
+  --border-strong: rgba(15, 23, 42, 0.24);
   --border-focus: var(--accent-default);
 
-  /* Shadows */
-  --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.1);
-  --shadow-lg: 0 20px 60px rgba(15, 23, 42, 0.16);
+  /* Shadows: Soft natural elevation */
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 20px 48px rgba(15, 23, 42, 0.14), 0 8px 20px rgba(15, 23, 42, 0.06);
 
   /* Glass Blur */
   --glass-blur: blur(16px);

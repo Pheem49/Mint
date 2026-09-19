@@ -415,7 +415,7 @@ export default function GeneralTab({
               }
 
               return (
-                <div className="setting-row stacked" style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '8px', background: 'var(--surface-strong)', border: '1px solid var(--border)' }}>
+                <div className="setting-row stacked setting-feature-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
                     <label style={{ margin: 0, fontWeight: 600, display: 'flex', alignItems: 'baseline', gap: '0.45rem' }}>
                       <span>Model Temperature</span>
@@ -535,7 +535,7 @@ export default function GeneralTab({
               }
 
               return (
-                <div className="setting-row stacked" style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '8px', background: 'var(--surface-strong)', border: '1px solid var(--border)' }}>
+                <div className="setting-row stacked setting-feature-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                     <label style={{ margin: 0, fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--accent, #10b981)' }}>

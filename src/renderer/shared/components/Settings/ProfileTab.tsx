@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react'
 import { useAuthUser } from '../AuthGate'
 import { authUploadAvatar } from '@/tauri'
+import AvatarCropModal from './AvatarCropModal'
 
 interface ProfileTabProps {
   name: string
@@ -13,6 +14,7 @@ export default function ProfileTab({ name, setName, imageUrl, setImageUrl }: Pro
   const { user, avatarUrl, refreshUser } = useAuthUser()
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [cropFile, setCropFile] = useState<{ imageSrc: string; fileName: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -23,7 +25,6 @@ export default function ProfileTab({ name, setName, imageUrl, setImageUrl }: Pro
       setUploadError('Please select a valid image file.')
       return
     }
-    setIsUploading(true)
     setUploadError(null)
     try {
       const dataUri = await new Promise<string>((resolve, reject) => {
@@ -32,9 +33,23 @@ export default function ProfileTab({ name, setName, imageUrl, setImageUrl }: Pro
         reader.onerror = reject
         reader.readAsDataURL(file)
       })
-      const updated = await authUploadAvatar(dataUri, file.name)
+      // Open the crop & rotate modal
+      setCropFile({ imageSrc: dataUri, fileName: file.name })
+    } catch (error) {
+      console.error('Failed to read image file:', error)
+      setUploadError('Failed to read selected image.')
+    }
+  }
+
+  const handleConfirmCrop = async (croppedDataUri: string) => {
+    if (!cropFile) return
+    setIsUploading(true)
+    setUploadError(null)
+    try {
+      const updated = await authUploadAvatar(croppedDataUri, cropFile.fileName)
       setImageUrl(updated.image || '')
       refreshUser(updated)
+      setCropFile(null)
     } catch (error) {
       console.error('Avatar upload error:', error)
       setUploadError('Failed to upload image.')
@@ -122,6 +137,15 @@ export default function ProfileTab({ name, setName, imageUrl, setImageUrl }: Pro
           </div>
         </div>
       </section>
+
+      {cropFile && (
+        <AvatarCropModal
+          imageSrc={cropFile.imageSrc}
+          fileName={cropFile.fileName}
+          onClose={() => setCropFile(null)}
+          onConfirm={handleConfirmCrop}
+        />
+      )}
     </div>
   )
 }

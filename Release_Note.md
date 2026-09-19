@@ -1,5 +1,37 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Light Mint Theme Contrast & Clarity Overhaul (Desktop & Web UI)
+
+Refined the **Light Mint** theme palette across Desktop and Web to eliminate blinding flat white surfaces and washed-out elements:
+- **Soft Slate Canvas (`#f0f2f5`) & Crisp White Cards**: Replaced the glaring near-white canvas (`#f8fafc`) with a soothing soft slate tone, creating immediate card elevation and depth between the canvas, sidebar, floating header, and chat input.
+- **High-Contrast Slate Typography**: Upgraded text tokens from flat black and washed-out grays to a rich slate scale (`--text-primary: #0f172a`, `--text-secondary: #334155`, `--text-muted: #475569`, `--placeholder: #64748b`), ensuring crisp, effortless readability for all labels, placeholders, and subtitles.
+- **Clearly Defined Component Boundaries**: Boosted border definition (`--border-subtle: rgba(15, 23, 42, 0.08)`, `--border-default: rgba(15, 23, 42, 0.14)`) so the sidebar divider, input card, and header are distinct.
+- **Input & Control Polish**: Replaced hardcoded dark-mode white alpha values in the model selector pill, smart context bar labels, toggle switch tracks, and tool action buttons with adaptive semantic tokens for clean light mode contrast.
+- **Settings Modal & Cards Overhaul**:
+  - **Zero Background Bleed-Through**: Rendered the modal container with a solid pure-white card and soft elevation drop shadow over a darkened blur scrim backdrop, preventing underlying chat text from bleeding through.
+  - **Unified & Polished Card System**: Eliminated mismatched muddy-slate backgrounds on Temperature and Thinking cards; all setting cards now share consistent, crisp `#f8fafc` soft-slate containers with refined slate borders (`1px solid rgba(15, 23, 42, 0.1)`).
+  - **Elevated Segmented Controls (`pill-segmented`)**: Upgraded provider selection and reasoning effort pills to modern iOS/macOS-style segmented controls featuring an elevated crisp white pill for the active selection and clear slate text for inactive options.
+  - **Readable Search & Navigation**: Upgraded the settings sidebar with high-contrast group labels, clean search input styling, and active tab highlights featuring mint accent icons.
+  - **Model Combobox Dropdown**: Restyled the searchable model picker in light mode with crisp white backgrounds, subtle slate borders, and readable search input.
+
+## Interactive Profile Photo Crop & Rotate Modal (Desktop & Web UI)
+
+Added an interactive image editor modal when updating the user profile photo:
+- **Pan & Position Adjustment with Edge Clamping**: Allows drag-to-reposition with mouse and touch gestures to frame the exact part of the image desired, with intelligent boundary constraints that prevent dragging past the edges of the image (eliminating empty black margins).
+- **Smooth Zoom Control**: Intuitive zoom slider (minimum zoom locked to 1.0 to prevent gaps) with step buttons, mouse wheel zooming, and 2-finger pinch-to-zoom on touch screens.
+- **90° Stepped Rotation**: Instant rotate button with clean icon to orient sideways or inverted photos correctly, automatically re-clamping coordinates.
+- **Visual Circular Avatar Framing & Corner Brackets**: Renders a circular vignette guide with white corner brackets (`┌ ┐ └ ┘`) matching modern photo crop standards.
+- **High-Resolution Canvas Export**: Automatically processes and renders the transformed image through an HTML5 canvas at 512×512 resolution before saving.
+
+## Floating Glass Capsule Chat Header (Desktop & Web UI)
+
+Redesigned the top chat header across both Desktop and Web interfaces into a modern, aesthetic floating glass capsule (Island/Capsule design):
+- **Floating Island Geometry & Glassmorphism**: Transformed the previously disconnected, flat rectangular header into an elegant floating capsule (`backdrop-filter: blur(20px) saturate(180%)`, rounded corners `border-radius: 14px`, sleek inner/outer border glows, and balanced top padding).
+- **Contextual Conversation Title**: Displays the current conversation topic/title dynamically instead of an empty, redundant "Mint Agent" title, with automatic truncation and tooltip for long titles.
+- **Clean Minimalist Balance**: Kept the floating capsule minimal and focused, avoiding artificial AI status badges to keep the conversation space calm and distraction-free.
+- **Polished Glass Action Buttons**: Redesigned the clear conversation button and preview toggles with smooth micro-interactions, subtle glass backgrounds, and clean hover feedback.
+- **Mobile Responsive Full-Width Integration**: Automatically transitions gracefully into a flush top navigation bar on screens under 760px without edge clipping.
+
 ## Unified Agent Loop Timeline & Unboxed Chat Stream (CLI, Desktop & Web UI)
 
 Overhauled the agent execution flow and timeline UI/UX across all 3 platforms (**CLI**, **Desktop UI**, and **Web UI**), aligning with modern developer assistant standards (Codex Desktop & Antigravity/Claude style):

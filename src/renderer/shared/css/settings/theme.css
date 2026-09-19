@@ -615,3 +615,67 @@
     color: var(--text-muted);
     line-height: 1.35;
 }
+
+/* ─── Light Mode Overrides for Theme & Controls ─────────────────────────── */
+
+[data-theme="light"] .pill-segmented {
+    background: #f1f5f9;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .pill-segmented-btn {
+    color: #475569;
+}
+
+[data-theme="light"] .pill-segmented-btn:hover {
+    color: #0f172a;
+    background: rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] .pill-segmented-btn.active {
+    background: #ffffff;
+    border-color: transparent;
+    color: #047857;
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1), 0 0 0 1px rgba(16, 185, 129, 0.3);
+}
+
+[data-theme="light"] .section-current-badge {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .theme-preset-card {
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .theme-preset-card:hover {
+    border-color: rgba(15, 23, 42, 0.24);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .theme-preset-card.active {
+    border-color: var(--accent);
+    background: #ffffff;
+    box-shadow: 0 0 0 1px var(--accent), 0 4px 14px rgba(16, 185, 129, 0.15);
+}
+
+[data-theme="light"] .surface-card {
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .surface-card:hover {
+    background: #f8fafc;
+    border-color: rgba(15, 23, 42, 0.24);
+}
+
+[data-theme="light"] .surface-card.active {
+    border-color: var(--accent);
+    background: #ffffff;
+    box-shadow: 0 0 0 1px var(--accent), 0 2px 8px rgba(16, 185, 129, 0.1);
+}
