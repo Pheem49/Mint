@@ -74,16 +74,16 @@ export function AgentActivityDrawer({
             gap: '8px',
             marginBottom: '10px',
             paddingBottom: '8px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            borderBottom: '1px solid var(--border)',
           }}
         >
           <div
             style={{
               display: 'inline-flex',
               padding: '2px',
-              background: 'rgba(255, 255, 255, 0.05)',
+              background: 'var(--surface-strong)',
               borderRadius: '6px',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              border: '1px solid var(--border)',
             }}
           >
             <button

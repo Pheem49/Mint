@@ -67,6 +67,9 @@ export default function MermaidCard({ code }: { code: string }) {
   const [status, setStatus] = useState<Status>('loading')
   const [svg, setSvg] = useState<string>('')
   const [copied, setCopied] = useState(false)
+  const [isDark, setIsDark] = useState(
+    () => (document.documentElement.getAttribute('data-theme') || 'dark') !== 'light'
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -142,7 +145,10 @@ export default function MermaidCard({ code }: { code: string }) {
       debounceTimer = setTimeout(render, 400)
     }
 
-    observer = new MutationObserver(() => render())
+    observer = new MutationObserver(() => {
+      setIsDark((document.documentElement.getAttribute('data-theme') || 'dark') !== 'light')
+      render()
+    })
     observer.observe(document.documentElement, { attributeFilter: ['data-theme'] })
 
     return () => {
@@ -184,28 +190,28 @@ export default function MermaidCard({ code }: { code: string }) {
   return (
     <div
       style={{
-        background: 'rgba(255, 255, 255, 0.03)',
+        background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.04)',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
-        color: '#f8fafc',
+        color: isDark ? '#f8fafc' : '#0f172a',
         borderRadius: '12px',
         padding: '16px 20px',
         margin: '12px 0',
-        boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.2)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
+        boxShadow: isDark ? '0 8px 32px 0 rgba(0,0,0,0.2)' : '0 4px 20px 0 rgba(15,23,42,0.08)',
+        border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.12)'}`,
         fontFamily: 'system-ui, -apple-system, sans-serif',
         minWidth: 0,
         maxWidth: '100%',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-        <Workflow size={16} strokeWidth={2} style={{ opacity: 0.9 }} />
+        <Workflow size={16} strokeWidth={2} style={{ opacity: 0.9, color: isDark ? 'rgba(255,255,255,0.6)' : '#64748b' }} />
         <span
           style={{
             fontSize: '11px',
             fontWeight: 700,
             letterSpacing: '0.8px',
-            color: 'rgba(255, 255, 255, 0.6)',
+            color: isDark ? 'rgba(255,255,255,0.6)' : '#64748b',
           }}
         >
           DIAGRAM
@@ -242,7 +248,7 @@ export default function MermaidCard({ code }: { code: string }) {
               width: '20px',
               height: '20px',
               borderRadius: '50%',
-              border: '2px solid rgba(255, 255, 255, 0.15)',
+              border: `2px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(15,23,42,0.12)'}`,
               borderTopColor: 'var(--accent, #10b981)',
               animation: 'mermaid-card-spin 0.8s linear infinite',
             }}

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import type { WebSearchSource } from '../utils/agentActivity'
 import { resolveMediaUrl } from '../utils/markdown'
 
@@ -50,6 +50,17 @@ export function groupSourcesByDomain(sources: WebSearchSource[]): DomainGroup[] 
 export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function SourcesBlock({ sources }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [openDropdownDomain, setOpenDropdownDomain] = useState<string | null>(null)
+  const [isDark, setIsDark] = useState(
+    () => (document.documentElement.getAttribute('data-theme') || 'dark') !== 'light'
+  )
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDark((document.documentElement.getAttribute('data-theme') || 'dark') !== 'light')
+    })
+    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] })
+    return () => observer.disconnect()
+  }, [])
 
   const domainGroups = useMemo(() => {
     const groups = groupSourcesByDomain(sources)
@@ -92,7 +103,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
         >
           <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
         </svg>
-        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#f1f5f9', letterSpacing: '0.01em' }}>
+        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: isDark ? '#f1f5f9' : '#0f172a', letterSpacing: '0.01em' }}>
           Sources
         </span>
       </div>
@@ -127,8 +138,8 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                   flexDirection: 'column',
                   justifyContent: 'space-between',
                   borderRadius: '16px',
-                  background: 'rgba(255, 255, 255, 0.04)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.05)',
+                  border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)'}`,
                   transition: 'all 0.15s ease',
                   cursor: 'pointer',
                   minHeight: '68px',
@@ -149,14 +160,14 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                 }}
                 onMouseEnter={(e) => {
                   const el = e.currentTarget
-                  el.style.background = 'rgba(255, 255, 255, 0.07)'
-                  el.style.borderColor = 'rgba(255, 255, 255, 0.16)'
+                  el.style.background = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(15,23,42,0.09)'
+                  el.style.borderColor = isDark ? 'rgba(255,255,255,0.16)' : 'rgba(15,23,42,0.2)'
                   el.style.transform = 'translateY(-1px)'
                 }}
                 onMouseLeave={(e) => {
                   const el = e.currentTarget
-                  el.style.background = 'rgba(255, 255, 255, 0.04)'
-                  el.style.borderColor = 'rgba(255, 255, 255, 0.08)'
+                  el.style.background = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.05)'
+                  el.style.borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)'
                   el.style.transform = 'translateY(0)'
                 }}
               >
@@ -353,8 +364,8 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
               justifyContent: 'space-between',
               padding: '10px 14px',
               borderRadius: '16px',
-              background: 'rgba(255, 255, 255, 0.03)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.04)',
+              border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)'}`,
               cursor: 'pointer',
               transition: 'all 0.15s ease',
               minHeight: '68px',
@@ -365,14 +376,14 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
             }}
             onMouseEnter={(e) => {
               const el = e.currentTarget
-              el.style.background = 'rgba(255, 255, 255, 0.06)'
-              el.style.borderColor = 'rgba(255, 255, 255, 0.16)'
+              el.style.background = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.08)'
+              el.style.borderColor = isDark ? 'rgba(255,255,255,0.16)' : 'rgba(15,23,42,0.2)'
               el.style.transform = 'translateY(-1px)'
             }}
             onMouseLeave={(e) => {
               const el = e.currentTarget
-              el.style.background = 'rgba(255, 255, 255, 0.03)'
-              el.style.borderColor = 'rgba(255, 255, 255, 0.08)'
+              el.style.background = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.04)'
+              el.style.borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)'
               el.style.transform = 'translateY(0)'
             }}
           >
@@ -414,8 +425,8 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
               setOpenDropdownDomain(null)
             }}
             style={{
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.1)',
+              background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.05)',
+              border: `1px solid ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(15,23,42,0.12)'}`,
               borderRadius: '8px',
               padding: '4px 10px',
               color: '#94a3b8',
@@ -424,8 +435,8 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
               cursor: 'pointer',
               transition: 'background 0.15s',
             }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.1)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(15,23,42,0.1)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.05)' }}
           >
             Show less
           </button>
