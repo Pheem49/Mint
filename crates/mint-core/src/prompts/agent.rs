@@ -182,7 +182,7 @@ pub fn build_system_prompt(
             .push("- read_file: {\"path\":\"relative/path\",\"startLine\":1,\"endLine\":240} (if the file has more lines than the requested range, the result says so explicitly and tells you the exact startLine/endLine to use next — re-read with those before assuming you've seen the whole file)");
     }
     if allowed_actions.contains(&"search_code") {
-        input_formats.push("- search_code: {\"query\":\"text\",\"path\":\".\",\"limit\":20}");
+        input_formats.push("- search_code: {\"query\":\"text\",\"path\":\".\",\"limit\":20} (path MUST be \".\" or a sub-path of the workspace — never use home dir, username, or absolute paths outside the project)");
     }
     if allowed_actions.contains(&"symbols") {
         input_formats.push("- symbols: {\"path\":\".\",\"limit\":100}");
@@ -463,6 +463,9 @@ pub fn build_system_prompt(
         );
         rules.push(
             "2a. BOUND INVESTIGATION: Keep investigations concise and targeted. Do NOT recursively read dozens of source files across directories. After 2-4 read/search inspection calls, synthesize your findings and present your answer or plan. Do NOT get trapped in endless exploratory reading.",
+        );
+        rules.push(
+            "2b. SEARCH PATH SCOPE: For search_code, always use \".\" or a specific sub-directory of the current workspace as the path. NEVER use a home directory, username path, or any path outside the project root — doing so scans thousands of unrelated files and spikes CPU.",
         );
     }
     if allowed_actions.contains(&"apply_patch") && allowed_actions.contains(&"write_file") {
