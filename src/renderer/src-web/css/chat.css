@@ -2169,6 +2169,22 @@
   letter-spacing: 0.01em;
 }
 
+.agent-activity-thought-meta {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.agent-activity-thought-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--accent);
+  animation: agent-thought-cursor-blink 0.9s steps(1) infinite;
+}
+
+@keyframes agent-thought-cursor-blink {
+  50% { opacity: 0; }
+}
+
 .agent-activity-thought-body {
   padding: 8px 12px 8px 28px;
   font-size: 0.8rem;
@@ -2351,7 +2367,7 @@ input:checked + .slider:before {
 }
 
 .conversation-panel.is-empty {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .conversation-panel.is-empty .chat-container {
@@ -2439,6 +2455,91 @@ input:checked + .slider:before {
   border: 0;
   box-shadow: none;
   pointer-events: auto;
+}
+
+/* Desktop project context lives with the composer because it scopes every
+   message and agent action. Keep it visually distinct from the mode toggles. */
+.workspace-select-btn {
+  width: 100%;
+  min-height: 52px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--input-bg) 88%, var(--accent) 12%);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.workspace-select-btn:hover {
+  background: color-mix(in srgb, var(--input-bg) 78%, var(--accent) 22%);
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border-default));
+  transform: translateY(-1px);
+}
+
+.workspace-select-btn:focus-visible {
+  outline: 2px solid var(--border-focus, var(--accent));
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.workspace-select-btn.needs-workspace {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-default));
+}
+
+.workspace-select-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 34px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.workspace-select-copy {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.workspace-select-label {
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.workspace-select-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-select-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 0.74rem;
+  font-weight: 600;
 }
 
 .smart-context-bar {
@@ -3348,6 +3449,4 @@ input:checked + .slider:before {
   background: #e2e8f0;
   color: #0f172a;
 }
-
-
 

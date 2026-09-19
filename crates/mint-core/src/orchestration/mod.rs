@@ -11,7 +11,8 @@ use std::time::Instant;
 use thiserror::Error;
 
 use crate::chat::{
-    ChatMessage, ChatRole, ContentBlock, send_chat_with_fallback, stream_chat_with_fallback,
+    ChatMessage, ChatRole, ChatStreamEvent, ContentBlock, send_chat_with_fallback,
+    stream_chat_events_with_fallback, stream_chat_with_fallback,
 };
 use crate::code_tools::{
     CodeEdit, CodePatchHunk, apply_code_edits, build_code_patch, list_code_files,
@@ -514,6 +515,14 @@ pub enum AgentProgress {
     Thought {
         thought: String,
     },
+    /// Incremental model reasoning for the currently active agent step. These
+    /// events are live-only; consumers replace them with the matching final
+    /// `ExtendedThinking` record instead of persisting every delta.
+    ThinkingDelta {
+        id: String,
+        delta: String,
+        elapsed_ms: u64,
+    },
     /// Extended reasoning / chain-of-thought from the model's API thinking
     /// tokens (e.g. Claude `<thinking>`, Gemini Thinking, DeepSeek Reasoner,
     /// or `<think>` tags). Semantically distinct from `Thought`, which
@@ -521,7 +530,11 @@ pub enum AgentProgress {
     /// summaries). The CLI renders this as a collapsible block; the web/
     /// desktop UI shows it in a dedicated "Extended Thinking" panel.
     ExtendedThinking {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
         thought: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        elapsed_ms: Option<u64>,
     },
     /// Emitted while retrying a step after every configured provider was
     /// unreachable (`ChatError::NetworkUnavailable`) — distinct from
@@ -951,22 +964,30 @@ fn resolve_agent_config(
     )
 }
 
-/// Calls `send_chat_with_fallback`, retrying up to `NETWORK_RETRY_ATTEMPTS`
-/// times (waiting `NETWORK_RETRY_DELAY` between each) when every configured
-/// provider comes back `ChatError::NetworkUnavailable` — swapping providers
-/// is pointless when the network itself is down, so this waits for it to
-/// come back instead of burning through the provider list, keeping the user
-/// informed via `AgentProgress::WaitingForNetwork` in the meantime. Any other
-/// error (including `NetworkUnavailable` after the last attempt) is returned
-/// immediately, unchanged.
-async fn send_chat_with_network_retry(
+async fn stream_chat_with_network_retry(
     config: &MintConfig,
     request: &ChatRequest,
+    thought_id: &str,
+    thought_started: Instant,
+    fast_mode: bool,
     progress: &mut (dyn FnMut(AgentProgress) + Send),
 ) -> Result<(ChatResponse, Option<String>), ChatError> {
     let mut attempt = 0;
     loop {
-        match send_chat_with_fallback(config, request).await {
+        let result = stream_chat_events_with_fallback(config, request, |event| {
+            if !fast_mode
+                && let ChatStreamEvent::ReasoningDelta { delta } = event
+                && !delta.is_empty()
+            {
+                progress(AgentProgress::ThinkingDelta {
+                    id: thought_id.to_owned(),
+                    delta,
+                    elapsed_ms: thought_started.elapsed().as_millis() as u64,
+                });
+            }
+        })
+        .await;
+        match result {
             Err(ChatError::NetworkUnavailable) if attempt < NETWORK_RETRY_ATTEMPTS => {
                 attempt += 1;
                 progress(AgentProgress::WaitingForNetwork {
@@ -1156,6 +1177,12 @@ where
             std::collections::BTreeSet::new();
 
         'steps: for step in 1..=MAX_STEPS {
+            let thought_id = if let Some(name) = chat_id.split("::subagent::").nth(1) {
+                format!("subagent-{name}-step-{step}")
+            } else {
+                format!("root-step-{step}")
+            };
+            let thought_started = Instant::now();
             let (active_config, agent_instruction, active_agent_name, active_model_name) =
                 resolve_agent_config(config, agent_id, &trajectory);
 
@@ -1241,7 +1268,7 @@ where
                         content,
                     });
                 }
-                send_chat_with_network_retry(
+                stream_chat_with_network_retry(
                     &active_config,
                     &ChatRequest {
                         message: String::new(),
@@ -1265,11 +1292,14 @@ where
                         temperature: active_config.temperature,
                         ..Default::default()
                     },
+                    &thought_id,
+                    thought_started,
+                    fast_mode,
                     &mut progress,
                 )
                 .await?
             } else {
-                send_chat_with_network_retry(
+                stream_chat_with_network_retry(
                     &active_config,
                     &ChatRequest {
                         message: observation.clone(),
@@ -1288,6 +1318,9 @@ where
                         temperature: active_config.temperature,
                         ..Default::default()
                     },
+                    &thought_id,
+                    thought_started,
+                    fast_mode,
                     &mut progress,
                 )
                 .await?
@@ -1442,7 +1475,9 @@ where
                 && !t.trim().is_empty()
             {
                 progress(AgentProgress::ExtendedThinking {
+                    id: Some(thought_id.clone()),
                     thought: t.trim().to_owned(),
+                    elapsed_ms: Some(thought_started.elapsed().as_millis() as u64),
                 });
                 extended_emitted = true;
             }
@@ -1498,7 +1533,9 @@ where
                         if !already_extended {
                             if is_internal_cot(d_thought) {
                                 progress(AgentProgress::ExtendedThinking {
+                                    id: Some(thought_id.clone()),
                                     thought: d_thought.to_owned(),
+                                    elapsed_ms: Some(thought_started.elapsed().as_millis() as u64),
                                 });
                             } else {
                                 progress(AgentProgress::Thought {
@@ -2545,7 +2582,9 @@ async fn run_parallel_read_only_batch(
                 let mut guard = progress_mutex.lock().unwrap();
                 if is_internal_cot(t) {
                     (*guard)(AgentProgress::ExtendedThinking {
+                        id: None,
                         thought: t.to_owned(),
+                        elapsed_ms: None,
                     });
                 } else {
                     (*guard)(AgentProgress::Thought {

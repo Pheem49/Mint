@@ -11,6 +11,7 @@ use std::time::Duration;
 pub struct ThoughtRecord {
     pub thought: String,
     pub elapsed_str: String,
+    live_id: Option<String>,
 }
 
 static LAST_THOUGHT: Mutex<Option<ThoughtRecord>> = Mutex::new(None);
@@ -21,6 +22,7 @@ pub fn set_last_thought(thought: &str, elapsed_str: &str) {
         *guard = Some(ThoughtRecord {
             thought: thought.to_string(),
             elapsed_str: elapsed_str.to_string(),
+            live_id: None,
         });
     }
 }
@@ -28,16 +30,65 @@ pub fn set_last_thought(thought: &str, elapsed_str: &str) {
 pub fn append_thought(thought: &str, elapsed_str: &str) {
     if let Ok(mut guard) = LAST_THOUGHT.lock() {
         if let Some(record) = guard.as_mut() {
-            record.thought.push_str("\n\n── Next Step ──────────────────────────\n");
+            record
+                .thought
+                .push_str("\n\n── Next Step ──────────────────────────\n");
             record.thought.push_str(thought);
             record.elapsed_str = elapsed_str.to_string();
         } else {
             *guard = Some(ThoughtRecord {
                 thought: thought.to_string(),
                 elapsed_str: elapsed_str.to_string(),
+                live_id: None,
             });
         }
     }
+}
+
+pub fn append_thought_delta(id: &str, delta: &str, elapsed_str: &str) {
+    if let Ok(mut guard) = LAST_THOUGHT.lock() {
+        match guard.as_mut() {
+            Some(record) if record.live_id.as_deref() == Some(id) => {
+                record.thought.push_str(delta);
+                record.elapsed_str = elapsed_str.to_string();
+            }
+            Some(record) => {
+                record
+                    .thought
+                    .push_str("\n\n── Next Step ──────────────────────────\n");
+                record.thought.push_str(delta);
+                record.elapsed_str = elapsed_str.to_string();
+                record.live_id = Some(id.to_string());
+            }
+            None => {
+                *guard = Some(ThoughtRecord {
+                    thought: delta.to_string(),
+                    elapsed_str: elapsed_str.to_string(),
+                    live_id: Some(id.to_string()),
+                });
+            }
+        }
+    }
+}
+
+pub fn finish_thought(id: Option<&str>, thought: &str, elapsed_str: &str) {
+    if let Ok(mut guard) = LAST_THOUGHT.lock()
+        && let Some(record) = guard.as_mut()
+        && id.is_some()
+        && record.live_id.as_deref() == id
+    {
+        let marker = "\n\n── Next Step ──────────────────────────\n";
+        if let Some(index) = record.thought.rfind(marker) {
+            record.thought.truncate(index + marker.len());
+            record.thought.push_str(thought);
+        } else {
+            record.thought = thought.to_string();
+        }
+        record.elapsed_str = elapsed_str.to_string();
+        record.live_id = None;
+        return;
+    }
+    append_thought(thought, elapsed_str);
 }
 
 pub fn get_last_thought() -> Option<ThoughtRecord> {
@@ -64,11 +115,15 @@ pub fn format_thought_elapsed(duration: Duration) -> String {
 pub fn show_thought_viewer(thought: &str, elapsed_str: &str) -> Result<()> {
     if !io::stdout().is_tty() || !io::stdin().is_tty() || thought.trim().is_empty() {
         println!();
-        println!("\x1b[38;2;148;163;184m╭─ Thought Process ({elapsed_str}) ─────────────────────\x1b[0m");
+        println!(
+            "\x1b[38;2;148;163;184m╭─ Thought Process ({elapsed_str}) ─────────────────────\x1b[0m"
+        );
         for line in thought.trim().lines() {
             println!("\x1b[38;2;148;163;184m│\x1b[0m \x1b[38;2;203;213;225m{line}\x1b[0m");
         }
-        println!("\x1b[38;2;148;163;184m╰──────────────────────────────────────────────────\x1b[0m");
+        println!(
+            "\x1b[38;2;148;163;184m╰──────────────────────────────────────────────────\x1b[0m"
+        );
         println!();
         return Ok(());
     }
@@ -122,7 +177,11 @@ pub fn show_thought_viewer(thought: &str, elapsed_str: &str) -> Result<()> {
 
     let render = |terminal: &mut ratatui::Terminal<_>, scroll: usize| {
         let scroll_hint = if max_scroll > 0 {
-            format!(" ↑/↓ scroll {}/{} · Esc to close ", scroll + 1, max_scroll + 1)
+            format!(
+                " ↑/↓ scroll {}/{} · Esc to close ",
+                scroll + 1,
+                max_scroll + 1
+            )
         } else {
             " Esc or Enter to close ".to_string()
         };
@@ -147,10 +206,7 @@ pub fn show_thought_viewer(thought: &str, elapsed_str: &str) -> Result<()> {
         for l in visible {
             paragraph_lines.push(Line::from(vec![
                 Span::raw(" "),
-                Span::styled(
-                    l.clone(),
-                    Style::default().fg(Color::Rgb(203, 213, 225)),
-                ),
+                Span::styled(l.clone(), Style::default().fg(Color::Rgb(203, 213, 225))),
             ]));
         }
         for _ in visible.len()..inner_height {

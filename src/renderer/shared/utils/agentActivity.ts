@@ -31,7 +31,7 @@ export type TimelineItem =
   | { id: string; kind: 'activity'; activity: AgentActivity }
   | { id: string; kind: 'group'; group: AgentActivityGroup }
   | { id: string; kind: 'thought'; thought: string }
-  | { id: string; kind: 'extendedThinking'; thought: string }
+  | { id: string; kind: 'extendedThinking'; thought: string; streaming?: boolean; elapsedMs?: number }
 
 export interface AgentActivityView {
   summary: string
@@ -324,13 +324,31 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
           timeline.push({ id: `thought-${nextId++}`, kind, thought: text })
         }
       }
+    } else if (event.type === 'ThinkingDelta') {
+      const text = event.data?.delta
+      if (text) {
+        flushGroup()
+        timeline.push({
+          id: event.data.id,
+          kind: 'extendedThinking',
+          thought: text,
+          streaming: true,
+          elapsedMs: event.data.elapsed_ms,
+        })
+      }
     } else if (event.type === 'ExtendedThinking') {
       const text = event.data?.thought?.trim()
       if (text) {
         flushGroup()
         const lastItem = timeline[timeline.length - 1]
         if (!lastItem || lastItem.kind !== 'extendedThinking' || ('thought' in lastItem && lastItem.thought !== text)) {
-          timeline.push({ id: `ext-thought-${nextId++}`, kind: 'extendedThinking', thought: text })
+          timeline.push({
+            id: event.data.id || `ext-thought-${nextId++}`,
+            kind: 'extendedThinking',
+            thought: text,
+            streaming: false,
+            elapsedMs: event.data.elapsed_ms,
+          })
         }
       }
     }
@@ -438,4 +456,3 @@ export function cleanIntermediateThought(text: string): string {
   cleaned = cleaned.replace(/^[\s•\-\*]+\s*/, '')
   return cleaned.trim() || text.trim()
 }
-

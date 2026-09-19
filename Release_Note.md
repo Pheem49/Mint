@@ -1,5 +1,23 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Desktop Empty Chat Layout & Workspace Selector
+
+- Fixed the empty-chat header so the Mint Agent identity and conversation actions stay anchored at the top of the workspace instead of moving into the centered composer area, including Tauri's WebKitGTK renderer where an inline positioned wrapper previously made the header follow the centered chat column.
+- Rebuilt the desktop workspace picker as a full-width project-context control with the selected folder name, clear Choose/Change action, long-path tooltip, keyboard focus treatment, and light/dark theme support.
+- Preserved the native folder picker and existing workspace-switch behavior while making the control visible in both empty and active chats.
+- Constrained the desktop chat, workspace context, and composer to a centered 1100px content rail with responsive side gutters, preventing active conversations from touching the workspace edges.
+- Kept active-chat headers aligned with the New Chat header by pinning the chat wrapper to the first workspace grid row when the Live2D model is hidden.
+- Made the hidden-Live2D desktop chat wrapper a full-height layer anchored directly to the workspace bounds, giving Active Chat and New Chat one stable containing block so the composer remains visible and the message area fills the window consistently in WebKitGTK.
+- Anchored the New Chat welcome/composer group above the footer instead of relying on WebKitGTK's inconsistent percentage-based vertical centering, keeping the complete composer visible at desktop window heights.
+
+## Live Thought Streaming (CLI, Desktop & Web)
+
+- Agent reasoning now appears incrementally while supported models are still thinking, instead of waiting for the entire provider response to finish.
+- Added a provider-neutral reasoning stream that preserves native tool calls, token usage, stop reasons, Gemini thought signatures, and `<think>` blocks split across network chunks.
+- Desktop and Web merge deltas into one live Thought card, throttle rendering to 75ms, show elapsed time and a streaming cursor, and persist only the completed Thought rather than every transport chunk.
+- CLI updates the `Ctrl+T` Thought viewer live while keeping terminal scrollback compact, then finalizes the existing record without duplicating it.
+- Providers that do not emit reasoning deltas retain the previous completed-Thought fallback behavior.
+
 ## Light Mint Theme Contrast & Clarity Overhaul (Desktop & Web UI)
 
 Refined the **Light Mint** theme palette across Desktop and Web to eliminate blinding flat white surfaces and washed-out elements:
@@ -157,6 +175,3 @@ Overhauled session management in the CLI to give every conversation its own isol
 - **Platform Parity across CLI, Desktop, and Web**:
   - Registered `/resume` in `slash-commands.json` for all three surfaces (`["cli", "web", "desktop"]`).
   - Integrated `/resume` dispatch in `slashCommandProcessor.ts` and `MintDashboard.tsx` to hot-swap active conversations seamlessly on Desktop and Web.
-
-
-

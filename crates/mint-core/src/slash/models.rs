@@ -204,4 +204,3 @@ mod tests {
         assert!(OPENROUTER_POPULAR_MODELS.contains(&"google/gemini-2.5-flash"));
     }
 }
-

@@ -712,24 +712,41 @@ pub async fn run_code_agent_with_options(
                 {
                     commit_activity_snapshot(&mut status);
                     let elapsed = started_at.elapsed();
-                    print_timeline_note(&mut status, &thought, elapsed);
+                    print_timeline_note(&mut status, &thought, elapsed, None);
                     status.thinking = None;
                     status.waiting_for_network = None;
                     render_live_status(&mut status);
                 }
             }
-            AgentProgress::ExtendedThinking { thought } => {
+            AgentProgress::ThinkingDelta {
+                id,
+                delta,
+                elapsed_ms,
+            } => {
+                if !options.fast_mode {
+                    let elapsed = Duration::from_millis(elapsed_ms);
+                    let elapsed_str = crate::interactive::format_thought_elapsed(elapsed);
+                    crate::interactive::append_thought_delta(&id, &delta, &elapsed_str);
+                }
+            }
+            AgentProgress::ExtendedThinking {
+                id,
+                thought,
+                elapsed_ms,
+            } => {
                 if !options.fast_mode
                     && !progress_approval_active.load(Ordering::Relaxed)
                     && let Ok(mut status) = progress_live_status.lock()
                 {
                     commit_activity_snapshot(&mut status);
-                    let elapsed = started_at.elapsed();
+                    let elapsed = elapsed_ms
+                        .map(Duration::from_millis)
+                        .unwrap_or_else(|| started_at.elapsed());
                     // Extended thinking gets the same timeline-note treatment
                     // as regular Thought — `print_timeline_note` already
                     // distinguishes internal CoT (long) from short notes via
                     // `is_internal_cot` and renders accordingly.
-                    print_timeline_note(&mut status, &thought, elapsed);
+                    print_timeline_note(&mut status, &thought, elapsed, id.as_deref());
                     status.thinking = None;
                     status.waiting_for_network = None;
                     render_live_status(&mut status);

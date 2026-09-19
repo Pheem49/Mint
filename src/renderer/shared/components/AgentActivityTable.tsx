@@ -94,10 +94,10 @@ export function AgentActivityTable({ activityView }: Props) {
     }))
   }
 
-  const toggleExpandItem = (key: string) => {
+  const toggleExpandItem = (key: string, defaultExpanded = false) => {
     setExpandedIndices(prev => ({
       ...prev,
-      [key]: !prev[key],
+      [key]: !(prev[key] ?? defaultExpanded),
     }))
   }
 
@@ -243,18 +243,25 @@ export function AgentActivityTable({ activityView }: Props) {
             }
             if (item.kind === 'extendedThinking') {
               const itemKey = item.id || `ext-thought-${idx}`
-              const isThoughtExpanded = Boolean(expandedIndices[itemKey])
+              const isThoughtExpanded = expandedIndices[itemKey] ?? Boolean(item.streaming)
               return (
                 <div key={itemKey} className="agent-activity-thought-step">
                   <div
                     className={`agent-activity-thought-header${isThoughtExpanded ? ' is-expanded' : ''}`}
-                    onClick={() => toggleExpandItem(itemKey)}
+                    onClick={() => toggleExpandItem(itemKey, Boolean(item.streaming))}
                   >
                     <span className="agent-activity-icon-wrap" aria-hidden="true">
                       <Brain size={14} className="agent-activity-kind-icon" />
                     </span>
                     <span className="agent-activity-thought-title">
                       Thought
+                      <span className="agent-activity-thought-meta">
+                        {item.streaming
+                          ? ' · Thinking…'
+                          : item.elapsedMs != null
+                            ? ` · ${(item.elapsedMs / 1000).toFixed(1)}s`
+                            : ''}
+                      </span>
                     </span>
                     <span
                       className={`agent-activity-chevron${isThoughtExpanded ? ' is-open' : ''}`}
@@ -265,7 +272,9 @@ export function AgentActivityTable({ activityView }: Props) {
                   </div>
                   {isThoughtExpanded && (
                     <div className="agent-activity-thought-body">
-                      {renderFormattedMessage(item.thought) ?? item.thought}
+                      {item.streaming
+                        ? <>{item.thought}<span className="agent-activity-thought-cursor">▍</span></>
+                        : (renderFormattedMessage(item.thought) ?? item.thought)}
                     </div>
                   )}
                 </div>

@@ -1746,4 +1746,3 @@ mod tests {
         assert!(!enabled);
     }
 }
-

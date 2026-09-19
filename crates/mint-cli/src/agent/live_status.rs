@@ -949,13 +949,18 @@ pub(super) fn is_internal_cot(text: &str) -> bool {
     mint_core::orchestration::is_internal_cot(text)
 }
 
-pub(super) fn print_timeline_note(status: &mut LiveStatus, thought: &str, elapsed: Duration) {
+pub(super) fn print_timeline_note(
+    status: &mut LiveStatus,
+    thought: &str,
+    elapsed: Duration,
+    stream_id: Option<&str>,
+) {
     let thought = thought.trim();
     if thought.is_empty() {
         return;
     }
     let elapsed_str = crate::interactive::format_thought_elapsed(elapsed);
-    crate::interactive::append_thought(thought, &elapsed_str);
+    crate::interactive::finish_thought(stream_id, thought, &elapsed_str);
 
     if is_internal_cot(thought) {
         let summary = format!(
@@ -980,7 +985,16 @@ pub(super) fn print_timeline_note(status: &mut LiveStatus, thought: &str, elapse
 
 fn strip_intermediate_greeting(text: &str) -> &str {
     let mut s = text.trim();
-    for prefix in &["สวัสดีค่ะ", "สวัสดีครับ", "หวัดดีค่ะ", "หวัดดีครับ", "สวัสดี", "Hello", "Hi", "Hey"] {
+    for prefix in &[
+        "สวัสดีค่ะ",
+        "สวัสดีครับ",
+        "หวัดดีค่ะ",
+        "หวัดดีครับ",
+        "สวัสดี",
+        "Hello",
+        "Hi",
+        "Hey",
+    ] {
         if let Some(rest) = s.strip_prefix(prefix) {
             s = rest.trim_start();
             break;
@@ -1000,7 +1014,8 @@ fn strip_intermediate_greeting(text: &str) -> &str {
             s = rest.trim_start();
         }
     }
-    let trimmed = s.trim_start_matches(|c: char| c == ',' || c == '-' || c == '—' || c == ' ' || c == '•');
+    let trimmed =
+        s.trim_start_matches(|c: char| c == ',' || c == '-' || c == '—' || c == ' ' || c == '•');
     if trimmed.is_empty() { text } else { trimmed }
 }
 

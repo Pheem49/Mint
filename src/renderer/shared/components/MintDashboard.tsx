@@ -1,5 +1,9 @@
 import { type ChangeEvent, type CSSProperties, type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { mergeActivitySnapshots, trimAgentProgress } from '../agentProgress'
+import {
+  compactAgentProgressForPersistence,
+  mergeActivitySnapshots,
+  reduceLiveAgentProgressBatch,
+} from '../agentProgress'
 import {
   clearChatHistory,
   deleteChatSession,
@@ -956,6 +960,26 @@ export default function MintDashboard() {
     liveExtendedThinkingOpenRef.current = true
     setThinkingExpanded((current) => ({ ...current, live: true, 'live-extended': true }))
     const progressSnapshot: AgentProgress[] = []
+    let pendingProgress: AgentProgress[] = []
+    let progressFlushTimer: ReturnType<typeof setTimeout> | null = null
+    const flushPendingProgress = () => {
+      if (progressFlushTimer) {
+        clearTimeout(progressFlushTimer)
+        progressFlushTimer = null
+      }
+      if (pendingProgress.length === 0) return
+      const batch = pendingProgress
+      pendingProgress = []
+      setAgentProgress((current) => reduceLiveAgentProgressBatch(current, batch))
+    }
+    const queueProgress = (progress: AgentProgress) => {
+      pendingProgress.push(progress)
+      if (progress.type !== 'ThinkingDelta') {
+        flushPendingProgress()
+      } else if (!progressFlushTimer) {
+        progressFlushTimer = setTimeout(flushPendingProgress, 75)
+      }
+    }
     if (options.clearComposer) {
       setMessage('')
       setImageAttachments([])
@@ -973,7 +997,7 @@ export default function MintDashboard() {
         options.systemInstruction ?? '',
         (progress) => {
           progressSnapshot.push(progress)
-          setAgentProgress((current) => trimAgentProgress([...current, progress]))
+          queueProgress(progress)
         },
         outgoingDocument,
         workspacePath || null,
@@ -992,13 +1016,15 @@ export default function MintDashboard() {
           }
         },
       )
+      flushPendingProgress()
       setStreamedResponse(response)
       if (document.hidden || !document.hasFocus()) {
         window.api?.notifyAiResponse?.(truncateForNotification(response.text))
       }
       const history = (await getRecentInteractions(50, conversationId, workspacePath || null)).reverse()
       let enrichedHistory = history
-      if (progressSnapshot.length > 0) {
+      const persistedProgress = compactAgentProgressForPersistence(progressSnapshot)
+      if (persistedProgress.length > 0) {
         const newestInteraction = [...history]
           .reverse()
           .find((interaction) => interaction.aiText === response.text || interaction.userText === promptText) ?? history[history.length - 1]
@@ -1006,19 +1032,19 @@ export default function MintDashboard() {
           const interactionKey = String(newestInteraction.id)
           enrichedHistory = history.map((interaction) =>
             interaction.id === newestInteraction.id
-              ? { ...interaction, agentActivity: progressSnapshot }
+              ? { ...interaction, agentActivity: persistedProgress }
               : interaction,
           )
           setAgentActivitySnapshots((current) => ({
             ...current,
-            [interactionKey]: progressSnapshot.slice(),
+            [interactionKey]: persistedProgress.slice(),
           }))
           setThinkingExpanded((current) => ({
             ...current,
             ...(liveThinkingOpenRef.current ? { [interactionKey]: true } : {}),
             ...(liveExtendedThinkingOpenRef.current ? { [`extended-${interactionKey}`]: true } : {}),
           }))
-          await saveInteractionAgentActivity(newestInteraction.id, progressSnapshot)
+          await saveInteractionAgentActivity(newestInteraction.id, persistedProgress)
         }
       }
       setInteractions(enrichedHistory)
@@ -1039,6 +1065,7 @@ export default function MintDashboard() {
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
+      flushPendingProgress()
       setSending(false)
       setStreamingConversationId(null)
       setSendingMessage('')

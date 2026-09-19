@@ -75,8 +75,9 @@ pub use auth::{
     user_db_path,
 };
 pub use chat::{
-    ChatError, ChatMessage, ChatRequest, ChatResponse, ChatRole, ContentBlock, ToolCall, ToolSpec,
-    send_chat, send_chat_with_fallback, stream_chat, stream_chat_with_fallback,
+    ChatError, ChatMessage, ChatRequest, ChatResponse, ChatRole, ChatStreamEvent, ContentBlock,
+    ToolCall, ToolSpec, send_chat, send_chat_with_fallback, stream_chat, stream_chat_events,
+    stream_chat_events_with_fallback, stream_chat_with_fallback,
 };
 
 pub use auto_shorts::{
