@@ -1,5 +1,9 @@
+pub mod branches;
 pub mod checkpoint;
 
+pub use branches::{
+    BranchInfo, checkout_remote_branch, create_branch, read_branch_info, read_graph, switch_branch,
+};
 pub use checkpoint::{
     Checkpoint, commit_task_changes, create_checkpoint, create_task_branch,
     detect_project_language, generate_commit_message, get_current_branch, get_head_hash,

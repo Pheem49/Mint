@@ -502,7 +502,10 @@ fn test_cli_sessions_separate_and_metadata() {
         .unwrap();
 
     let sessions = store.list_chat_sessions().unwrap();
-    let session = sessions.iter().find(|s| s.id == session_id).expect("Session must exist");
+    let session = sessions
+        .iter()
+        .find(|s| s.id == session_id)
+        .expect("Session must exist");
 
     assert_eq!(session.title, "Fix background job bug");
     assert_eq!(session.kind, "cli");

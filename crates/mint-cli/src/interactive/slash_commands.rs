@@ -296,7 +296,8 @@ async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Op
                                 let trimmed = query.trim();
                                 if !trimmed.is_empty() {
                                     let next_input = format!("{command} __action:search:{trimmed}");
-                                    return Box::pin(handle_slash_command(session, &next_input)).await;
+                                    return Box::pin(handle_slash_command(session, &next_input))
+                                        .await;
                                 }
                             }
                             println!("Cancelled.\n");
@@ -311,7 +312,8 @@ async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Op
                                 let trimmed = custom_input.trim();
                                 if !trimmed.is_empty() {
                                     let next_input = format!("{command} {trimmed}");
-                                    return Box::pin(handle_slash_command(session, &next_input)).await;
+                                    return Box::pin(handle_slash_command(session, &next_input))
+                                        .await;
                                 }
                             }
                             println!("Cancelled.\n");
@@ -466,14 +468,17 @@ pub async fn handle_slash_command(
 
         "/resume" => {
             let target_session_id = if rest.is_empty() {
-                prompt_resume_session_picker(&session.current_dir, &session.chat_id).ok().flatten()
+                prompt_resume_session_picker(&session.current_dir, &session.chat_id)
+                    .ok()
+                    .flatten()
             } else {
                 let trimmed = rest.trim();
-                let candidate = if !trimmed.starts_with("cli::") && trimmed != mint_core::CHAT_CLI_ID {
-                    format!("cli::{trimmed}")
-                } else {
-                    trimmed.to_string()
-                };
+                let candidate =
+                    if !trimmed.starts_with("cli::") && trimmed != mint_core::CHAT_CLI_ID {
+                        format!("cli::{trimmed}")
+                    } else {
+                        trimmed.to_string()
+                    };
                 if let Ok(memory) = MemoryStore::open_default()
                     && let Ok(sessions) = memory.list_chat_sessions()
                     && sessions.iter().any(|s| s.id == candidate)
@@ -497,7 +502,9 @@ pub async fn handle_slash_command(
                             .find(|s| s.id == target_id)
                             .map(|s| s.title.as_str())
                             .unwrap_or("Conversation");
-                        println!("\n{MINT}●{RESET} Switched to session: {BOLD}{title}{RESET} {DIM}({target_id}){RESET}");
+                        println!(
+                            "\n{MINT}●{RESET} Switched to session: {BOLD}{title}{RESET} {DIM}({target_id}){RESET}"
+                        );
                         if let Ok(recent) = memory.get_session_preview(&target_id, 2)
                             && let Some(last) = recent.first()
                         {
@@ -506,7 +513,9 @@ pub async fn handle_slash_command(
                         }
                         println!();
                     } else {
-                        println!("\n{MINT}●{RESET} Switched to session: {BOLD}{target_id}{RESET}\n");
+                        println!(
+                            "\n{MINT}●{RESET} Switched to session: {BOLD}{target_id}{RESET}\n"
+                        );
                     }
                 }
             } else {
@@ -1705,7 +1714,9 @@ pub async fn handle_slash_command(
                 clear_last_thought();
                 if let Ok(memory) = MemoryStore::open_default() {
                     match memory.clear_interactions_for_chat(&session.chat_id) {
-                        Ok(count) => println!("{DIM}Cleared {count} interactions for session.{RESET}"),
+                        Ok(count) => {
+                            println!("{DIM}Cleared {count} interactions for session.{RESET}")
+                        }
                         Err(error) => println!("{ERROR}Memory error:{RESET} {error}"),
                     }
                 }
@@ -1725,7 +1736,7 @@ pub async fn handle_slash_command(
                     session.current_dir = new_dir.canonicalize().unwrap_or(new_dir);
                     println!(
                         "{DIM}Workspace: {}{RESET}\n",
-                        format_path_with_tilde(&session.current_dir)
+                        format_workspace_with_branch(&session.current_dir)
                     );
                 } else {
                     println!("{ERROR}Directory not found:{RESET} {rest}\n");
@@ -2470,7 +2481,7 @@ pub async fn handle_slash_command(
             println!("  Model    : {model}");
             println!(
                 "  Workspace: {}",
-                format_path_with_tilde(&session.current_dir)
+                format_workspace_with_branch(&session.current_dir)
             );
             println!(
                 "  Fast mode: {}",
@@ -3609,7 +3620,8 @@ mod tests {
 
     /// Commands that are dispatched but deliberately left undocumented —
     /// shortcuts for another command's own token, not gaps in `SLASH_COMMANDS`.
-    const UNDOCUMENTED_ALIASES: &[&str] = &["/quit", "/reset", "/plugin", "/searchProvider", "/think"];
+    const UNDOCUMENTED_ALIASES: &[&str] =
+        &["/quit", "/reset", "/plugin", "/searchProvider", "/think"];
 
     /// Regression guard for the exact bug that motivated `SLASH_COMMANDS`:
     /// `/edit-image`, `/gen-image`, `/shells`, and `/subagent` all worked but

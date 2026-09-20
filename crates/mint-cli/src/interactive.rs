@@ -34,7 +34,6 @@ pub fn truncate_utf8(text: &str, max_chars: usize) -> String {
     format!("{prefix}...")
 }
 
-
 pub static SESSION_APPROVED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
@@ -326,7 +325,10 @@ pub async fn run_interactive_chat_with_session(
     if let Ok(memory) = mint_core::MemoryStore::open_default() {
         let sessions = memory.list_chat_sessions().unwrap_or_default();
         if let Some(target) = sessions.iter().find(|s| s.id == chat_id) {
-            println!("{MINT}●{RESET} Resumed session: {BOLD}{}{RESET} {DIM}({}){RESET}", target.title, target.id);
+            println!(
+                "{MINT}●{RESET} Resumed session: {BOLD}{}{RESET} {DIM}({}){RESET}",
+                target.title, target.id
+            );
             if let Ok(recent) = memory.get_session_preview(&chat_id, 2)
                 && let Some(last) = recent.first()
             {
@@ -391,7 +393,7 @@ pub async fn run_interactive_chat_with_session(
             }
         }
 
-        let path_str = format_path_with_tilde(&session.current_dir);
+        let path_str = format_workspace_with_branch(&session.current_dir);
         let model_str = active_model(&session.config.ai_provider, &session.config).to_owned();
 
         let query_str = if let Some(queued) = pending_inputs.pop_front() {
@@ -602,7 +604,7 @@ pub fn print_exit_message(session: &InteractiveSession) {
     );
     println!(
         "{DIM}Workspace:{RESET} {}",
-        format_path_with_tilde(&session.current_dir)
+        format_workspace_with_branch(&session.current_dir)
     );
     let has_history = if let Ok(memory) = MemoryStore::open_default() {
         memory

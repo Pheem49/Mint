@@ -7,6 +7,7 @@ use mint_core::MintConfig;
 pub mod agent;
 pub mod config;
 pub mod eval;
+pub mod git;
 pub mod integrations;
 pub mod knowledge;
 pub mod system;
@@ -15,6 +16,7 @@ pub mod tasks;
 pub use agent::*;
 pub use config::*;
 pub use eval::*;
+pub use git::*;
 pub use integrations::*;
 pub use knowledge::*;
 pub use system::*;
@@ -98,6 +100,11 @@ pub enum Command {
         /// Chat ID (defaults to "cli").
         #[arg(long, default_value = "cli")]
         chat_id: String,
+    },
+    /// Inspect and manage Git branches in the current workspace.
+    Git {
+        #[command(subcommand)]
+        command: GitCommand,
     },
     /// Resume a previous conversation session, or open the interactive session picker.
     Resume {
@@ -278,6 +285,7 @@ pub async fn dispatch(cmd: Command, config: &mut MintConfig, cli: &crate::Cli) -
         Command::Agent { task } => agent::handle_agent(task).await,
         Command::Eval { suite, limit } => eval::handle_eval(suite, limit, config).await,
         Command::Rewind { step, chat_id } => agent::handle_rewind(step, chat_id),
+        Command::Git { command } => git::handle_git(command),
         Command::Resume { id } => {
             mint_core::channels::start_channels();
             mint_core::start_cron_scheduler();

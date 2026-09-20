@@ -44,6 +44,14 @@ pub fn format_path_with_tilde(path: &Path) -> String {
     }
     path_str
 }
+
+pub fn format_workspace_with_branch(path: &Path) -> String {
+    let workspace = format_path_with_tilde(path);
+    match mint_core::git::get_current_branch(path) {
+        Some(branch) => format!("{workspace} • branch: {branch}"),
+        None => workspace,
+    }
+}
 /// Placeholder prefixes that get colored when they appear in the input box —
 /// currently `[Pasted text #N]`/`[Pasted text #N +K lines]` (inserted by
 /// large-paste detection) and `[Image #N]` (inserted by Ctrl+V image paste).

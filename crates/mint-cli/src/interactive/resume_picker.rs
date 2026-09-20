@@ -117,9 +117,9 @@ pub fn prompt_resume_session_picker(
     let mut rename_query = String::new();
 
     // Check if there are sessions for current workspace
-    let has_current_workspace_sessions = sessions.iter().any(|s| {
-        s.workspace_path.as_deref() == Some(&current_workspace_str)
-    });
+    let has_current_workspace_sessions = sessions
+        .iter()
+        .any(|s| s.workspace_path.as_deref() == Some(&current_workspace_str));
     if !has_current_workspace_sessions {
         // If current project has none, default show all projects
         show_all_projects = true;
@@ -392,7 +392,9 @@ pub fn prompt_resume_session_picker(
                                 if !trimmed.is_empty() && selected_idx < filtered_count {
                                     let target_id = filtered[selected_idx].id.clone();
                                     let _ = memory.rename_chat_session(&target_id, trimmed);
-                                    if let Some(item) = sessions.iter_mut().find(|s| s.id == target_id) {
+                                    if let Some(item) =
+                                        sessions.iter_mut().find(|s| s.id == target_id)
+                                    {
                                         item.title = trimmed.to_string();
                                     }
                                 }
@@ -464,10 +466,13 @@ pub fn prompt_resume_session_picker(
                         }
                         KeyCode::PageDown => {
                             if filtered_count > 0 {
-                                selected_idx = (selected_idx + visible_items).min(filtered_count - 1);
+                                selected_idx =
+                                    (selected_idx + visible_items).min(filtered_count - 1);
                             }
                         }
-                        KeyCode::Char(' ') if search_query.is_empty() && selected_idx < filtered_count => {
+                        KeyCode::Char(' ')
+                            if search_query.is_empty() && selected_idx < filtered_count =>
+                        {
                             showing_preview = true;
                         }
                         KeyCode::Enter => {

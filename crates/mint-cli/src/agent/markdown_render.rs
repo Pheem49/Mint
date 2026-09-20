@@ -74,12 +74,20 @@ fn render_cli_ui_grid(json_str: &str, term_width: usize) -> Option<Vec<String>> 
     }
 
     let dashes = term_width.saturating_sub(14).clamp(16, 50);
-    let title = val.get("title").and_then(|v| v.as_str()).unwrap_or("OPTIONS");
+    let title = val
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("OPTIONS");
     let mut lines = Vec::new();
-    lines.push(format!("\x1b[38;2;56;189;248m┌─ {title} {}\x1b[0m", "─".repeat(dashes)));
+    lines.push(format!(
+        "\x1b[38;2;56;189;248m┌─ {title} {}\x1b[0m",
+        "─".repeat(dashes)
+    ));
 
     if let Some(subtitle) = val.get("subtitle").and_then(|v| v.as_str()) {
-        lines.push(format!("\x1b[38;2;56;189;248m│\x1b[0m \x1b[90m{subtitle}\x1b[0m"));
+        lines.push(format!(
+            "\x1b[38;2;56;189;248m│\x1b[0m \x1b[90m{subtitle}\x1b[0m"
+        ));
         lines.push(format!("\x1b[38;2;56;189;248m│\x1b[0m"));
     }
 
@@ -98,14 +106,19 @@ fn render_cli_ui_grid(json_str: &str, term_width: usize) -> Option<Vec<String>> 
             "\x1b[38;2;56;189;248m│\x1b[0m \x1b[38;2;56;189;248m[◆]\x1b[0m \x1b[1m{item_title}\x1b[0m{badge_str}"
         ));
         if !item_desc.is_empty() {
-            lines.push(format!("\x1b[38;2;56;189;248m│\x1b[0m     \x1b[90m{item_desc}\x1b[0m"));
+            lines.push(format!(
+                "\x1b[38;2;56;189;248m│\x1b[0m     \x1b[90m{item_desc}\x1b[0m"
+            ));
         }
         if idx < items.len() - 1 {
             lines.push(format!("\x1b[38;2;56;189;248m│\x1b[0m"));
         }
     }
 
-    lines.push(format!("\x1b[38;2;56;189;248m└{}\x1b[0m", "─".repeat(dashes + 4)));
+    lines.push(format!(
+        "\x1b[38;2;56;189;248m└{}\x1b[0m",
+        "─".repeat(dashes + 4)
+    ));
     Some(lines)
 }
 
@@ -126,7 +139,10 @@ fn render_cli_ui_card(json_str: &str, term_width: usize) -> Option<Vec<String>> 
     let mut lines = Vec::new();
 
     for (idx, item) in items.iter().enumerate() {
-        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("FEATURE");
+        let title = item
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("FEATURE");
         let subtitle = item.get("subtitle").and_then(|v| v.as_str());
         let badge = item.get("badge").and_then(|v| v.as_str());
 
@@ -154,7 +170,10 @@ fn render_cli_ui_card(json_str: &str, term_width: usize) -> Option<Vec<String>> 
             }
         }
 
-        lines.push(format!("\x1b[38;2;52;211;153m└{}\x1b[0m", "─".repeat(dashes + 4)));
+        lines.push(format!(
+            "\x1b[38;2;52;211;153m└{}\x1b[0m",
+            "─".repeat(dashes + 4)
+        ));
         if idx < items.len() - 1 {
             lines.push(String::new());
         }
@@ -165,10 +184,19 @@ fn render_cli_ui_card(json_str: &str, term_width: usize) -> Option<Vec<String>> 
 
 fn render_cli_ui_mockup(json_str: &str, term_width: usize) -> Option<Vec<String>> {
     let val: serde_json::Value = serde_json::from_str(json_str).ok()?;
-    let title = val.get("title").and_then(|v| v.as_str()).unwrap_or("Mockup");
+    let title = val
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Mockup");
     let subtitle = val.get("subtitle").and_then(|v| v.as_str());
-    let dropzone_text = val.get("dropzoneText").and_then(|v| v.as_str()).unwrap_or("Drop file here");
-    let disclaimer = val.get("disclaimer").and_then(|v| v.as_str()).unwrap_or("UI Concept Only");
+    let dropzone_text = val
+        .get("dropzoneText")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Drop file here");
+    let disclaimer = val
+        .get("disclaimer")
+        .and_then(|v| v.as_str())
+        .unwrap_or("UI Concept Only");
 
     let dashes = term_width.saturating_sub(14).clamp(16, 50);
     let mut lines = Vec::new();
@@ -179,22 +207,35 @@ fn render_cli_ui_mockup(json_str: &str, term_width: usize) -> Option<Vec<String>
     ));
 
     if let Some(sub) = subtitle {
-        lines.push(format!("\x1b[38;2;192;132;252m│\x1b[0m \x1b[90m{sub}\x1b[0m"));
+        lines.push(format!(
+            "\x1b[38;2;192;132;252m│\x1b[0m \x1b[90m{sub}\x1b[0m"
+        ));
     }
 
-    lines.push(format!("\x1b[38;2;192;132;252m│\x1b[0m  \x1b[90m┌─ Dropzone ────────────────────────┐\x1b[0m"));
+    lines.push(format!(
+        "\x1b[38;2;192;132;252m│\x1b[0m  \x1b[90m┌─ Dropzone ────────────────────────┐\x1b[0m"
+    ));
     lines.push(format!("\x1b[38;2;192;132;252m│\x1b[0m  \x1b[90m│\x1b[0m \x1b[38;2;56;189;248m[↑]\x1b[0m {dropzone_text}         \x1b[90m│\x1b[0m"));
-    lines.push(format!("\x1b[38;2;192;132;252m│\x1b[0m  \x1b[90m└───────────────────────────────────┘\x1b[0m"));
+    lines.push(format!(
+        "\x1b[38;2;192;132;252m│\x1b[0m  \x1b[90m└───────────────────────────────────┘\x1b[0m"
+    ));
 
     if let Some(metrics) = val.get("metrics").and_then(|v| v.as_object()) {
         for (k, v) in metrics {
             let val_str = v.as_str().unwrap_or("");
-            lines.push(format!("\x1b[38;2;192;132;252m│\x1b[0m   \x1b[90m{k}:\x1b[0m \x1b[1m{val_str}\x1b[0m"));
+            lines.push(format!(
+                "\x1b[38;2;192;132;252m│\x1b[0m   \x1b[90m{k}:\x1b[0m \x1b[1m{val_str}\x1b[0m"
+            ));
         }
     }
 
-    lines.push(format!("\x1b[38;2;192;132;252m│\x1b[0m  \x1b[90mℹ {disclaimer}\x1b[0m"));
-    lines.push(format!("\x1b[38;2;192;132;252m└{}\x1b[0m", "─".repeat(dashes + 4)));
+    lines.push(format!(
+        "\x1b[38;2;192;132;252m│\x1b[0m  \x1b[90mℹ {disclaimer}\x1b[0m"
+    ));
+    lines.push(format!(
+        "\x1b[38;2;192;132;252m└{}\x1b[0m",
+        "─".repeat(dashes + 4)
+    ));
 
     Some(lines)
 }
@@ -209,7 +250,14 @@ fn try_render_single_line_custom_block(raw: &str, term_width: usize) -> Option<V
             }
         }
     }
-    for prefix in &["ui-card", "ui_card", "ui-card-json", "ui_card_json", "ui-feature", "ui_feature"] {
+    for prefix in &[
+        "ui-card",
+        "ui_card",
+        "ui-card-json",
+        "ui_card_json",
+        "ui-feature",
+        "ui_feature",
+    ] {
         if let Some(rest) = raw.strip_prefix(prefix) {
             let json = rest.trim();
             if json.starts_with('[') || json.starts_with('{') {
@@ -263,9 +311,8 @@ pub(super) fn format_markdown_bold(text: &str) -> String {
                         "ui-grid" | "ui_grid" | "ui-grid-json" | "ui_grid_json" => {
                             render_cli_ui_grid(&buffered, term_width)
                         }
-                        "ui-card" | "ui_card" | "ui-card-json" | "ui_card_json" | "ui-feature" | "ui_feature" => {
-                            render_cli_ui_card(&buffered, term_width)
-                        }
+                        "ui-card" | "ui_card" | "ui-card-json" | "ui_card_json" | "ui-feature"
+                        | "ui_feature" => render_cli_ui_card(&buffered, term_width),
                         "ui-mockup" | "ui_mockup" | "ui-mockup-json" | "ui_mockup_json" => {
                             render_cli_ui_mockup(&buffered, term_width)
                         }
@@ -286,15 +333,17 @@ pub(super) fn format_markdown_bold(text: &str) -> String {
                 }
             } else {
                 let lang_raw = trimmed.trim_start_matches('`').trim();
-                let (lang, rest) = if let Some(space_idx) = lang_raw.find(|c: char| c.is_whitespace() || c == '[' || c == '{') {
+                let (lang, rest) = if let Some(space_idx) =
+                    lang_raw.find(|c: char| c.is_whitespace() || c == '[' || c == '{')
+                {
                     (&lang_raw[..space_idx], lang_raw[space_idx..].trim())
                 } else {
                     (lang_raw, "")
                 };
 
                 match lang {
-                    "ui-grid" | "ui_grid" | "ui-grid-json" | "ui_grid_json"
-                    | "ui-card" | "ui_card" | "ui-card-json" | "ui_card_json" | "ui-feature" | "ui_feature"
+                    "ui-grid" | "ui_grid" | "ui-grid-json" | "ui_grid_json" | "ui-card"
+                    | "ui_card" | "ui-card-json" | "ui_card_json" | "ui-feature" | "ui_feature"
                     | "ui-mockup" | "ui_mockup" | "ui-mockup-json" | "ui_mockup_json" => {
                         active_custom_block = Some(lang.to_string());
                         custom_block_buffer.clear();
@@ -331,30 +380,52 @@ pub(super) fn format_markdown_bold(text: &str) -> String {
         let is_quote = trimmed.starts_with('>');
         let is_standalone_alert = trimmed.starts_with("[!");
         if is_quote || is_standalone_alert {
-            let quote_content = if is_quote { trimmed[1..].trim() } else { trimmed };
+            let quote_content = if is_quote {
+                trimmed[1..].trim()
+            } else {
+                trimmed
+            };
             let upper = quote_content.to_uppercase();
             if upper.starts_with("[!NOTE]") {
                 let body = quote_content[7..].trim();
-                formatted_lines.push(format!("\x1b[38;2;56;189;248m│ NOTE:\x1b[0m {}", process_inline_bold(body)));
+                formatted_lines.push(format!(
+                    "\x1b[38;2;56;189;248m│ NOTE:\x1b[0m {}",
+                    process_inline_bold(body)
+                ));
                 continue;
             } else if upper.starts_with("[!TIP]") {
                 let body = quote_content[6..].trim();
-                formatted_lines.push(format!("\x1b[38;2;52;211;153m│ TIP:\x1b[0m {}", process_inline_bold(body)));
+                formatted_lines.push(format!(
+                    "\x1b[38;2;52;211;153m│ TIP:\x1b[0m {}",
+                    process_inline_bold(body)
+                ));
                 continue;
             } else if upper.starts_with("[!IMPORTANT]") {
                 let body = quote_content[12..].trim();
-                formatted_lines.push(format!("\x1b[38;2;192;132;252m│ IMPORTANT:\x1b[0m {}", process_inline_bold(body)));
+                formatted_lines.push(format!(
+                    "\x1b[38;2;192;132;252m│ IMPORTANT:\x1b[0m {}",
+                    process_inline_bold(body)
+                ));
                 continue;
             } else if upper.starts_with("[!WARNING]") {
                 let body = quote_content[10..].trim();
-                formatted_lines.push(format!("\x1b[38;2;251;191;36m│ WARNING:\x1b[0m {}", process_inline_bold(body)));
+                formatted_lines.push(format!(
+                    "\x1b[38;2;251;191;36m│ WARNING:\x1b[0m {}",
+                    process_inline_bold(body)
+                ));
                 continue;
             } else if upper.starts_with("[!CAUTION]") {
                 let body = quote_content[10..].trim();
-                formatted_lines.push(format!("\x1b[38;2;248;113;113m│ CAUTION:\x1b[0m {}", process_inline_bold(body)));
+                formatted_lines.push(format!(
+                    "\x1b[38;2;248;113;113m│ CAUTION:\x1b[0m {}",
+                    process_inline_bold(body)
+                ));
                 continue;
             } else if is_quote {
-                formatted_lines.push(format!("\x1b[38;2;100;116;139m│\x1b[0m \x1b[3m{}\x1b[0m", process_inline_bold(quote_content)));
+                formatted_lines.push(format!(
+                    "\x1b[38;2;100;116;139m│\x1b[0m \x1b[3m{}\x1b[0m",
+                    process_inline_bold(quote_content)
+                ));
                 continue;
             }
         }
@@ -387,8 +458,8 @@ pub(super) fn format_markdown_bold(text: &str) -> String {
             formatted_line = process_inline_bold(&new_line);
         } else {
             let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
-            let is_heading = (1..=6).contains(&hash_count)
-                && trimmed.as_bytes().get(hash_count) == Some(&b' ');
+            let is_heading =
+                (1..=6).contains(&hash_count) && trimmed.as_bytes().get(hash_count) == Some(&b' ');
             if is_heading {
                 let leading_len = line.len() - trimmed.len();
                 let leading_spaces_str = &line[..leading_len];
@@ -582,15 +653,16 @@ mod tests {
 
     #[test]
     fn test_format_markdown_single_line_ui_blocks() {
-        let single_line_card = "ui-card [{\"title\": \"QuickCard\", \"subtitle\": \"Instant preview\"}]";
+        let single_line_card =
+            "ui-card [{\"title\": \"QuickCard\", \"subtitle\": \"Instant preview\"}]";
         let output = format_markdown_bold(single_line_card);
         assert!(output.contains("QuickCard"));
         assert!(output.contains("Instant preview"));
 
-        let fenced_single_line = "```ui-grid [{\"title\": \"OptionA\", \"desc\": \"Best choice\"}]```";
+        let fenced_single_line =
+            "```ui-grid [{\"title\": \"OptionA\", \"desc\": \"Best choice\"}]```";
         let output_grid = format_markdown_bold(fenced_single_line);
         assert!(output_grid.contains("OptionA"));
         assert!(output_grid.contains("Best choice"));
     }
 }
-

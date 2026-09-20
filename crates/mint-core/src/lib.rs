@@ -114,9 +114,10 @@ pub use gemini_live::{
     GeminiLiveEvent, GeminiLiveHandle, start_session as start_gemini_live_session,
 };
 pub use git::{
-    Checkpoint, commit_task_changes, create_checkpoint, create_task_branch,
-    generate_commit_message, get_head_hash, is_git_repo, list_checkpoints, record_checkpoint,
-    restore_file, rollback_checkpoint, rollback_task_changes, rollback_to_step, undo_rollback,
+    BranchInfo, Checkpoint, checkout_remote_branch, commit_task_changes, create_branch,
+    create_checkpoint, create_task_branch, generate_commit_message, get_head_hash, is_git_repo,
+    list_checkpoints, read_branch_info, read_graph, record_checkpoint, restore_file,
+    rollback_checkpoint, rollback_task_changes, rollback_to_step, switch_branch, undo_rollback,
 };
 pub use hooks::{
     HookEntry, HookError, HookEvent, PreHookOutcome, add_hook, clear_hooks, list_hooks,

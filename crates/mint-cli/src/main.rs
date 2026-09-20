@@ -86,10 +86,7 @@ pub(crate) async fn run_code_agent_with_saved_image(
     // the user's own just-sent message for one that arrived from another surface.
     if let Ok(memory) = mint_core::MemoryStore::open_default()
         && let Ok(rows) = memory.recent_interactions_for_chat(
-            &mint_core::scoped_chat_id(
-                &target_chat_id,
-                Some(&current_dir.to_string_lossy()),
-            ),
+            &mint_core::scoped_chat_id(&target_chat_id, Some(&current_dir.to_string_lossy())),
             1,
         )
         && let Some(row) = rows.first()
@@ -354,10 +351,7 @@ async fn main() -> Result<()> {
                     None
                 };
                 interactive::run_interactive_chat_with_session(
-                    cli.model,
-                    cli.fast,
-                    cli.plan,
-                    resume_id,
+                    cli.model, cli.fast, cli.plan, resume_id,
                 )
                 .await?;
             }

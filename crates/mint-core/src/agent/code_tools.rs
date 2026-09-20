@@ -73,19 +73,14 @@ const IGNORED_DIRECTORIES: &[&str] = &[
 /// time opening large blobs and burning CPU on backtracking.
 const BINARY_EXTENSIONS: &[&str] = &[
     // Images (binary raster — SVG is XML text and intentionally excluded)
-    "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "avif",
-    // Video / audio
-    "mp4", "avi", "mkv", "mov", "webm", "mp3", "wav", "flac", "ogg", "m4a",
-    // Archives
-    "zip", "tar", "gz", "bz2", "xz", "7z", "rar",
-    // Compiled / binary
-    "so", "dylib", "dll", "exe", "bin", "o", "a", "wasm",
-    // Documents (non-text)
-    "pdf", "docx", "xlsx", "pptx", "odt",
-    // Databases / blobs
-    "db", "sqlite", "sqlite3", "rdb",
-    // Fonts
-    "ttf", "otf", "woff", "woff2",
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "avif", // Video / audio
+    "mp4", "avi", "mkv", "mov", "webm", "mp3", "wav", "flac", "ogg", "m4a", // Archives
+    "zip", "tar", "gz", "bz2", "xz", "7z", "rar", // Compiled / binary
+    "so", "dylib", "dll", "exe", "bin", "o", "a", "wasm", // Documents (non-text)
+    "pdf", "docx", "xlsx", "pptx", "odt", // Databases / blobs
+    "db", "sqlite", "sqlite3", "rdb", // Fonts
+    "ttf", "otf", "woff",
+    "woff2",
     // NOTE: .lock files (Cargo.lock, package-lock.json) are plain text and
     // intentionally NOT skipped — agents may need to verify dependency versions.
 ];

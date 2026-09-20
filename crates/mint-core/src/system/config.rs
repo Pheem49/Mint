@@ -723,13 +723,25 @@ impl MintConfig {
         let p = provider.to_ascii_lowercase();
         let m = model.to_ascii_lowercase();
         if p == "gemini" {
-            return m.contains("2.5") || m.contains("2.0") || m.contains("3.") || m.contains("thinking");
+            return m.contains("2.5")
+                || m.contains("2.0")
+                || m.contains("3.")
+                || m.contains("thinking");
         }
         if p == "anthropic" {
-            return m.contains("3-7") || m.contains("3.7") || m.contains("sonnet-5") || m.contains("opus-5") || m.contains("sonnet-4") || m.contains("opus-4");
+            return m.contains("3-7")
+                || m.contains("3.7")
+                || m.contains("sonnet-5")
+                || m.contains("opus-5")
+                || m.contains("sonnet-4")
+                || m.contains("opus-4");
         }
         if p == "openai" || p == "local_openai" {
-            return m.starts_with("o1") || m.starts_with("o3") || m.contains("thinking") || m.contains("reason") || m.contains("gpt-5");
+            return m.starts_with("o1")
+                || m.starts_with("o3")
+                || m.contains("thinking")
+                || m.contains("reason")
+                || m.contains("gpt-5");
         }
         if p == "deepseek" {
             return m.contains("reasoner") || m.contains("r1") || m.contains("deepseek");
@@ -745,7 +757,10 @@ impl MintConfig {
                 || m.contains("deepseek");
         }
         if p == "ollama" {
-            return m.contains("r1") || m.contains("qwq") || m.contains("thinking") || m.contains("deepseek");
+            return m.contains("r1")
+                || m.contains("qwq")
+                || m.contains("thinking")
+                || m.contains("deepseek");
         }
         false
     }
@@ -1714,12 +1729,28 @@ mod tests {
         let mut config = MintConfig::default();
 
         // Support checks
-        assert!(MintConfig::is_thinking_supported_for_model("anthropic", "claude-3-7-sonnet"));
-        assert!(MintConfig::is_thinking_supported_for_model("gemini", "gemini-2.5-pro"));
-        assert!(MintConfig::is_thinking_supported_for_model("openai", "o3-mini"));
-        assert!(MintConfig::is_thinking_supported_for_model("deepseek", "deepseek-reasoner"));
-        assert!(!MintConfig::is_thinking_supported_for_model("openai", "gpt-4o"));
-        assert!(!MintConfig::is_thinking_supported_for_model("anthropic", "claude-3-5-haiku"));
+        assert!(MintConfig::is_thinking_supported_for_model(
+            "anthropic",
+            "claude-3-7-sonnet"
+        ));
+        assert!(MintConfig::is_thinking_supported_for_model(
+            "gemini",
+            "gemini-2.5-pro"
+        ));
+        assert!(MintConfig::is_thinking_supported_for_model(
+            "openai", "o3-mini"
+        ));
+        assert!(MintConfig::is_thinking_supported_for_model(
+            "deepseek",
+            "deepseek-reasoner"
+        ));
+        assert!(!MintConfig::is_thinking_supported_for_model(
+            "openai", "gpt-4o"
+        ));
+        assert!(!MintConfig::is_thinking_supported_for_model(
+            "anthropic",
+            "claude-3-5-haiku"
+        ));
 
         // Global default resolution
         config.ai_provider = "anthropic".into();

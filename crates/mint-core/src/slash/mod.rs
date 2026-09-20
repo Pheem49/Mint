@@ -902,7 +902,10 @@ fn cmd_thinking(rest: &str, config: &mut MintConfig) -> SlashResponse {
         let status_label = if !supported {
             "⚠️ Thinking is **not supported** by the current active model.".to_string()
         } else if current_enabled {
-            format!("✅ Thinking is **ON** (Effort: **{}**)", capitalize_effort(current_effort))
+            format!(
+                "✅ Thinking is **ON** (Effort: **{}**)",
+                capitalize_effort(current_effort)
+            )
         } else {
             "⏸️ Thinking is **OFF**".to_string()
         };
@@ -1232,11 +1235,16 @@ async fn cmd_models_async(rest: &str, config: &mut MintConfig) -> SlashResponse 
                     .filter(|m| m.to_lowercase().contains(&q_lower))
                     .collect();
                 if matched.is_empty() {
-                    return message(format!("No models found matching \"{query}\" for provider {provider}."));
+                    return message(format!(
+                        "No models found matching \"{query}\" for provider {provider}."
+                    ));
                 }
                 return SlashResponse::NeedsChoice {
                     command: format!("/models {provider}"),
-                    title: format!("Search results for \"{query}\" in {provider} ({})", matched.len()),
+                    title: format!(
+                        "Search results for \"{query}\" in {provider} ({})",
+                        matched.len()
+                    ),
                     options: matched
                         .into_iter()
                         .map(|m| {
@@ -2871,7 +2879,10 @@ mod tests {
             SlashResponse::NeedsChoice { options, .. } => {
                 assert!(!options.is_empty());
             }
-            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
 
         // 2. Set effort to High
@@ -2927,13 +2938,18 @@ mod tests {
         let mut cfg = MintConfig::default();
         // 1. /models openrouter offers popular models and action shortcuts
         match execute_async(&req("/models openrouter"), &mut cfg).await {
-            SlashResponse::NeedsChoice { command, options, .. } => {
+            SlashResponse::NeedsChoice {
+                command, options, ..
+            } => {
                 assert_eq!(command, "/models openrouter");
                 assert!(options.iter().any(|o| o.value == "__action:search"));
                 assert!(options.iter().any(|o| o.value == "__action:all"));
                 assert!(options.iter().any(|o| o.value == "__action:custom"));
             }
-            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
 
         // 2. /models openrouter __action:all returns all models
@@ -2942,15 +2958,25 @@ mod tests {
                 assert!(title.contains("All openrouter models"));
                 assert!(!options.is_empty());
             }
-            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
 
         // 3. /models openrouter __action:search:gpt filters models
         match execute_async(&req("/models openrouter __action:search:gpt"), &mut cfg).await {
             SlashResponse::NeedsChoice { options, .. } => {
-                assert!(options.iter().all(|o| o.value.to_lowercase().contains("gpt")));
+                assert!(
+                    options
+                        .iter()
+                        .all(|o| o.value.to_lowercase().contains("gpt"))
+                );
             }
-            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
     }
 }

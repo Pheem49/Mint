@@ -11,6 +11,11 @@
 - Added keyboard focus treatments, disabled and active control states, long-name truncation, contained scrolling, narrow-window adjustments, reduced-motion behavior, and forced-colors support.
 - Preserved the existing workspace file creation, folder creation, refresh, drag-to-mention, expand/collapse, delete, and automatic refresh behavior without changing component logic.
 
+## Git Branches in CLI & Desktop
+
+- Moved shared branch inspection and switching into `mint-core`, then added `mint git status|list|switch|create|track|graph` so CLI and Desktop follow the same branch, dirty-worktree, and remote-tracking rules.
+- Added the current Git branch beside the workspace path in the interactive CLI prompt, `/cd` update, session stats, and exit summary.
+
 ## Desktop Empty Chat Layout & Workspace Selector
 
 - Fixed the empty-chat header so the Mint Agent identity and conversation actions stay anchored at the top of the workspace instead of moving into the centered composer area, including Tauri's WebKitGTK renderer where an inline positioned wrapper previously made the header follow the centered chat column.
