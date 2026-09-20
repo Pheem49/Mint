@@ -15,6 +15,7 @@
 
 - Moved shared branch inspection and switching into `mint-core`, then added `mint git status|list|switch|create|track|graph` so CLI and Desktop follow the same branch, dirty-worktree, and remote-tracking rules.
 - Added the current Git branch beside the workspace path in the interactive CLI prompt, `/cd` update, session stats, and exit summary.
+- Added the CLI-only `/branch` slash command with an interactive local/remote branch picker, direct `/branch <name>` switching, and dirty-worktree confirmation.
 
 ## Desktop Empty Chat Layout & Workspace Selector
 

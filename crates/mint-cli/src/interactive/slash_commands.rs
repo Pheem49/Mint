@@ -375,6 +375,7 @@ pub async fn handle_slash_command(
             | "/thought"
             | "/think"
             | "/resume"
+            | "/branch"
             | "/bg"
             | "/jobs"
             | "/shells"
@@ -1745,6 +1746,8 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
+        "/branch" => Some(handle_branch_slash(session, rest)),
+
         "/veo" => {
             if rest.is_empty() {
                 println!(
@@ -2942,6 +2945,130 @@ pub async fn handle_slash_command(
             None
         }
     }
+}
+
+fn handle_branch_slash(session: &mut InteractiveSession, requested: &str) -> SlashResult {
+    use mint_core::git::{checkout_remote_branch, read_branch_info, switch_branch};
+
+    let info = match read_branch_info(&session.current_dir) {
+        Ok(info) if info.is_repository => info,
+        Ok(_) => {
+            println!("{WARN}Current workspace is not a Git repository.{RESET}\n");
+            return SlashResult::Handled;
+        }
+        Err(error) => {
+            println!("{ERROR}Git error:{RESET} {error}\n");
+            return SlashResult::Handled;
+        }
+    };
+
+    let (remote, branch) = if requested.is_empty() {
+        let mut choices = info
+            .branches
+            .iter()
+            .map(|branch| {
+                (
+                    format!(
+                        "{branch}{}",
+                        if info.current_branch.as_deref() == Some(branch) {
+                            "  (current)"
+                        } else {
+                            ""
+                        }
+                    ),
+                    false,
+                    branch.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        choices.extend(
+            info.remote_branches
+                .iter()
+                .map(|branch| (format!("{branch}  (remote · track)"), true, branch.clone())),
+        );
+        if choices.is_empty() {
+            println!("{DIM}No branches found in this workspace.{RESET}\n");
+            return SlashResult::Handled;
+        }
+        let labels = choices
+            .iter()
+            .map(|(label, _, _)| label.clone())
+            .collect::<Vec<_>>();
+        let selected = info
+            .current_branch
+            .as_ref()
+            .and_then(|branch| {
+                choices
+                    .iter()
+                    .position(|(_, is_remote, name)| !is_remote && name == branch)
+            })
+            .map(|index| labels[index].as_str())
+            .unwrap_or("");
+        match prompt_interactive_select("Switch Git Branch", &labels, selected) {
+            Ok(Some(choice)) => match choices.into_iter().find(|(label, _, _)| label == &choice) {
+                Some((_, is_remote, branch)) => (is_remote, branch),
+                None => return SlashResult::Handled,
+            },
+            Ok(None) => {
+                println!("{DIM}Branch selection cancelled.{RESET}\n");
+                return SlashResult::Handled;
+            }
+            Err(error) => {
+                println!("{ERROR}Branch selection failed:{RESET} {error}\n");
+                return SlashResult::Handled;
+            }
+        }
+    } else if info.branches.iter().any(|branch| branch == requested) {
+        (false, requested.to_string())
+    } else if info
+        .remote_branches
+        .iter()
+        .any(|branch| branch == requested)
+    {
+        (true, requested.to_string())
+    } else {
+        println!("{ERROR}Branch not found:{RESET} {requested}\n");
+        return SlashResult::Handled;
+    };
+
+    if !remote && info.current_branch.as_deref() == Some(branch.as_str()) {
+        println!("{DIM}Already on branch {branch}.{RESET}\n");
+        return SlashResult::Handled;
+    }
+
+    let allow_dirty = if info.is_dirty {
+        match confirm("Workspace has uncommitted changes. Continue switching branches?") {
+            Ok(true) => true,
+            Ok(false) => {
+                println!("{DIM}Branch change cancelled.{RESET}\n");
+                return SlashResult::Handled;
+            }
+            Err(error) => {
+                println!("{ERROR}Could not confirm branch change:{RESET} {error}\n");
+                return SlashResult::Handled;
+            }
+        }
+    } else {
+        false
+    };
+
+    let result = if remote {
+        checkout_remote_branch(&session.current_dir, &branch, allow_dirty)
+    } else {
+        switch_branch(&session.current_dir, &branch, allow_dirty)
+    };
+    match result {
+        Ok(next) => {
+            let current = next.current_branch.as_deref().unwrap_or("detached HEAD");
+            println!("{MINT}Switched to {current}.{RESET}");
+            println!(
+                "{DIM}Workspace: {}{RESET}\n",
+                format_workspace_with_branch(&session.current_dir)
+            );
+        }
+        Err(error) => println!("{ERROR}Git error:{RESET} {error}\n"),
+    }
+    SlashResult::Handled
 }
 
 // ── /mcp interactive handling ────────────────────────────────────────────────

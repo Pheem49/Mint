@@ -8,6 +8,7 @@
   { "token": "/temperature", "usage": "[<provider> [model] [temp]|<temp>|default|status]", "description": "Interactive temperature picker or set/inspect per-model temperatures", "category": "models", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/clear", "usage": "", "description": "Clear conversation history", "category": "system", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/resume", "usage": "[<id|search>]", "description": "Resume and switch conversation session", "category": "system", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/branch", "usage": "[<name>]", "description": "Select or switch the current workspace Git branch", "category": "workspace", "surfaces": ["cli"] },
   { "token": "/cd", "usage": "<path>", "description": "Change workspace directory", "category": "workspace", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/image", "usage": "<path> [prompt]", "description": "Attach image from file", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/edit-image", "usage": "<prompt>", "description": "Edit attached image with prompt instruction", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
