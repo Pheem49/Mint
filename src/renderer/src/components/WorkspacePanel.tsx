@@ -119,7 +119,12 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
     const handleFocus = () => {
       refresh()
     }
+    const handleBranchChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ workspacePath?: string }>).detail
+      if (!detail?.workspacePath || detail.workspacePath === workspacePath) refresh()
+    }
     window.addEventListener('focus', handleFocus)
+    window.addEventListener('mint:workspace-branch-changed', handleBranchChanged)
 
     // Poll every 15 seconds to catch edits/updates in real-time
     const interval = setInterval(() => {
@@ -128,6 +133,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
 
     return () => {
       window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('mint:workspace-branch-changed', handleBranchChanged)
       clearInterval(interval)
     }
   }, [workspacePath])

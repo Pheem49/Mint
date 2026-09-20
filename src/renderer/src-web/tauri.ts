@@ -23,6 +23,7 @@ import type {
   LinkedFolder,
   LinkedFolderDraft,
   GitCheckpoint,
+  GitBranchInfo,
 } from '../shared/types'
 
 
@@ -1910,6 +1911,56 @@ export async function getWorkspaceTree(path?: string | null): Promise<WorkspaceT
   return invoke<WorkspaceTreeEntry>('get_workspace_tree', { path })
 }
 
+export async function getGitBranchInfo(workspacePath: string): Promise<GitBranchInfo> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    return { isRepository: false, currentBranch: null, detachedHead: null, branches: [], remoteBranches: [], isDirty: false }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<GitBranchInfo>('get_git_branch_info', { workspacePath })
+}
+
+export async function switchGitBranch(
+  workspacePath: string,
+  branch: string,
+  allowDirty = false,
+): Promise<GitBranchInfo> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    throw new Error('Branch switching is only available in the desktop app.')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<GitBranchInfo>('switch_git_branch', { workspacePath, branch, allowDirty })
+}
+
+export async function createGitBranch(
+  workspacePath: string,
+  branch: string,
+  allowDirty = false,
+): Promise<GitBranchInfo> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    throw new Error('Branch creation is only available in the desktop app.')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<GitBranchInfo>('create_git_branch', { workspacePath, branch, allowDirty })
+}
+
+export async function checkoutRemoteGitBranch(
+  workspacePath: string,
+  remoteBranch: string,
+  allowDirty = false,
+): Promise<GitBranchInfo> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    throw new Error('Remote branch checkout is only available in the desktop app.')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<GitBranchInfo>('checkout_remote_git_branch', { workspacePath, remoteBranch, allowDirty })
+}
+
+export async function getGitGraph(workspacePath: string): Promise<string[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) return []
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('get_git_graph', { workspacePath })
+}
+
 export async function createWorkspaceFile(path: string): Promise<void> {
   if (typeof window === 'undefined' || !isTauriRuntime()) return
   const { invoke } = await import('@tauri-apps/api/core')
@@ -2448,6 +2499,11 @@ const _apiCheck: MintPlatformApi = {
   getImageGenProviders,
   setDefaultImageProvider,
   getWorkspaceTree,
+  getGitBranchInfo,
+  switchGitBranch,
+  createGitBranch,
+  checkoutRemoteGitBranch,
+  getGitGraph,
   createWorkspaceFile,
   createWorkspaceFolder,
   deleteWorkspaceItem,
@@ -2464,4 +2520,3 @@ const _apiCheck: MintPlatformApi = {
   readWorkspaceFile,
   testMcpConnection,
 }
-

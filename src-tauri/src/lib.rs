@@ -104,6 +104,17 @@ struct WorkspaceTreeEntry {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitBranchInfo {
+    is_repository: bool,
+    current_branch: Option<String>,
+    detached_head: Option<String>,
+    branches: Vec<String>,
+    remote_branches: Vec<String>,
+    is_dirty: bool,
+}
+
+#[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum DesktopStreamEvent {
     Chunk { chunk: String },
@@ -147,6 +158,101 @@ async fn get_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, 
     tokio::task::spawn_blocking(move || build_workspace_tree(path))
         .await
         .map_err(|error| format!("workspace tree task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn get_git_branch_info(workspace_path: String) -> Result<GitBranchInfo, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = workspace_root(Some(&workspace_path))?;
+        read_git_branch_info(&root)
+    })
+    .await
+    .map_err(|error| format!("git branch task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn switch_git_branch(
+    workspace_path: String,
+    branch: String,
+    allow_dirty: bool,
+) -> Result<GitBranchInfo, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = workspace_root(Some(&workspace_path))?;
+        let before = read_git_branch_info(&root)?;
+        if !before.is_repository {
+            return Err("The selected workspace is not a Git repository.".to_string());
+        }
+        if !before.branches.iter().any(|candidate| candidate == &branch) {
+            return Err(format!("Local branch not found: {branch}"));
+        }
+        if before.current_branch.as_deref() == Some(branch.as_str()) {
+            return Ok(before);
+        }
+        ensure_branch_change_allowed(&before, allow_dirty)?;
+        run_git_switch(&root, &["switch", "--", branch.as_str()])?;
+        read_git_branch_info(&root)
+    })
+    .await
+    .map_err(|error| format!("git switch task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn create_git_branch(
+    workspace_path: String,
+    branch: String,
+    allow_dirty: bool,
+) -> Result<GitBranchInfo, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = workspace_root(Some(&workspace_path))?;
+        let branch = branch.trim();
+        if branch.is_empty() {
+            return Err("Enter a branch name.".to_string());
+        }
+        validate_new_branch_name(&root, branch)?;
+        let before = read_git_branch_info(&root)?;
+        ensure_branch_change_allowed(&before, allow_dirty)?;
+        if before.branches.iter().any(|candidate| candidate == branch) {
+            return Err(format!("Local branch already exists: {branch}"));
+        }
+        run_git_switch(&root, &["switch", "-c", branch])?;
+        read_git_branch_info(&root)
+    })
+    .await
+    .map_err(|error| format!("create branch task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn checkout_remote_git_branch(
+    workspace_path: String,
+    remote_branch: String,
+    allow_dirty: bool,
+) -> Result<GitBranchInfo, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = workspace_root(Some(&workspace_path))?;
+        let before = read_git_branch_info(&root)?;
+        ensure_branch_change_allowed(&before, allow_dirty)?;
+        if !before
+            .remote_branches
+            .iter()
+            .any(|candidate| candidate == &remote_branch)
+        {
+            return Err(format!("Remote branch not found: {remote_branch}"));
+        }
+        run_git_switch(&root, &["switch", "--track", remote_branch.as_str()])?;
+        read_git_branch_info(&root)
+    })
+    .await
+    .map_err(|error| format!("remote branch task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn get_git_graph(workspace_path: String) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = workspace_root(Some(&workspace_path))?;
+        read_git_graph(&root)
+    })
+    .await
+    .map_err(|error| format!("git graph task failed: {error}"))?
 }
 
 /// Re-runs a configured MCP server's OAuth login in the foreground (fixes an
@@ -378,6 +484,206 @@ fn workspace_root(path: Option<&str>) -> Result<PathBuf, String> {
         return Err(format!("workspace is not a directory: {}", root.display()));
     }
     Ok(root)
+}
+
+fn read_git_branch_info(root: &Path) -> Result<GitBranchInfo, String> {
+    let repository_check = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .map_err(|error| format!("failed to run git: {error}"))?;
+    if !repository_check.status.success()
+        || String::from_utf8_lossy(&repository_check.stdout).trim() != "true"
+    {
+        return Ok(GitBranchInfo {
+            is_repository: false,
+            current_branch: None,
+            detached_head: None,
+            branches: Vec::new(),
+            remote_branches: Vec::new(),
+            is_dirty: false,
+        });
+    }
+
+    let branches_output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+        .output()
+        .map_err(|error| format!("failed to list local branches: {error}"))?;
+    if !branches_output.status.success() {
+        return Err(String::from_utf8_lossy(&branches_output.stderr)
+            .trim()
+            .to_string());
+    }
+    let mut branches = String::from_utf8_lossy(&branches_output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    branches.sort_by_key(|branch| branch.to_lowercase());
+
+    let remote_branches_output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["for-each-ref", "--format=%(refname:short)", "refs/remotes"])
+        .output()
+        .map_err(|error| format!("failed to list remote branches: {error}"))?;
+    if !remote_branches_output.status.success() {
+        return Err(String::from_utf8_lossy(&remote_branches_output.stderr)
+            .trim()
+            .to_string());
+    }
+    let mut remote_branches = String::from_utf8_lossy(&remote_branches_output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty() && !branch.ends_with("/HEAD"))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    remote_branches.sort_by_key(|branch| branch.to_lowercase());
+
+    let current_output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .output()
+        .map_err(|error| format!("failed to read current branch: {error}"))?;
+    let current_branch = current_output
+        .status
+        .success()
+        .then(|| {
+            String::from_utf8_lossy(&current_output.stdout)
+                .trim()
+                .to_string()
+        })
+        .filter(|branch| !branch.is_empty());
+    if let Some(current) = current_branch.as_ref() {
+        if !branches.iter().any(|branch| branch == current) {
+            branches.insert(0, current.clone());
+        }
+    }
+
+    let detached_head = if current_branch.is_none() {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["rev-parse", "--short", "HEAD"])
+            .output()
+            .map_err(|error| format!("failed to read detached HEAD: {error}"))?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .filter(|head| !head.is_empty())
+    } else {
+        None
+    };
+
+    let status_output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["status", "--porcelain", "--untracked-files=normal"])
+        .output()
+        .map_err(|error| format!("failed to read git status: {error}"))?;
+    if !status_output.status.success() {
+        return Err(String::from_utf8_lossy(&status_output.stderr)
+            .trim()
+            .to_string());
+    }
+
+    Ok(GitBranchInfo {
+        is_repository: true,
+        current_branch,
+        detached_head,
+        branches,
+        remote_branches,
+        is_dirty: !status_output.stdout.is_empty(),
+    })
+}
+
+fn ensure_branch_change_allowed(info: &GitBranchInfo, allow_dirty: bool) -> Result<(), String> {
+    if !info.is_repository {
+        return Err("The selected workspace is not a Git repository.".to_string());
+    }
+    if info.is_dirty && !allow_dirty {
+        return Err(
+            "The workspace has uncommitted changes. Confirm before changing branches.".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_new_branch_name(root: &Path, branch: &str) -> Result<(), String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["check-ref-format", "--branch", branch])
+        .output()
+        .map_err(|error| format!("failed to validate branch name: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!("Invalid branch name: {branch}"))
+    }
+}
+
+fn run_git_switch(root: &Path, args: &[&str]) -> Result<(), String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(|error| format!("failed to run git switch: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if detail.is_empty() {
+        "Git could not change branches.".to_string()
+    } else {
+        detail
+    })
+}
+
+fn read_git_graph(root: &Path) -> Result<Vec<String>, String> {
+    let info = read_git_branch_info(root)?;
+    if !info.is_repository {
+        return Err("The selected workspace is not a Git repository.".to_string());
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args([
+            "log",
+            "--graph",
+            "--all",
+            "--decorate=short",
+            "--date=short",
+            "--pretty=format:%h%x09%ad%x09%an%x09%d%x09%s",
+            "-n",
+            "120",
+        ])
+        .output()
+        .map_err(|error| format!("failed to read git graph: {error}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect())
+    } else {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if detail.contains("does not have any commits yet") {
+            Ok(Vec::new())
+        } else {
+            Err(if detail.is_empty() {
+                "Git history is unavailable.".to_string()
+            } else {
+                detail
+            })
+        }
+    }
 }
 
 fn workspace_children(
@@ -1932,6 +2238,11 @@ pub fn run() {
             fetch_video_provider_models,
             fetch_gemini_live_models,
             get_workspace_tree,
+            get_git_branch_info,
+            switch_git_branch,
+            create_git_branch,
+            checkout_remote_git_branch,
+            get_git_graph,
             create_workspace_file,
             create_workspace_folder,
             delete_workspace_item,

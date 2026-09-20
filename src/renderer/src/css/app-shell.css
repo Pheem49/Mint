@@ -681,6 +681,29 @@ h1 {
   grid-template-columns: minmax(420px, 1.18fr) minmax(360px, 0.72fr);
 }
 
+/* Workspace is a two-pane working view: files on the left, conversation on
+   the right. The Live2D stage is intentionally replaced by the file tree. */
+.assistant-workspace.workspace-open {
+  grid-template-columns: minmax(360px, 520px) minmax(460px, 1fr);
+}
+
+.assistant-workspace.workspace-open .workspace-panel {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.assistant-workspace.workspace-open .model-stage {
+  display: none;
+}
+
+.assistant-workspace.workspace-open .chat-panel-split-wrapper {
+  grid-column: 2;
+  grid-row: 1;
+  width: 100%;
+  min-width: 0;
+  justify-self: stretch;
+}
+
 .app-body.sidebar-collapsed .assistant-workspace {
   margin-left: calc(var(--sidebar-collapsed-width) + var(--sidebar-content-gap));
 }
@@ -957,11 +980,11 @@ h1 {
    height. Anchor the desktop empty state to the full workspace instead, so
    the header never follows the vertically-centered composer. */
 @media (min-width: 761px) {
-  .assistant-workspace .conversation-panel.is-empty {
+  .assistant-workspace:not(.workspace-open) .conversation-panel.is-empty {
     position: static;
   }
 
-  .assistant-workspace .conversation-panel.is-empty .chat-header {
+  .assistant-workspace:not(.workspace-open) .conversation-panel.is-empty .chat-header {
     position: absolute;
     top: 16px;
     left: 50%;
@@ -971,7 +994,7 @@ h1 {
     transform: translateX(-50%);
   }
 
-  .assistant-workspace .conversation-panel.is-empty .input-area {
+  .assistant-workspace:not(.workspace-open) .conversation-panel.is-empty .input-area {
     position: absolute;
     top: auto;
     bottom: 44px;
@@ -981,7 +1004,7 @@ h1 {
     transform: translateX(-50%);
   }
 
-  .assistant-workspace .conversation-panel.is-empty .input-disclaimer {
+  .assistant-workspace:not(.workspace-open) .conversation-panel.is-empty .input-disclaimer {
     position: absolute;
     right: 32px;
     bottom: 8px;

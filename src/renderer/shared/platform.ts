@@ -23,6 +23,7 @@ import type {
   AgentProgress,
   AuthUser,
   GitCheckpoint,
+  GitBranchInfo,
 } from './types'
 
 export function getLocalApiBase(): string {
@@ -124,6 +125,11 @@ export interface MintPlatformApi {
   getImageGenProviders(): Promise<ImageGenProviders>
   setDefaultImageProvider(provider: string): Promise<boolean>
   getWorkspaceTree(path?: string | null): Promise<WorkspaceTreeEntry>
+  getGitBranchInfo(workspacePath: string): Promise<GitBranchInfo>
+  switchGitBranch(workspacePath: string, branch: string, allowDirty?: boolean): Promise<GitBranchInfo>
+  createGitBranch(workspacePath: string, branch: string, allowDirty?: boolean): Promise<GitBranchInfo>
+  checkoutRemoteGitBranch(workspacePath: string, remoteBranch: string, allowDirty?: boolean): Promise<GitBranchInfo>
+  getGitGraph(workspacePath: string): Promise<string[]>
   createWorkspaceFile(path: string): Promise<void>
   createWorkspaceFolder(path: string): Promise<void>
   deleteWorkspaceItem(path: string): Promise<void>

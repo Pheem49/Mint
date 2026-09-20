@@ -1,5 +1,16 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Desktop Workspace File Explorer UI
+
+- Rebuilt the missing Workspace stylesheet as a compact desktop file explorer with a clear header, flat action toolbar, sticky project root, correctly sized material file icons, and dense scannable tree rows.
+- Restored the intended two-pane Workspace layout with the file explorer on the left and chat composer on the right, while hiding the Live2D stage and preventing empty-chat positioning rules from overlaying the full workspace.
+- Reworked the workspace selector from a prominent accent card into a compact project-context row integrated with the composer, using neutral surfaces and restrained hover/focus feedback while preserving folder selection and full-path tooltips.
+- Added a compact Local Branch selector beside the active workspace, including branch search, current and detached-HEAD states, dirty-worktree warnings, safe Git switching, and immediate workspace-tree refresh after a successful switch.
+- Extended the Branch selector with create-and-switch, locally known remote tracking branches, and an in-place Git graph showing the latest decorated repository history without performing an implicit network fetch.
+- Replaced decorative gradients, glow effects, elevated cards, and AI-style status capsules with restrained surfaces, structural dividers, typography, and a small state indicator suited to a developer tool.
+- Added keyboard focus treatments, disabled and active control states, long-name truncation, contained scrolling, narrow-window adjustments, reduced-motion behavior, and forced-colors support.
+- Preserved the existing workspace file creation, folder creation, refresh, drag-to-mention, expand/collapse, delete, and automatic refresh behavior without changing component logic.
+
 ## Desktop Empty Chat Layout & Workspace Selector
 
 - Fixed the empty-chat header so the Mint Agent identity and conversation actions stay anchored at the top of the workspace instead of moving into the centered composer area, including Tauri's WebKitGTK renderer where an inline positioned wrapper previously made the header follow the centered chat column.

@@ -32,6 +32,7 @@ import { useGeminiLiveVoice } from '../utils/useGeminiLiveVoice'
 import GeminiLiveOverlay from './GeminiLiveOverlay'
 import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../utils/documentTypes'
 import ModelSelectorPopover from './ModelSelectorPopover'
+import GitBranchSelector from './GitBranchSelector'
 
 import {
   APP_ICON_PATH,
@@ -1590,29 +1591,34 @@ export default function ChatPanel({
       <div className={`input-area ${voiceMode ? 'voice-active' : ''}`}>
         {isEmptyChat && <div className="empty-chat-prompt">Mint Agent is ready to work</div>}
         {onSelectWorkspace && (
-          <button
-            type="button"
-            className={`workspace-select-btn ${workspacePath ? 'has-workspace' : 'needs-workspace'}`}
-            onClick={onSelectWorkspace}
-            aria-label={`${workspaceAction}: ${workspaceName}`}
-            title={workspacePath || 'Choose a workspace folder'}
-          >
-            <span className="workspace-select-icon" aria-hidden="true">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>
-              </svg>
-            </span>
-            <span className="workspace-select-copy">
-              <span className="workspace-select-label">Workspace</span>
-              <span className="workspace-select-name">{workspaceName}</span>
-            </span>
-            <span className="workspace-select-action" aria-hidden="true">
-              {workspaceAction}
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m9 18 6-6-6-6" />
-              </svg>
-            </span>
-          </button>
+          <div className="project-context-row">
+            <button
+              type="button"
+              className={`workspace-select-btn ${workspacePath ? 'has-workspace' : 'needs-workspace'}`}
+              onClick={onSelectWorkspace}
+              aria-label={`${workspaceAction}: ${workspaceName}`}
+              title={workspacePath || 'Choose a workspace folder'}
+            >
+              <span className="workspace-select-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>
+                </svg>
+              </span>
+              <span className="workspace-select-copy">
+                <span className="workspace-select-label">Workspace</span>
+                <span className="workspace-select-name">{workspaceName}</span>
+              </span>
+              {!workspacePath && (
+                <span className="workspace-select-action" aria-hidden="true">
+                  {workspaceAction}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                </span>
+              )}
+            </button>
+            {workspacePath && <GitBranchSelector workspacePath={workspacePath} disabled={sending} />}
+          </div>
         )}
         <div className="smart-context-bar">
           <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

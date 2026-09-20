@@ -107,6 +107,15 @@ export interface ChatSession {
   totalBytes?: number
 }
 
+export interface GitBranchInfo {
+  isRepository: boolean
+  currentBranch: string | null
+  detachedHead: string | null
+  branches: string[]
+  remoteBranches: string[]
+  isDirty: boolean
+}
+
 export interface PictureEntry {
   id: string
   filename: string
