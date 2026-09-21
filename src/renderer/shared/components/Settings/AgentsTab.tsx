@@ -218,7 +218,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
         <div className="section-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <p className="section-kicker">Multi-Agent System</p>
-            <h2 className="section-title">Agent Collaboration Settings</h2>
+            <h2 className="section-title">Agent collaboration settings</h2>
           </div>
           {!isEditing && (
             <div style={{ display: 'flex', gap: '10px', height: 'fit-content', flexShrink: 0 }}>
@@ -235,7 +235,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
         <div className="toggle-card" style={{ margin: '4px 0 24px 0' }}>
           <div className="toggle-row">
             <div>
-              <label>Enable Multi-Agent Collaboration</label>
+              <label>Enable multi-agent collaboration</label>
               <p className="hint">Allow multiple specialized agents to collaborate sequentially (Planner → Coder → Reviewer).</p>
             </div>
             <label className="settings-toggle-switch">
@@ -256,7 +256,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
             </h3>
             
             <div className="setting-row">
-              <label>Agent Name</label>
+              <label>Agent name</label>
               <input 
                 type="text" 
                 value={name} 
@@ -266,7 +266,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
             </div>
 
             <div className="setting-row">
-              <label>AI Provider</label>
+              <label>AI provider</label>
               <select value={provider} onChange={(e) => handleProviderChange(e.target.value)}>
                 {availableProviders.map(p => (
                   <option key={p.value} value={p.value}>{p.label}</option>
@@ -275,7 +275,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
             </div>
 
             <div className="setting-row">
-              <label>Model Name</label>
+              <label>Model name</label>
               <select 
                 value={isCustomModel ? 'custom' : model} 
                 onChange={(e) => {
@@ -296,7 +296,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
 
             {isCustomModel && (
               <div className="setting-row">
-                <label>Custom Model Name</label>
+                <label>Custom model name</label>
                 <input 
                   type="text" 
                   value={model} 
@@ -316,7 +316,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
             </div>
 
             <div className="setting-row">
-              <label>System Instructions / Role</label>
+              <label>System instructions / role</label>
               <textarea 
                 value={systemInstruction} 
                 onChange={(e) => setSystemInstruction(e.target.value)} 
@@ -327,7 +327,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '16px', justifyContent: 'flex-end' }}>
               <button className="btn btn-secondary" onClick={closeForm}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSaveAgent}>Save Agent</button>
+              <button className="btn btn-primary" onClick={handleSaveAgent}>Save agent</button>
             </div>
           </div>
         ) : (
@@ -525,7 +525,7 @@ function SubagentsSection() {
           </div>
 
           <div className="setting-row">
-            <label>System Prompt</label>
+            <label>System prompt</label>
             <textarea
               value={form.systemPrompt}
               onChange={(e) => setForm({ ...form, systemPrompt: e.target.value })}
@@ -535,7 +535,7 @@ function SubagentsSection() {
           </div>
 
           <div className="setting-row">
-            <label>Allowed Tools (optional)</label>
+            <label>Allowed tools (optional)</label>
             <input
               type="text"
               value={form.tools}
@@ -545,7 +545,7 @@ function SubagentsSection() {
           </div>
 
           <div className="setting-row">
-            <label>Model Override (optional)</label>
+            <label>Model override (optional)</label>
             <input
               type="text"
               value={form.model}
@@ -555,7 +555,7 @@ function SubagentsSection() {
           </div>
 
           <div className="setting-row">
-            <label>Provider Override (optional)</label>
+            <label>Provider override (optional)</label>
             <input
               type="text"
               value={form.provider}
@@ -592,7 +592,7 @@ function SubagentsSection() {
 
           <div style={{ display: 'flex', gap: '10px', marginTop: '16px', justifyContent: 'flex-end' }}>
             <button className="btn btn-secondary" onClick={closeForm}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleSave}>Save Subagent</button>
+            <button className="btn btn-primary" onClick={handleSave}>Save subagent</button>
           </div>
         </div>
       ) : (

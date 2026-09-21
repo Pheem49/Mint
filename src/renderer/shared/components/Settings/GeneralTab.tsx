@@ -240,8 +240,8 @@ export default function GeneralTab({
     <div className="tab-pane active">
       {/* Accordion Quick Control Bar */}
       <div className="accordion-controls">
-        <button type="button" onClick={() => setAllSections(true)}>Expand All</button>
-        <button type="button" onClick={() => setAllSections(false)}>Collapse All</button>
+        <button type="button" onClick={() => setAllSections(true)}>Expand all</button>
+        <button type="button" onClick={() => setAllSections(false)}>Collapse all</button>
       </div>
 
       {/* ── Section 1: AI Routing ── */}
@@ -253,8 +253,8 @@ export default function GeneralTab({
         <>
           <div className="form-grid compact">
             <div className="setting-row stacked">
-              <label>Active Provider</label>
-              <div className="pill-segmented" role="radiogroup" aria-label="Active Provider">
+              <label>Active provider</label>
+              <div className="pill-segmented" role="radiogroup" aria-label="Active provider">
                 {[
                   { id: 'gemini', label: aiProviderLabel('gemini'), title: 'Google Gemini (Cloud)' },
                   { id: 'anthropic', label: aiProviderLabel('anthropic'), title: 'Anthropic Claude' },
@@ -291,7 +291,7 @@ export default function GeneralTab({
               const currentModel = (config.customModelSelections ?? {})[activeId] ?? cp.models[0]?.modelId ?? ''
               return (
                 <div className="setting-row wide">
-                  <label>Active Model</label>
+                  <label>Active model</label>
                   <select
                     value={currentModel}
                     onChange={(e) => updateField('customModelSelections', {
@@ -418,7 +418,7 @@ export default function GeneralTab({
                 <div className="setting-row stacked setting-feature-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
                     <label style={{ margin: 0, fontWeight: 600, display: 'flex', alignItems: 'baseline', gap: '0.45rem' }}>
-                      <span>Model Temperature</span>
+                      <span>Model temperature</span>
                       {modelDisplayName && (
                         <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>
                           · {modelDisplayName}
@@ -572,7 +572,7 @@ export default function GeneralTab({
                   {/* Toggle Row */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0' }}>
                     <div>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 500 }}>Enable Thinking</span>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 500 }}>Enable thinking</span>
                       <p style={{ margin: '2px 0 0 0', fontSize: '0.73rem', color: 'var(--text-muted)' }}>
                         {isThinkingSupported
                           ? 'Allow model to output chain-of-thought tokens.'
@@ -595,7 +595,7 @@ export default function GeneralTab({
                   {currentEnabled && (
                     <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'none', letterSpacing: '0.04em' }}>
                           Reasoning Effort
                         </span>
                         <div style={{ display: 'flex', gap: '4px' }}>
@@ -648,7 +648,7 @@ export default function GeneralTab({
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
-                  <label>Gemini Model</label>
+                  <label>Gemini model</label>
                   <select 
                     value={dynamicGeminiModels.includes(config.geminiModel) ? config.geminiModel : 'custom'} 
                     onChange={(e) => updateField('geminiModel', e.target.value)}
@@ -661,7 +661,7 @@ export default function GeneralTab({
                 </div>
                 {(!dynamicGeminiModels.includes(config.geminiModel) || config.geminiModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom Gemini Model</label>
+                    <label>Custom Gemini model</label>
                     <input 
                       type="text" 
                       value={customGemini} 
@@ -703,7 +703,7 @@ export default function GeneralTab({
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
-                  <label>Anthropic Model</label>
+                  <label>Anthropic model</label>
                   <select 
                     value={dynamicAnthropicModels.includes(config.anthropicModel) ? config.anthropicModel : 'custom'} 
                     onChange={(e) => updateField('anthropicModel', e.target.value)}
@@ -716,7 +716,7 @@ export default function GeneralTab({
                 </div>
                 {(!dynamicAnthropicModels.includes(config.anthropicModel) || config.anthropicModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom Anthropic Model</label>
+                    <label>Custom Anthropic model</label>
                     <input 
                       type="text" 
                       value={customAnthropic} 
@@ -772,7 +772,7 @@ export default function GeneralTab({
                 </div>
                 {(!dynamicOpenAIModels.includes(config.openaiModel) || config.openaiModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom OpenAI Model</label>
+                    <label>Custom OpenAI model</label>
                     <input 
                       type="text" 
                       value={customOpenAI} 
@@ -832,7 +832,7 @@ export default function GeneralTab({
                 </div>
                 {(!dynamicOpenRouterModels.includes(config.openrouterModel) || config.openrouterModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom OpenRouter Model</label>
+                    <label>Custom OpenRouter model</label>
                     <input
                       type="text"
                       value={customOpenRouter}
@@ -887,7 +887,7 @@ export default function GeneralTab({
                 </div>
                 {(!dynamicDeepSeekModels.includes(config.deepseekModel) || config.deepseekModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom DeepSeek Model</label>
+                    <label>Custom DeepSeek model</label>
                     <input
                       type="text"
                       value={customDeepSeek}
@@ -931,7 +931,7 @@ export default function GeneralTab({
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
-                  <label>Hugging Face Model</label>
+                  <label>Hugging Face model</label>
                   <select 
                     value={(HF_MODELS as readonly string[]).includes(config.hfModel) ? config.hfModel : 'custom'} 
                     onChange={(e) => updateField('hfModel', e.target.value)}
@@ -944,7 +944,7 @@ export default function GeneralTab({
                 </div>
                 {(!(HF_MODELS as readonly string[]).includes(config.hfModel) || config.hfModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom Hugging Face Model</label>
+                    <label>Custom Hugging Face model</label>
                     <input 
                       type="text" 
                       value={customHF} 
@@ -954,11 +954,11 @@ export default function GeneralTab({
                   </div>
                 )}
                 <div className="setting-row">
-                  <label>Hugging Face API Key</label>
+                  <label>Hugging Face API key</label>
                   <ApiKeyInput
                     value={config.hfApiKey}
                     onChange={(value) => updateField('hfApiKey', value)}
-                    placeholder="Enter Hugging Face API Key..."
+                    placeholder="Enter Hugging Face API key..."
                   />
                 </div>
               </div>
@@ -1042,7 +1042,7 @@ export default function GeneralTab({
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
-                  <label>Ollama Model</label>
+                  <label>Ollama model</label>
                   <select 
                     value={dynamicOllamaModels.includes(config.ollamaModel) ? config.ollamaModel : 'custom'} 
                     onChange={(e) => updateField('ollamaModel', e.target.value)}
@@ -1058,7 +1058,7 @@ export default function GeneralTab({
                 </div>
                 {(!dynamicOllamaModels.includes(config.ollamaModel) || config.ollamaModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom Ollama Model</label>
+                    <label>Custom Ollama model</label>
                     <input 
                       type="text" 
                       value={customOllama} 
@@ -1068,7 +1068,7 @@ export default function GeneralTab({
                   </div>
                 )}
                 <div className="setting-row">
-                  <label>Ollama Host</label>
+                  <label>Ollama host</label>
                   <input 
                     type="text" 
                     value={config.ollamaHost} 
@@ -1111,11 +1111,11 @@ export default function GeneralTab({
             </div>
             <div className="provider-card-body">
               <div className="setting-row">
-                <label>Brave Search API Key</label>
+                <label>Brave Search API key</label>
                 <ApiKeyInput
                   value={config.braveSearchApiKey}
                   onChange={(value) => updateField('braveSearchApiKey', value)}
-                  placeholder="Enter Brave Search API Key..."
+                  placeholder="Enter Brave Search API key..."
                 />
               </div>
             </div>
@@ -1143,15 +1143,15 @@ export default function GeneralTab({
             </div>
             <div className="provider-card-body">
               <div className="setting-row">
-                <label>Google Search API Key</label>
+                <label>Google Search API key</label>
                 <ApiKeyInput
                   value={config.googleSearchApiKey}
                   onChange={(value) => updateField('googleSearchApiKey', value)}
-                  placeholder="Enter Google Search API Key..."
+                  placeholder="Enter Google Search API key..."
                 />
               </div>
               <div className="setting-row">
-                <label>Google Search Engine ID (CX)</label>
+                <label>Google Search engine ID (CX)</label>
                 <input
                   type="text"
                   value={config.googleSearchCx}
@@ -1209,7 +1209,7 @@ export default function GeneralTab({
         <>
           <div className="form-grid compact">
             <div className="setting-row stacked">
-              <label>Active Provider</label>
+              <label>Active provider</label>
               <div className="pill-segmented" role="radiogroup" aria-label="Image Provider">
                 {IMAGE_PROVIDERS.map(o => (
                   <button
@@ -1321,7 +1321,7 @@ export default function GeneralTab({
             <div className="provider-card-body">
               <p className="hint">Uses your Gemini API key — no extra key needed.</p>
               <div className="setting-row">
-                <label>Default Veo Model</label>
+                <label>Default Veo model</label>
                 {(() => {
                   const veoOpts = dynamicVideoModels?.veo || VEO_STUDIO_MODELS.veo || []
                   const currentVeoModel = config.veoModel || 'veo-3.1-generate-preview'
@@ -1575,11 +1575,11 @@ export default function GeneralTab({
           </div>
           <div className="form-grid single">
             <div className="setting-row">
-              <label>Updater Endpoint</label>
+              <label>Updater endpoint</label>
               <input type="text" value={config.updaterEndpoint} onChange={(e) => updateField('updaterEndpoint', e.target.value)} placeholder="https://updates.example.com/latest.json" />
             </div>
             <div className="setting-row">
-              <label>Updater Public Key</label>
+              <label>Updater public key</label>
               <textarea value={config.updaterPublicKey} onChange={(e) => updateField('updaterPublicKey', e.target.value)} placeholder="Minisign public key" />
             </div>
           </div>
@@ -1600,7 +1600,7 @@ export default function GeneralTab({
         'Configure the mini AI character desktop presence widget.',
         <div className="toggle-row">
           <div>
-            <label>Show Desktop AI Candidate</label>
+            <label>Show Desktop AI candidate</label>
             <p className="hint">Show the mini AI character on your desktop.</p>
           </div>
           <label className="settings-toggle-switch">

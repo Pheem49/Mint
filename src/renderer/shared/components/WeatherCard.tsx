@@ -191,7 +191,7 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
             padding: '8px 10px',
           }}
         >
-          <p style={{ margin: 0, fontSize: '10px', opacity: 0.75, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Wind</p>
+          <p style={{ margin: 0, fontSize: '10px', opacity: 0.75, textTransform: 'none', letterSpacing: '0.5px' }}>Wind</p>
           <p style={{ margin: '2px 0 0', fontSize: '13px', fontWeight: 700 }}>{Math.round(current.wind_speed_10m)} km/h</p>
         </div>
 
@@ -203,7 +203,7 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
             padding: '8px 10px',
           }}
         >
-          <p style={{ margin: 0, fontSize: '10px', opacity: 0.75, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Humidity</p>
+          <p style={{ margin: 0, fontSize: '10px', opacity: 0.75, textTransform: 'none', letterSpacing: '0.5px' }}>Humidity</p>
           <p style={{ margin: '2px 0 0', fontSize: '13px', fontWeight: 700 }}>{Math.round(current.relative_humidity_2m)}%</p>
         </div>
 
@@ -215,7 +215,7 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
             padding: '8px 10px',
           }}
         >
-          <p style={{ margin: 0, fontSize: '10px', opacity: 0.75, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Feels Like</p>
+          <p style={{ margin: 0, fontSize: '10px', opacity: 0.75, textTransform: 'none', letterSpacing: '0.5px' }}>Feels like</p>
           <p style={{ margin: '2px 0 0', fontSize: '13px', fontWeight: 700 }}>{Math.round(current.apparent_temperature)}°C</p>
         </div>
       </div>

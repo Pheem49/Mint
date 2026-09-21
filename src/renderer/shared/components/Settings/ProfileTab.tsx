@@ -113,7 +113,7 @@ export default function ProfileTab({ name, setName, imageUrl, setImageUrl }: Pro
 
         <div className="form-grid single">
           <div className="setting-row">
-            <label>Display Name</label>
+            <label>Display name</label>
             <div className="memory-field-container">
               <input
                 type="text"
@@ -125,7 +125,7 @@ export default function ProfileTab({ name, setName, imageUrl, setImageUrl }: Pro
           </div>
 
           <div className="setting-row">
-            <label>Profile Image URL</label>
+            <label>Profile image URL</label>
             <div className="memory-field-container">
               <input
                 type="text"

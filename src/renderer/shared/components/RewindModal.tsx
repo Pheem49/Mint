@@ -188,7 +188,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'none', letterSpacing: '0.05em' }}>
                 Target Checkpoint
               </span>
               {checkpoints.length > 1 && (
@@ -262,7 +262,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
           {/* Affected Files List */}
           {changes.length > 0 && (
             <div>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'none', letterSpacing: '0.05em' }}>
                 Files in this turn ({changes.length})
               </div>
               <div
@@ -408,7 +408,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
                   <polyline points="1 4 1 10 7 10" />
                   <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
                 </svg>
-                <span>Confirm Rewind</span>
+                <span>Confirm rewind</span>
               </>
             )}
           </button>

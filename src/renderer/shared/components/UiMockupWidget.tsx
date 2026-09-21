@@ -77,7 +77,7 @@ export default function UiMockupWidget({ data }: { data: UiMockupData }) {
           <span className="chat-ui-mockup-dot dot-amber" />
           <span className="chat-ui-mockup-dot dot-green" />
         </div>
-        <div className="chat-ui-mockup-tag">Mockup Concept</div>
+        <div className="chat-ui-mockup-tag">Mockup concept</div>
         <div style={{ width: '42px' }} />
       </div>
 

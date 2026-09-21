@@ -159,7 +159,7 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
                 <polyline points="4 17 10 11 4 5"></polyline>
                 <line x1="12" y1="19" x2="20" y2="19"></line>
               </svg>
-              <span>Code Sessions</span>
+              <span>Code sessions</span>
             </h1>
             <span className="code-header-count">
               {allCliSessions.length} {allCliSessions.length === 1 ? 'session' : 'sessions'}
@@ -197,9 +197,9 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
             onChange={(e) => setSortBy(e.target.value as any)}
             title="Sort sessions"
           >
-            <option value="recent">Recently Active</option>
-            <option value="messages">Most Turns</option>
-            <option value="oldest">Oldest First</option>
+            <option value="recent">Recently active</option>
+            <option value="messages">Most turns</option>
+            <option value="oldest">Oldest first</option>
           </select>
 
           {onRefreshSessions && (

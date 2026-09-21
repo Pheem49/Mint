@@ -33,6 +33,7 @@ import GeminiLiveOverlay from './GeminiLiveOverlay'
 import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../utils/documentTypes'
 import ModelSelectorPopover from './ModelSelectorPopover'
 import GitBranchSelector from './GitBranchSelector'
+import WorkspaceSelector from './WorkspaceSelector'
 
 import { catalogPlatform, conversationPlatform, runtimePlatform } from '../platform'
 
@@ -87,8 +88,9 @@ interface ChatPanelContract {
   onSetPlanMode?: (enabled: boolean) => void
   onSetProvider: (provider: string) => void
   /** Desktop only — see `workspacePath`. */
-  onSelectWorkspace?: () => void
+  onSelectWorkspace?: (path?: string) => void
   onWorkspaceChanged?: () => void
+  recentWorkspacePaths: string[]
   onApproval: (approved: boolean, autoApproveSession?: boolean, answer?: string) => void
   settingsConfig: any
   onUpdateSettings?: (config: any) => void
@@ -109,7 +111,7 @@ export type ConversationViewModel = Pick<ChatPanelContract,
   | 'interactions' | 'sending' | 'sendingMessage' | 'sendingImageCount' | 'sendingVideoCount'
   | 'streamedReply' | 'streamedResponse' | 'agentProgress' | 'agentActivitySnapshots'
   | 'thinkingExpanded' | 'message' | 'imageAttachments' | 'videoAttachments' | 'documentName'
-  | 'pendingApproval' | 'smartContext' | 'agentMode' | 'planMode' | 'status' | 'workspacePath'
+  | 'pendingApproval' | 'smartContext' | 'agentMode' | 'planMode' | 'status' | 'workspacePath' | 'recentWorkspacePaths'
   | 'chatEnd' | 'welcomeInteraction' | 'settingsConfig' | 'isCliSession' | 'cliSessionId'
   | 'conversationTitle'
 >
@@ -146,6 +148,7 @@ export default function ChatPanel({
   planMode,
   status,
   workspacePath,
+  recentWorkspacePaths,
   chatEnd,
   welcomeInteraction,
   onSubmit,
@@ -655,10 +658,6 @@ export default function ChatPanel({
     }
   }
   const activeModel = getActiveModel(activeProvider)
-  const workspaceName = workspacePath
-    ? workspacePath.split(/[\\/]/).filter(Boolean).pop() || workspacePath
-    : 'Select Project'
-  const workspaceAction = workspacePath ? 'Change' : 'Choose folder'
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const slashRef = useRef<SlashSuggestionsHandle>(null)
 
@@ -1376,7 +1375,7 @@ export default function ChatPanel({
                     type="button"
                     className="chat-header-back-btn"
                     onClick={onBackToCode}
-                    title="Back to Code Sessions Hub"
+                    title="Back to Code sessions Hub"
                   >
                     <svg
                       width="12"
@@ -1424,7 +1423,7 @@ export default function ChatPanel({
                   <line x1="18" y1="6" x2="6" y2="18"></line>
                   <line x1="6" y1="6" x2="18" y2="18"></line>
                 </svg>
-                <span>Close Preview</span>
+                <span>Close preview</span>
               </button>
             )}
             <button
@@ -1605,57 +1604,40 @@ export default function ChatPanel({
         {isEmptyChat && <div className="empty-chat-prompt">Mint Agent is ready to work</div>}
         {onSelectWorkspace && (
           <div className="project-context-row">
-            <button
-              type="button"
-              className={`workspace-select-btn ${workspacePath ? 'has-workspace' : 'needs-workspace'}`}
-              onClick={onSelectWorkspace}
-              aria-label={`${workspaceAction}: ${workspaceName}`}
-              title={workspacePath || 'Choose a workspace folder'}
-            >
-              <span className="workspace-select-icon" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>
-                </svg>
-              </span>
-              <span className="workspace-select-copy">
-                <span className="workspace-select-label">Workspace</span>
-                <span className="workspace-select-name">{workspaceName}</span>
-              </span>
-              {!workspacePath && (
-                <span className="workspace-select-action" aria-hidden="true">
-                  {workspaceAction}
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="m9 18 6-6-6-6" />
-                  </svg>
-                </span>
-              )}
-            </button>
+            <WorkspaceSelector
+              currentPath={workspacePath || ''}
+              recentPaths={recentWorkspacePaths}
+              onSelectWorkspace={onSelectWorkspace}
+            />
             {workspacePath && <GitBranchSelector workspacePath={workspacePath} disabled={sending} onBranchChanged={onWorkspaceChanged} />}
           </div>
         )}
         <div className="smart-context-bar">
-          <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label className="toggle-switch">
+          <label className={`smart-context-option ${smartContext ? 'is-active' : ''}`}>
+            <span className="toggle-switch">
               <input type="checkbox" checked={smartContext} onChange={(event) => onSetSmartContext(event.target.checked)} />
               <span className="slider round" />
-            </label>
-            <span>Smart Context (Auto-Screen)</span>
-          </div>
-          <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label className="toggle-switch">
+            </span>
+            <span className="smart-context-copy">
+              <span className="smart-context-title">Smart context</span>
+              <span className="smart-context-detail">Auto-Screen</span>
+            </span>
+          </label>
+          <label className={`smart-context-option ${agentMode ? 'is-active' : ''}`}>
+            <span className="toggle-switch">
               <input type="checkbox" checked={agentMode} onChange={(event) => onSetAgentMode(event.target.checked)} />
               <span className="slider round" />
-            </label>
-            <span>Agent Mode</span>
-          </div>
+            </span>
+            <span className="smart-context-copy"><span className="smart-context-title">Agent mode</span></span>
+          </label>
           {onSetPlanMode && (
-            <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }} title="Investigate read-only and require plan approval before editing files or running commands">
-              <label className="toggle-switch">
+            <label className={`smart-context-option ${planMode ? 'is-active' : ''}`} title="Investigate read-only and require plan approval before editing files or running commands">
+              <span className="toggle-switch">
                 <input type="checkbox" checked={Boolean(planMode)} onChange={(event) => onSetPlanMode(event.target.checked)} />
                 <span className="slider round" />
-              </label>
-              <span>Plan Mode</span>
-            </div>
+              </span>
+              <span className="smart-context-copy"><span className="smart-context-title">Plan mode</span></span>
+            </label>
           )}
         </div>
         {voiceMode && (

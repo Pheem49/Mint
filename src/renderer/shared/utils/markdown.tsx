@@ -408,7 +408,7 @@ function renderAlertBox(type: string, children: ReactNode): ReactNode {
           fontWeight: 700,
           fontSize: '0.86rem',
           letterSpacing: '0.3px',
-          textTransform: 'uppercase',
+          textTransform: 'none',
         }}
       >
         <IconComponent size={16} strokeWidth={2.2} />

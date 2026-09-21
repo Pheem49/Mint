@@ -28,6 +28,7 @@ export default function GitBranchSelector({ workspacePath, disabled = false, onB
   const [graphLines, setGraphLines] = useState<string[]>([])
   const [graphLoading, setGraphLoading] = useState(false)
   const [menuDirection, setMenuDirection] = useState<MenuDirection>('up')
+  const [menuAlignment, setMenuAlignment] = useState<'left' | 'right'>('left')
   const [menuMaxHeight, setMenuMaxHeight] = useState(480)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -239,10 +240,17 @@ export default function GitBranchSelector({ workspacePath, disabled = false, onB
     }
   }
 
-  const positionMenu = (preferredHeight: number) => {
+  const positionMenu = (preferredHeight: number, preferredWidth = 320) => {
     const triggerRect = triggerRef.current?.getBoundingClientRect()
     if (!triggerRect) return
     const viewportPadding = 16
+    const panelRect = rootRef.current?.closest('.conversation-panel')?.getBoundingClientRect()
+    const leftEdge = Math.max(viewportPadding, panelRect?.left ?? viewportPadding)
+    const rightEdge = Math.min(window.innerWidth - viewportPadding, panelRect?.right ?? window.innerWidth - viewportPadding)
+    const availableRight = Math.max(0, rightEdge - triggerRect.left)
+    const availableLeft = Math.max(0, triggerRect.right - leftEdge)
+    const menuWidth = Math.min(preferredWidth, window.innerWidth - viewportPadding * 2)
+    setMenuAlignment(availableRight >= menuWidth || availableRight >= availableLeft ? 'left' : 'right')
     const availableAbove = Math.max(0, triggerRect.top - viewportPadding)
     const availableBelow = Math.max(0, window.innerHeight - triggerRect.bottom - viewportPadding)
     const direction: MenuDirection = availableAbove >= preferredHeight || availableAbove >= availableBelow
@@ -253,7 +261,7 @@ export default function GitBranchSelector({ workspacePath, disabled = false, onB
   }
 
   const openGraph = () => {
-    positionMenu(420)
+    positionMenu(420, window.innerWidth <= 1100 ? 320 : 540)
     setMenuView('graph')
     loadGraph()
   }
@@ -296,7 +304,7 @@ export default function GitBranchSelector({ workspacePath, disabled = false, onB
 
       {open && (
         <div
-          className={`git-branch-menu ${menuView === 'graph' ? 'is-graph' : ''} ${menuDirection === 'down' ? 'opens-down' : ''}`}
+          className={`git-branch-menu ${menuView === 'graph' ? 'is-graph' : ''} ${menuDirection === 'down' ? 'opens-down' : ''} ${menuAlignment === 'right' ? 'align-right' : ''}`}
           id="workspace-branch-menu"
           role="dialog"
           style={{ maxHeight: `${menuMaxHeight}px` }}

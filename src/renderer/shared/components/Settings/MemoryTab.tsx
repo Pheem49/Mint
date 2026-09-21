@@ -19,13 +19,13 @@ export default function MemoryTab({
         <div className="section-heading">
           <div>
             <p className="section-kicker">Cross-session Memory</p>
-            <h2 className="section-title">User Profile & Preferences</h2>
+            <h2 className="section-title">User profile & preferences</h2>
           </div>
         </div>
 
         <div className="form-grid single">
           <div className="setting-row">
-            <label>Your Name / Nickname</label>
+            <label>Your name / nickname</label>
             <div className="memory-field-container">
               <input 
                 type="text" 
@@ -38,7 +38,7 @@ export default function MemoryTab({
           </div>
 
           <div className="setting-row">
-            <label>Custom Instructions & Preferences</label>
+            <label>Custom instructions & preferences</label>
             <div className="memory-field-container">
               <textarea 
                 value={userPreferences} 

@@ -151,7 +151,7 @@
   color: var(--text-muted, #94a3b8);
   cursor: pointer;
   transition: all 0.2s ease;
-  text-transform: capitalize;
+  text-transform: none;
 }
 
 .management-pill-btn:hover {
@@ -315,7 +315,7 @@
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .mgmt-status.ok {
@@ -593,7 +593,7 @@
 }
 
 /* Plain-text scope label (Skills: Workspace/Global) — no pill/border/dot,
-   just small uppercase colored text. A pill badge makes sense for a live
+   just small colored text. A pill badge makes sense for a live
    status (Enabled, Connected, ...) but Workspace/Global is closer to a
    category label, and the bordered-capsule-with-dot look for that read as
    generic "AI-template" chrome rather than a deliberate design choice. */
@@ -601,7 +601,7 @@
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
+  text-transform: none;
   flex-shrink: 0;
 }
 
@@ -1302,5 +1302,4 @@
   color: var(--text-muted, #94a3b8);
   line-height: 1.4;
 }
-
 

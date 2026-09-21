@@ -89,7 +89,7 @@
     font-weight: 600;
     padding: 2px 8px;
     border-radius: var(--radius-xl);
-    text-transform: uppercase;
+    text-transform: none;
     letter-spacing: 0.5px;
 }
 

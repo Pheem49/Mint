@@ -3,5 +3,10 @@
   "identifier": "main",
   "description": "Capabilities for Mint desktop windows managed by the Rust backend.",
   "windows": ["main", "settings", "spotlight", "widget", "screen-picker"],
-  "permissions": ["core:default", "dialog:default", "notification:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "dialog:default",
+    "notification:default"
+  ]
 }

@@ -29,7 +29,7 @@ interface FlattenedItem {
   model: string
 }
 
-const EFFORT_LEVELS = [
+const Effort_LEVELS = [
   { id: 'low', label: 'Low' },
   { id: 'medium', label: 'Medium' },
   { id: 'high', label: 'High' },
@@ -339,7 +339,7 @@ export default function ModelSelectorPopover({
       if (popularModels.length > 0) {
         addGroup('openrouter-popular', 'openrouter', 'OpenRouter • Popular & Recommended', popularModels)
         if (otherModels.length > 0) {
-          addGroup('openrouter-other', 'openrouter', `OpenRouter • Other Models (${otherModels.length})`, otherModels)
+          addGroup('openrouter-other', 'openrouter', `OpenRouter • Other models (${otherModels.length})`, otherModels)
         }
       } else {
         addGroup('openrouter', 'openrouter', 'OpenRouter', dynamicOpenRouter)
@@ -747,7 +747,7 @@ export default function ModelSelectorPopover({
                                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                                       <span className="model-item-name">{m.split('/').pop() || m}</span>
                                       {isFreeModel(m) && (
-                                        <span className="model-tag-badge badge-free">FREE</span>
+                                        <span className="model-tag-badge badge-free">Free</span>
                                       )}
                                     </div>
                                     {m.includes('/') && <span className="model-item-repo">{m}</span>}
@@ -839,8 +839,8 @@ export default function ModelSelectorPopover({
                 {/* Divider */}
                 <div className="model-detail-divider" />
 
-                {/* OPTIONS Section */}
-                <div className="model-detail-section-title">OPTIONS</div>
+                {/* Options Section */}
+                <div className="model-detail-section-title">Options</div>
                 <div className="model-detail-option-row">
                   <div className="option-row-left">
                     <svg
@@ -890,12 +890,12 @@ export default function ModelSelectorPopover({
                   </div>
                 )}
 
-                {/* EFFORT Section (visible when Thinking is ON) */}
+                {/* Effort Section (visible when Thinking is ON) */}
                 {inspectedThinking.enabled && (
                   <div className="model-effort-section">
-                    <div className="model-detail-section-title">EFFORT</div>
+                    <div className="model-detail-section-title">Effort</div>
                     <div className="model-effort-list">
-                      {EFFORT_LEVELS.map((level) => {
+                      {Effort_LEVELS.map((level) => {
                         const isCurrent = inspectedThinking.effort === level.id
                         return (
                           <button

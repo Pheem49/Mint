@@ -178,7 +178,7 @@ export default function SearchableModelCombobox({
         <div className="model-combobox-trigger-content">
           <span className="model-combobox-trigger-text">{displayLabel}</span>
           {isCurrentFree && (
-            <span className="model-tag-badge badge-free">FREE</span>
+            <span className="model-tag-badge badge-free">Free</span>
           )}
         </div>
         <svg
@@ -285,7 +285,7 @@ export default function SearchableModelCombobox({
                       <div className="combobox-item-left">
                         <div className="combobox-item-row">
                           <span className="combobox-item-name">{m.split('/').pop() || m}</span>
-                          {free && <span className="model-tag-badge badge-free">FREE</span>}
+                          {free && <span className="model-tag-badge badge-free">Free</span>}
                         </div>
                         {m.includes('/') && <span className="combobox-item-repo">{m}</span>}
                       </div>
@@ -300,11 +300,11 @@ export default function SearchableModelCombobox({
               </div>
             )}
 
-            {/* Other Models Group */}
+            {/* Other models Group */}
             {filteredOther.length > 0 && (
               <div className="model-combobox-group">
                 <div className="model-combobox-group-title">
-                  <span>Other Models ({filteredOther.length})</span>
+                  <span>Other models ({filteredOther.length})</span>
                 </div>
                 {!isOtherExpanded ? (
                   <div className="combobox-see-more-wrap">
@@ -339,7 +339,7 @@ export default function SearchableModelCombobox({
                           <div className="combobox-item-left">
                             <div className="combobox-item-row">
                               <span className="combobox-item-name">{m.split('/').pop() || m}</span>
-                              {free && <span className="model-tag-badge badge-free">FREE</span>}
+                              {free && <span className="model-tag-badge badge-free">Free</span>}
                             </div>
                             {m.includes('/') && <span className="combobox-item-repo">{m}</span>}
                           </div>

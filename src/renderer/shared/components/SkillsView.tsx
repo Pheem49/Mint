@@ -4,9 +4,34 @@ import { renderFormattedMessage } from '../utils/markdown'
 import '../css/management-views.css'
 import type { LearnedSkill } from '../types'
 
-/** First non-empty line of a skill's content, for the one-line row preview. */
-function firstLine(text: string): string {
-  return text.split('\n').map((l) => l.replace(/^#+\s*/, '').trim()).find(Boolean) || ''
+/** Prefer a skill's frontmatter summary; otherwise preview its first body line. */
+function skillPreview(skill: LearnedSkill): string {
+  if (skill.description?.trim()) return skill.description.trim()
+
+  const lines = skill.content.trimStart().split(/\r?\n/)
+  if (lines[0]?.trim() === '---') {
+    const frontmatterEnd = lines.findIndex((line, index) => index > 0 && line.trim() === '---')
+    if (frontmatterEnd > 0) {
+      const descriptionLine = lines
+        .slice(1, frontmatterEnd)
+        .find((line) => /^description\s*:/i.test(line.trim()))
+      if (descriptionLine) {
+        const description = descriptionLine.replace(/^\s*description\s*:\s*/i, '').trim()
+        if (description && description !== '>' && description !== '|') {
+          return description.replace(/^("([\s\S]*)"|'([\s\S]*)')$/, (_, _quoted, double, single) => double ?? single)
+        }
+      }
+
+      lines.splice(0, frontmatterEnd + 1)
+    }
+  }
+
+  return lines.map((line) => line.replace(/^#+\s*/, '').trim()).find(Boolean) || ''
+}
+
+function isWorkspaceSkill(skill: LearnedSkill): boolean {
+  // Desktop Tauri returns `location`; the Web API returns `is_workspace`.
+  return Boolean(skill.is_workspace || skill.location === 'workspace')
 }
 
 export type { LearnedSkill }
@@ -30,7 +55,7 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
   const [searchQuery, setSearchQuery] = useState('')
   const [scopeFilter, setScopeFilter] = useState<'all' | 'workspace' | 'global'>('all')
 
-  // Teach New Skill Form State
+  // Teach new skill Form State
   const [newSkillName, setNewSkillName] = useState('')
   const [newSkillContent, setNewSkillContent] = useState('')
   const [adding, setAdding] = useState(false)
@@ -93,8 +118,8 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
 
     if (!matchesSearch) return false
 
-    if (scopeFilter === 'workspace') return Boolean(s.is_workspace)
-    if (scopeFilter === 'global') return !s.is_workspace
+    if (scopeFilter === 'workspace') return isWorkspaceSkill(s)
+    if (scopeFilter === 'global') return !isWorkspaceSkill(s)
     return true
   })
 
@@ -122,7 +147,7 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
-          Teach New Skill
+          Teach new skill
         </button>
       </div>
 
@@ -189,10 +214,10 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
             <div key={s.name} className="mgmt-row" onClick={() => setDetailSkill(s)}>
               <div className="mgmt-row-main">
                 <div className="mgmt-row-title">{s.name}</div>
-                <div className="mgmt-row-sub">{s.description || firstLine(s.content)}</div>
+                <div className="mgmt-row-sub">{skillPreview(s)}</div>
               </div>
-              <span className={`management-tag ${s.is_workspace ? 'workspace' : 'global'}`}>
-                {s.is_workspace ? 'Workspace' : 'Global'}
+              <span className={`management-tag ${isWorkspaceSkill(s) ? 'workspace' : 'global'}`}>
+                {isWorkspaceSkill(s) ? 'Workspace' : 'Global'}
               </span>
             </div>
           ))}
@@ -218,8 +243,8 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
             </div>
 
             <div className="management-modal-body">
-              <span className={`management-tag ${detailSkill.is_workspace ? 'workspace' : 'global'}`}>
-                {detailSkill.is_workspace ? 'Workspace' : 'Global'}
+              <span className={`management-tag ${isWorkspaceSkill(detailSkill) ? 'workspace' : 'global'}`}>
+                {isWorkspaceSkill(detailSkill) ? 'Workspace' : 'Global'}
               </span>
 
               {detailSkill.description && (
@@ -247,13 +272,13 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
         </div>
       )}
 
-      {/* Teach New Skill Modal */}
+      {/* Teach new skill Modal */}
       {showTeachModal && (
         <div className="management-modal-overlay">
           <div className="management-modal">
             <div className="management-modal-header">
               <h2 className="management-modal-title">
-                Teach New Skill to Mint
+                Teach new skill to Mint
               </h2>
               <button
                 type="button"
@@ -268,7 +293,7 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
               <div className="management-modal-body">
                 <div className="management-form-group">
                   <label className="management-label">
-                    Skill Name (e.g. typescript-standards)
+                    Skill name (e.g. typescript-standards)
                   </label>
                   <input
                     type="text"
@@ -282,7 +307,7 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
 
                 <div className="management-form-group">
                   <label className="management-label">
-                    Skill Instructions / Content (Markdown supported)
+                    Skill instructions / content (Markdown supported)
                   </label>
                   <textarea
                     className="management-textarea-field"

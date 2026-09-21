@@ -1,5 +1,48 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Assistant Presence Widget
+
+- Made the floating assistant open the main chat when clicked and added a hover-only control that turns Assistant Presence off.
+- Fixed widget dragging by starting Tauri's native drag from the mouse-down event and granting the widget window the required permission; clicking still opens chat.
+- Persisted the Assistant Presence toggle immediately, so its enabled/disabled state survives closing Settings and restarting Mint.
+
+## Skills List Descriptions
+
+- Replaced YAML frontmatter separators in skill list previews with each skill's description, falling back to the first content line when no description exists.
+
+## Empty Chat Welcome Alignment
+
+- Centered the empty-chat welcome message above the composer on desktop while keeping the composer anchored at the bottom.
+
+## Workspace Chat Width
+
+- Let chat messages use the available pane width when Workspace and Chat are open together, instead of keeping the standalone chat's 620px message limit.
+
+## Workspace Opening Motion
+
+- Smoothed the Workspace transition by keeping grid tracks interpolable, fading the Live2D stage out instead of removing it instantly, and animating the file panel's entrance; respects reduced-motion settings.
+
+## Image Studio Send-to-Chat Draft
+
+- Changed Image Studio's Send to chat action to attach the selected full-size image to Chat input and keep its prompt editable as a draft; it no longer only fills text or sends automatically.
+
+## Sentence-Case UI Copy
+
+- Standardized English interface copy across Desktop and Web to sentence case, removing forced all-caps/capitalize styling and adjusting common navigation, settings, workspace, gallery, and action labels while preserving product names, acronyms, and model identifiers.
+
+## Image Studio Sentence-Case Copy
+
+- Removed forced uppercase styling from Image Studio labels and provider badges, and standardized visible actions and section titles to sentence case with clearer image-upload wording.
+
+## Skills Workspace Scope Labels
+
+- Fixed Skills and Plugins views labeling workspace skill files as Global by recognizing Tauri's `location` field as well as the Web API's `is_workspace` flag.
+
+## Image Studio Gallery Image Loading
+
+- Fixed saved image thumbnails failing to load in the desktop gallery by preferring the filesystem thumbnail path over the `file://` URL when converting image sources for Tauri.
+- Added a one-time fallback to the original image when a saved thumbnail cannot be loaded.
+
 ## Desktop Workspace File Explorer UI
 
 - Rebuilt the missing Workspace stylesheet as a compact desktop file explorer with a clear header, flat action toolbar, sticky project root, correctly sized material file icons, and dense scannable tree rows.
@@ -201,6 +244,11 @@ Overhauled session management in the CLI to give every conversation its own isol
   - Integrated `/resume` dispatch in `slashCommandProcessor.ts` and `MintDashboard.tsx` to hot-swap active conversations seamlessly on Desktop and Web.
 # Unreleased
 
+- Fixed the Git branch menu clipping behind the Workspace pane by positioning it within the conversation panel and aligning to the side with more available room.
+- Added a searchable Workspace menu with up to eight recent folders, a current-workspace checkmark, and an Open folder action that reuses the native folder picker.
+- Restyled Workspace and Git branch selection as a compact project-context bar with a distinct workspace chip and adjacent branch control, preserving folder selection, branch menus, and responsive truncation on Desktop and Web.
+- Matched the Chat composer frame's top and bottom corner radii at 16px across Desktop and Web, including the workspace selector, mode bar, and input form.
+- Refined the Chat composer mode controls into unified, fully clickable options with clearer active, hover, keyboard-focus, and narrow-screen states; preserved the existing Smart Context, Agent Mode, and Plan Mode behavior across Desktop and Web.
 - Centralized Git branch-change safety decisions in mint-core; CLI, interactive /branch, and Desktop now use the same workspace-change module before switching, creating, or tracking a branch.
 - Added a shared workspace platform module. Shared Git and workspace renderer modules now cross one interface, while Desktop and Web install their own adapters at startup.
 - Started moving workspace tree and relative-path policy into mint-core's Workspace module.

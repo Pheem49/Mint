@@ -1195,6 +1195,9 @@ export function installTauriAdapters() {
 
     (window as any).widgetAPI = {
       onStateChange: () => {},
+      openChat: async () => {},
+      setVisible: async () => {},
+      startDragging: async () => {},
     };
 
     (window as any).screenPickerApi = {
@@ -1458,6 +1461,9 @@ export function installTauriAdapters() {
       const { listen } = await import('@tauri-apps/api/event')
       void listen<string>('widget-state', (event) => callback(event.payload))
     },
+    openChat: async () => {},
+    setVisible: async () => {},
+    startDragging: async () => {},
   }
 
   window.screenPickerApi = {

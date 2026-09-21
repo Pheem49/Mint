@@ -16,6 +16,11 @@ import { isNativePluginEnabled, applyNativePluginToggle } from '../../utils/nati
 
 const { listLearnedSkills, addLearnedSkill, deleteLearnedSkill, detectSystemTools, listMcpServerTools } = catalogPlatform
 
+function isWorkspaceSkill(skill: LearnedSkill): boolean {
+  // Desktop Tauri returns `location`; the Web API returns `is_workspace`.
+  return Boolean(skill.is_workspace || skill.location === 'workspace')
+}
+
 interface PluginsTabProps {
   config: typeof DEFAULT_CONFIG
   updateField: (field: keyof typeof DEFAULT_CONFIG, value: any) => void
@@ -278,7 +283,7 @@ export default function PluginsTab({
       <section className="setting-section">
         <div className="section-heading">
           <div>
-            <p className="section-kicker">Knowledge Base</p>
+            <p className="section-kicker">Knowledge base</p>
             <h2 className="section-title">Learned AI Skills</h2>
           </div>
         </div>
@@ -294,8 +299,8 @@ export default function PluginsTab({
                 <div className="skill-card-body">
                   <div className="plugin-name-row">
                     <span className="plugin-tag accent">{s.name}</span>
-                    <span className={`plugin-tag ${s.is_workspace ? 'ok' : 'info'}`}>
-                      {s.is_workspace ? 'Workspace' : 'Global'}
+                    <span className={`plugin-tag ${isWorkspaceSkill(s) ? 'ok' : 'info'}`}>
+                      {isWorkspaceSkill(s) ? 'Workspace' : 'Global'}
                     </span>
                   </div>
                   <p className="skill-card-desc">{s.description || s.content}</p>
@@ -312,11 +317,11 @@ export default function PluginsTab({
         )}
 
         <form className="add-skill-box" onSubmit={handleAddSkill}>
-          <h3>Teach New Skill</h3>
+          <h3>Teach new skill</h3>
           {skillsError && <p className="profile-message-error">{skillsError}</p>}
 
           <div className="setting-row stacked">
-            <label>Skill Name (e.g. coding-guidelines)</label>
+            <label>Skill name (e.g. coding-guidelines)</label>
             <input
               type="text"
               placeholder="e.g. angular-standard"
@@ -326,7 +331,7 @@ export default function PluginsTab({
           </div>
 
           <div className="setting-row stacked">
-            <label>Skill Instructions / Content</label>
+            <label>Skill instructions / content</label>
             <textarea
               placeholder="# Instructions&#10;Write only clean TypeScript. Use async/await."
               value={newSkillContent}
@@ -341,12 +346,12 @@ export default function PluginsTab({
         </form>
       </section>
 
-      {/* ── 2. External tools (MCP Servers) ── */}
+      {/* ── 2. External tools (MCP servers) ── */}
       <section className="setting-section">
         <div className="section-heading">
           <div>
             <p className="section-kicker">External tools</p>
-            <h2 className="section-title">MCP Servers</h2>
+            <h2 className="section-title">MCP servers</h2>
             <p className="section-desc" style={{ opacity: 0.7, fontSize: '0.85rem' }}>
               Add, edit, enable/disable a server and choose which of its tools the agent may
               call. The same manager opens full-screen with <code>/mcp</code> in chat.
@@ -460,7 +465,7 @@ export default function PluginsTab({
                       </div>
 
                       <div className="setting-row stacked">
-                        <label>Environment Variables (JSON format)</label>
+                        <label>Environment variables (JSON format)</label>
                         <textarea
                           value={typeof srvConfig.env === 'object' ? JSON.stringify(srvConfig.env, null, 2) : (srvConfig.env || '')}
                           onChange={(e) => {
@@ -503,7 +508,7 @@ export default function PluginsTab({
           />
           <div className="form-grid two-col">
             <div className="setting-row stacked">
-              <label>Server Name</label>
+              <label>Server name</label>
               <input
                 type="text"
                 placeholder="e.g. google-search"
@@ -540,7 +545,7 @@ export default function PluginsTab({
             />
           </div>
           <div className="setting-row stacked">
-            <label>Environment Variables (JSON)</label>
+            <label>Environment variables (JSON)</label>
             <textarea
               placeholder='e.g. {"BRAVE_API_KEY": "your_key_here"}'
               value={mcpEnv}

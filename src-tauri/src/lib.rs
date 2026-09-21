@@ -1607,6 +1607,14 @@ fn read_workspace_file(path: String, workspace_path: Option<String>) -> Result<S
 
 #[tauri::command]
 fn open_window(app: AppHandle, kind: String) -> Result<(), String> {
+    if kind == "main" {
+        let window = app
+            .get_webview_window("main")
+            .ok_or_else(|| "main window is unavailable".to_string())?;
+        window.show().map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
     open_desktop_window(&app, &kind)?;
     if kind == "widget" {
         position_widget(&app);

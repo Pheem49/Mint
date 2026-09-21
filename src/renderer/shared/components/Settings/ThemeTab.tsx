@@ -107,12 +107,12 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
         <div className="section-heading">
           <div>
             <p className="section-kicker">Appearance</p>
-            <h2 className="section-title">Theme Presets</h2>
+            <h2 className="section-title">Theme presets</h2>
             <p className="section-subtitle">Curated, complete visual profiles ready in one click</p>
           </div>
         </div>
 
-        <div className="theme-preset-grid" role="radiogroup" aria-label="Theme Presets">
+        <div className="theme-preset-grid" role="radiogroup" aria-label="Theme presets">
           {THEME_PRESETS.map((preset, index) => {
             const active = isPresetActive(preset)
             return (
@@ -191,16 +191,16 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
       <section className="setting-section">
         <div className="section-heading">
           <div>
-            <p className="section-kicker">Core System</p>
-            <h2 className="section-title">Color Mode & Accent</h2>
+            <p className="section-kicker">Core system</p>
+            <h2 className="section-title">Color mode & accent</h2>
           </div>
         </div>
 
         <div className="form-grid">
-          {/* Color Mode Cards */}
+          {/* Color mode Cards */}
           <div className="setting-row stacked">
-            <label>Color Mode</label>
-            <div className="color-mode-grid" role="radiogroup" aria-label="Color Mode">
+            <label>Color mode</label>
+            <div className="color-mode-grid" role="radiogroup" aria-label="Color mode">
               {COLOR_MODES.map((mode) => {
                 const isSelected = (config.theme || 'dark') === mode.id
                 return (
@@ -241,10 +241,10 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
             </div>
           </div>
 
-          {/* Accent Flavors */}
+          {/* Accent flavors */}
           <div className="setting-row stacked">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label>Accent Flavor</label>
+              <label>Accent flavor</label>
               <button
                 type="button"
                 className="custom-accent-toggle"
@@ -255,7 +255,7 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
             </div>
 
             {!showCustomAccent ? (
-              <div className="flavor-grid" role="radiogroup" aria-label="Accent Flavors">
+              <div className="flavor-grid" role="radiogroup" aria-label="Accent flavors">
                 {ACCENT_FLAVORS.map((flavor) => {
                   const isSelected = currentAccent === flavor.color.toLowerCase()
                   const isWhite = flavor.color.toLowerCase() === '#ffffff'
@@ -300,10 +300,10 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
             )}
           </div>
 
-          {/* Surface Style: Opaque vs Glassmorphism */}
+          {/* Surface style: Opaque vs Glassmorphism */}
           <div className="setting-row stacked">
-            <label>Surface Style</label>
-            <div className="surface-style-grid" role="radiogroup" aria-label="Surface Style">
+            <label>Surface style</label>
+            <div className="surface-style-grid" role="radiogroup" aria-label="Surface style">
               <button
                 type="button"
                 role="radio"
@@ -345,8 +345,8 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
           {/* Glass Blur Options (if glass is active) */}
           {config.surfaceStyle !== 'opaque' && config.glassBlur !== 'none' && (
             <div className="setting-row">
-              <label>Blur Intensity</label>
-              <div className="pill-segmented" role="radiogroup" aria-label="Glass Blur Intensity">
+              <label>Blur intensity</label>
+              <div className="pill-segmented" role="radiogroup" aria-label="Glass Blur intensity">
                 {[
                   { id: 'blur(4px)', label: 'Low' },
                   { id: 'blur(16px)', label: 'Medium' },
@@ -379,23 +379,23 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
         </div>
         <div className="form-grid">
           <div className="setting-row">
-            <label>Font Family</label>
+            <label>Font family</label>
             <select value={config.fontFamily} onChange={(e) => updateField('fontFamily', e.target.value)}>
               <option value="'Prompt', 'Noto Sans Thai', 'Inter', sans-serif">Prompt / Noto Sans Thai (ChatGPT Style - Default)</option>
               <option value="'Outfit', sans-serif">Outfit (Geometric Modern)</option>
               <option value="'Inter', sans-serif">Inter (Clean Sans-Serif)</option>
               <option value="'Prompt', sans-serif">Prompt (Modern Thai)</option>
-              <option value="'Noto Sans Thai', sans-serif">Noto Sans Thai (Clean Thai)</option>
+              <option value="'Noto Sans Thai', sans-serif">Noto Sans Thai (clean Thai)</option>
               <option value="'Sarabun', sans-serif">Sarabun (Formal Thai)</option>
               <option value="'Kanit', sans-serif">Kanit (Trendy Thai)</option>
               <option value="'Mitr', sans-serif">Mitr (Friendly Thai)</option>
               <option value="'Mali', cursive">Mali (Cute Thai Font)</option>
-              <option value="'Fira Code', monospace">Fira Code (Developer Code Font)</option>
+              <option value="'Fira Code', monospace">Fira Code (developer code font)</option>
             </select>
           </div>
           <div className="setting-row">
-            <label>Font Size</label>
-            <div className="pill-segmented" role="radiogroup" aria-label="Font Size">
+            <label>Font size</label>
+            <div className="pill-segmented" role="radiogroup" aria-label="Font size">
               {[
                 { id: '16px', label: 'Small' },
                 { id: '18px', label: 'Medium' },

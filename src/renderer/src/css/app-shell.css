@@ -684,7 +684,7 @@ h1 {
 /* Workspace is a two-pane working view: files on the left, conversation on
    the right. The Live2D stage is intentionally replaced by the file tree. */
 .assistant-workspace.workspace-open {
-  grid-template-columns: minmax(360px, 520px) minmax(460px, 1fr);
+  grid-template-columns: minmax(360px, 0.6fr) minmax(460px, 1.4fr);
 }
 
 .assistant-workspace.workspace-open .workspace-panel {
@@ -693,7 +693,16 @@ h1 {
 }
 
 .assistant-workspace.workspace-open .model-stage {
-  display: none;
+  grid-column: 2;
+  grid-row: 1;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-20px) scale(0.985);
+  transition: opacity 0.3s ease,
+              transform 0.48s cubic-bezier(0.16, 1, 0.3, 1),
+              padding 0.48s cubic-bezier(0.16, 1, 0.3, 1),
+              visibility 0s linear 0.48s;
 }
 
 .assistant-workspace.workspace-open .chat-panel-split-wrapper {
@@ -702,6 +711,20 @@ h1 {
   width: 100%;
   min-width: 0;
   justify-self: stretch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-workspace {
+    transition: none;
+  }
+
+  .assistant-workspace.workspace-open .model-stage {
+    transition: none;
+  }
+}
+
+.assistant-workspace.workspace-open .message {
+  max-width: 100%;
 }
 
 .app-body.sidebar-collapsed .assistant-workspace {
@@ -980,6 +1003,19 @@ h1 {
    height. Anchor the desktop empty state to the full workspace instead, so
    the header never follows the vertically-centered composer. */
 @media (min-width: 761px) {
+  .conversation-panel.is-empty .input-area {
+    position: relative;
+  }
+
+  .conversation-panel.is-empty .empty-chat-prompt {
+    position: absolute;
+    top: -100%;
+    right: 0;
+    left: 0;
+    margin: 0;
+    pointer-events: none;
+  }
+
   .assistant-workspace:not(.workspace-open) .conversation-panel.is-empty {
     position: static;
   }
@@ -1304,7 +1340,7 @@ h1 {
   color: var(--accent);
   font-size: 0.72rem;
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.05em;
   padding: 4px 10px;
 }

@@ -263,7 +263,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                       background: 'rgba(245, 158, 11, 0.15)',
                       padding: '1px 6px',
                       borderRadius: '4px',
-                      textTransform: 'uppercase',
+                      textTransform: 'none',
                     }}
                   >
                     Review carefully

@@ -29,8 +29,8 @@ export default function AutomationTab({
         </div>
         <div className="form-grid single">
           <div className="setting-row">
-            <label>Browser Engine</label>
-            <div className="pill-segmented" role="radiogroup" aria-label="Browser Engine">
+            <label>Browser engine</label>
+            <div className="pill-segmented" role="radiogroup" aria-label="Browser engine">
               {[
                 { id: 'chromium', label: 'Chromium' },
                 { id: '/usr/bin/firefox', label: 'Firefox' },
@@ -50,12 +50,12 @@ export default function AutomationTab({
             <p className="hint">Chromium is bundled; Firefox uses your system install (Linux).</p>
           </div>
           <div className="setting-row">
-            <label>Chromium DevTools Endpoint</label>
+            <label>Chromium DevTools endpoint</label>
             <input type="text" value={config.browserDebugUrl} onChange={(e) => updateField('browserDebugUrl', e.target.value)} />
             <p className="hint">Required for native tab reading and selector clicks.</p>
           </div>
           <div className="setting-row">
-            <label>Browser Extension Context Endpoint</label>
+            <label>Browser extension context endpoint</label>
             <input type="text" value={config.browserExtensionContextUrl} onChange={(e) => updateField('browserExtensionContextUrl', e.target.value)} />
             <p className="hint">Fallback endpoint used when Chromium remote debugging is unavailable.</p>
           </div>
@@ -66,7 +66,7 @@ export default function AutomationTab({
         <div className="section-heading">
           <div>
             <p className="section-kicker">Behavior</p>
-            <h2 className="section-title">Agent Behavior</h2>
+            <h2 className="section-title">Agent behavior</h2>
           </div>
         </div>
         <div className="toggle-card">
@@ -117,7 +117,7 @@ export default function AutomationTab({
         </div>
         <div className="slider-stack">
           <div className="setting-row">
-            <label>Screen Capture Frequency</label>
+            <label>Screen capture frequency</label>
             <div className="slider-group">
               <input 
                 type="range" 
@@ -133,7 +133,7 @@ export default function AutomationTab({
             <p className="hint">Lower values respond faster but use more API calls.</p>
           </div>
           <div className="setting-row">
-            <label>Suggestion Cooldown</label>
+            <label>Suggestion cooldown</label>
             <div className="slider-group">
               <input 
                 type="range" 
@@ -155,7 +155,7 @@ export default function AutomationTab({
         <div className="section-heading">
           <div>
             <p className="section-kicker">Messaging</p>
-            <h2 className="section-title">Native Channel Bridges</h2>
+            <h2 className="section-title">Native channel bridges</h2>
           </div>
         </div>
 
@@ -217,7 +217,7 @@ export default function AutomationTab({
                       {config.enableTelegramBridge ? 'Active' : 'Disabled'}
                     </span>
                   </span>
-                  <span className="bridge-subtitle">Long Polling Engine (getUpdates)</span>
+                  <span className="bridge-subtitle">Long polling engine (getUpdates)</span>
                 </div>
               </div>
               <label className="settings-toggle-switch">
@@ -405,7 +405,7 @@ export default function AutomationTab({
                       {config.enableWhatsappBridge ? 'Active' : 'Disabled'}
                     </span>
                   </span>
-                  <span className="bridge-subtitle">Meta Cloud API Webhook Listener</span>
+                  <span className="bridge-subtitle">Meta Cloud API webhook listener</span>
                 </div>
               </div>
               <label className="settings-toggle-switch">

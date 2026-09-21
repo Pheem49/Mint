@@ -442,7 +442,7 @@
   color: var(--text-muted, #94a3b8);
   font-size: 0.76rem;
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.05em;
   flex-shrink: 0;
 }
@@ -787,6 +787,18 @@
   overflow: hidden;
   position: relative;
   z-index: 1;
+  animation: workspacePanelEnter 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes workspacePanelEnter {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .workspace-panel-header {
@@ -810,7 +822,7 @@
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: 0.1em;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .workspace-panel-header h2 {
@@ -1141,6 +1153,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .workspace-panel {
+    animation: none;
+  }
+
   .workspace-agent-pill[data-state="thinking"]::before {
     animation: none;
   }
@@ -1243,4 +1259,3 @@
 .sidebar-search-btn {
   margin-top: 4px;
 }
-

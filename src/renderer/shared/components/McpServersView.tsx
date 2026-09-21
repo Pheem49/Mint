@@ -196,7 +196,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
           headers = JSON.parse(customHeaders.trim())
         } catch {
           setTestStatus('error')
-          setTestMessage('Invalid JSON in Custom Headers field.')
+          setTestMessage('Invalid JSON in Custom headers field.')
           return
         }
       }
@@ -207,7 +207,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
       const res = await testMcpConnection(mcpUrl.trim(), headers)
       if (res.ok) {
         setTestStatus('success')
-        const name = res.server_info?.name || 'Remote Server'
+        const name = res.server_info?.name || 'Remote server'
         const count = res.tools_count ?? 0
         setTestMessage(`Connected: ${name} (${count} tools discovered)`)
       } else {
@@ -239,7 +239,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
         try {
           headers = JSON.parse(customHeaders.trim())
         } catch {
-          alert('Invalid JSON in Custom Headers field.')
+          alert('Invalid JSON in Custom headers field.')
           return
         }
       }
@@ -298,7 +298,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
             <span className="management-title-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
               {renderMcpHubSvgIcon(22, 'var(--accent)')}
             </span>
-            MCP Servers
+            MCP servers
           </h1>
           <p className="management-subtitle">
             Connect external tool servers.
@@ -377,7 +377,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
       )}
 
       {/* MCP Server List */}
-      <h2 className="management-section-title">All Servers</h2>
+      <h2 className="management-section-title">All servers</h2>
       {filteredMcpItems.length === 0 ? (
         <div className="mgmt-empty">
           <p>{searchQuery ? 'No MCP servers match your search.' : 'No MCP servers yet.'}</p>
@@ -490,7 +490,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
 
                 {item.isConfigured && (
                   <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border, rgba(255, 255, 255, 0.08))' }}>
-                    <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent, #3b82f6)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 12px' }}>
+                    <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent, #3b82f6)', textTransform: 'none', letterSpacing: '0.5px', margin: '0 0 12px' }}>
                       Server Config
                     </h4>
                     {srvConfig.url ? (
@@ -508,7 +508,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                           />
                         </div>
                         <div className="management-form-group">
-                          <label className="management-label">Custom Headers (JSON)</label>
+                          <label className="management-label">Custom headers (JSON)</label>
                           <textarea
                             className="management-textarea-field"
                             value={typeof srvConfig.headers === 'object' ? JSON.stringify(srvConfig.headers, null, 2) : srvConfig.headers || ''}
@@ -566,7 +566,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                           />
                         </div>
                         <div className="management-form-group">
-                          <label className="management-label">Environment Variables (JSON)</label>
+                          <label className="management-label">Environment variables (JSON)</label>
                           <textarea
                             className="management-textarea-field"
                             value={typeof srvConfig.env === 'object' ? JSON.stringify(srvConfig.env, null, 2) : srvConfig.env || ''}
@@ -638,7 +638,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
         <div className="management-modal-overlay" onClick={() => setShowAddModal(false)}>
           <div className="management-modal" onClick={(e) => e.stopPropagation()}>
             <div className="management-modal-header">
-              <h2 className="management-modal-title">Add New MCP Server</h2>
+              <h2 className="management-modal-title">Add new MCP server</h2>
               <button type="button" className="management-modal-close" onClick={() => setShowAddModal(false)}>
                 ✕
               </button>
@@ -657,7 +657,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                       setTestMessage('')
                     }}
                   >
-                    <Globe size={15} /> Remote Server (URL / SSE)
+                    <Globe size={15} /> Remote server (URL / SSE)
                   </button>
                   <button
                     type="button"
@@ -668,7 +668,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                       setTestMessage('')
                     }}
                   >
-                    <Terminal size={15} /> Local Command (stdio)
+                    <Terminal size={15} /> Local command (stdio)
                   </button>
                 </div>
 
@@ -676,7 +676,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                   <>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                       <div className="management-form-group">
-                        <label className="management-label">Server Name</label>
+                        <label className="management-label">Server name</label>
                         <input
                           type="text"
                           className="management-input-field"
@@ -699,8 +699,8 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                           style={{ cursor: 'pointer' }}
                         >
                           <option value="none">None (Public)</option>
-                          <option value="bearer">Bearer Token</option>
-                          <option value="custom">Custom Headers (JSON)</option>
+                          <option value="bearer">Bearer token</option>
+                          <option value="custom">Custom headers (JSON)</option>
                         </select>
                       </div>
                     </div>
@@ -723,7 +723,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
 
                     {authType === 'bearer' && (
                       <div className="management-form-group">
-                        <label className="management-label">Bearer Token</label>
+                        <label className="management-label">Bearer token</label>
                         <input
                           type="password"
                           className="management-input-field"
@@ -766,7 +766,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                       />
                     </div>
 
-                    {/* Test Connection Bar */}
+                    {/* Test connection Bar */}
                     <div className="mcp-test-row">
                       <button
                         type="button"
@@ -780,7 +780,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                           </>
                         ) : (
                           <>
-                            <Zap size={13} /> Test Connection
+                            <Zap size={13} /> Test connection
                           </>
                         )}
                       </button>
@@ -821,7 +821,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                   <>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                       <div className="management-form-group">
-                        <label className="management-label">Server Name</label>
+                        <label className="management-label">Server name</label>
                         <input
                           type="text"
                           className="management-input-field"
@@ -867,7 +867,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                     </div>
 
                     <div className="management-form-group">
-                      <label className="management-label">Environment Variables (JSON)</label>
+                      <label className="management-label">Environment variables (JSON)</label>
                       <textarea
                         className="management-textarea-field"
                         placeholder='e.g. {"BRAVE_API_KEY": "your_key_here"}'
@@ -912,12 +912,12 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
         </div>
       )}
 
-      {/* MCP Catalog Modal */}
+      {/* MCP catalog Modal */}
       {showCatalogModal && (
         <div className="management-modal-overlay" onClick={() => setShowCatalogModal(false)}>
           <div className="management-modal mcp-catalog-modal" onClick={(e) => e.stopPropagation()}>
             <div className="management-modal-header">
-              <h2 className="management-modal-title">MCP Catalog</h2>
+              <h2 className="management-modal-title">MCP catalog</h2>
               <button type="button" className="management-modal-close" onClick={() => setShowCatalogModal(false)}>
                 ✕
               </button>

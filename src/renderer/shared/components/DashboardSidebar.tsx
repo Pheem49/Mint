@@ -230,7 +230,7 @@ export default function DashboardSidebar({
             <line x1="5" y1="12" x2="19" y2="12"></line>
           </svg>
         </span>
-        <span>New Chat</span>
+        <span>New chat</span>
       </button>
 
       <button className="sidebar-top-action sidebar-search-btn" onClick={() => onSetSearchOpen(true)}>
@@ -240,7 +240,7 @@ export default function DashboardSidebar({
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
         </span>
-        <span>Search Chats</span>
+        <span>Search chats</span>
       </button>
 
       <button className={`sidebar-top-action ${view === 'chat' ? 'is-active' : ''}`} onClick={() => onSetView('chat')}>
@@ -308,7 +308,7 @@ export default function DashboardSidebar({
               <circle cx="12" cy="7" r="4"></circle>
             </svg>
           </span>
-          <span>Live2D Model</span>
+          <span>Live2D model</span>
         </button>
       )}
 
@@ -331,7 +331,7 @@ export default function DashboardSidebar({
             </button>
             <button className={`popover-item ${view === 'mcp' ? 'active' : ''}`} onClick={() => { onSetView('mcp'); setIsMoreOpen(false); }}>
               <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderMcpHubSvgIcon(15)}</span>
-              <span>MCP Servers</span>
+              <span>MCP servers</span>
             </button>
             <button className={`popover-item ${view === 'plugins' ? 'active' : ''}`} onClick={() => { onSetView('plugins'); setIsMoreOpen(false); }}>
               <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderPluginsSvgIcon(15)}</span>
@@ -339,11 +339,11 @@ export default function DashboardSidebar({
             </button>
             <button className={`popover-item ${view === 'cron' ? 'active' : ''}`} onClick={() => { onSetView('cron'); setIsMoreOpen(false); }}>
               <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderScheduledTasksSvgIcon(15)}</span>
-              <span>Scheduled Tasks</span>
+              <span>Scheduled tasks</span>
             </button>
             <button className={`popover-item ${view === 'link' ? 'active' : ''}`} onClick={() => { onSetView('link'); setIsMoreOpen(false); }}>
               <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderLinkedFoldersSvgIcon(15)}</span>
-              <span>Linked Folders</span>
+              <span>Linked folders</span>
             </button>
             {!promoteMediaStudios && (
               <button className={`popover-item ${view === 'imagine' ? 'active' : ''}`} onClick={() => { onSetView('imagine'); setIsMoreOpen(false); }}>
@@ -437,7 +437,7 @@ export default function DashboardSidebar({
           <button
             className={`sidebar-project sidebar-chat-item ${view === 'code' ? 'active' : ''}`}
             onClick={() => onSetView('code')}
-            title="Code Sessions Hub"
+            title="Code sessions Hub"
           >
             <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -445,7 +445,7 @@ export default function DashboardSidebar({
                 <line x1="12" y1="19" x2="20" y2="19"></line>
               </svg>
             </span>
-            <span className="sidebar-chat-title">Code Hub</span>
+            <span className="sidebar-chat-title">Code hub</span>
             <span
               style={{
                 marginLeft: 'auto',
@@ -600,7 +600,7 @@ export default function DashboardSidebar({
               </button>
               <button className={`popover-item ${view === 'mcp' ? 'active' : ''}`} onClick={() => { onSetView('mcp'); setIsAccountMenuOpen(false); }}>
                 <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderMcpHubSvgIcon(15)}</span>
-                <span>MCP Servers</span>
+                <span>MCP servers</span>
               </button>
               <button className={`popover-item ${view === 'plugins' ? 'active' : ''}`} onClick={() => { onSetView('plugins'); setIsAccountMenuOpen(false); }}>
                 <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderPluginsSvgIcon(15)}</span>
@@ -608,11 +608,11 @@ export default function DashboardSidebar({
               </button>
               <button className={`popover-item ${view === 'cron' ? 'active' : ''}`} onClick={() => { onSetView('cron'); setIsAccountMenuOpen(false); }}>
                 <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderScheduledTasksSvgIcon(15)}</span>
-                <span>Scheduled Tasks</span>
+                <span>Scheduled tasks</span>
               </button>
               <button className={`popover-item ${view === 'link' ? 'active' : ''}`} onClick={() => { onSetView('link'); setIsAccountMenuOpen(false); }}>
                 <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderLinkedFoldersSvgIcon(15)}</span>
-                <span>Linked Folders</span>
+                <span>Linked folders</span>
               </button>
               <div className="sidebar-account-menu-divider" />
               <button className="popover-item" onClick={() => { setIsAccountMenuOpen(false); logout(); }}>

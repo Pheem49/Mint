@@ -224,7 +224,7 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.65rem;
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.04em;
   color: var(--accent, #10b981);
   background: color-mix(in srgb, var(--accent, #10b981) 12%, transparent);

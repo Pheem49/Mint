@@ -376,7 +376,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
           <button
             type="button"
             onClick={onClose}
-            title="Close Preview Panel"
+            title="Close preview Panel"
             style={{
               background: 'none',
               border: 'none',

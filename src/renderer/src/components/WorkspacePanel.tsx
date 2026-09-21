@@ -169,7 +169,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
     <section className="workspace-panel">
       <header className="workspace-panel-header">
         <div>
-          <span className="workspace-kicker">Agent Workspace</span>
+          <span className="workspace-kicker">Agent workspace</span>
           <h2>Workspace</h2>
         </div>
         <span className="workspace-agent-pill" data-state={sending ? 'thinking' : agentMode ? 'agent' : 'idle'}>
@@ -178,8 +178,8 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
       </header>
 
       <div className="workspace-panel-actions">
-        <button type="button" onClick={handleCreateFile} disabled={!workspacePath.trim()}>New File</button>
-        <button type="button" onClick={handleCreateFolder} disabled={!workspacePath.trim()}>New Folder</button>
+        <button type="button" onClick={handleCreateFile} disabled={!workspacePath.trim()}>New file</button>
+        <button type="button" onClick={handleCreateFolder} disabled={!workspacePath.trim()}>New folder</button>
         <button type="button" onClick={refresh} disabled={!workspacePath.trim()}>Refresh</button>
       </div>
 

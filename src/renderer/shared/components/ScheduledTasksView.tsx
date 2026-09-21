@@ -94,7 +94,7 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
     const [showAddModal, setShowAddModal] = useState(false)
     const [detailJob, setDetailJob] = useState<CronJob | null>(null)
 
-    // Picker inputs for the "New Scheduled Task" form — build the cron
+    // Picker inputs for the "New scheduled task" form — build the cron
     // expression `newSchedule` from a clock/calendar UI instead of asking
     // everyone to type raw cron syntax. "custom" leaves newSchedule as a
     // free-text field for anyone who wants to type cron directly.
@@ -276,7 +276,7 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
               <span className="management-title-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
                 {renderScheduledTasksSvgIcon(22, 'var(--accent)')}
               </span>
-              Scheduled Tasks
+              Scheduled tasks
             </h1>
             <p className="management-subtitle">
               Tasks that run on a schedule in the background.
@@ -287,7 +287,7 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            New Scheduled Task
+            New scheduled task
           </button>
         </div>
 
@@ -442,7 +442,7 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
           <div className="management-modal-overlay">
             <div className="management-modal">
               <div className="management-modal-header">
-                <h2 className="management-modal-title">New Scheduled Task</h2>
+                <h2 className="management-modal-title">New scheduled task</h2>
                 <button type="button" className="management-modal-close" onClick={() => setShowAddModal(false)}>
                   ✕
                 </button>

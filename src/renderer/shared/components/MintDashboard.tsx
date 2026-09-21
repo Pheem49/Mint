@@ -12,7 +12,7 @@ const {
   cancelChatMessage, submitToolApproval, listen, readClipboardImage,
 } = conversationPlatform
 const { getRuntimeStatus, setActiveModel, selectWorkspaceDirectory, selectLinkedFolderPath, isTauriRuntime } = runtimePlatform
-const { listSavedPictures } = mediaPlatform
+const { listSavedPictures, convertFileSrc } = mediaPlatform
 const {
   listLearnedSkills, addLearnedSkill, deleteLearnedSkill, detectSystemTools, reauthMcpServer,
   listMcpServerTools, setProfileValue, listCronJobs, addCronJob, removeCronJob,
@@ -60,9 +60,23 @@ const ACCESSORIES = [
 import { DEFAULT_CONFIG } from '../constants/config'
 
 const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
+const RECENT_WORKSPACE_PATHS_KEY = 'mint:recent-workspace-paths'
+const MAX_RECENT_WORKSPACES = 8
 const ACTIVE_CONVERSATION_ID_KEY = 'mint:active-conversation-id'
 const LAST_ACTIVE_TIME_KEY = 'mint:last-active-timestamp'
 const DESKTOP_INACTIVITY_THRESHOLD_MS = 30 * 60 * 1000 // 30 minutes
+
+function readRecentWorkspacePaths(): string[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(RECENT_WORKSPACE_PATHS_KEY) || '[]')
+    return Array.isArray(parsed)
+      ? [...new Set(parsed.filter((path): path is string => typeof path === 'string' && Boolean(path.trim())))].slice(0, MAX_RECENT_WORKSPACES)
+      : []
+  } catch {
+    return []
+  }
+}
 
 function touchActiveTimestamp() {
   if (typeof window === 'undefined') return
@@ -186,7 +200,7 @@ function activeConversationId() {
     }
   }
 
-  // When visiting Root URL ('/' or '/chat' without specific ID), always start a fresh New Chat
+  // When visiting Root URL ('/' or '/chat' without specific ID), always start a fresh New chat
   // (matching ChatGPT / Claude / Gemini industry-standard UX).
   // Applies to Web UI always, and Desktop App upon cold launch / inactivity / new day.
   if (isRootOrNewChatRoute()) {
@@ -325,6 +339,20 @@ export default function MintDashboard() {
   // `changeView` can close it on every navigation without branching.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [workspaceRefreshRevision, setWorkspaceRefreshRevision] = useState(0)
+  const [recentWorkspacePaths, setRecentWorkspacePaths] = useState<string[]>(readRecentWorkspacePaths)
+
+  useEffect(() => {
+    const currentPath = workspacePath.trim()
+    if (!currentPath) return
+    const recent = [currentPath, ...readRecentWorkspacePaths().filter((path) => path !== currentPath)]
+      .slice(0, MAX_RECENT_WORKSPACES)
+    try {
+      window.localStorage.setItem(RECENT_WORKSPACE_PATHS_KEY, JSON.stringify(recent))
+    } catch {
+      /* Keep the in-memory recent list usable when storage is unavailable. */
+    }
+    setRecentWorkspacePaths(recent)
+  }, [workspacePath])
 
   const changeView = (newView: any, targetConversationId?: string) => {
     setMobileSidebarOpen(false)
@@ -1241,9 +1269,9 @@ export default function MintDashboard() {
     conversationActions.compose(message.trim() ? `Search web: ${message.trim()}` : 'Search web: ')
   }
 
-  async function selectWorkspace() {
+  async function selectWorkspace(path?: string) {
     try {
-      const selected = await selectWorkspaceDirectory()
+      const selected = path || await selectWorkspaceDirectory()
       if (selected) {
         updateWorkspacePath(selected)
         changeView('workspace')
@@ -1690,6 +1718,7 @@ export default function MintDashboard() {
     planMode,
     status,
     workspacePath,
+    recentWorkspacePaths,
     chatEnd,
     welcomeInteraction: MOCK_WELCOME_INTERACTION,
     settingsConfig,
@@ -1950,9 +1979,21 @@ export default function MintDashboard() {
         <ImageStudioPanel
           view={view}
           onRefreshPictures={refreshPictures}
-          onSendToChat={(_url, imgPrompt) => {
-            changeView('chat')
-            conversationActions.compose(imgPrompt)
+          onSendToChat={async (imagePath, imgPrompt) => {
+            try {
+              const response = await fetch(convertFileSrc(imagePath))
+              if (!response.ok) throw new Error(`Unable to load image (${response.status})`)
+              const blob = await response.blob()
+              const imageName = imagePath.split(/[\\/]/).pop() || 'generated-image.png'
+              const dataUri = await readImage(new File([blob], imageName, { type: blob.type || 'image/png' }))
+              const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
+
+              changeView('chat')
+              conversationActions.compose(imgPrompt)
+              conversationActions.attachImage({ dataUri, previewDataUri, name: imageName })
+            } catch (error) {
+              showToast(`Could not attach image: ${errorMessage(error)}`)
+            }
           }}
           onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
         />

@@ -442,7 +442,7 @@
   color: var(--text-muted, #94a3b8);
   font-size: 0.76rem;
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.05em;
   flex-shrink: 0;
 }

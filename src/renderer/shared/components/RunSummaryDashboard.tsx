@@ -44,7 +44,7 @@ export function RunSummaryDashboard({ summary, className = '' }: Props) {
       <div className="run-summary-header">
         <div className="run-summary-title">
           <Activity style={{ width: '15px', height: '15px', color: statusColor }} />
-          <span>Run Telemetry #{summary.runId}</span>
+          <span>Run telemetry #{summary.runId}</span>
         </div>
         <div>
           <span className={badgeClass}>
@@ -110,10 +110,10 @@ export function RunSummaryDashboard({ summary, className = '' }: Props) {
         </div>
       </div>
 
-      {/* Tool Calls Timeline */}
+      {/* Tool call timeline */}
       {summary.toolTimeline && summary.toolTimeline.length > 0 && (
         <div className="run-timeline-container">
-          <div className="run-timeline-title">Tool Calls Timeline</div>
+          <div className="run-timeline-title">Tool call timeline</div>
           <div className="run-timeline-list">
             {summary.toolTimeline.map((item, idx) => (
               <div key={idx} className="run-timeline-item">

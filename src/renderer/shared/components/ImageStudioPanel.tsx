@@ -15,7 +15,7 @@ interface ImageStudioPanelProps {
 
 import { IMAGE_ASPECT_RATIOS, IMAGE_STYLE_PRESETS } from '../constants/studio'
 
-const ASPECT_OPTIONS = IMAGE_ASPECT_RATIOS
+const ASPECT_Options = IMAGE_ASPECT_RATIOS
 const STYLE_SUGGESTIONS = IMAGE_STYLE_PRESETS
 
 import { IMAGE_STUDIO_MODELS } from '../constants/models'
@@ -32,6 +32,12 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 function providerLabel(key: string) {
   return PROVIDER_LABELS[key] ?? key
+}
+
+function imageSourceForChat(entry: PictureEntry): string {
+  const url = entry.url?.trim()
+  if (url && (/^https?:\/\//i.test(url) || url.startsWith('/api/'))) return url
+  return entry.path || url || ''
 }
 
 function defaultModelForProvider(provider: string): string {
@@ -305,7 +311,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                 {selectedModel && selectedModel !== 'custom' && !modelOptions.some(m => m.value === selectedModel) && (
                   <option key={selectedModel} value={selectedModel}>{selectedModel}</option>
                 )}
-                <option value="custom">Custom Model ID...</option>
+              <option value="custom">Custom model ID…</option>
               </select>
             </div>
           </div>
@@ -333,7 +339,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
           {/* Image Editing / Source Image Attachment */}
           <div className="img-studio-field">
             <label className="img-studio-label">
-              Source Image (Optional for Image Editing)
+              Source image (optional for image editing)
               <span className="img-studio-label-hint">Upload an image to edit / inpaint</span>
             </label>
             {inputImage ? (
@@ -341,16 +347,16 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                 <img src={inputImage} alt="Input source" className="img-studio-preview-thumb" />
                 <div className="img-studio-preview-info">
                   <div className="img-studio-preview-title">
-                    <span>Source Image Attached</span>
+                    <span>Source image attached</span>
                   </div>
-                  <div className="img-studio-preview-subtitle">Ready for Image Editing</div>
+                  <div className="img-studio-preview-subtitle">Ready for image editing</div>
                 </div>
                 <button
                   type="button"
                   className="img-studio-preview-remove"
                   onClick={() => setInputImage(null)}
                 >
-                  ✕ Remove
+                  ✕ Remove image
                 </button>
               </div>
             ) : (
@@ -374,7 +380,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                   <polyline points="17 8 12 3 7 8"/>
                   <line x1="12" y1="3" x2="12" y2="15"/>
                 </svg>
-                <div className="img-studio-dropzone-text">Click or Drag & Drop image here</div>
+                <div className="img-studio-dropzone-text">Click to choose an image or drag it here</div>
                 <div className="img-studio-dropzone-subtext">PNG, JPG, WEBP up to 10MB</div>
               </div>
             )}
@@ -383,7 +389,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
           {/* Prompt */}
           <div className="img-studio-field">
             <label className="img-studio-label" htmlFor="img-studio-prompt">
-              {inputImage ? 'Editing Instruction Prompt' : 'Prompt'}
+              {inputImage ? 'Editing instructions' : 'Prompt'}
               <span className="img-studio-label-hint">{inputImage ? 'Describe what to edit or remove' : 'Describe the image you want'}</span>
             </label>
             <textarea
@@ -455,7 +461,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
           <div className="img-studio-field">
             <span className="img-studio-label">Aspect ratio</span>
             <div className="img-studio-aspect-group" role="radiogroup" aria-label="Aspect ratio">
-              {ASPECT_OPTIONS.map(({ value, label, icon }) => (
+              {ASPECT_Options.map(({ value, label, icon }) => (
                 <button
                   key={value}
                   type="button"
@@ -515,14 +521,14 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
             {generating ? (
               <>
                 <span className="img-studio-spinner" aria-hidden="true" />
-                Generating...
+                Generating…
               </>
             ) : (
               <>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
                 </svg>
-                Generate Image
+                Generate image
               </>
             )}
           </button>
@@ -615,14 +621,14 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                           <button
                             type="button"
                             className="img-studio-action-btn img-studio-action-btn--primary"
-                            onClick={() => onSendToChat(entry.url || entry.path, prompt)}
-                            title="Send to Chat"
+                            onClick={() => onSendToChat(imageSourceForChat(entry), prompt)}
+                          title="Send to chat"
                             id={`img-studio-send-${idx}`}
                           >
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                               <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
                             </svg>
-                            Send to Chat
+                            Send to chat
                           </button>
                         )}
                       </div>
@@ -654,7 +660,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
               </svg>
-              <span>Gallery & History</span>
+              <span>Gallery & history</span>
               <span className="img-studio-history-badge">
                 {(() => {
                   const currentIds = new Set(result?.images.map(img => img.id) || [])
@@ -685,11 +691,20 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                     <article key={picture.id} className="img-studio-card" aria-label={`Saved image ${idx + 1}`}>
                       <div className="img-studio-card-img-wrap">
                         <img
-                          src={convertFileSrc(picture.thumbnailUrl || picture.thumbnailPath || picture.url || picture.path)}
+                          // Prefer filesystem paths: Tauri's convertFileSrc expects a path,
+                          // while thumbnailUrl may be a `file://` URL on desktop.
+                          src={convertFileSrc(picture.thumbnailPath || picture.thumbnailUrl || picture.url || picture.path)}
                           alt={picture.message || 'Generated image'}
                           className="img-studio-card-img"
                           loading="lazy"
                           decoding="async"
+                          onError={(event) => {
+                            const image = event.currentTarget
+                            if (image.dataset.fallback) return
+                            image.dataset.fallback = 'true'
+                            const originalPath = picture.path || picture.url
+                            if (originalPath) image.src = convertFileSrc(originalPath)
+                          }}
                         />
                       </div>
                       <div className="img-studio-card-actions">
@@ -709,14 +724,14 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                           <button
                             type="button"
                             className="img-studio-action-btn img-studio-action-btn--primary"
-                            onClick={() => onSendToChat(picture.url || picture.path, picture.message || '')}
-                            title="Send to Chat"
+                            onClick={() => onSendToChat(imageSourceForChat(picture), picture.message || '')}
+                          title="Send to chat"
                             id={`img-studio-gallery-send-${idx}`}
                           >
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                               <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
                             </svg>
-                            Send to Chat
+                            Send to chat
                           </button>
                         )}
                       </div>

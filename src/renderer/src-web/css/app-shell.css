@@ -681,6 +681,10 @@ h1 {
   grid-template-columns: minmax(420px, 1.18fr) minmax(360px, 0.72fr);
 }
 
+.assistant-workspace.workspace-open .message {
+  max-width: 100%;
+}
+
 .app-body.sidebar-collapsed .assistant-workspace {
   margin-left: calc(var(--sidebar-collapsed-width) + var(--sidebar-content-gap));
 }
@@ -809,6 +813,19 @@ h1 {
 }
 
 @media (min-width: 761px) {
+  .conversation-panel.is-empty .input-area {
+    position: relative;
+  }
+
+  .conversation-panel.is-empty .empty-chat-prompt {
+    position: absolute;
+    top: -100%;
+    right: 0;
+    left: 0;
+    margin: 0;
+    pointer-events: none;
+  }
+
   .assistant-workspace .chat-panel-split-wrapper.no-preview {
     width: min(1100px, calc(100% - 64px));
     justify-self: center;
@@ -1281,7 +1298,7 @@ h1 {
   color: var(--accent);
   font-size: 0.72rem;
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.05em;
   padding: 4px 10px;
 }

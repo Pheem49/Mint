@@ -99,7 +99,7 @@ export default function StockCard({ data }: { data: StockData }) {
                 borderRadius: '4px',
                 background: t.tagBg,
                 color: t.tagColor,
-                textTransform: 'uppercase',
+                textTransform: 'none',
               }}
             >
               {currency}
@@ -140,26 +140,26 @@ export default function StockCard({ data }: { data: StockData }) {
       {/* Stats Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
         <div style={{ background: t.statBg, borderRadius: '8px', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
-          <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'uppercase' }}>Day High</p>
+          <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'none' }}>Day high</p>
           <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700, color: t.statValue }}>
             {data.dayHigh ? `${currencySymbol}${data.dayHigh.toFixed(2)}` : 'N/A'}
           </p>
         </div>
 
         <div style={{ background: t.statBg, borderRadius: '8px', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
-          <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'uppercase' }}>Day Low</p>
+          <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'none' }}>Day low</p>
           <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700, color: t.statValue }}>
             {data.dayLow ? `${currencySymbol}${data.dayLow.toFixed(2)}` : 'N/A'}
           </p>
         </div>
 
         <div style={{ background: t.statBg, borderRadius: '8px', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
-          <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'uppercase' }}>Mkt Cap</p>
+          <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'none' }}>Market cap</p>
           <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700, color: t.statValue }}>{formatLargeNum(data.marketCap)}</p>
         </div>
 
         <div style={{ background: t.statBg, borderRadius: '8px', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
-          <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'uppercase' }}>Volume</p>
+          <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'none' }}>Volume</p>
           <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700, color: t.statValue }}>{formatLargeNum(data.volume)}</p>
         </div>
       </div>

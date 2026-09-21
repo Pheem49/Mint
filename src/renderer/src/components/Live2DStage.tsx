@@ -371,7 +371,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     >
       {loading && (
         <div style={{ position: 'absolute', color: '#9f7aea', fontSize: '14px', fontFamily: 'Outfit, sans-serif' }}>
-          Loading Shiroko Live2D Model...
+          Loading Shiroko Live2D model...
         </div>
       )}
       <canvas

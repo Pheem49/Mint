@@ -104,7 +104,7 @@
 .run-timeline-title {
   font-size: 0.68rem;
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.05em;
   color: var(--text-muted, #8f8f94);
   margin-bottom: 6px;

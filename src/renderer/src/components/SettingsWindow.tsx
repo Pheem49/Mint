@@ -562,6 +562,13 @@ export default function SettingsWindow() {
     const updated = { ...config, [field]: value }
     setConfig(updated)
     applyThemeStyles(updated)
+    // Assistant Presence is a live window preference; save it immediately so
+    // closing Settings before pressing Save does not discard the choice.
+    if (field === 'showDesktopWidget' && window.settingsApi) {
+      void window.settingsApi.saveSettings(updated).catch((error) => {
+        console.error('Failed to save Assistant Presence setting:', error)
+      })
+    }
   }
 
   const updateFields = (patch: Partial<typeof DEFAULT_CONFIG>) => {

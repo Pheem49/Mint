@@ -110,7 +110,7 @@ export const LinkedFoldersView: React.FC<LinkedFoldersViewProps> = React.memo(
               <span className="management-title-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
                 {renderLinkedFoldersSvgIcon(22, 'var(--accent)')}
               </span>
-              Linked Folders
+              Linked folders
             </h1>
             <p className="management-subtitle">
               Mint drops a note into <code>mint-notes/</code> when a chat matches a linked folder's topic.

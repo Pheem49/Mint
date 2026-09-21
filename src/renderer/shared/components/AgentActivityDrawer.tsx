@@ -152,7 +152,7 @@ export function AgentActivityDrawer({
     latestPlan?.objective ||
     activityView.summary ||
     (latestRunSummary
-      ? `Run Telemetry (${latestRunSummary.outcome})`
+      ? `Run telemetry (${latestRunSummary.outcome})`
       : 'Agent Activity')
 
   if (isHistorical) {
