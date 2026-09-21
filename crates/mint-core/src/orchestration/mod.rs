@@ -996,11 +996,6 @@ async fn stream_chat_with_network_retry(
                     summary_stream.push_json_prompt(&delta, &mut |chunk| {
                         on_stream_chunk(AgentStreamChunk::FinalSummary(chunk));
                     });
-                } else if !delta.is_empty() {
-                    // Native tool-calling providers may answer directly in plain text
-                    // instead of calling `finish`. Forward those deltas too; otherwise
-                    // the native-mode fallback can only display the completed answer.
-                    on_stream_chunk(AgentStreamChunk::DirectText(delta));
                 }
             }
             ChatStreamEvent::ToolCallDelta {
@@ -1026,6 +1021,23 @@ async fn stream_chat_with_network_retry(
                     max_attempts: NETWORK_RETRY_ATTEMPTS,
                 });
                 tokio::time::sleep(NETWORK_RETRY_DELAY).await;
+            }
+            Ok((response, fallback)) => {
+                if !stream_json_prompt
+                    && allow_final_stream
+                    && response
+                        .tool_calls
+                        .as_ref()
+                        .is_none_or(|calls| calls.is_empty())
+                    && !response.text.is_empty()
+                {
+                    // Plain text from a native tool-calling response is only a final
+                    // answer if the completed model turn contains no tool calls. Buffer
+                    // it until then so an assistant preamble doesn't appear under
+                    // "Mint:" while the requested tools are still about to run.
+                    on_stream_chunk(AgentStreamChunk::DirectText(response.text.clone()));
+                }
+                return Ok((response, fallback));
             }
             other => return other,
         }

@@ -719,7 +719,10 @@ pub(super) fn compose_queue_box(
     (lines, cursor_x, cursor_y)
 }
 
-pub(super) fn render_live_status(status: &mut LiveStatus) {
+/// Renders the live viewport and reports whether a terminal was available to
+/// draw it. Callers use the result to fall back to plain output when Mint is
+/// run without an interactive terminal.
+pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
     let mut lines = Vec::new();
     let explored_start = status.committed_explored.min(status.explored.len());
     let activities_start = status.committed_activities.min(status.activities.len());
@@ -741,9 +744,12 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
         tick,
     ));
     if !status.streamed_answer.is_empty() {
-        let formatted = format_markdown_bold(&sanitize_latex(&status.streamed_answer));
         lines.push(format!("  {MINT}Mint:{RESET}"));
-        lines.extend(formatted.lines().map(|line| format!("  {line}")));
+        lines.extend(
+            render_streamed_answer_lines(&status.streamed_answer)
+                .into_iter()
+                .map(|line| format!("  {line}")),
+        );
     }
     // Built here (not inline below) so both destinations for it — the old
     // trailing-line spot in `lines`, and the queue box's own pinned row —
@@ -842,16 +848,16 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
 
     if lines.is_empty() && box_lines.is_empty() {
         status.inline_tui.teardown();
-        return;
+        return false;
     }
 
     let Ok(terminal) = status.inline_tui.ensure() else {
-        return;
+        return false;
     };
     // `draw()` itself only queries the cursor position on the rare path
     // where it detects the terminal window was actually resized since the
     // last frame — bracket it too, defensively, for that case.
-    let _ = with_raw_mode_for_cursor_query(|| {
+    with_raw_mode_for_cursor_query(|| {
         terminal.draw(|frame| {
             let area = frame.area();
             // The box (the "Ask anything..." input) claims its own rows
@@ -919,7 +925,41 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
                 ));
             }
         })
-    });
+    })
+    .is_ok()
+}
+
+/// Formats a complete streamed answer for the live viewport. Tables are
+/// buffered across their complete Markdown block, matching the raw renderer,
+/// so a live response does not fall back to literal `| header |` source.
+fn render_streamed_answer_lines(answer: &str) -> Vec<String> {
+    let formatted = format_markdown_bold(&sanitize_latex(answer));
+    let mut lines = Vec::new();
+    let mut table_buffer = Vec::new();
+
+    for line in formatted.lines() {
+        if markdown::is_table_line(line) {
+            table_buffer.push(line.to_owned());
+            continue;
+        }
+        if !table_buffer.is_empty() {
+            lines.extend(
+                markdown::render_markdown_table(&table_buffer)
+                    .lines()
+                    .map(str::to_owned),
+            );
+            table_buffer.clear();
+        }
+        lines.push(line.to_owned());
+    }
+    if !table_buffer.is_empty() {
+        lines.extend(
+            markdown::render_markdown_table(&table_buffer)
+                .lines()
+                .map(str::to_owned),
+        );
+    }
+    lines
 }
 
 /// Freezes any in-flight activity into scrollback. Returns whether it
@@ -964,11 +1004,27 @@ pub(super) fn commit_streamed_answer_snapshot(status: &mut LiveStatus) -> bool {
         return false;
     }
 
-    let formatted = format_markdown_bold(&sanitize_latex(&answer));
     let mut lines = vec![format!("  {MINT}Mint:{RESET}")];
-    lines.extend(formatted.lines().map(|line| format!("  {line}")));
+    lines.extend(
+        render_streamed_answer_lines(&answer)
+            .into_iter()
+            .map(|line| format!("  {line}")),
+    );
     lines.push(String::new());
     insert_permanent_lines(status, &lines);
+    true
+}
+
+/// Replaces a streamed draft with the agent's completed summary when a
+/// provider omitted or reordered a delta. The completed summary is the
+/// authoritative result; keeping the draft would make CLI output silently
+/// shorter than the identical Desktop/Web response.
+pub(super) fn reconcile_streamed_answer(status: &mut LiveStatus, summary: &str) -> bool {
+    if status.streamed_answer == summary {
+        return false;
+    }
+    status.streamed_answer.clear();
+    status.streamed_answer.push_str(summary);
     true
 }
 
@@ -1535,6 +1591,46 @@ mod format_token_count_tests {
     #[test]
     fn millions_round_to_one_decimal_place() {
         assert_eq!(format_token_count_bare(1_234_567), "1.2m");
+    }
+}
+
+#[cfg(test)]
+mod streamed_answer_tests {
+    use super::*;
+
+    #[test]
+    fn completed_summary_restores_a_missing_stream_suffix() {
+        let mut status = LiveStatus {
+            streamed_answer: "1. First\n2. Second".into(),
+            ..LiveStatus::default()
+        };
+
+        assert!(reconcile_streamed_answer(
+            &mut status,
+            "1. First\n2. Second\n3. Third"
+        ));
+        assert_eq!(status.streamed_answer, "1. First\n2. Second\n3. Third");
+    }
+
+    #[test]
+    fn completed_summary_does_not_redraw_an_identical_stream() {
+        let mut status = LiveStatus {
+            streamed_answer: "Complete answer".into(),
+            ..LiveStatus::default()
+        };
+
+        assert!(!reconcile_streamed_answer(&mut status, "Complete answer"));
+    }
+
+    #[test]
+    fn live_answer_formats_markdown_tables_before_drawing() {
+        let lines = render_streamed_answer_lines(
+            "| File | Status |\n| --- | --- |\n| agent.rs | Updated |",
+        );
+        let rendered = lines.join("\n");
+
+        assert!(rendered.contains('┌'));
+        assert!(!rendered.contains("| --- | --- |"));
     }
 }
 

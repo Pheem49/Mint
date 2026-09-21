@@ -1048,19 +1048,27 @@ pub async fn run_code_agent_with_options(
                 status.waiting_for_network = None;
                 if status.queue_enabled && status.accepting_input {
                     status.thinking = Some("Responding · Esc to interrupt".into());
-                    status.streamed_answer_active = true;
                 } else {
                     status.thinking = None;
                     status.accepting_input = false;
                     committed_activity = commit_activity_snapshot(&mut status);
-                    clear_live_status(&mut status);
                 }
+                // Render every streamed answer in the inline viewport. The
+                // viewport receives the accumulated Markdown, so tables and
+                // long paragraphs are parsed and wrapped as one document
+                // instead of being broken at arbitrary provider chunks.
+                status.streamed_answer_active = true;
             }
 
             if status.streamed_answer_active {
                 status.streamed_answer.push_str(&summary);
-                render_live_status(&mut status);
-                rendered_in_live_tui = true;
+                rendered_in_live_tui = render_live_status(&mut status);
+                if !rendered_in_live_tui {
+                    // No interactive terminal: retain the existing raw
+                    // output fallback rather than swallowing the answer.
+                    status.streamed_answer_active = false;
+                    status.streamed_answer.clear();
+                }
             }
         }
 
@@ -1128,6 +1136,15 @@ pub async fn run_code_agent_with_options(
         status.waiting_for_network = None;
         status.accepting_input = false;
         if status.streamed_answer_active {
+            if let Ok(agent_result) = &res
+                && reconcile_streamed_answer(&mut status, &agent_result.summary)
+            {
+                // A provider may omit a streamed delta even though its final
+                // tool-call payload is complete. Redraw from that completed,
+                // authoritative payload before freezing the answer into
+                // scrollback so CLI never loses a trailing paragraph.
+                let _ = render_live_status(&mut status);
+            }
             commit_streamed_answer_snapshot(&mut status);
         }
         if let Ok(mut out) = queued_out.lock() {

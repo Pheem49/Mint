@@ -81,6 +81,11 @@ pub fn tool_catalog(
         .filter_map(|action| all_tools().into_iter().find(|t| t.name == action))
         .collect();
 
+    // Native models need a structured terminal action. Plain text can be a
+    // progress preamble or a final reply, but finish.summary is unambiguous
+    // and can be streamed as the final answer.
+    tools.push(finish_tool());
+
     if allow_subagent_dispatch && !plan_mode {
         let subagents = list_subagents(Some(root));
         if !subagents.is_empty() {
@@ -112,6 +117,26 @@ fn dispatch_subagent_tool(subagents: &[crate::subagents::SubagentDefinition]) ->
                 "instruction": { "type": "string", "description": "The task/question to give the subagent." }
             }),
             &["name", "instruction"],
+        ),
+    )
+}
+
+fn finish_tool() -> ToolSpec {
+    tool(
+        "finish",
+        "Complete the task and deliver the final answer. Call this only when no further tool calls are needed. Put the complete user-facing response in summary. If this run changed files, verification must state the check and its result, or explain why no check applies.",
+        schema(
+            json!({
+                "summary": {
+                    "type": "string",
+                    "description": "Complete final answer in the user's language."
+                },
+                "verification": {
+                    "type": "string",
+                    "description": "Verification performed after file changes and its result; otherwise omit."
+                }
+            }),
+            &["summary"],
         ),
     )
 }
@@ -1096,5 +1121,15 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn native_catalog_always_offers_finish() {
+        let config = MintConfig::default();
+        let tools = tool_catalog(&config, false, Path::new("."), true);
+        assert!(
+            tools.iter().any(|tool| tool.name == "finish"),
+            "native tool catalog must include the terminal finish tool"
+        );
     }
 }
