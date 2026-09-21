@@ -346,6 +346,9 @@ pub struct CustomProvider {
     pub id: String,
     /// Human-readable name shown in the UI.
     pub display_name: String,
+    /// Optional custom provider logo stored as a small image data URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logo_data_url: Option<String>,
     /// Base URL of the OpenAI-compatible endpoint, e.g. `"http://localhost:20128/v1"`.
     pub base_url: String,
     /// API key sent as `Authorization: Bearer <key>`. Empty = no auth header.
@@ -1500,6 +1503,26 @@ mod tests {
     }
 
     #[test]
+    fn custom_provider_logo_survives_config_round_trip() {
+        let logo = "data:image/png;base64,aGVsbG8=";
+        let mut value = serde_json::to_value(MintConfig::default()).unwrap();
+        value["customProviders"] = serde_json::json!([{
+            "id": "test-provider",
+            "displayName": "Test Provider",
+            "baseUrl": "https://example.test/v1",
+            "apiKey": "",
+            "models": [],
+            "headers": [],
+            "logoDataUrl": logo,
+        }]);
+
+        let parsed: MintConfig = serde_json::from_value(value).unwrap();
+        let round_tripped = serde_json::to_value(parsed).unwrap();
+
+        assert_eq!(round_tripped["customProviders"][0]["logoDataUrl"], logo);
+    }
+
+    #[test]
     fn config_preserves_fields_that_have_not_migrated_yet() {
         let config: MintConfig =
             serde_json::from_str(r#"{"aiProvider":"gemini","pluginGmailEnabled":true}"#).unwrap();
@@ -1544,6 +1567,7 @@ mod tests {
             custom_providers: vec![CustomProvider {
                 id: "myprovider".into(),
                 display_name: "My Provider".into(),
+                logo_data_url: None,
                 base_url: "http://localhost:20128/v1".into(),
                 api_key: "sk-abc".into(),
                 models: vec![CustomProviderModel {

@@ -998,6 +998,11 @@ h1 {
     transform: translateX(-50%);
   }
 
+  .assistant-workspace .conversation-panel.is-empty .empty-chat-prompt {
+    top: calc(100% + 44px - 50vh);
+    transform: translateY(-50%);
+  }
+
   .assistant-workspace .conversation-panel.is-empty .input-disclaimer {
     position: absolute;
     right: 32px;

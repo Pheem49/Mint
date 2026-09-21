@@ -315,6 +315,7 @@ export interface CustomProviderHeader {
 export interface CustomProviderConfig {
   id: string
   displayName: string
+  logoDataUrl?: string
   baseUrl: string
   apiKey: string
   models: CustomProviderModel[]

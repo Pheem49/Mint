@@ -39,6 +39,12 @@ export const isTauriRuntime = () => (
   typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__)
 )
 
+const WEB_SETTINGS_CHANGED_EVENT = 'mint:web-settings-changed'
+
+function dispatchWebSettingsChanged(config: any) {
+  window.dispatchEvent(new CustomEvent(WEB_SETTINGS_CHANGED_EVENT, { detail: config }))
+}
+
 /** The last browser Notification shown by notifyAiResponse's fallback
  * (non-Tauri) branch, so clearAiNotifications can dismiss it. */
 let lastAiNotification: Notification | null = null
@@ -1149,7 +1155,9 @@ export function installTauriAdapters() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
           });
-          return await res.json();
+          const data = await res.json();
+          if (res.ok) dispatchWebSettingsChanged(config)
+          return data;
         } catch (e) {
           console.error("Failed to save settings to local server:", e);
           return {};
@@ -1295,7 +1303,9 @@ export function installTauriAdapters() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
           });
-          return await res.json();
+          const data = await res.json();
+          if (res.ok) dispatchWebSettingsChanged(config)
+          return data;
         } catch (e) {
           return {};
         }
@@ -1305,7 +1315,11 @@ export function installTauriAdapters() {
           window.history.replaceState(null, '', window.location.pathname + window.location.search)
         }
       },
-      onSettingsChanged: () => {},
+      onSettingsChanged: (callback: (config: any) => void) => {
+        window.addEventListener(WEB_SETTINGS_CHANGED_EVENT, (event) => {
+          callback((event as CustomEvent).detail)
+        })
+      },
       startVision: () => {},
       onVisionReady: async () => () => {},
       captureSilentScreen: async () => '',

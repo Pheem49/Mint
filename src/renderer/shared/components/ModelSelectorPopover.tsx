@@ -3,6 +3,14 @@ import { useProviderModels } from '@/hooks/useProviderModels'
 import { catalogPlatform } from '../platform'
 import { HF_MODELS, getModelMetadata, isFreeModel, OPENROUTER_POPULAR_MODELS } from '../constants/models'
 import type { CustomProviderConfig } from '../types'
+import anthropicLogo from '@lobehub/icons-static-svg/icons/anthropic.svg?url'
+import deepseekLogo from '@lobehub/icons-static-svg/icons/deepseek-color.svg?url'
+import geminiLogo from '@lobehub/icons-static-svg/icons/gemini-color.svg?url'
+import huggingFaceLogo from '@lobehub/icons-static-svg/icons/huggingface-color.svg?url'
+import lmStudioLogo from '@lobehub/icons-static-svg/icons/lmstudio.svg?url'
+import ollamaLogo from '@lobehub/icons-static-svg/icons/ollama.svg?url'
+import openAiLogo from '@lobehub/icons-static-svg/icons/openai.svg?url'
+import openRouterLogo from '@lobehub/icons-static-svg/icons/openrouter-color.svg?url'
 
 interface ModelSelectorPopoverProps {
   activeProvider: string
@@ -45,78 +53,36 @@ function formatEffortDisplay(effort?: string): string {
   return 'Medium'
 }
 
-// ─── SVG Icons for Providers ──────────────────────────────────────────────────
+// Brand marks are bundled locally so the selector never depends on a remote image host.
+const providerLogos: Record<string, { src: string; color?: string }> = {
+  anthropic: { src: anthropicLogo, color: '#d97757' },
+  deepseek: { src: deepseekLogo },
+  gemini: { src: geminiLogo },
+  huggingface: { src: huggingFaceLogo },
+  local_openai: { src: lmStudioLogo, color: '#8b5cf6' },
+  ollama: { src: ollamaLogo, color: '#f3f4f6' },
+  openai: { src: openAiLogo, color: '#10a37f' },
+  openrouter: { src: openRouterLogo },
+}
 
 function ProviderIcon({ provider }: { provider: string }) {
   const p = provider.toLowerCase()
-  if (p === 'gemini') {
-    return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-      </svg>
-    )
-  }
-  if (p === 'anthropic') {
-    return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4.5 16.5c-1.5 1.26-2.5 3.19-2.5 5.5h20c0-2.31-1-4.24-2.5-5.5" />
-        <path d="M12 2L2 22h20L12 2z" />
-      </svg>
-    )
-  }
-  if (p === 'openai') {
-    return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <line x1="12" y1="2" x2="12" y2="22" />
-        <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-      </svg>
-    )
-  }
-  if (p === 'deepseek') {
-    return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="11" cy="11" r="8" />
-        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-      </svg>
-    )
-  }
-  if (p === 'openrouter') {
-    return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="16 3 21 3 21 8" />
-        <line x1="4" y1="20" x2="21" y2="3" />
-        <polyline points="21 16 21 21 16 21" />
-        <line x1="15" y1="15" x2="21" y2="21" />
-        <line x1="4" y1="4" x2="9" y2="9" />
-      </svg>
-    )
-  }
-  if (p === 'huggingface') {
-    return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-        <line x1="9" y1="9" x2="9.01" y2="9" />
-        <line x1="15" y1="9" x2="15.01" y2="9" />
-      </svg>
-    )
-  }
-  if (p === 'local_openai') {
-    return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-        <line x1="8" y1="21" x2="16" y2="21" />
-        <line x1="12" y1="17" x2="12" y2="21" />
-      </svg>
-    )
-  }
-  if (p === 'ollama') {
-    return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-      </svg>
-    )
+  const logo = providerLogos[p]
+  if (logo) {
+    if (logo.color) {
+      return (
+        <span
+          className="provider-brand-logo is-monochrome"
+          aria-hidden="true"
+          style={{
+            '--provider-brand-color': logo.color,
+            maskImage: `url("${logo.src}")`,
+            WebkitMaskImage: `url("${logo.src}")`,
+          } as React.CSSProperties}
+        />
+      )
+    }
+    return <img className="provider-brand-logo" src={logo.src} alt="" aria-hidden="true" />
   }
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -303,13 +269,15 @@ export default function ModelSelectorPopover({
   const providerGroups = useMemo<ProviderGroup[]>(() => {
     const list: ProviderGroup[] = []
 
-    const addGroup = (id: string, providerId: string, name: string, models: string[]) => {
+    const addGroup = (id: string, providerId: string, name: string, models: string[], logoDataUrl?: string) => {
       if (models.length === 0) return
       list.push({
         id,
         providerId,
         name,
-        icon: <ProviderIcon provider={providerId} />,
+        icon: logoDataUrl
+          ? <img className="provider-brand-logo" src={logoDataUrl} alt="" aria-hidden="true" />
+          : <ProviderIcon provider={providerId} />,
         models,
       })
     }
@@ -365,7 +333,7 @@ export default function ModelSelectorPopover({
       const pid = `custom:${cp.id}`
       if (availableProviders.includes(pid)) {
         const cModels = (cp.models || []).map((m: any) => m.modelId).filter(Boolean)
-        addGroup(pid, pid, cp.displayName || cp.id, cModels)
+        addGroup(pid, pid, cp.displayName || cp.id, cModels, cp.logoDataUrl)
       }
     }
 
@@ -601,6 +569,10 @@ export default function ModelSelectorPopover({
     return getModelBadges(currentInspected.model)
   }, [currentInspected])
 
+  const customLogoForProvider = (providerId: string) =>
+    (settingsConfig?.customProviders as CustomProviderConfig[] | undefined)
+      ?.find((provider) => `custom:${provider.id}` === providerId)?.logoDataUrl
+
   let itemCounter = 0
 
   return (
@@ -617,7 +589,9 @@ export default function ModelSelectorPopover({
         aria-expanded={isOpen}
       >
         <span className="model-selector-trigger-icon">
-          <ProviderIcon provider={activeProvider} />
+          {customLogoForProvider(activeProvider)
+            ? <img className="provider-brand-logo" src={customLogoForProvider(activeProvider)} alt="" aria-hidden="true" />
+            : <ProviderIcon provider={activeProvider} />}
         </span>
         <span className="model-selector-trigger-name">{activeModelDisplay}</span>
         {activeThinking.enabled && (
@@ -745,6 +719,9 @@ export default function ModelSelectorPopover({
                                 >
                                   <div className="model-item-left">
                                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                      <span className="model-item-provider-icon" aria-hidden="true">
+                                        {group.icon}
+                                      </span>
                                       <span className="model-item-name">{m.split('/').pop() || m}</span>
                                       {isFreeModel(m) && (
                                         <span className="model-tag-badge badge-free">Free</span>
@@ -811,7 +788,9 @@ export default function ModelSelectorPopover({
                 {/* Header: Icon + Name */}
                 <div className="model-detail-header">
                   <div className="model-detail-icon">
-                    <ProviderIcon provider={currentInspected.providerId} />
+                    {customLogoForProvider(currentInspected.providerId)
+                      ? <img className="provider-brand-logo" src={customLogoForProvider(currentInspected.providerId)} alt="" aria-hidden="true" />
+                      : <ProviderIcon provider={currentInspected.providerId} />}
                   </div>
                   <div className="model-detail-title-wrap">
                     <span className="model-detail-title">{currentInspected.model.split('/').pop() || currentInspected.model}</span>

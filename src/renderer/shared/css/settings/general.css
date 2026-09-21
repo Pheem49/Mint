@@ -85,6 +85,81 @@
     gap: 8px;
 }
 
+.settings-provider-logo {
+    display: block;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    object-fit: contain;
+}
+
+.settings-provider-logo.is-monochrome {
+    background-color: var(--provider-brand-color);
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: contain;
+    -webkit-mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-size: contain;
+}
+
+.custom-provider-logo {
+    border-radius: 4px;
+    object-fit: contain;
+}
+
+.custom-provider-logo-picker {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.custom-provider-logo-preview {
+    display: flex;
+    width: 34px;
+    height: 34px;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--surface-secondary, rgba(255, 255, 255, 0.04));
+    color: var(--text-muted);
+    font-size: 0.65rem;
+}
+
+.custom-provider-logo-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.custom-provider-logo-select {
+    position: relative;
+    overflow: hidden;
+}
+
+.custom-provider-logo-select input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.custom-provider-logo-help,
+.custom-provider-logo-error {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.custom-provider-logo-error {
+    flex-basis: 100%;
+    color: var(--danger, #ef4444);
+}
+
 .provider-active-badge {
     color: var(--accent-hover);
     font-size: 0.7rem;
@@ -649,4 +724,3 @@
     color: #047857 !important;
     font-weight: 600;
 }
-

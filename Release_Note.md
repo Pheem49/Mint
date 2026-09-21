@@ -6,6 +6,15 @@
 - Fixed widget dragging by starting Tauri's native drag from the mouse-down event and granting the widget window the required permission; clicking still opens chat.
 - Persisted the Assistant Presence toggle immediately, so its enabled/disabled state survives closing Settings and restarting Mint.
 
+## Model Provider Icons
+
+- Added bundled brand logos for supported AI providers beside models in the selector, with larger logos in group headings and the detail pane. Providers without a dedicated logo keep the generic fallback icon.
+- Fixed monochrome logos rendering black on the dark selector by using available color variants and provider-colored masks for monochrome marks.
+- Reused the same provider brand logos in General settings' AI provider cards.
+- Added optional custom-provider logos in General settings. PNG, JPEG, and WebP files up to 256 KB are saved in configuration and shown in the provider card and model selector.
+- Fixed logos disappearing after save in the web settings flow by preserving the logo data URL through backend config serialization.
+- Refresh the chat's provider configuration and availability immediately after web settings are saved, so custom providers and models appear without reloading the page.
+
 ## Skills List Descriptions
 
 - Replaced YAML frontmatter separators in skill list previews with each skill's description, falling back to the first content line when no description exists.
@@ -13,6 +22,7 @@
 ## Empty Chat Welcome Alignment
 
 - Centered the empty-chat welcome message above the composer on desktop while keeping the composer anchored at the bottom.
+- Centered the web empty-chat welcome message in the main workspace while keeping the composer anchored at the bottom.
 
 ## Workspace Chat Width
 

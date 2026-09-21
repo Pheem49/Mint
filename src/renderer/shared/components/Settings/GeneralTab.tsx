@@ -22,6 +22,46 @@ import { setActiveModel } from '../../utils/modelManager'
 import { providerLabel as aiProviderLabel } from '../../utils/providers'
 import ApiKeyInput from './ApiKeyInput'
 import SearchableModelCombobox from './SearchableModelCombobox'
+import anthropicLogo from '@lobehub/icons-static-svg/icons/anthropic.svg?url'
+import deepseekLogo from '@lobehub/icons-static-svg/icons/deepseek-color.svg?url'
+import geminiLogo from '@lobehub/icons-static-svg/icons/gemini-color.svg?url'
+import huggingFaceLogo from '@lobehub/icons-static-svg/icons/huggingface-color.svg?url'
+import lmStudioLogo from '@lobehub/icons-static-svg/icons/lmstudio.svg?url'
+import ollamaLogo from '@lobehub/icons-static-svg/icons/ollama.svg?url'
+import openAiLogo from '@lobehub/icons-static-svg/icons/openai.svg?url'
+import openRouterLogo from '@lobehub/icons-static-svg/icons/openrouter-color.svg?url'
+
+const settingsProviderLogos: Record<string, { src: string; color?: string }> = {
+  anthropic: { src: anthropicLogo, color: '#d97757' },
+  deepseek: { src: deepseekLogo },
+  gemini: { src: geminiLogo },
+  huggingface: { src: huggingFaceLogo },
+  local_openai: { src: lmStudioLogo, color: '#8b5cf6' },
+  ollama: { src: ollamaLogo, color: '#f3f4f6' },
+  openai: { src: openAiLogo, color: '#10a37f' },
+  openrouter: { src: openRouterLogo },
+}
+
+function SettingsProviderLogo({ provider }: { provider: string }) {
+  const logo = settingsProviderLogos[provider]
+  if (!logo) return null
+
+  if (logo.color) {
+    return (
+      <span
+        className="settings-provider-logo is-monochrome"
+        aria-hidden="true"
+        style={{
+          '--provider-brand-color': logo.color,
+          maskImage: `url("${logo.src}")`,
+          WebkitMaskImage: `url("${logo.src}")`,
+        } as React.CSSProperties}
+      />
+    )
+  }
+
+  return <img className="settings-provider-logo" src={logo.src} alt="" aria-hidden="true" />
+}
 
 // One card per image-gen provider (mirrors the chat "Provider & Model"
 // cards): a model dropdown plus either its own API-key field, or a note
@@ -146,6 +186,7 @@ export default function GeneralTab({
   onSaveWithoutClosing
 }: GeneralTabProps) {
   const [savedProviderId, setSavedProviderId] = React.useState<string | null>(null)
+  const [providerLogoErrors, setProviderLogoErrors] = React.useState<Record<string, string>>({})
   const [openSections, setOpenSections] = React.useState<Record<string, boolean>>({
     ai_routing: true,
     search: false,
@@ -180,6 +221,42 @@ export default function GeneralTab({
       setSavedProviderId(providerId)
       setTimeout(() => setSavedProviderId(null), 2000)
     }
+  }
+
+  const handleProviderLogoChange = (providerId: string, file?: File) => {
+    if (!file) return
+    const supportedTypes = ['image/png', 'image/jpeg', 'image/webp']
+    if (!supportedTypes.includes(file.type)) {
+      setProviderLogoErrors(prev => ({ ...prev, [providerId]: 'Choose a PNG, JPEG, or WebP image.' }))
+      return
+    }
+    if (file.size > 256 * 1024) {
+      setProviderLogoErrors(prev => ({ ...prev, [providerId]: 'The logo must be 256 KB or smaller.' }))
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        setProviderLogoErrors(prev => ({ ...prev, [providerId]: 'Could not read this image.' }))
+        return
+      }
+      const provider = (config.customProviders ?? []).find(item => item.id === providerId)
+      if (!provider) return
+      const updated = (config.customProviders ?? []).map(item =>
+        item.id === providerId ? { ...item, logoDataUrl: reader.result as string } : item
+      )
+      updateField('customProviders', updated)
+      setProviderLogoErrors(prev => {
+        const next = { ...prev }
+        delete next[providerId]
+        return next
+      })
+    }
+    reader.onerror = () => {
+      setProviderLogoErrors(prev => ({ ...prev, [providerId]: 'Could not read this image.' }))
+    }
+    reader.readAsDataURL(file)
   }
 
   const renderCollapsibleSection = (
@@ -631,9 +708,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'gemini' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-                  </svg>
+                  <SettingsProviderLogo provider="gemini" />
                   Google Gemini (Cloud)
                 </div>
                 <div className="provider-card-actions">
@@ -685,10 +760,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'anthropic' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4.5 16.5c-1.5 1.26-2.5 3.19-2.5 5.5h20c0-2.31-1-4.24-2.5-5.5"></path>
-                    <path d="M12 2L2 22h20L12 2z"></path>
-                  </svg>
+                  <SettingsProviderLogo provider="anthropic" />
                   Anthropic Claude
                 </div>
                 <div className="provider-card-actions">
@@ -740,11 +812,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'openai' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="2" x2="12" y2="22"></line>
-                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-                  </svg>
+                  <SettingsProviderLogo provider="openai" />
                   OpenAI
                 </div>
                 <div className="provider-card-actions">
@@ -796,13 +864,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'openrouter' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="16 3 21 3 21 8"></polyline>
-                    <line x1="4" y1="20" x2="21" y2="3"></line>
-                    <polyline points="21 16 21 21 16 21"></polyline>
-                    <line x1="15" y1="15" x2="21" y2="21"></line>
-                    <line x1="4" y1="4" x2="9" y2="9"></line>
-                  </svg>
+                  <SettingsProviderLogo provider="openrouter" />
                   OpenRouter
                 </div>
                 <div className="provider-card-actions">
@@ -856,10 +918,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'deepseek' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="11" cy="11" r="8"></circle>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                  </svg>
+                  <SettingsProviderLogo provider="deepseek" />
                   DeepSeek
                 </div>
                 <div className="provider-card-actions">
@@ -911,12 +970,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'huggingface' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
-                    <line x1="9" y1="9" x2="9.01" y2="9"></line>
-                    <line x1="15" y1="9" x2="15.01" y2="9"></line>
-                  </svg>
+                  <SettingsProviderLogo provider="huggingface" />
                   Hugging Face (Inference API)
                 </div>
                 <div className="provider-card-actions">
@@ -968,11 +1022,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'local_openai' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                    <line x1="8" y1="21" x2="16" y2="21"></line>
-                    <line x1="12" y1="17" x2="12" y2="21"></line>
-                  </svg>
+                  <SettingsProviderLogo provider="local_openai" />
                   LM Studio / Local OpenAI
                 </div>
                 <div className="provider-card-actions">
@@ -1025,9 +1075,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'ollama' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                  </svg>
+                  <SettingsProviderLogo provider="ollama" />
                   Ollama (Local)
                 </div>
                 <div className="provider-card-actions">
@@ -1401,9 +1449,13 @@ export default function GeneralTab({
                 <div key={cpIdx} className={`provider-card ${isActive ? 'active-provider' : ''}`}>
                   <div className="provider-card-header">
                     <div className="provider-card-title">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="3" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14" />
-                      </svg>
+                      {cp.logoDataUrl ? (
+                        <img className="settings-provider-logo custom-provider-logo" src={cp.logoDataUrl} alt="" />
+                      ) : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <circle cx="12" cy="12" r="3" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14" />
+                        </svg>
+                      )}
                       {cp.displayName || cp.id || 'Unnamed Provider'}
                     </div>
                     <div className="provider-card-actions">
@@ -1452,6 +1504,50 @@ export default function GeneralTab({
                         }}
                         placeholder="e.g. DeepSeek"
                       />
+                    </div>
+
+                    <div className="setting-row">
+                      <label>Provider logo (optional)</label>
+                      <div className="custom-provider-logo-picker">
+                        <div className="custom-provider-logo-preview" aria-hidden="true">
+                          {cp.logoDataUrl ? (
+                            <img src={cp.logoDataUrl} alt="" />
+                          ) : (
+                            <span>Logo</span>
+                          )}
+                        </div>
+                        <label className="btn btn-secondary btn-xs custom-provider-logo-select">
+                          {cp.logoDataUrl ? 'Change image' : 'Choose image'}
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            onChange={(event) => {
+                              handleProviderLogoChange(cp.id, event.currentTarget.files?.[0])
+                              event.currentTarget.value = ''
+                            }}
+                          />
+                        </label>
+                        {cp.logoDataUrl && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-xs"
+                            onClick={() => {
+                              updateCp({ logoDataUrl: undefined })
+                              setProviderLogoErrors(prev => {
+                                const next = { ...prev }
+                                delete next[cp.id]
+                                return next
+                              })
+                            }}
+                          >
+                            Remove
+                          </button>
+                        )}
+                        <span className="custom-provider-logo-help">PNG, JPEG, or WebP · max 256 KB</span>
+                        {providerLogoErrors[cp.id] && (
+                          <span className="custom-provider-logo-error" role="alert">{providerLogoErrors[cp.id]}</span>
+                        )}
+                      </div>
                     </div>
 
                     <div className="setting-row">
