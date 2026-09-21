@@ -282,10 +282,6 @@ pub(super) struct LiveStatus {
     /// Whether this turn keeps a typeable follow-up box pinned under the
     /// live status region (see [`AgentOptions::queueing`]).
     pub(super) queue_enabled: bool,
-    /// Current assistant response rendered above the follow-up composer while
-    /// tokens stream in. It is committed to scrollback when the turn ends.
-    pub(super) streamed_answer: String,
-    pub(super) streamed_answer_active: bool,
     /// Flips to `false` once the turn is wrapping up (final chunk printing,
     /// or the turn ending), so a stray keystroke can't resurrect the box
     /// after [`clear_live_status`] has already torn it down.
@@ -707,14 +703,6 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
         true,
         tick,
     ));
-    if !status.streamed_answer.is_empty() {
-        lines.push(format!("  {MINT}Mint:{RESET}"));
-        lines.extend(
-            render_streamed_answer_lines(&status.streamed_answer)
-                .into_iter()
-                .map(|line| format!("  {line}")),
-        );
-    }
     // Built here (not inline below) so both destinations for it — the old
     // trailing-line spot in `lines`, and the queue box's own pinned row —
     // share one animation. When the queue box is about to be drawn, it's
@@ -893,39 +881,6 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
     .is_ok()
 }
 
-/// Formats a complete streamed answer for the live viewport. Tables are
-/// buffered across their complete Markdown block, matching the raw renderer,
-/// so a live response does not fall back to literal `| header |` source.
-fn render_streamed_answer_lines(answer: &str) -> Vec<String> {
-    let formatted = format_markdown_bold(&sanitize_latex(answer));
-    let mut lines = Vec::new();
-    let mut table_buffer = Vec::new();
-
-    for line in formatted.lines() {
-        if markdown::is_table_line(line) {
-            table_buffer.push(line.to_owned());
-            continue;
-        }
-        if !table_buffer.is_empty() {
-            lines.extend(
-                markdown::render_markdown_table(&table_buffer)
-                    .lines()
-                    .map(str::to_owned),
-            );
-            table_buffer.clear();
-        }
-        lines.push(line.to_owned());
-    }
-    if !table_buffer.is_empty() {
-        lines.extend(
-            markdown::render_markdown_table(&table_buffer)
-                .lines()
-                .map(str::to_owned),
-        );
-    }
-    lines
-}
-
 /// Freezes any in-flight activity into scrollback. Returns whether it
 /// actually committed anything — callers that print their own leading blank
 /// line right after (e.g. the final answer) use this to skip it when this
@@ -959,39 +914,6 @@ pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
     true
 }
 
-/// Moves the response shown in the live viewport into terminal scrollback
-/// before the viewport is cleared at the end of the turn.
-pub(super) fn commit_streamed_answer_snapshot(status: &mut LiveStatus) -> bool {
-    let answer = std::mem::take(&mut status.streamed_answer);
-    status.streamed_answer_active = false;
-    if answer.trim().is_empty() {
-        return false;
-    }
-
-    let mut lines = vec![format!("  {MINT}Mint:{RESET}")];
-    lines.extend(
-        render_streamed_answer_lines(&answer)
-            .into_iter()
-            .map(|line| format!("  {line}")),
-    );
-    lines.push(String::new());
-    insert_permanent_lines(status, &lines);
-    true
-}
-
-/// Replaces a streamed draft with the agent's completed summary when a
-/// provider omitted or reordered a delta. The completed summary is the
-/// authoritative result; keeping the draft would make CLI output silently
-/// shorter than the identical Desktop/Web response.
-pub(super) fn reconcile_streamed_answer(status: &mut LiveStatus, summary: &str) -> bool {
-    if status.streamed_answer == summary {
-        return false;
-    }
-    status.streamed_answer.clear();
-    status.streamed_answer.push_str(summary);
-    true
-}
-
 pub(super) fn is_internal_cot(text: &str) -> bool {
     mint_core::orchestration::is_internal_cot(text)
 }
@@ -1022,8 +944,11 @@ pub(super) fn print_timeline_note(
             .trim();
         let clean_note = strip_intermediate_greeting(clean_note);
         let (tw, _) = markdown::terminal_size_or_default();
-        let width = (tw as usize).saturating_sub(4).max(20);
-        let options = textwrap::Options::new(width).break_words(true);
+        let width = (tw as usize).saturating_sub(2).max(20);
+        let options = textwrap::Options::new(width)
+            .initial_indent("  ")
+            .subsequent_indent("  ")
+            .break_words(true);
         let wrapped = textwrap::fill(clean_note, &options);
         let formatted = format!("\x1b[38;2;226;232;240m{}\x1b[0m", wrapped);
         insert_permanent_lines(status, &[formatted]);
@@ -1551,43 +1476,8 @@ mod format_token_count_tests {
 }
 
 #[cfg(test)]
-mod streamed_answer_tests {
+mod scrollback_layout_tests {
     use super::*;
-
-    #[test]
-    fn completed_summary_restores_a_missing_stream_suffix() {
-        let mut status = LiveStatus {
-            streamed_answer: "1. First\n2. Second".into(),
-            ..LiveStatus::default()
-        };
-
-        assert!(reconcile_streamed_answer(
-            &mut status,
-            "1. First\n2. Second\n3. Third"
-        ));
-        assert_eq!(status.streamed_answer, "1. First\n2. Second\n3. Third");
-    }
-
-    #[test]
-    fn completed_summary_does_not_redraw_an_identical_stream() {
-        let mut status = LiveStatus {
-            streamed_answer: "Complete answer".into(),
-            ..LiveStatus::default()
-        };
-
-        assert!(!reconcile_streamed_answer(&mut status, "Complete answer"));
-    }
-
-    #[test]
-    fn live_answer_formats_markdown_tables_before_drawing() {
-        let lines = render_streamed_answer_lines(
-            "| File | Status |\n| --- | --- |\n| agent.rs | Updated |",
-        );
-        let rendered = lines.join("\n");
-
-        assert!(rendered.contains('┌'));
-        assert!(!rendered.contains("| --- | --- |"));
-    }
 
     #[test]
     fn scrollback_height_accounts_for_wide_unicode() {

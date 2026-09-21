@@ -1,17 +1,17 @@
 # Release Notes - Mint Agent v1.15.0
 
-## Agent Reply Streaming
+## Agent Reply Completion and CLI Rendering
 
-- Stream Agent mode's final answer as the model generates its `finish` summary, for native tool-call and JSON-prompt providers, instead of waiting to send the completed summary as one block. The web and desktop chat now use the same real chunks; desktop no longer simulates typing after generation.
-- Added the native `finish` tool and require Agent mode to put its final response in `finish.summary`, so Mint streams only the confirmed final answer while tool activity remains visible until work is complete. Plain-text final responses stay a non-streaming fallback for providers that do not follow the tool contract.
-- Fixed CLI rendering for streamed Markdown: every interactive response now renders from its accumulated text in the live viewport, keeping long paragraphs wrapped and tables intact instead of splitting them at provider chunk boundaries.
-- Render Markdown tables through the same terminal-table renderer in both the CLI live viewport and its final scrollback snapshot, instead of reverting to raw pipe-delimited source when a streamed answer completes.
-- Reconcile the CLI's streamed draft with the Agent's completed summary before committing it, restoring any delta a provider omitted so the CLI cannot end before the final paragraph.
+- Wait for the authoritative completed Agent response before displaying assistant text across CLI, Desktop, and Web, while tool activity and working status remain live.
+- Added the native `finish` tool and require Agent mode to put its final response in `finish.summary`, ensuring every surface renders the same complete answer.
+- Render complete Markdown documents in the CLI so long paragraphs, tables, and rich option cards are not split at provider chunk boundaries.
+- Render Markdown tables through the CLI terminal-table renderer instead of showing raw pipe-delimited source.
 - Measure final CLI scrollback with Ratatui's actual Unicode-aware wrapping before insertion, preventing Thai text, emoji, and rich option cards from clipping the end of a complete response.
 - Removed the redundant CLI `Verification:` footer; verification remains part of the internal agent result while relevant test outcomes and limitations stay in the main response.
-- Updated CLI streamed-answer rendering to print the `Mint:` header and clear the live status only once, append each incoming text delta continuously, and print collected web sources after the response finishes.
-- Kept the CLI follow-up composer visible during streaming, rendered the current answer above it, and committed that answer to scrollback when the turn completes.
-- Prevented late thinking/network progress events from restoring the "Mulling" status after streamed answer text has started.
+- Print collected web sources after the completed response.
+- Added a consistent two-column left margin to CLI progress notes, including wrapped Thai text, so live activity no longer touches the terminal edge.
+- Replaced the verbose CLI Agent Run card and duplicated tool timeline with a one-line completion summary; changed files and failed tools appear only when relevant.
+- Made terminal-table width tests deterministic by injecting an explicit width while production rendering continues to use the live terminal size.
 
 ## JSON Card Parsing
 

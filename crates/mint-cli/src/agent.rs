@@ -33,6 +33,7 @@ const RESET: &str = "\x1b[0m";
 const MINT: &str = "\x1b[32m";
 const GREEN: &str = "\x1b[32m";
 const RED: &str = "\x1b[31m";
+const YELLOW: &str = "\x1b[33m";
 const BLUE: &str = "\x1b[38;2;78;201;216m";
 const CYAN: &str = "\x1b[38;2;56;189;248m";
 const DIM: &str = "\x1b[90m";
@@ -626,10 +627,6 @@ pub async fn run_code_agent_with_options(
     let progress_live_status = Arc::clone(&live_status);
     let progress_approval_active = Arc::clone(&approval_active);
     let progress_tool_running = Arc::clone(&tool_running);
-    // Once answer deltas start, late progress events must not replace the
-    // response status with a stale "Mulling" label.
-    let answer_started = Arc::new(AtomicBool::new(false));
-    let progress_answer_started = Arc::clone(&answer_started);
     // Built fresh per turn from the config passed in, so a token generated or
     // cleared via `/avatar` mid-session takes effect on the very next turn
     // without restarting `mint`. The tradeoff: cross-turn cooldown state
@@ -654,10 +651,8 @@ pub async fn run_code_agent_with_options(
                 estimated_tokens,
             } => {
                 if !options.fast_mode
-                    && !progress_answer_started.load(Ordering::Relaxed)
                     && !progress_approval_active.load(Ordering::Relaxed)
                     && let Ok(mut status) = progress_live_status.lock()
-                    && !progress_answer_started.load(Ordering::Relaxed)
                 {
                     status.context_pct = context_pct;
                     status.tokens_used = tokens_used;
@@ -703,10 +698,8 @@ pub async fn run_code_agent_with_options(
                 max_attempts,
             } => {
                 if !options.fast_mode
-                    && !progress_answer_started.load(Ordering::Relaxed)
                     && !progress_approval_active.load(Ordering::Relaxed)
                     && let Ok(mut status) = progress_live_status.lock()
-                    && !progress_answer_started.load(Ordering::Relaxed)
                 {
                     status.waiting_for_network = Some((attempt, max_attempts));
                     status.thinking = Some(waiting_for_network_label(attempt, max_attempts));
@@ -955,145 +948,69 @@ pub async fn run_code_agent_with_options(
                 if let Ok(mut status) = progress_live_status.lock() {
                     status.thinking = None;
                     status.waiting_for_network = None;
-                    let outcome_str = match summary.outcome.as_str() {
-                        "SUCCESS" => "\x1b[32m✓ Success\x1b[0m",
-                        "FAILED" => "\x1b[31m✗ Failure\x1b[0m",
-                        "ROLLED_BACK" => "\x1b[33m↺ Rolled Back\x1b[0m",
-                        _ => &summary.outcome,
-                    };
-                    let tokens_k = if summary.total_tokens >= 1000 {
-                        format!("{:.1}k", summary.total_tokens as f64 / 1000.0)
+                    commit_activity_snapshot(&mut status);
+
+                    let failed_tools: Vec<_> = summary
+                        .tool_timeline
+                        .iter()
+                        .filter(|record| !record.success)
+                        .collect();
+                    let outcome = if !failed_tools.is_empty() {
+                        format!(
+                            "{YELLOW}⚠ Completed with {} failure{}{RESET}",
+                            failed_tools.len(),
+                            if failed_tools.len() == 1 { "" } else { "s" }
+                        )
+                    } else if summary.outcome == "ROLLED_BACK" {
+                        format!("{YELLOW}↺ Rolled back{RESET}")
+                    } else if summary.outcome == "FAILED" {
+                        format!("{RED}✗ Failed{RESET}")
                     } else {
-                        summary.total_tokens.to_string()
+                        format!("{GREEN}✓ Completed{RESET}")
                     };
-                    let created_count = summary.files_created.len();
-                    let modified_count = summary.files_changed.len().saturating_sub(created_count);
-                    let files_str = if created_count > 0 && modified_count > 0 {
-                        format!("{} created, {} modified", created_count, modified_count)
-                    } else if created_count > 0 {
-                        format!("{} created", created_count)
-                    } else {
-                        format!("{} modified", summary.files_changed.len())
-                    };
-                    let mut card = format!(
-                        "\x1b[1;36m┌─ Agent Run #{} ────────────────────────────\x1b[0m\n\
-                         │ Status:   {}\n\
-                         │ Duration: {:.1}s\n\
-                         │ Tokens:   {}\n\
-                         │ Tools:    {} calls ({} retries)\n\
-                         │ Files:    {}\n",
-                        summary.run_id,
-                        outcome_str,
+                    let file_count = summary.files_changed.len();
+                    let mut lines = vec![format!(
+                        "  {outcome} {DIM}in {:.1}s · {} tool{} · {} file{} changed{RESET}",
                         summary.duration_secs,
-                        tokens_k,
                         summary.tool_calls_count,
-                        summary.retries_count,
-                        files_str,
-                    );
-                    if !summary.tool_timeline.is_empty() {
-                        card.push_str("│\n│ Tool calls timeline:\n");
-                        for rec in &summary.tool_timeline {
-                            let status_icon = if !rec.success {
-                                "\x1b[31m✗\x1b[0m"
-                            } else if rec.retried {
-                                "\x1b[33m↺\x1b[0m"
-                            } else {
-                                "\x1b[32m✓\x1b[0m"
-                            };
-                            let note = if !rec.success {
-                                " (failed)"
-                            } else if rec.retried {
-                                " (self-corrected)"
-                            } else {
-                                ""
-                            };
-                            let target_desc = if rec.target.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" [{}]", rec.target)
-                            };
-                            card.push_str(&format!(
-                                "│  {:02}s {} {}{}{}\n",
-                                rec.step, status_icon, rec.action, target_desc, note
-                            ));
+                        if summary.tool_calls_count == 1 {
+                            ""
+                        } else {
+                            "s"
+                        },
+                        file_count,
+                        if file_count == 1 { "" } else { "s" },
+                    )];
+
+                    if file_count > 0 {
+                        let mut names: Vec<String> = summary
+                            .files_changed
+                            .iter()
+                            .take(6)
+                            .map(|path| display_tool_target(path))
+                            .collect();
+                        if file_count > names.len() {
+                            names.push(format!("+{} more", file_count - names.len()));
                         }
+                        lines.push(format!("    {DIM}└ {}{RESET}", names.join(", ")));
                     }
-                    card.push_str("\x1b[1;36m└────────────────────────────────────────\x1b[0m");
-                    status.tasks.push(card.into());
-                    render_live_status(&mut status);
+                    for record in failed_tools.into_iter().take(3) {
+                        let target = if record.target.is_empty() {
+                            record.action.clone()
+                        } else {
+                            format!("{} [{}]", record.action, truncate_line(&record.target, 72))
+                        };
+                        lines.push(format!("    {RED}└ {target} failed{RESET}"));
+                    }
+                    insert_permanent_lines(&mut status, &lines);
                 }
             }
         }
     };
 
-    let chunk_live_status = Arc::clone(&live_status);
-    let chunk_agent_done = Arc::clone(&agent_done);
-    let chunk_answer_started = Arc::clone(&answer_started);
-    let answer_in_live_tui = Arc::new(AtomicBool::new(false));
-    let chunk_answer_in_live_tui = Arc::clone(&answer_in_live_tui);
-    let on_chunk = |summary: String| {
-        let first_chunk = !chunk_answer_started.swap(true, Ordering::Relaxed);
-        if first_chunk {
-            // Stop the thinking ticker, but keep the inline TUI and follow-up
-            // composer alive when this is an interactive queueing turn.
-            chunk_agent_done.store(true, Ordering::Relaxed);
-        }
-
-        let mut committed_activity = false;
-        let mut rendered_in_live_tui = false;
-        if !options.fast_mode
-            && let Ok(mut status) = chunk_live_status.lock()
-        {
-            if first_chunk {
-                status.waiting_for_network = None;
-                if status.queue_enabled && status.accepting_input {
-                    status.thinking = Some("Responding · Esc to interrupt".into());
-                } else {
-                    status.thinking = None;
-                    status.accepting_input = false;
-                    committed_activity = commit_activity_snapshot(&mut status);
-                }
-                // Render every streamed answer in the inline viewport. The
-                // viewport receives the accumulated Markdown, so tables and
-                // long paragraphs are parsed and wrapped as one document
-                // instead of being broken at arbitrary provider chunks.
-                status.streamed_answer_active = true;
-            }
-
-            if status.streamed_answer_active {
-                status.streamed_answer.push_str(&summary);
-                rendered_in_live_tui = render_live_status(&mut status);
-                if !rendered_in_live_tui {
-                    // No interactive terminal: retain the existing raw
-                    // output fallback rather than swallowing the answer.
-                    status.streamed_answer_active = false;
-                    status.streamed_answer.clear();
-                }
-            }
-        }
-
-        if rendered_in_live_tui {
-            chunk_answer_in_live_tui.store(true, Ordering::Relaxed);
-            avatar_bridge.on_talking(true);
-            avatar_bridge.on_talking(false);
-            return;
-        }
-
-        if first_chunk {
-            // Raw terminal output is used only when there is no live composer
-            // to keep pinned below the answer.
-            let _ = crossterm::terminal::disable_raw_mode();
-            if committed_activity {
-                print!("  {MINT}Mint:{RESET} ");
-            } else {
-                print!("\n  {MINT}Mint:{RESET} ");
-            }
-        }
-        let formatted_summary = format_markdown_bold(&sanitize_latex(&summary));
-        avatar_bridge.on_talking(true);
-        render_live_summary(&formatted_summary);
-        avatar_bridge.on_talking(false);
-    };
+    // Providers may still stream internally, but the CLI deliberately waits
+    // for AgentResult.summary so it can render one complete Markdown document.
+    let on_chunk = |_summary: String| {};
 
     let user_name = MemoryStore::open_default()
         .ok()
@@ -1135,18 +1052,7 @@ pub async fn run_code_agent_with_options(
         status.thinking = None;
         status.waiting_for_network = None;
         status.accepting_input = false;
-        if status.streamed_answer_active {
-            if let Ok(agent_result) = &res
-                && reconcile_streamed_answer(&mut status, &agent_result.summary)
-            {
-                // A provider may omit a streamed delta even though its final
-                // tool-call payload is complete. Redraw from that completed,
-                // authoritative payload before freezing the answer into
-                // scrollback so CLI never loses a trailing paragraph.
-                let _ = render_live_status(&mut status);
-            }
-            commit_streamed_answer_snapshot(&mut status);
-        }
+        commit_activity_snapshot(&mut status);
         if let Ok(mut out) = queued_out.lock() {
             *out = status.queued.clone();
         }
@@ -1157,16 +1063,16 @@ pub async fn run_code_agent_with_options(
                 Some(status.draft.iter().collect())
             };
         }
-        if res.is_err() {
-            commit_activity_snapshot(&mut status);
-        }
         clear_live_status(&mut status);
     }
     let res = res.map_err(|e| anyhow!("{}", e))?;
 
-    if answer_started.load(Ordering::Relaxed) && !answer_in_live_tui.load(Ordering::Relaxed) {
-        println!();
-    }
+    let formatted_summary = format_markdown_bold(&sanitize_latex(&res.summary));
+    print!("\n  {MINT}Mint:{RESET} ");
+    avatar_bridge.on_talking(true);
+    render_live_summary(&formatted_summary);
+    avatar_bridge.on_talking(false);
+    println!();
 
     // Print web search sources once after the streamed answer is complete.
     if let Ok(mut status) = live_status.lock()

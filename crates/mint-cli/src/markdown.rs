@@ -146,6 +146,11 @@ pub(crate) fn hard_wrap(text: &str, max_width: usize) -> Vec<String> {
 }
 
 pub fn render_markdown_table(table_lines: &[String]) -> String {
+    let (term_width, _) = terminal_size_or_default();
+    render_markdown_table_with_width(table_lines, term_width)
+}
+
+fn render_markdown_table_with_width(table_lines: &[String], term_width: u16) -> String {
     let mut rows: Vec<Vec<String>> = Vec::new();
     for line in table_lines {
         let trimmed = line.trim();
@@ -229,7 +234,6 @@ pub fn render_markdown_table(table_lines: &[String]) -> String {
     // that no longer fits gets word-wrapped below rather than left to overflow
     // and break the border characters (see `wrap_cell_text`).
     if num_cols > 0 {
-        let (term_width, _) = terminal_size_or_default();
         // Each column contributes `width + 2` (one space of padding either
         // side) plus one border character; there's one extra border character
         // closing the row.
@@ -368,10 +372,10 @@ mod table_tests {
             "| --- | --- |",
             &format!("| x | {long_cell} |"),
         ]);
-        let rendered = render_markdown_table(&table);
+        let rendered = render_markdown_table_with_width(&table, 80);
         assert_borders_aligned(&rendered);
-        // Falls back to 80 columns when no real terminal is attached (test
-        // harness has no TTY), so every physical line must fit within that.
+        // The test pins the renderer to 80 columns so its result does not
+        // depend on whether the test process inherited a real TTY.
         for line in rendered.lines() {
             assert!(
                 unicode_width(line) <= 80,
