@@ -747,19 +747,10 @@ async fn stream_chat_message(
 
     let on_event_clone = on_event.clone();
     let chunk_app = app.clone();
-    let on_chunk = move |summary: String| {
+    let on_chunk = move |chunk: String| {
         let bridge = chunk_app.state::<mint_core::avatar_bridge::AvatarBridge>();
         bridge.on_talking(true);
-        let chars: Vec<char> = summary.chars().collect();
-        let mut i = 0;
-        while i < chars.len() {
-            let end = (i + 4).min(chars.len());
-            let chunk: String = chars[i..end].iter().collect();
-            let _ = on_event_clone.send(DesktopStreamEvent::Chunk { chunk });
-            i = end;
-            std::thread::sleep(std::time::Duration::from_millis(15));
-        }
-        bridge.on_talking(false);
+        let _ = on_event_clone.send(DesktopStreamEvent::Chunk { chunk });
     };
 
     let chat_id_str = request.chat_id.clone().unwrap_or_default();

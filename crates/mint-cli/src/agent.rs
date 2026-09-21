@@ -626,6 +626,10 @@ pub async fn run_code_agent_with_options(
     let progress_live_status = Arc::clone(&live_status);
     let progress_approval_active = Arc::clone(&approval_active);
     let progress_tool_running = Arc::clone(&tool_running);
+    // Once answer deltas start, late progress events must not replace the
+    // response status with a stale "Mulling" label.
+    let answer_started = Arc::new(AtomicBool::new(false));
+    let progress_answer_started = Arc::clone(&answer_started);
     // Built fresh per turn from the config passed in, so a token generated or
     // cleared via `/avatar` mid-session takes effect on the very next turn
     // without restarting `mint`. The tradeoff: cross-turn cooldown state
@@ -650,8 +654,10 @@ pub async fn run_code_agent_with_options(
                 estimated_tokens,
             } => {
                 if !options.fast_mode
+                    && !progress_answer_started.load(Ordering::Relaxed)
                     && !progress_approval_active.load(Ordering::Relaxed)
                     && let Ok(mut status) = progress_live_status.lock()
+                    && !progress_answer_started.load(Ordering::Relaxed)
                 {
                     status.context_pct = context_pct;
                     status.tokens_used = tokens_used;
@@ -697,8 +703,10 @@ pub async fn run_code_agent_with_options(
                 max_attempts,
             } => {
                 if !options.fast_mode
+                    && !progress_answer_started.load(Ordering::Relaxed)
                     && !progress_approval_active.load(Ordering::Relaxed)
                     && let Ok(mut status) = progress_live_status.lock()
+                    && !progress_answer_started.load(Ordering::Relaxed)
                 {
                     status.waiting_for_network = Some((attempt, max_attempts));
                     status.thinking = Some(waiting_for_network_label(attempt, max_attempts));
@@ -1020,95 +1028,63 @@ pub async fn run_code_agent_with_options(
 
     let chunk_live_status = Arc::clone(&live_status);
     let chunk_agent_done = Arc::clone(&agent_done);
+    let chunk_answer_started = Arc::clone(&answer_started);
+    let answer_in_live_tui = Arc::new(AtomicBool::new(false));
+    let chunk_answer_in_live_tui = Arc::clone(&answer_in_live_tui);
     let on_chunk = |summary: String| {
-        // Flip this *before* touching anything else — `agent_loop` still has
-        // async work left (memory writes, etc.) after calling `on_chunk`, so
-        // the real "done" store below (after `agent_loop.await`) fires too
-        // late: the periodic status ticker keeps polling every 150ms in the
-        // meantime and, seeing `agent_done` still false, unconditionally
-        // resurrects `status.thinking` and re-renders — reconstructing a
-        // fresh inline TUI viewport mid-print if that lands while the plain
-        // `print!`s below are still spooling out a long answer (e.g. a big
-        // markdown table), corrupting the terminal. Setting it here closes
-        // that window instead of only the (much narrower) one the
-        // `accepting_input` flag below covers.
-        chunk_agent_done.store(true, Ordering::Relaxed);
+        let first_chunk = !chunk_answer_started.swap(true, Ordering::Relaxed);
+        if first_chunk {
+            // Stop the thinking ticker, but keep the inline TUI and follow-up
+            // composer alive when this is an interactive queueing turn.
+            chunk_agent_done.store(true, Ordering::Relaxed);
+        }
+
         let mut committed_activity = false;
+        let mut rendered_in_live_tui = false;
         if !options.fast_mode
             && let Ok(mut status) = chunk_live_status.lock()
         {
-            status.thinking = None;
-            status.waiting_for_network = None;
-            // Stop accepting keystrokes for the queueing box before it's torn
-            // down below — otherwise a keypress landing between this
-            // `clear_live_status` and the final answer's plain `println!`
-            // would resurrect the box (via `render_live_status`'s lazy
-            // `InlineTui::ensure`) at whatever the cursor's current position
-            // happens to be, underneath the answer that just printed.
-            status.accepting_input = false;
-            committed_activity = commit_activity_snapshot(&mut status);
-            clear_live_status(&mut status);
+            if first_chunk {
+                status.waiting_for_network = None;
+                if status.queue_enabled && status.accepting_input {
+                    status.thinking = Some("Responding · Esc to interrupt".into());
+                    status.streamed_answer_active = true;
+                } else {
+                    status.thinking = None;
+                    status.accepting_input = false;
+                    committed_activity = commit_activity_snapshot(&mut status);
+                    clear_live_status(&mut status);
+                }
+            }
+
+            if status.streamed_answer_active {
+                status.streamed_answer.push_str(&summary);
+                render_live_status(&mut status);
+                rendered_in_live_tui = true;
+            }
         }
-        // Same reasoning as `approve_cb`: drop raw mode synchronously,
-        // right here, rather than leaving `wait_for_escape_interrupt` to
-        // notice `accepting_input` went false on its next tick — the prints
-        // below need cooked mode's `\n` → `\r\n` translation immediately.
-        let _ = crossterm::terminal::disable_raw_mode();
+
+        if rendered_in_live_tui {
+            chunk_answer_in_live_tui.store(true, Ordering::Relaxed);
+            avatar_bridge.on_talking(true);
+            avatar_bridge.on_talking(false);
+            return;
+        }
+
+        if first_chunk {
+            // Raw terminal output is used only when there is no live composer
+            // to keep pinned below the answer.
+            let _ = crossterm::terminal::disable_raw_mode();
+            if committed_activity {
+                print!("  {MINT}Mint:{RESET} ");
+            } else {
+                print!("\n  {MINT}Mint:{RESET} ");
+            }
+        }
         let formatted_summary = format_markdown_bold(&sanitize_latex(&summary));
-        // `commit_activity_snapshot` above already ended on a blank line when
-        // it committed anything (e.g. a tool-use activity block) — printing
-        // this leading "\n" unconditionally on top of that stacked two blank
-        // lines before every answer that followed tool use.
-        if committed_activity {
-            print!("  {MINT}Mint:{RESET} ");
-        } else {
-            print!("\n  {MINT}Mint:{RESET} ");
-        }
         avatar_bridge.on_talking(true);
         render_live_summary(&formatted_summary);
         avatar_bridge.on_talking(false);
-
-        // Print web search sources if any were collected (grouped by domain)
-        if let Ok(mut status) = chunk_live_status.lock()
-            && !status.web_sources.is_empty()
-        {
-            println!();
-            println!("  {DIM}Sources:{RESET}");
-
-            let mut domain_groups: Vec<(String, Vec<(String, String)>)> = Vec::new();
-            for (title, url) in status.web_sources.drain(..) {
-                let domain = extract_domain(&url);
-                if let Some(group) = domain_groups.iter_mut().find(|(d, _)| d == &domain) {
-                    group.1.push((title, url));
-                } else {
-                    domain_groups.push((domain, vec![(title, url)]));
-                }
-            }
-
-            for (i, (domain, items)) in domain_groups.iter().enumerate() {
-                let (first_title, first_url) = &items[0];
-                let extra_count = items.len() - 1;
-                if extra_count > 0 {
-                    println!(
-                        "  {DIM}{}.{RESET} {BLUE}{}{RESET} {DIM}({}){RESET} {CYAN}[+{} extra]{RESET}",
-                        i + 1,
-                        first_title,
-                        domain,
-                        extra_count
-                    );
-                } else {
-                    println!(
-                        "  {DIM}{}.{RESET} {BLUE}{}{RESET} {DIM}({}){RESET}",
-                        i + 1,
-                        first_title,
-                        domain
-                    );
-                }
-                println!("     {DIM}{}{RESET}", first_url);
-            }
-        }
-
-        println!();
     };
 
     let user_name = MemoryStore::open_default()
@@ -1151,6 +1127,9 @@ pub async fn run_code_agent_with_options(
         status.thinking = None;
         status.waiting_for_network = None;
         status.accepting_input = false;
+        if status.streamed_answer_active {
+            commit_streamed_answer_snapshot(&mut status);
+        }
         if let Ok(mut out) = queued_out.lock() {
             *out = status.queued.clone();
         }
@@ -1167,6 +1146,50 @@ pub async fn run_code_agent_with_options(
         clear_live_status(&mut status);
     }
     let res = res.map_err(|e| anyhow!("{}", e))?;
+
+    if answer_started.load(Ordering::Relaxed) && !answer_in_live_tui.load(Ordering::Relaxed) {
+        println!();
+    }
+
+    // Print web search sources once after the streamed answer is complete.
+    if let Ok(mut status) = live_status.lock()
+        && !status.web_sources.is_empty()
+    {
+        println!("  {DIM}Sources:{RESET}");
+
+        let mut domain_groups: Vec<(String, Vec<(String, String)>)> = Vec::new();
+        for (title, url) in status.web_sources.drain(..) {
+            let domain = extract_domain(&url);
+            if let Some(group) = domain_groups.iter_mut().find(|(d, _)| d == &domain) {
+                group.1.push((title, url));
+            } else {
+                domain_groups.push((domain, vec![(title, url)]));
+            }
+        }
+
+        for (i, (domain, items)) in domain_groups.iter().enumerate() {
+            let (first_title, first_url) = &items[0];
+            let extra_count = items.len() - 1;
+            if extra_count > 0 {
+                println!(
+                    "  {DIM}{}.{RESET} {BLUE}{}{RESET} {DIM}({}){RESET} {CYAN}[+{} extra]{RESET}",
+                    i + 1,
+                    first_title,
+                    domain,
+                    extra_count
+                );
+            } else {
+                println!(
+                    "  {DIM}{}.{RESET} {BLUE}{}{RESET} {DIM}({}){RESET}",
+                    i + 1,
+                    first_title,
+                    domain
+                );
+            }
+            println!("     {DIM}{}{RESET}", first_url);
+        }
+        println!();
+    }
 
     if should_show_verification(&res.verification) {
         println!("  Verification: {}", res.verification);

@@ -311,6 +311,10 @@ pub(super) struct LiveStatus {
     /// Whether this turn keeps a typeable follow-up box pinned under the
     /// live status region (see [`AgentOptions::queueing`]).
     pub(super) queue_enabled: bool,
+    /// Current assistant response rendered above the follow-up composer while
+    /// tokens stream in. It is committed to scrollback when the turn ends.
+    pub(super) streamed_answer: String,
+    pub(super) streamed_answer_active: bool,
     /// Flips to `false` once the turn is wrapping up (final chunk printing,
     /// or the turn ending), so a stray keystroke can't resurrect the box
     /// after [`clear_live_status`] has already torn it down.
@@ -736,6 +740,11 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
         true,
         tick,
     ));
+    if !status.streamed_answer.is_empty() {
+        let formatted = format_markdown_bold(&sanitize_latex(&status.streamed_answer));
+        lines.push(format!("  {MINT}Mint:{RESET}"));
+        lines.extend(formatted.lines().map(|line| format!("  {line}")));
+    }
     // Built here (not inline below) so both destinations for it — the old
     // trailing-line spot in `lines`, and the queue box's own pinned row —
     // share one animation. When the queue box is about to be drawn, it's
@@ -856,7 +865,7 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
             let box_height = (box_lines.len() as u16).min(area.height);
             let available_for_status = area.height.saturating_sub(box_height);
 
-            let mut status_line_count: u16 = 0;
+            let mut status_height: u16 = 0;
             let mut status_paragraph = None;
             if !lines.is_empty()
                 && let Ok(status_text) = lines.join("\n").into_text()
@@ -874,17 +883,18 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
                 // bottom of the frame. (`Paragraph::line_count` would do this
                 // exactly, but it's gated behind an unstable ratatui feature.)
                 let wrap_width = area.width.max(1);
-                status_line_count = status_text
+                let status_line_count: u16 = status_text
                     .lines
                     .iter()
                     .map(|line| (line.width().max(1) as u16).div_ceil(wrap_width))
                     .sum();
+                status_height = status_line_count.min(available_for_status);
                 status_paragraph = Some(
                     ratatui::widgets::Paragraph::new(status_text)
-                        .wrap(ratatui::widgets::Wrap { trim: false }),
+                        .wrap(ratatui::widgets::Wrap { trim: false })
+                        .scroll((status_line_count.saturating_sub(status_height), 0)),
                 );
             }
-            let status_height = status_line_count.min(available_for_status);
             let status_area = ratatui::layout::Rect {
                 height: status_height,
                 ..area
@@ -942,6 +952,23 @@ pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
     status.committed_explored = status.explored.len();
     status.committed_activities = status.activities.len();
     status.committed_tasks = status.tasks.len();
+    true
+}
+
+/// Moves the response shown in the live viewport into terminal scrollback
+/// before the viewport is cleared at the end of the turn.
+pub(super) fn commit_streamed_answer_snapshot(status: &mut LiveStatus) -> bool {
+    let answer = std::mem::take(&mut status.streamed_answer);
+    status.streamed_answer_active = false;
+    if answer.trim().is_empty() {
+        return false;
+    }
+
+    let formatted = format_markdown_bold(&sanitize_latex(&answer));
+    let mut lines = vec![format!("  {MINT}Mint:{RESET}")];
+    lines.extend(formatted.lines().map(|line| format!("  {line}")));
+    lines.push(String::new());
+    insert_permanent_lines(status, &lines);
     true
 }
 

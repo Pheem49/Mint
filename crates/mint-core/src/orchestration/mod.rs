@@ -964,6 +964,11 @@ fn resolve_agent_config(
     )
 }
 
+enum AgentStreamChunk {
+    DirectText(String),
+    FinalSummary(String),
+}
+
 async fn stream_chat_with_network_retry(
     config: &MintConfig,
     request: &ChatRequest,
@@ -971,20 +976,46 @@ async fn stream_chat_with_network_retry(
     thought_started: Instant,
     fast_mode: bool,
     progress: &mut (dyn FnMut(AgentProgress) + Send),
+    stream_json_prompt: bool,
+    allow_final_stream: bool,
+    on_stream_chunk: &mut (dyn FnMut(AgentStreamChunk) + Send),
 ) -> Result<(ChatResponse, Option<String>), ChatError> {
     let mut attempt = 0;
+    let mut summary_stream = FinishSummaryStream::default();
     loop {
-        let result = stream_chat_events_with_fallback(config, request, |event| {
-            if !fast_mode
-                && let ChatStreamEvent::ReasoningDelta { delta } = event
-                && !delta.is_empty()
-            {
+        let result = stream_chat_events_with_fallback(config, request, |event| match event {
+            ChatStreamEvent::ReasoningDelta { delta } if !fast_mode && !delta.is_empty() => {
                 progress(AgentProgress::ThinkingDelta {
                     id: thought_id.to_owned(),
                     delta,
                     elapsed_ms: thought_started.elapsed().as_millis() as u64,
                 });
             }
+            ChatStreamEvent::TextDelta { delta } if allow_final_stream => {
+                if stream_json_prompt {
+                    summary_stream.push_json_prompt(&delta, &mut |chunk| {
+                        on_stream_chunk(AgentStreamChunk::FinalSummary(chunk));
+                    });
+                } else if !delta.is_empty() {
+                    // Native tool-calling providers may answer directly in plain text
+                    // instead of calling `finish`. Forward those deltas too; otherwise
+                    // the native-mode fallback can only display the completed answer.
+                    on_stream_chunk(AgentStreamChunk::DirectText(delta));
+                }
+            }
+            ChatStreamEvent::ToolCallDelta {
+                index,
+                name,
+                arguments,
+                input,
+            } if allow_final_stream => summary_stream.push_tool_call(
+                index,
+                name.as_deref(),
+                arguments.as_deref(),
+                input.as_ref(),
+                &mut |chunk| on_stream_chunk(AgentStreamChunk::FinalSummary(chunk)),
+            ),
+            _ => {}
         })
         .await;
         match result {
@@ -999,6 +1030,161 @@ async fn stream_chat_with_network_retry(
             other => return other,
         }
     }
+}
+
+#[derive(Default)]
+struct FinishSummaryStream {
+    tool_names: std::collections::HashMap<usize, String>,
+    tool_arguments: std::collections::HashMap<usize, String>,
+    json_prompt: String,
+    emitted: String,
+}
+
+impl FinishSummaryStream {
+    fn push_tool_call(
+        &mut self,
+        index: usize,
+        name_delta: Option<&str>,
+        arguments_delta: Option<&str>,
+        input: Option<&serde_json::Value>,
+        on_chunk: &mut (dyn FnMut(String) + Send),
+    ) {
+        if let Some(name) = name_delta {
+            self.tool_names.insert(index, name.to_owned());
+        }
+        if let Some(arguments) = arguments_delta {
+            self.tool_arguments
+                .entry(index)
+                .or_default()
+                .push_str(arguments);
+        }
+        if let Some(input) = input {
+            self.tool_arguments.insert(index, input.to_string());
+        }
+        if self
+            .tool_names
+            .get(&index)
+            .is_some_and(|name| name == "finish")
+            && let Some(arguments) = self.tool_arguments.get(&index)
+            && let Some(summary) = json_string_field_prefix(arguments, "summary")
+        {
+            self.emit_new_text(&summary, on_chunk);
+        }
+    }
+
+    fn push_json_prompt(&mut self, delta: &str, on_chunk: &mut (dyn FnMut(String) + Send)) {
+        self.json_prompt.push_str(delta);
+        if json_string_field_prefix(&self.json_prompt, "action").as_deref() == Some("finish")
+            && let Some(summary) = json_string_field_prefix(&self.json_prompt, "summary")
+        {
+            self.emit_new_text(&summary, on_chunk);
+        }
+    }
+
+    fn emit_new_text(&mut self, text: &str, on_chunk: &mut (dyn FnMut(String) + Send)) {
+        if !text.starts_with(&self.emitted) || text.len() == self.emitted.len() {
+            return;
+        }
+        let delta = text[self.emitted.len()..].to_owned();
+        self.emitted.push_str(&delta);
+        on_chunk(delta);
+    }
+}
+
+fn unstreamed_summary_remainder<'a>(
+    summary: &'a str,
+    streamed_finish: &str,
+    streamed_direct: &str,
+) -> &'a str {
+    let streamed_finish = streamed_finish.trim();
+    if !streamed_finish.is_empty()
+        && let Some(remainder) = summary.strip_prefix(streamed_finish)
+    {
+        return remainder;
+    }
+
+    let streamed_direct = streamed_direct.trim();
+    if !streamed_direct.is_empty()
+        && let Some(remainder) = summary.strip_prefix(streamed_direct)
+    {
+        return remainder;
+    }
+
+    summary
+}
+
+/// Reads a JSON string-valued property even while its value is still arriving.
+/// It skips quoted values and only recognizes actual object keys, so a mention
+/// of `"summary"` inside a thought or another string cannot leak to the chat.
+fn json_string_field_prefix(input: &str, field: &str) -> Option<String> {
+    let bytes = input.as_bytes();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'"' {
+            cursor += 1;
+            continue;
+        }
+        let start = cursor;
+        cursor += 1;
+        let mut escaped = false;
+        let mut end = None;
+        while cursor < bytes.len() {
+            match (bytes[cursor], escaped) {
+                (b'"', false) => {
+                    end = Some(cursor);
+                    cursor += 1;
+                    break;
+                }
+                (b'\\', false) => escaped = true,
+                (_, true) => escaped = false,
+                _ => {}
+            }
+            cursor += 1;
+        }
+        if end.is_none() {
+            break;
+        }
+        let Ok(key) = serde_json::from_str::<String>(&input[start..cursor]) else {
+            continue;
+        };
+        if key != field {
+            continue;
+        }
+        let mut value_start = cursor;
+        while value_start < bytes.len() && bytes[value_start].is_ascii_whitespace() {
+            value_start += 1;
+        }
+        if value_start >= bytes.len() || bytes[value_start] != b':' {
+            continue;
+        }
+        value_start += 1;
+        while value_start < bytes.len() && bytes[value_start].is_ascii_whitespace() {
+            value_start += 1;
+        }
+        if value_start >= bytes.len() || bytes[value_start] != b'"' {
+            continue;
+        }
+        let value_content_start = value_start + 1;
+        let mut value_cursor = value_content_start;
+        let mut value_escaped = false;
+        while value_cursor < bytes.len() {
+            match (bytes[value_cursor], value_escaped) {
+                (b'"', false) => {
+                    return serde_json::from_str::<String>(&input[value_start..value_cursor + 1])
+                        .ok();
+                }
+                (b'\\', false) => value_escaped = true,
+                (_, true) => value_escaped = false,
+                _ => {}
+            }
+            value_cursor += 1;
+        }
+        // Close a temporary copy of an incomplete string. Invalid partial
+        // escapes (e.g. half a `\\uXXXX`) are held until the next provider delta.
+        let partial = format!("\"{}\"", &input[value_content_start..]);
+        return serde_json::from_str::<String>(&partial).ok();
+    }
+    None
 }
 
 /// Returns a boxed `dyn Future` trait object rather than being a plain
@@ -1124,6 +1310,8 @@ where
         let mut final_fallback = None;
         let mut final_fallback_reason = None;
         let mut action_counts = BTreeMap::<String, usize>::new();
+        let mut streamed_finish_summary = String::new();
+        let mut streamed_direct_text = String::new();
         // Track the most recent step (if any) that successfully modified a file
         // (`apply_patch`/`write_file`) and the most recent step that ran `verify`,
         // so `finish` can be rejected when code was changed but never checked —
@@ -1214,6 +1402,12 @@ where
             }
 
             let tool_mode = active_config.tool_calling_mode();
+            // A finish can still be rejected after the provider finishes
+            // streaming when edited files have not been verified. Don't show
+            // that provisional summary to the user as if the run were done.
+            let allow_final_stream =
+                !unverified_modification(last_modify_step, last_verify_step, "")
+                    && last_verify_failed != Some(true);
 
             if tool_mode == ToolCallingMode::JsonPrompt
                 && active_config.ai_provider == "ollama"
@@ -1268,62 +1462,92 @@ where
                         content,
                     });
                 }
-                stream_chat_with_network_retry(
-                    &active_config,
-                    &ChatRequest {
-                        message: String::new(),
-                        system_instruction: active_system_prompt.clone(),
-                        chat_id: Some(chat_id.to_owned()),
-                        image_data_uri: None,
-                        audio_data_uri: None,
-                        video_data_uri: None,
-                        document_attachment: None,
-                        workspace_path: None,
-                        agent_id: None,
-                        plan_mode: false,
-                        pinned_mcp_server: None,
-                        messages: Some(native_messages.clone()),
-                        tools: Some(tool_catalog(
-                            &active_config,
-                            plan_mode,
-                            &root,
-                            allow_subagent_dispatch,
-                        )),
-                        temperature: active_config.temperature,
-                        ..Default::default()
-                    },
-                    &thought_id,
-                    thought_started,
-                    fast_mode,
-                    &mut progress,
-                )
-                .await?
+                {
+                    let mut emit_stream_chunk = |chunk| match chunk {
+                        AgentStreamChunk::DirectText(delta) => {
+                            streamed_direct_text.push_str(&delta);
+                            on_chunk(delta);
+                        }
+                        AgentStreamChunk::FinalSummary(delta) => {
+                            streamed_finish_summary.push_str(&delta);
+                            on_chunk(delta);
+                        }
+                    };
+                    stream_chat_with_network_retry(
+                        &active_config,
+                        &ChatRequest {
+                            message: String::new(),
+                            system_instruction: active_system_prompt.clone(),
+                            chat_id: Some(chat_id.to_owned()),
+                            image_data_uri: None,
+                            audio_data_uri: None,
+                            video_data_uri: None,
+                            document_attachment: None,
+                            workspace_path: None,
+                            agent_id: None,
+                            plan_mode: false,
+                            pinned_mcp_server: None,
+                            messages: Some(native_messages.clone()),
+                            tools: Some(tool_catalog(
+                                &active_config,
+                                plan_mode,
+                                &root,
+                                allow_subagent_dispatch,
+                            )),
+                            temperature: active_config.temperature,
+                            ..Default::default()
+                        },
+                        &thought_id,
+                        thought_started,
+                        fast_mode,
+                        &mut progress,
+                        false,
+                        allow_final_stream,
+                        &mut emit_stream_chunk,
+                    )
+                    .await?
+                }
             } else {
-                stream_chat_with_network_retry(
-                    &active_config,
-                    &ChatRequest {
-                        message: observation.clone(),
-                        system_instruction: active_system_prompt.clone(),
-                        chat_id: Some(chat_id.to_owned()),
-                        image_data_uri: pending_image.take(),
-                        audio_data_uri: pending_audio.take(),
-                        video_data_uri: pending_video.take(),
-                        document_attachment: None,
-                        workspace_path: None,
-                        agent_id: None,
-                        plan_mode: false,
-                        pinned_mcp_server: None,
-                        messages: None,
-                        tools: None,
-                        temperature: active_config.temperature,
-                        ..Default::default()
-                    },
-                    &thought_id,
-                    thought_started,
-                    fast_mode,
-                    &mut progress,
-                )
-                .await?
+                {
+                    let mut emit_stream_chunk = |chunk| match chunk {
+                        AgentStreamChunk::DirectText(delta) => {
+                            streamed_direct_text.push_str(&delta);
+                            on_chunk(delta);
+                        }
+                        AgentStreamChunk::FinalSummary(delta) => {
+                            streamed_finish_summary.push_str(&delta);
+                            on_chunk(delta);
+                        }
+                    };
+                    stream_chat_with_network_retry(
+                        &active_config,
+                        &ChatRequest {
+                            message: observation.clone(),
+                            system_instruction: active_system_prompt.clone(),
+                            chat_id: Some(chat_id.to_owned()),
+                            image_data_uri: pending_image.take(),
+                            audio_data_uri: pending_audio.take(),
+                            video_data_uri: pending_video.take(),
+                            document_attachment: None,
+                            workspace_path: None,
+                            agent_id: None,
+                            plan_mode: false,
+                            pinned_mcp_server: None,
+                            messages: None,
+                            tools: None,
+                            temperature: active_config.temperature,
+                            ..Default::default()
+                        },
+                        &thought_id,
+                        thought_started,
+                        fast_mode,
+                        &mut progress,
+                        true,
+                        allow_final_stream,
+                        &mut emit_stream_chunk,
+                    )
+                    .await?
+                }
             };
 
             final_provider = response.provider.clone();
@@ -1720,7 +1944,14 @@ where
                         let verification =
                             meaningful_verification(&decision.input.verification).to_owned();
 
-                        on_chunk(summary.clone());
+                        let remainder = unstreamed_summary_remainder(
+                            &summary,
+                            &streamed_finish_summary,
+                            &streamed_direct_text,
+                        );
+                        if !remainder.is_empty() {
+                            on_chunk(remainder.to_owned());
+                        }
 
                         let memory = MemoryStore::open_default()?;
                         memory.add_interaction_for_chat_with_fallback(
@@ -2969,6 +3200,74 @@ where
 mod tests {
     use super::*;
     use crate::config::AgentConfig;
+
+    #[test]
+    fn extracts_a_summary_incrementally_without_matching_text_inside_other_strings() {
+        let mut stream = FinishSummaryStream::default();
+        let mut output = String::new();
+        let mut emit = |delta: String| output.push_str(&delta);
+
+        stream.push_tool_call(0, Some("read_file"), None, None, &mut emit);
+        stream.push_tool_call(
+            0,
+            None,
+            Some(r#"{"thought":"the \"summary\" key is data","path":"x"}"#),
+            None,
+            &mut emit,
+        );
+        assert!(stream.emitted.is_empty());
+
+        stream.push_tool_call(1, Some("fin"), None, None, &mut emit);
+        stream.push_tool_call(1, Some("finish"), None, None, &mut emit);
+        stream.push_tool_call(1, None, Some(r#"{"summary":"สวัส"#), None, &mut emit);
+        stream.push_tool_call(
+            1,
+            None,
+            Some(r#"ดี\nโลก","verification":""}"#),
+            None,
+            &mut emit,
+        );
+
+        assert_eq!(output, "สวัสดี\nโลก");
+    }
+
+    #[test]
+    fn extracts_json_prompt_summary_as_chunks_arrive() {
+        let mut stream = FinishSummaryStream::default();
+        let mut output = String::new();
+        let mut emit = |delta: String| output.push_str(&delta);
+        stream.push_json_prompt(
+            r#"{"thought":"done","action":"finish","input":{"summary":"Hello"#,
+            &mut emit,
+        );
+        assert_eq!(stream.emitted, "Hello");
+        stream.push_json_prompt(r#" world"}}"#, &mut emit);
+        assert_eq!(output, "Hello world");
+    }
+
+    #[test]
+    fn direct_native_text_is_not_sent_again_as_a_completed_summary() {
+        assert_eq!(
+            unstreamed_summary_remainder("A streamed answer.", "", "A streamed answer."),
+            ""
+        );
+    }
+
+    #[test]
+    fn direct_native_text_appends_only_the_unstreamed_suffix() {
+        assert_eq!(
+            unstreamed_summary_remainder("A streamed answer, continued.", "", "A streamed answer"),
+            ", continued."
+        );
+    }
+
+    #[test]
+    fn streamed_finish_summary_takes_precedence_over_direct_text() {
+        assert_eq!(
+            unstreamed_summary_remainder("Final answer.", "Final", "unrelated preamble"),
+            " answer."
+        );
+    }
 
     #[test]
     fn truncate_for_context_leaves_short_text_untouched() {

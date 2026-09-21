@@ -10,8 +10,18 @@ use crate::MintConfig;
 /// Callers never need to know which vendor-specific field carried the data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatStreamEvent {
-    TextDelta { delta: String },
-    ReasoningDelta { delta: String },
+    TextDelta {
+        delta: String,
+    },
+    ReasoningDelta {
+        delta: String,
+    },
+    ToolCallDelta {
+        index: usize,
+        name: Option<String>,
+        arguments: Option<String>,
+        input: Option<Value>,
+    },
 }
 
 /// `available_providers()`'s configured-providers list, reordered so
@@ -1991,15 +2001,28 @@ impl StreamReplyAccumulator {
                     .as_u64()
                     .map(|n| n as usize)
                     .unwrap_or(fallback_index);
-                let tool = self.tool_at(index);
-                if let Some(id) = call["id"].as_str() {
-                    tool.id.push_str(id);
-                }
-                if let Some(name) = call["function"]["name"].as_str() {
-                    tool.name.push_str(name);
-                }
-                if let Some(arguments) = call["function"]["arguments"].as_str() {
-                    tool.arguments.push_str(arguments);
+                let name_delta = call["function"]["name"].as_str().map(str::to_owned);
+                let arguments = call["function"]["arguments"].as_str().map(str::to_owned);
+                let current_name = {
+                    let tool = self.tool_at(index);
+                    if let Some(id) = call["id"].as_str() {
+                        tool.id.push_str(id);
+                    }
+                    if let Some(name) = &name_delta {
+                        tool.name.push_str(name);
+                    }
+                    if let Some(arguments) = &arguments {
+                        tool.arguments.push_str(arguments);
+                    }
+                    tool.name.clone()
+                };
+                if name_delta.is_some() || arguments.is_some() {
+                    on_event(ChatStreamEvent::ToolCallDelta {
+                        index,
+                        name: name_delta.map(|_| current_name),
+                        arguments,
+                        input: None,
+                    });
                 }
             }
         }
@@ -2035,6 +2058,12 @@ impl StreamReplyAccumulator {
                     tool.name = call["name"].as_str().unwrap_or_default().to_owned();
                     tool.input = Some(call["args"].clone());
                     tool.thought_signature = part["thoughtSignature"].as_str().map(str::to_owned);
+                    on_event(ChatStreamEvent::ToolCallDelta {
+                        index,
+                        name: call["name"].as_str().map(str::to_owned),
+                        arguments: None,
+                        input: Some(call["args"].clone()),
+                    });
                 }
             }
         }
@@ -2078,6 +2107,12 @@ impl StreamReplyAccumulator {
                     .unwrap_or_default()
                     .to_owned();
                 tool.input = Some(call["function"]["arguments"].clone());
+                on_event(ChatStreamEvent::ToolCallDelta {
+                    index,
+                    name: call["function"]["name"].as_str().map(str::to_owned),
+                    arguments: None,
+                    input: Some(call["function"]["arguments"].clone()),
+                });
             }
         }
         self.input_tokens = value["prompt_eval_count"]
@@ -2115,6 +2150,12 @@ impl StreamReplyAccumulator {
                     tool.id = block["id"].as_str().unwrap_or_default().to_owned();
                     tool.name = block["name"].as_str().unwrap_or_default().to_owned();
                     self.anthropic_blocks.insert(block_index, tool_index);
+                    on_event(ChatStreamEvent::ToolCallDelta {
+                        index: tool_index,
+                        name: block["name"].as_str().map(str::to_owned),
+                        arguments: None,
+                        input: None,
+                    });
                 }
             }
             Some("content_block_delta") => {
@@ -2136,6 +2177,12 @@ impl StreamReplyAccumulator {
                             && let Some(json) = delta["partial_json"].as_str()
                         {
                             self.tool_at(tool_index).arguments.push_str(json);
+                            on_event(ChatStreamEvent::ToolCallDelta {
+                                index: tool_index,
+                                name: None,
+                                arguments: Some(json.to_owned()),
+                                input: None,
+                            });
                         }
                     }
                     _ => {}
@@ -2978,7 +3025,20 @@ mod tests {
         assert_eq!(reply.stop_reason.as_deref(), Some("tool_calls"));
         assert_eq!(reply.input_tokens, Some(10));
         assert_eq!(reply.tool_calls.unwrap()[0].input["path"], "README.md");
-        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ChatStreamEvent::ReasoningDelta { .. }))
+                .count(),
+            2
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ChatStreamEvent::ToolCallDelta { .. }))
+                .count(),
+            2
+        );
     }
 
     #[test]

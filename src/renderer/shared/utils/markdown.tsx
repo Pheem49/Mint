@@ -14,6 +14,7 @@ import ImageSearchCard from '../components/ImageSearchCard'
 import ImageGenCard from '../components/ImageGenCard'
 import MermaidCard from '../components/MermaidCard'
 import UiGridCard from '../components/UiGridCard'
+import { parseCardJsonSafely } from './cardJson'
 import UiFeatureCard from '../components/UiFeatureCard'
 import UiMockupWidget from '../components/UiMockupWidget'
 import {
@@ -253,55 +254,37 @@ function parseJsonSafely(codeText: string): any {
   if (cleaned.startsWith('```')) {
     cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\s*/, '').replace(/\s*```$/, '').trim()
   }
-  try {
-    return JSON.parse(cleaned)
-  } catch {
-    try {
-      const trailingFixed = cleaned.replace(/,\s*([\]}])/g, '$1')
-      return JSON.parse(trailingFixed)
-    } catch {
-      return null
-    }
-  }
+  return parseCardJsonSafely(cleaned)
+}
+
+function renderJsonCard(
+  codeText: string,
+  lang: string,
+  render: (data: any) => ReactNode,
+): ReactNode {
+  const parsed = parseJsonSafely(codeText)
+  return parsed
+    ? render(parsed)
+    : <ChatCodeBlock code={codeText} language={lang} />
 }
 
 function renderCodeCard(lang: string, codeText: string): ReactNode {
   switch (lang) {
     case 'weather_json':
     case 'weather-json':
-      try {
-        return <WeatherCard data={JSON.parse(codeText)} />
-      } catch {
-        return <ChatCodeBlock code={codeText} language={lang} />
-      }
+      return renderJsonCard(codeText, lang, (data) => <WeatherCard data={data} />)
     case 'stock_json':
     case 'stock-json':
-      try {
-        return <StockCard data={JSON.parse(codeText)} />
-      } catch {
-        return <ChatCodeBlock code={codeText} language={lang} />
-      }
+      return renderJsonCard(codeText, lang, (data) => <StockCard data={data} />)
     case 'calculation_json':
     case 'calculation-json':
-      try {
-        return <CalculationCard data={JSON.parse(codeText)} />
-      } catch {
-        return <ChatCodeBlock code={codeText} language={lang} />
-      }
+      return renderJsonCard(codeText, lang, (data) => <CalculationCard data={data} />)
     case 'image_search_json':
     case 'image-search-json':
-      try {
-        return <ImageSearchCard data={JSON.parse(codeText)} />
-      } catch {
-        return <ChatCodeBlock code={codeText} language={lang} />
-      }
+      return renderJsonCard(codeText, lang, (data) => <ImageSearchCard data={data} />)
     case 'image_gen_json':
     case 'image-gen-json':
-      try {
-        return <ImageGenCard data={JSON.parse(codeText)} />
-      } catch {
-        return <ChatCodeBlock code={codeText} language={lang} />
-      }
+      return renderJsonCard(codeText, lang, (data) => <ImageGenCard data={data} />)
     case 'mermaid':
       return <MermaidCard code={codeText} />
     case 'ui_grid':

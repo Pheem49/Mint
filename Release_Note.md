@@ -1,5 +1,18 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Agent Reply Streaming
+
+- Stream Agent mode's final answer as the model generates its `finish` summary, for native tool-call and JSON-prompt providers, instead of waiting to send the completed summary as one block. The web and desktop chat now use the same real chunks; desktop no longer simulates typing after generation.
+- Stream plain-text responses from native tool-calling models as they arrive too, while keeping reasoning deltas separate and avoiding a duplicate completed summary.
+- Updated CLI streamed-answer rendering to print the `Mint:` header and clear the live status only once, append each incoming text delta continuously, and print collected web sources after the response finishes.
+- Kept the CLI follow-up composer visible during streaming, rendered the current answer above it, and committed that answer to scrollback when the turn completes.
+- Prevented late thinking/network progress events from restoring the "Mulling" status after streamed answer text has started.
+
+## JSON Card Parsing
+
+- Recover all JSON-backed chat cards (weather, stock, calculation, image, UI grid, feature, and mockup) when a simple field is accidentally emitted outside its object; unrelated malformed JSON still falls back safely rather than being guessed at.
+- Strengthened card-generation instructions and added regression coverage for the malformed three-option payload and detached scalar fields.
+
 ## Assistant Presence Widget
 
 - Made the floating assistant open the main chat when clicked and added a hover-only control that turns Assistant Presence off.
