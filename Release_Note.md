@@ -10,12 +10,19 @@
 - Replaced decorative gradients, glow effects, elevated cards, and AI-style status capsules with restrained surfaces, structural dividers, typography, and a small state indicator suited to a developer tool.
 - Added keyboard focus treatments, disabled and active control states, long-name truncation, contained scrolling, narrow-window adjustments, reduced-motion behavior, and forced-colors support.
 - Preserved the existing workspace file creation, folder creation, refresh, drag-to-mention, expand/collapse, delete, and automatic refresh behavior without changing component logic.
+- Bound workspace mutations to an explicit workspace root and relative path, rejected traversal and symlink escapes, and carried the workspace revision through consecutive file operations.
+- Unified workspace reads and mutations around `{ root, relativePath, revision }`; every operation now returns a complete snapshot containing the canonical root, tree, Git state, and revision.
+- Added grouped renderer platform seams for authentication, conversations, catalogs, media, runtime capabilities, and workspaces, removing direct runtime-adapter imports from shared UI modules.
+- Replaced generic conversation field setters with semantic transitions for composing, attachments, workspace selection, run lifecycle, streaming, progress, approvals, cancellation, and session switching.
+- Added interface tests for Git branch outcomes, Workspace containment and revisions, renderer platform routing, and conversation transitions.
+- Restored immediate Workspace snapshot refresh after branch changes, removed stale polling revisions, strengthened typed platform dispatch, and included interface tests in the default test command.
 
 ## Git Branches in CLI & Desktop
 
 - Moved shared branch inspection and switching into `mint-core`, then added `mint git status|list|switch|create|track|graph` so CLI and Desktop follow the same branch, dirty-worktree, and remote-tracking rules.
 - Added the current Git branch beside the workspace path in the interactive CLI prompt, `/cd` update, session stats, and exit summary.
 - Added the CLI-only `/branch` slash command with an interactive local/remote branch picker, direct `/branch <name>` switching, and dirty-worktree confirmation.
+- Preserved the semantic Git branch-change outcome through Tauri so Desktop requests dirty-worktree confirmation only after `mint-core` returns `confirmation_required`.
 
 ## Desktop Empty Chat Layout & Workspace Selector
 
@@ -192,3 +199,9 @@ Overhauled session management in the CLI to give every conversation its own isol
 - **Platform Parity across CLI, Desktop, and Web**:
   - Registered `/resume` in `slash-commands.json` for all three surfaces (`["cli", "web", "desktop"]`).
   - Integrated `/resume` dispatch in `slashCommandProcessor.ts` and `MintDashboard.tsx` to hot-swap active conversations seamlessly on Desktop and Web.
+# Unreleased
+
+- Centralized Git branch-change safety decisions in mint-core; CLI, interactive /branch, and Desktop now use the same workspace-change module before switching, creating, or tracking a branch.
+- Added a shared workspace platform module. Shared Git and workspace renderer modules now cross one interface, while Desktop and Web install their own adapters at startup.
+- Started moving workspace tree and relative-path policy into mint-core's Workspace module.
+- Deepened conversation coordination with a shared reducer and React adapter. Conversation run state, composer attachments, draft/workspace persistence, streaming callbacks, approvals, progress, and cancellation now cross one coordinator interface; ChatPanel now receives only a view model and actions.

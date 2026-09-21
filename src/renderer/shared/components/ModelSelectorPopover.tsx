@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useProviderModels } from '@/hooks/useProviderModels'
-import { fetchProviderModels } from '@/tauri'
+import { catalogPlatform } from '../platform'
 import { HF_MODELS, getModelMetadata, isFreeModel, OPENROUTER_POPULAR_MODELS } from '../constants/models'
 import type { CustomProviderConfig } from '../types'
 
@@ -282,7 +282,7 @@ export default function ModelSelectorPopover({
       } catch {}
 
       try {
-        const live = await fetchProviderModels('ollama', '')
+        const live = await catalogPlatform.fetchProviderModels('ollama', '')
         if (!cancelled && live && live.length > 0) {
           setInternalOllamaModels(live)
           return

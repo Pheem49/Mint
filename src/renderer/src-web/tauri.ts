@@ -13,7 +13,6 @@ import type {
   ImageGenRequest,
   ImageGenProviders,
   ImageGenResponse,
-  WorkspaceTreeEntry,
   CodeEdit,
   CodeEditProposal,
   LearnedSkill,
@@ -24,6 +23,7 @@ import type {
   LinkedFolderDraft,
   GitCheckpoint,
   GitBranchInfo,
+  GitBranchChangeOutcome,
 } from '../shared/types'
 
 
@@ -1895,20 +1895,16 @@ export async function removeLinkedFolder(name: string): Promise<void> {
   await invoke('remove_linked_folder', { name })
 }
 
-export async function getWorkspaceTree(path?: string | null): Promise<WorkspaceTreeEntry> {
+export async function getWorkspaceSnapshot(operation: import('../shared/types').WorkspaceOperation): Promise<import('../shared/types').WorkspaceSnapshot> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     return {
-      name: 'Workspace',
-      path: '.',
-      kind: 'directory',
-      children: [
-        { name: 'src', path: 'src', kind: 'directory', children: [] },
-        { name: 'package.json', path: 'package.json', kind: 'file', children: [] },
-      ],
+      path: operation.root, revision: operation.revision,
+      git: { isRepository: false, currentBranch: null, detachedHead: null, branches: [], remoteBranches: [], isDirty: false },
+      tree: { name: 'Workspace', path: '.', kind: 'directory', children: [] },
     }
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<WorkspaceTreeEntry>('get_workspace_tree', { path })
+  return invoke('get_workspace_snapshot', { operation })
 }
 
 export async function getGitBranchInfo(workspacePath: string): Promise<GitBranchInfo> {
@@ -1922,37 +1918,37 @@ export async function getGitBranchInfo(workspacePath: string): Promise<GitBranch
 export async function switchGitBranch(
   workspacePath: string,
   branch: string,
-  allowDirty = false,
-): Promise<GitBranchInfo> {
+  confirmedDirtyWorkspace = false,
+): Promise<GitBranchChangeOutcome> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     throw new Error('Branch switching is only available in the desktop app.')
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<GitBranchInfo>('switch_git_branch', { workspacePath, branch, allowDirty })
+  return invoke<GitBranchChangeOutcome>('switch_git_branch', { workspacePath, branch, confirmedDirtyWorkspace })
 }
 
 export async function createGitBranch(
   workspacePath: string,
   branch: string,
-  allowDirty = false,
-): Promise<GitBranchInfo> {
+  confirmedDirtyWorkspace = false,
+): Promise<GitBranchChangeOutcome> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     throw new Error('Branch creation is only available in the desktop app.')
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<GitBranchInfo>('create_git_branch', { workspacePath, branch, allowDirty })
+  return invoke<GitBranchChangeOutcome>('create_git_branch', { workspacePath, branch, confirmedDirtyWorkspace })
 }
 
 export async function checkoutRemoteGitBranch(
   workspacePath: string,
   remoteBranch: string,
-  allowDirty = false,
-): Promise<GitBranchInfo> {
+  confirmedDirtyWorkspace = false,
+): Promise<GitBranchChangeOutcome> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     throw new Error('Remote branch checkout is only available in the desktop app.')
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<GitBranchInfo>('checkout_remote_git_branch', { workspacePath, remoteBranch, allowDirty })
+  return invoke<GitBranchChangeOutcome>('checkout_remote_git_branch', { workspacePath, remoteBranch, confirmedDirtyWorkspace })
 }
 
 export async function getGitGraph(workspacePath: string): Promise<string[]> {
@@ -1961,22 +1957,22 @@ export async function getGitGraph(workspacePath: string): Promise<string[]> {
   return invoke<string[]>('get_git_graph', { workspacePath })
 }
 
-export async function createWorkspaceFile(path: string): Promise<void> {
-  if (typeof window === 'undefined' || !isTauriRuntime()) return
+export async function createWorkspaceFile(operation: import('../shared/types').WorkspaceOperation): Promise<import('../shared/types').WorkspaceSnapshot> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) throw new Error('Workspace files are only available in the desktop app.')
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('create_workspace_file', { path })
+  return invoke('create_workspace_file', { operation })
 }
 
-export async function createWorkspaceFolder(path: string): Promise<void> {
-  if (typeof window === 'undefined' || !isTauriRuntime()) return
+export async function createWorkspaceFolder(operation: import('../shared/types').WorkspaceOperation): Promise<import('../shared/types').WorkspaceSnapshot> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) throw new Error('Workspace folders are only available in the desktop app.')
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('create_workspace_folder', { path })
+  return invoke('create_workspace_folder', { operation })
 }
 
-export async function deleteWorkspaceItem(path: string): Promise<void> {
-  if (typeof window === 'undefined' || !isTauriRuntime()) return
+export async function deleteWorkspaceItem(operation: import('../shared/types').WorkspaceOperation): Promise<import('../shared/types').WorkspaceSnapshot> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) throw new Error('Workspace files are only available in the desktop app.')
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('delete_workspace_item', { path })
+  return invoke('delete_workspace_item', { operation })
 }
 
 export async function selectWorkspaceDirectory(): Promise<string | null> {
@@ -2498,7 +2494,7 @@ const _apiCheck: MintPlatformApi = {
   generateImages,
   getImageGenProviders,
   setDefaultImageProvider,
-  getWorkspaceTree,
+  getWorkspaceSnapshot,
   getGitBranchInfo,
   switchGitBranch,
   createGitBranch,

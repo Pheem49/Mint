@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react'
-import { getWorkspaceTree, type WorkspaceTreeEntry, createWorkspaceFile, createWorkspaceFolder, deleteWorkspaceItem } from '../tauri'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { workspacePlatform } from '@shared/platform'
+import type { WorkspaceSnapshot, WorkspaceTreeEntry } from '@shared/types'
 import {
   materialFolderIcon,
   materialFileIcon,
@@ -15,6 +16,7 @@ interface WorkspacePanelProps {
   onEnableAgentMode: () => void
   onSetMessage: (message: string) => void
   onWorkspaceReady: (path: string) => void
+  refreshRevision?: number
 }
 
 const FILE_LABEL: Record<string, string> = {
@@ -29,7 +31,7 @@ const FILE_LABEL: Record<string, string> = {
 }
 
 
-function TreeNode({ entry, level, onRefresh, workspacePath }: { entry: WorkspaceTreeEntry; level: number; onRefresh: () => void; workspacePath: string; key?: string }) {
+function TreeNode({ entry, level, onSnapshot, workspacePath, revision }: { entry: WorkspaceTreeEntry; level: number; onSnapshot: (snapshot: WorkspaceSnapshot) => void; workspacePath: string; revision: number; key?: string }) {
   const [open, setOpen] = useState(level < 1)
   const isDirectory = entry.kind === 'directory'
   const hasChildren = entry.children.length > 0
@@ -44,9 +46,8 @@ function TreeNode({ entry, level, onRefresh, workspacePath }: { entry: Workspace
     if (!confirmed) return
 
     try {
-      const absolutePath = `${workspacePath}/${entry.path}`
-      await deleteWorkspaceItem(absolutePath)
-      onRefresh()
+      const snapshot = await workspacePlatform.deleteWorkspaceItem({ root: workspacePath, relativePath: entry.path, revision })
+      onSnapshot(snapshot)
     } catch (err) {
       alert(`Failed to delete item: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -83,7 +84,7 @@ function TreeNode({ entry, level, onRefresh, workspacePath }: { entry: Workspace
       {isDirectory && open && hasChildren && (
         <div className="workspace-tree-children">
           {entry.children.map((child) => (
-            <TreeNode key={child.path} entry={child} level={level + 1} onRefresh={onRefresh} workspacePath={workspacePath} />
+            <TreeNode key={child.path} entry={child} level={level + 1} onSnapshot={onSnapshot} workspacePath={workspacePath} revision={revision} />
           ))}
         </div>
       )}
@@ -91,11 +92,19 @@ function TreeNode({ entry, level, onRefresh, workspacePath }: { entry: Workspace
   )
 }
 
-export default function WorkspacePanel({ agentMode, sending, workspacePath, onEnableAgentMode, onSetMessage, onWorkspaceReady }: WorkspacePanelProps) {
+export default function WorkspacePanel({ agentMode, sending, workspacePath, onEnableAgentMode, onSetMessage, onWorkspaceReady, refreshRevision = 0 }: WorkspacePanelProps) {
   const [tree, setTree] = useState<WorkspaceTreeEntry | null>(null)
+  const [revision, setRevision] = useState(0)
+  const revisionRef = useRef(0)
   const [error, setError] = useState('')
 
-  const refresh = async () => {
+  const applySnapshot = useCallback((snapshot: WorkspaceSnapshot) => {
+    setTree(snapshot.tree)
+    revisionRef.current = snapshot.revision
+    setRevision(snapshot.revision)
+    if (snapshot.path !== workspacePath) onWorkspaceReady(snapshot.path)
+  }, [onWorkspaceReady, workspacePath])
+  const refresh = useCallback(async () => {
     if (!workspacePath.trim()) {
       setError('')
       setTree(null)
@@ -104,13 +113,11 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
 
     try {
       setError('')
-      const nextTree = await getWorkspaceTree(workspacePath)
-      setTree(nextTree)
-      if (nextTree.path !== workspacePath) onWorkspaceReady(nextTree.path)
+      applySnapshot(await workspacePlatform.getWorkspaceSnapshot({ root: workspacePath, relativePath: '', revision: revisionRef.current }))
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     }
-  }
+  }, [applySnapshot, workspacePath])
 
   useEffect(() => {
     refresh()
@@ -119,12 +126,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
     const handleFocus = () => {
       refresh()
     }
-    const handleBranchChanged = (event: Event) => {
-      const detail = (event as CustomEvent<{ workspacePath?: string }>).detail
-      if (!detail?.workspacePath || detail.workspacePath === workspacePath) refresh()
-    }
     window.addEventListener('focus', handleFocus)
-    window.addEventListener('mint:workspace-branch-changed', handleBranchChanged)
 
     // Poll every 15 seconds to catch edits/updates in real-time
     const interval = setInterval(() => {
@@ -133,10 +135,9 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
 
     return () => {
       window.removeEventListener('focus', handleFocus)
-      window.removeEventListener('mint:workspace-branch-changed', handleBranchChanged)
       clearInterval(interval)
     }
-  }, [workspacePath])
+  }, [workspacePath, refreshRevision, refresh])
 
   const handleCreateFile = async () => {
     if (!workspacePath.trim()) return
@@ -145,9 +146,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
 
     try {
       setError('')
-      const fullPath = `${workspacePath}/${name.trim()}`
-      await createWorkspaceFile(fullPath)
-      await refresh()
+      applySnapshot(await workspacePlatform.createWorkspaceFile({ root: workspacePath, relativePath: name.trim(), revision }))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -160,9 +159,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
 
     try {
       setError('')
-      const fullPath = `${workspacePath}/${name.trim()}`
-      await createWorkspaceFolder(fullPath)
-      await refresh()
+      applySnapshot(await workspacePlatform.createWorkspaceFolder({ root: workspacePath, relativePath: name.trim(), revision }))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -200,7 +197,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
             </div>
             <div className="workspace-tree">
               {tree.children.map((entry) => (
-                <TreeNode key={entry.path} entry={entry} level={0} onRefresh={refresh} workspacePath={workspacePath} />
+                <TreeNode key={entry.path} entry={entry} level={0} onSnapshot={applySnapshot} workspacePath={workspacePath} revision={revision} />
               ))}
             </div>
           </>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
-import { listLearnedSkills, addLearnedSkill, deleteLearnedSkill, LearnedSkill, detectSystemTools, DetectedTools, listMcpServerTools } from '@/tauri'
+import { catalogPlatform } from '../../platform'
+import type { DetectedTools, LearnedSkill } from '../../types'
 import McpToolAllowlist from '../McpToolAllowlist'
 import McpRegistryPicker from '../McpRegistryPicker'
 import {
@@ -12,6 +13,8 @@ import {
 } from '../../utils/oauthManager'
 import { renderMcpSvgIcon, BUILTIN_PLUGINS_LIST } from '../../constants/plugins'
 import { isNativePluginEnabled, applyNativePluginToggle } from '../../utils/nativePlugins'
+
+const { listLearnedSkills, addLearnedSkill, deleteLearnedSkill, detectSystemTools, listMcpServerTools } = catalogPlatform
 
 interface PluginsTabProps {
   config: typeof DEFAULT_CONFIG

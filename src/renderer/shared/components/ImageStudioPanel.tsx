@@ -1,15 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
-import {
-  generateImages,
-  getImageGenProviders,
-  fetchImageProviderModels,
-  convertFileSrc,
-  listSavedPictures,
-  type ImageGenRequest,
-  type ImageGenResponse,
-  type ImageGenProviders,
-  type PictureEntry,
-} from '@/tauri'
+import { mediaPlatform } from '../platform'
+import type { ImageGenRequest, ImageGenResponse, ImageGenProviders, PictureEntry } from '../types'
+
+const { generateImages, getImageGenProviders, fetchImageProviderModels, convertFileSrc, listSavedPictures } = mediaPlatform
 
 type AspectRatio = '1:1' | '16:9' | '9:16' | '4:3'
 

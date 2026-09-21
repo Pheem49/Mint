@@ -9,9 +9,11 @@ import {
   HF_MODELS,
   LOCAL_MODELS,
 } from '../../constants/models'
-import type { CustomProviderConfig } from '../../types'
-import { listSubagents, saveSubagent, deleteSubagent, SubagentDefinition, SubagentDraft } from '@/tauri'
+import type { CustomProviderConfig, SubagentDefinition, SubagentDraft } from '../../types'
+import { catalogPlatform } from '../../platform'
 import ApiKeyInput from './ApiKeyInput'
+
+const { listSubagents, saveSubagent, deleteSubagent } = catalogPlatform
 
 export interface Agent {
   id: string

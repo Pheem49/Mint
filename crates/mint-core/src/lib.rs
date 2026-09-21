@@ -67,6 +67,7 @@ pub use system::docker_sandbox;
 pub use system::shell;
 pub use system::stock;
 pub use system::weather;
+pub use system::workspace;
 
 pub use agent_loop::{AgentActionFuture, AgentLoopError, parse_agent_json, run_agent_loop};
 pub use auth::{
@@ -114,10 +115,11 @@ pub use gemini_live::{
     GeminiLiveEvent, GeminiLiveHandle, start_session as start_gemini_live_session,
 };
 pub use git::{
-    BranchInfo, Checkpoint, checkout_remote_branch, commit_task_changes, create_branch,
-    create_checkpoint, create_task_branch, generate_commit_message, get_head_hash, is_git_repo,
-    list_checkpoints, read_branch_info, read_graph, record_checkpoint, restore_file,
-    rollback_checkpoint, rollback_task_changes, rollback_to_step, switch_branch, undo_rollback,
+    BranchChange, BranchChangeOutcome, BranchInfo, Checkpoint, change_branch,
+    checkout_remote_branch, commit_task_changes, create_branch, create_checkpoint,
+    create_task_branch, generate_commit_message, get_head_hash, is_git_repo, list_checkpoints,
+    read_branch_info, read_graph, record_checkpoint, restore_file, rollback_checkpoint,
+    rollback_task_changes, rollback_to_step, switch_branch, undo_rollback,
 };
 pub use hooks::{
     HookEntry, HookError, HookEvent, PreHookOutcome, add_hook, clear_hooks, list_hooks,

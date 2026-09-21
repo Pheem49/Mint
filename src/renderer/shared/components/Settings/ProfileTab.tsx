@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react'
 import { useAuthUser } from '../AuthGate'
-import { authUploadAvatar } from '@/tauri'
+import { authPlatform } from '../../platform'
 import AvatarCropModal from './AvatarCropModal'
 
 interface ProfileTabProps {
@@ -46,7 +46,7 @@ export default function ProfileTab({ name, setName, imageUrl, setImageUrl }: Pro
     setIsUploading(true)
     setUploadError(null)
     try {
-      const updated = await authUploadAvatar(croppedDataUri, cropFile.fileName)
+      const updated = await authPlatform.authUploadAvatar(croppedDataUri, cropFile.fileName)
       setImageUrl(updated.image || '')
       refreshUser(updated)
       setCropFile(null)

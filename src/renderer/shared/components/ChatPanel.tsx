@@ -25,7 +25,7 @@ import ChatMessageItem from './ChatMessageItem'
 import { AgentActivityDrawer } from './AgentActivityDrawer'
 import { ArtifactPreviewPanel, type ArtifactFile } from './ArtifactPreviewPanel'
 import { RewindModal } from './RewindModal'
-import type { DiffHunk, FileChange, GitCheckpoint } from '../types'
+import type { AgentProgress, ChatResponse, DiffHunk, FileChange, GitCheckpoint, RuntimeStatus } from '../types'
 import { numericSetting, shouldShowSessionDivider, formatSessionDividerLabel } from '../utils/ui'
 import { useVoiceInput } from '@/voiceInput'
 import { useGeminiLiveVoice } from '../utils/useGeminiLiveVoice'
@@ -34,23 +34,16 @@ import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../utils/documen
 import ModelSelectorPopover from './ModelSelectorPopover'
 import GitBranchSelector from './GitBranchSelector'
 
-import {
-  APP_ICON_PATH,
-  type AgentProgress,
-  type ChatResponse,
-  type RuntimeStatus,
-  getTtsUrls,
-  startGeminiLiveSession,
-  sendGeminiLiveAudioChunk,
-  stopGeminiLiveSession,
-  listGitCheckpoints,
-  rollbackGitCheckpoint,
-  undoGitCheckpoint,
-  fetchProviderModels,
-} from '@/tauri'
+import { catalogPlatform, conversationPlatform, runtimePlatform } from '../platform'
+
+const {
+  getTtsUrls, startGeminiLiveSession, sendGeminiLiveAudioChunk, stopGeminiLiveSession,
+  listGitCheckpoints, rollbackGitCheckpoint, undoGitCheckpoint,
+} = conversationPlatform
+const { fetchProviderModels } = catalogPlatform
 
 
-interface ChatPanelProps {
+interface ChatPanelContract {
   interactions: any[]
   sending: boolean
   sendingMessage: string
@@ -95,6 +88,7 @@ interface ChatPanelProps {
   onSetProvider: (provider: string) => void
   /** Desktop only — see `workspacePath`. */
   onSelectWorkspace?: () => void
+  onWorkspaceChanged?: () => void
   onApproval: (approved: boolean, autoApproveSession?: boolean, answer?: string) => void
   settingsConfig: any
   onUpdateSettings?: (config: any) => void
@@ -111,8 +105,26 @@ interface ChatPanelProps {
   conversationTitle?: string
 }
 
+export type ConversationViewModel = Pick<ChatPanelContract,
+  | 'interactions' | 'sending' | 'sendingMessage' | 'sendingImageCount' | 'sendingVideoCount'
+  | 'streamedReply' | 'streamedResponse' | 'agentProgress' | 'agentActivitySnapshots'
+  | 'thinkingExpanded' | 'message' | 'imageAttachments' | 'videoAttachments' | 'documentName'
+  | 'pendingApproval' | 'smartContext' | 'agentMode' | 'planMode' | 'status' | 'workspacePath'
+  | 'chatEnd' | 'welcomeInteraction' | 'settingsConfig' | 'isCliSession' | 'cliSessionId'
+  | 'conversationTitle'
+>
+export type ConversationActions = Omit<ChatPanelContract, keyof ConversationViewModel>
+
+interface ChatPanelProps {
+  conversation: ConversationViewModel
+  actions: ConversationActions
+}
 
 export default function ChatPanel({
+  conversation,
+  actions,
+}: ChatPanelProps) {
+  const {
   interactions,
   sending,
   sendingMessage,
@@ -153,6 +165,7 @@ export default function ChatPanel({
   onSetPlanMode,
   onSetProvider,
   onSelectWorkspace,
+  onWorkspaceChanged,
   onApproval,
   settingsConfig,
   onUpdateSettings,
@@ -166,7 +179,7 @@ export default function ChatPanel({
   cliSessionId,
   onBackToCode,
   conversationTitle,
-}: ChatPanelProps) {
+  } = { ...conversation, ...actions }
   const agentActivities = activitiesFrom(agentProgress)
   const activeFallbackNotice = fallbackNotice(streamedResponse)
   const lastThinkingProgress = [...agentProgress].reverse().find(p => p.type === 'Thinking')
@@ -1389,7 +1402,7 @@ export default function ChatPanel({
               </div>
             ) : (
               <div className="chat-header-brand-group">
-                <img src={APP_ICON_PATH} alt="Logo" className="chat-header-logo" />
+                <img src={runtimePlatform.appIconPath()} alt="Logo" className="chat-header-logo" />
                 <span
                   className="chat-header-title-text"
                   title={conversationTitle && conversationTitle.trim() && conversationTitle !== 'New chat' ? conversationTitle.trim() : 'Mint Agent'}
@@ -1617,7 +1630,7 @@ export default function ChatPanel({
                 </span>
               )}
             </button>
-            {workspacePath && <GitBranchSelector workspacePath={workspacePath} disabled={sending} />}
+            {workspacePath && <GitBranchSelector workspacePath={workspacePath} disabled={sending} onBranchChanged={onWorkspaceChanged} />}
           </div>
         )}
         <div className="smart-context-bar">

@@ -1,17 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { getActiveModel, setActiveModel, subscribeModelChange } from '../utils/modelManager'
-import {
-  generateVideo,
-  getVideoGenProviders,
-  fetchVideoProviderModels,
-  convertFileSrc,
-  getProfileValue,
-  setProfileValue,
-  type VideoGenRequest,
-  type VideoGenResponse,
-  type VideoGenProviders,
-  type VideoGenEntry,
-} from '@/tauri'
+import { catalogPlatform, mediaPlatform } from '../platform'
+import type { VideoGenRequest, VideoGenResponse, VideoGenProviders, VideoGenEntry } from '../types'
+
+const { generateVideo, getVideoGenProviders, fetchVideoProviderModels, convertFileSrc } = mediaPlatform
+const { getProfileValue, setProfileValue } = catalogPlatform
 
 type AspectRatio = '16:9' | '9:16' | '1:1'
 type Duration = 5 | 8

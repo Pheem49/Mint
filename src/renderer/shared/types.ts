@@ -116,6 +116,10 @@ export interface GitBranchInfo {
   isDirty: boolean
 }
 
+export type GitBranchChangeOutcome =
+  | { status: 'changed'; info: GitBranchInfo }
+  | { status: 'confirmation_required'; info: GitBranchInfo }
+
 export interface PictureEntry {
   id: string
   filename: string
@@ -171,6 +175,34 @@ export interface WorkspaceTreeEntry {
   kind: 'file' | 'directory'
   children: WorkspaceTreeEntry[]
 }
+export interface WorkspaceSnapshot { path: string; tree: WorkspaceTreeEntry; git: GitBranchInfo; revision: number }
+export interface WorkspaceOperation { root: string; relativePath: string; revision: number }
+
+export interface VideoGenRequest {
+  prompt: string
+  negativePrompt?: string
+  aspectRatio: '16:9' | '9:16' | '1:1'
+  duration: 5 | 8
+  model?: string
+  provider: string
+}
+
+export interface VideoGenEntry {
+  id: string
+  url: string
+  path: string
+  message?: string
+  createdAt?: string
+}
+
+export interface VideoGenResponse {
+  videos: VideoGenEntry[]
+  provider: string
+  model: string
+  description?: string
+}
+
+export interface VideoGenProviders { active: string; available: string[] }
 
 export interface DetectedTools {
   docker: boolean

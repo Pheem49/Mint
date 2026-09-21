@@ -13,3 +13,4 @@ pub mod project_detector;
 pub mod shell;
 pub mod stock;
 pub mod weather;
+pub mod workspace;

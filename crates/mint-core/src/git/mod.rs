@@ -2,7 +2,8 @@ pub mod branches;
 pub mod checkpoint;
 
 pub use branches::{
-    BranchInfo, checkout_remote_branch, create_branch, read_branch_info, read_graph, switch_branch,
+    BranchChange, BranchChangeOutcome, BranchInfo, change_branch, checkout_remote_branch,
+    create_branch, read_branch_info, read_graph, switch_branch,
 };
 pub use checkpoint::{
     Checkpoint, commit_task_changes, create_checkpoint, create_task_branch,

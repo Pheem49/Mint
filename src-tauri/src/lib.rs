@@ -67,7 +67,7 @@ use proactive::{
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use system::{SmartContext, smart_context};
 use tauri::{
@@ -95,37 +95,11 @@ struct RuntimeStatus {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkspaceTreeEntry {
-    name: String,
-    path: String,
-    kind: &'static str,
-    children: Vec<WorkspaceTreeEntry>,
-}
-
-#[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum DesktopStreamEvent {
     Chunk { chunk: String },
     Progress { progress: AgentProgress },
 }
-const WORKSPACE_TREE_MAX_DEPTH: usize = 9;
-const WORKSPACE_TREE_MAX_CHILDREN: usize = 400;
-const WORKSPACE_TREE_COLLAPSED_DIRS: &[&str] = &[
-    ".antigravitycli",
-    ".cargo_home",
-    ".git",
-    ".rustup",
-    ".rustup_copy",
-    ".rustup_home",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "out",
-    "target",
-];
-
 #[tauri::command]
 fn get_runtime_status() -> Result<RuntimeStatus, String> {
     let config = load_config().map_err(|error| error.to_string())?;
@@ -143,8 +117,10 @@ fn get_runtime_status() -> Result<RuntimeStatus, String> {
 }
 
 #[tauri::command]
-async fn get_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, String> {
-    tokio::task::spawn_blocking(move || build_workspace_tree(path))
+async fn get_workspace_snapshot(
+    operation: mint_core::workspace::WorkspaceOperation,
+) -> Result<mint_core::workspace::WorkspaceSnapshot, String> {
+    tokio::task::spawn_blocking(move || mint_core::workspace::snapshot(&operation))
         .await
         .map_err(|error| format!("workspace tree task failed: {error}"))?
 }
@@ -163,11 +139,15 @@ async fn get_git_branch_info(workspace_path: String) -> Result<BranchInfo, Strin
 async fn switch_git_branch(
     workspace_path: String,
     branch: String,
-    allow_dirty: bool,
-) -> Result<BranchInfo, String> {
+    confirmed_dirty_workspace: bool,
+) -> Result<mint_core::BranchChangeOutcome, String> {
     tokio::task::spawn_blocking(move || {
         let root = workspace_root(Some(&workspace_path))?;
-        mint_core::switch_branch(&root, &branch, allow_dirty)
+        mint_core::change_branch(
+            &root,
+            &mint_core::BranchChange::Switch { branch },
+            confirmed_dirty_workspace,
+        )
     })
     .await
     .map_err(|error| format!("git switch task failed: {error}"))?
@@ -177,11 +157,15 @@ async fn switch_git_branch(
 async fn create_git_branch(
     workspace_path: String,
     branch: String,
-    allow_dirty: bool,
-) -> Result<BranchInfo, String> {
+    confirmed_dirty_workspace: bool,
+) -> Result<mint_core::BranchChangeOutcome, String> {
     tokio::task::spawn_blocking(move || {
         let root = workspace_root(Some(&workspace_path))?;
-        mint_core::create_branch(&root, &branch, allow_dirty)
+        mint_core::change_branch(
+            &root,
+            &mint_core::BranchChange::Create { branch },
+            confirmed_dirty_workspace,
+        )
     })
     .await
     .map_err(|error| format!("create branch task failed: {error}"))?
@@ -191,11 +175,15 @@ async fn create_git_branch(
 async fn checkout_remote_git_branch(
     workspace_path: String,
     remote_branch: String,
-    allow_dirty: bool,
-) -> Result<BranchInfo, String> {
+    confirmed_dirty_workspace: bool,
+) -> Result<mint_core::BranchChangeOutcome, String> {
     tokio::task::spawn_blocking(move || {
         let root = workspace_root(Some(&workspace_path))?;
-        mint_core::checkout_remote_branch(&root, &remote_branch, allow_dirty)
+        mint_core::change_branch(
+            &root,
+            &mint_core::BranchChange::Track { remote_branch },
+            confirmed_dirty_workspace,
+        )
     })
     .await
     .map_err(|error| format!("remote branch task failed: {error}"))?
@@ -357,37 +345,24 @@ async fn fetch_gemini_live_models(api_key: String) -> Result<Vec<String>, String
 }
 
 #[tauri::command]
-async fn create_workspace_file(path: String) -> Result<(), String> {
-    std::fs::write(&path, "").map_err(|error| error.to_string())
+async fn create_workspace_file(
+    operation: mint_core::workspace::WorkspaceOperation,
+) -> Result<mint_core::workspace::WorkspaceSnapshot, String> {
+    mint_core::workspace::create_file(&operation)
 }
 
 #[tauri::command]
-async fn create_workspace_folder(path: String) -> Result<(), String> {
-    std::fs::create_dir_all(&path).map_err(|error| error.to_string())
+async fn create_workspace_folder(
+    operation: mint_core::workspace::WorkspaceOperation,
+) -> Result<mint_core::workspace::WorkspaceSnapshot, String> {
+    mint_core::workspace::create_folder(&operation)
 }
 
 #[tauri::command]
-async fn delete_workspace_item(path: String) -> Result<(), String> {
-    let path_buf = std::path::PathBuf::from(path);
-    if path_buf.is_dir() {
-        std::fs::remove_dir_all(path_buf).map_err(|error| error.to_string())
-    } else {
-        std::fs::remove_file(path_buf).map_err(|error| error.to_string())
-    }
-}
-
-fn build_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, String> {
-    let root = workspace_root(path.as_deref())?;
-    let name = root
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| root.display().to_string());
-    Ok(WorkspaceTreeEntry {
-        name,
-        path: root.display().to_string(),
-        kind: "directory",
-        children: workspace_children(&root, &root, 0)?,
-    })
+async fn delete_workspace_item(
+    operation: mint_core::workspace::WorkspaceOperation,
+) -> Result<mint_core::workspace::WorkspaceSnapshot, String> {
+    mint_core::workspace::delete(&operation)
 }
 
 #[tauri::command]
@@ -440,54 +415,6 @@ fn workspace_root(path: Option<&str>) -> Result<PathBuf, String> {
         return Err(format!("workspace is not a directory: {}", root.display()));
     }
     Ok(root)
-}
-
-fn workspace_children(
-    root: &Path,
-    directory: &Path,
-    depth: usize,
-) -> Result<Vec<WorkspaceTreeEntry>, String> {
-    if depth >= WORKSPACE_TREE_MAX_DEPTH {
-        return Ok(Vec::new());
-    }
-
-    let mut entries = fs::read_dir(directory)
-        .map_err(|error| error.to_string())?
-        .flatten()
-        .filter_map(|entry| {
-            let file_type = entry.file_type().ok()?;
-            if file_type.is_symlink() {
-                return None;
-            }
-            let name = entry.file_name().to_string_lossy().to_string();
-            Some((name, entry.path(), file_type.is_dir()))
-        })
-        .collect::<Vec<_>>();
-
-    entries.sort_by(|left, right| right.2.cmp(&left.2).then_with(|| left.0.cmp(&right.0)));
-    entries.truncate(WORKSPACE_TREE_MAX_CHILDREN);
-
-    entries
-        .into_iter()
-        .map(|(name, path, is_dir)| {
-            let relative = path
-                .strip_prefix(root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .to_string();
-            let children = if is_dir && !WORKSPACE_TREE_COLLAPSED_DIRS.contains(&name.as_str()) {
-                workspace_children(root, &path, depth + 1)?
-            } else {
-                Vec::new()
-            };
-            Ok(WorkspaceTreeEntry {
-                name,
-                path: relative,
-                kind: if is_dir { "directory" } else { "file" },
-                children,
-            })
-        })
-        .collect()
 }
 
 #[tauri::command]
@@ -1993,7 +1920,7 @@ pub fn run() {
             fetch_image_provider_models,
             fetch_video_provider_models,
             fetch_gemini_live_models,
-            get_workspace_tree,
+            get_workspace_snapshot,
             get_git_branch_info,
             switch_git_branch,
             create_git_branch,

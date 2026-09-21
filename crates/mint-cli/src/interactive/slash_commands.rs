@@ -2948,7 +2948,7 @@ pub async fn handle_slash_command(
 }
 
 fn handle_branch_slash(session: &mut InteractiveSession, requested: &str) -> SlashResult {
-    use mint_core::git::{checkout_remote_branch, read_branch_info, switch_branch};
+    use mint_core::git::{BranchChange, BranchChangeOutcome, change_branch, read_branch_info};
 
     let info = match read_branch_info(&session.current_dir) {
         Ok(info) if info.is_repository => info,
@@ -3036,26 +3036,38 @@ fn handle_branch_slash(session: &mut InteractiveSession, requested: &str) -> Sla
         return SlashResult::Handled;
     }
 
-    let allow_dirty = if info.is_dirty {
-        match confirm("Workspace has uncommitted changes. Continue switching branches?") {
-            Ok(true) => true,
-            Ok(false) => {
-                println!("{DIM}Branch change cancelled.{RESET}\n");
-                return SlashResult::Handled;
-            }
-            Err(error) => {
-                println!("{ERROR}Could not confirm branch change:{RESET} {error}\n");
-                return SlashResult::Handled;
-            }
+    let change = if remote {
+        BranchChange::Track {
+            remote_branch: branch,
         }
     } else {
-        false
+        BranchChange::Switch { branch }
     };
-
-    let result = if remote {
-        checkout_remote_branch(&session.current_dir, &branch, allow_dirty)
-    } else {
-        switch_branch(&session.current_dir, &branch, allow_dirty)
+    let result = match change_branch(&session.current_dir, &change, false) {
+        Ok(BranchChangeOutcome::Changed { info }) => Ok(info),
+        Ok(BranchChangeOutcome::ConfirmationRequired { .. }) => {
+            match confirm("Workspace has uncommitted changes. Continue switching branches?") {
+                Ok(true) => {
+                    change_branch(&session.current_dir, &change, true).and_then(|outcome| {
+                        match outcome {
+                            BranchChangeOutcome::Changed { info } => Ok(info),
+                            BranchChangeOutcome::ConfirmationRequired { .. } => {
+                                Err("Workspace still requires confirmation.".to_string())
+                            }
+                        }
+                    })
+                }
+                Ok(false) => {
+                    println!("{DIM}Branch change cancelled.{RESET}\n");
+                    return SlashResult::Handled;
+                }
+                Err(error) => {
+                    println!("{ERROR}Could not confirm branch change:{RESET} {error}\n");
+                    return SlashResult::Handled;
+                }
+            }
+        }
+        Err(error) => Err(error),
     };
     match result {
         Ok(next) => {

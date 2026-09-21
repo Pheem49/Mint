@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react'
 import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon, renderScheduledTasksSvgIcon, renderLinkedFoldersSvgIcon } from '../constants/plugins'
 import { useAuthUser } from './AuthGate'
-import { APP_ICON_PATH } from '@/tauri'
+import { runtimePlatform } from '../platform'
 
 export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'veo' | 'skills' | 'mcp' | 'plugins' | 'cron' | 'link' | 'code'
 
@@ -219,7 +219,7 @@ export default function DashboardSidebar({
           if (event.key === 'Enter' || event.key === ' ') onToggleSidebar()
         }}
       >
-        <img src={APP_ICON_PATH} alt="Mint Agent Logo" className="sidebar-logo" />
+        <img src={runtimePlatform.appIconPath()} alt="Mint Agent Logo" className="sidebar-logo" />
         <span className="sidebar-brand-name">Mint Agent</span>
       </div>
 

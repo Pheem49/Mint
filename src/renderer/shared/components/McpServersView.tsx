@@ -4,8 +4,10 @@ import { renderMcpSvgIcon, renderMcpHubSvgIcon } from '../constants/plugins'
 import McpToolAllowlist from './McpToolAllowlist'
 import McpRegistryPicker from './McpRegistryPicker'
 import type { McpRegistryEntry } from '../constants/mcpRegistry'
-import { testMcpConnection } from '@/tauri'
+import { catalogPlatform } from '../platform'
 import { Globe, Terminal, Zap, Loader2, Check, AlertCircle, ShieldAlert } from 'lucide-react'
+
+const { testMcpConnection } = catalogPlatform
 
 export interface McpServersViewProps {
   config: any

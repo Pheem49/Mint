@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use clap::Subcommand;
 use crossterm::tty::IsTty;
 use mint_core::{
-    BranchInfo, checkout_remote_branch, create_branch, read_branch_info, read_graph, switch_branch,
+    BranchChange, BranchChangeOutcome, BranchInfo, change_branch, read_branch_info, read_graph,
 };
 
 use crate::{DIM, MINT, RESET, confirm};
@@ -57,34 +57,42 @@ pub fn handle_git(command: GitCommand) -> Result<()> {
             branch,
             allow_dirty,
         } => {
-            let allow_dirty =
-                confirm_dirty_change(&root, allow_dirty, &format!("Switch to {branch}?"))?;
-            let info = switch_branch(&root, &branch, allow_dirty).map_err(anyhow::Error::msg)?;
+            let info = apply_branch_change(
+                &root,
+                BranchChange::Switch {
+                    branch: branch.clone(),
+                },
+                allow_dirty,
+                &format!("Switch to {branch}?"),
+            )?;
             print_changed(&info)
         }
         GitCommand::Create {
             branch,
             allow_dirty,
         } => {
-            let allow_dirty = confirm_dirty_change(
+            let info = apply_branch_change(
                 &root,
+                BranchChange::Create {
+                    branch: branch.clone(),
+                },
                 allow_dirty,
                 &format!("Create and switch to {branch}?"),
             )?;
-            let info = create_branch(&root, &branch, allow_dirty).map_err(anyhow::Error::msg)?;
             print_changed(&info)
         }
         GitCommand::Track {
             remote_branch,
             allow_dirty,
         } => {
-            let allow_dirty = confirm_dirty_change(
+            let info = apply_branch_change(
                 &root,
+                BranchChange::Track {
+                    remote_branch: remote_branch.clone(),
+                },
                 allow_dirty,
                 &format!("Create a local tracking branch from {remote_branch}?"),
             )?;
-            let info = checkout_remote_branch(&root, &remote_branch, allow_dirty)
-                .map_err(anyhow::Error::msg)?;
             print_changed(&info)
         }
         GitCommand::Graph { limit } => {
@@ -157,17 +165,31 @@ fn print_info(info: &BranchInfo) {
     );
 }
 
-fn confirm_dirty_change(root: &Path, requested: bool, action: &str) -> Result<bool> {
-    let info = read_branch_info(root).map_err(anyhow::Error::msg)?;
-    ensure_repository(&info)?;
-    if !info.is_dirty || requested {
-        return Ok(requested);
+fn apply_branch_change(
+    root: &Path,
+    change: BranchChange,
+    confirmed_dirty_workspace: bool,
+    action: &str,
+) -> Result<BranchInfo> {
+    match change_branch(root, &change, confirmed_dirty_workspace).map_err(anyhow::Error::msg)? {
+        BranchChangeOutcome::Changed { info } => Ok(info),
+        BranchChangeOutcome::ConfirmationRequired { .. } => {
+            confirm_and_change(root, change, action)
+        }
     }
+}
+
+fn confirm_and_change(root: &Path, change: BranchChange, action: &str) -> Result<BranchInfo> {
     if !std::io::stdin().is_tty() || !std::io::stdout().is_tty() {
         bail!("Workspace has uncommitted changes. Re-run with --allow-dirty to confirm.");
     }
     if confirm(&format!("Workspace has uncommitted changes. {action}"))? {
-        Ok(true)
+        match change_branch(root, &change, true).map_err(anyhow::Error::msg)? {
+            BranchChangeOutcome::Changed { info } => Ok(info),
+            BranchChangeOutcome::ConfirmationRequired { .. } => {
+                bail!("Workspace still requires confirmation.")
+            }
+        }
     } else {
         bail!("Branch change cancelled.")
     }

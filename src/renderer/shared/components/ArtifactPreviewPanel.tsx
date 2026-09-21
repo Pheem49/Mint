@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import { readWorkspaceFile } from '@/tauri'
+import { runtimePlatform } from '../platform'
 import { renderFormattedMessage } from '../utils/markdown'
 import { ChatCodeBlock } from './ChatCodeBlock'
 
@@ -72,7 +72,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
     setLoading(true)
     setError(null)
     try {
-      const text = await readWorkspaceFile(filePath, workspacePath)
+      const text = await runtimePlatform.readWorkspaceFile(filePath, workspacePath)
       setContent(text)
     } catch (err: any) {
       // If content was already supplied in artifact, fallback to it

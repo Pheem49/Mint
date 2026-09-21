@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import {
-  checkoutRemoteGitBranch,
-  createGitBranch,
-  getGitBranchInfo,
-  getGitGraph,
-  switchGitBranch,
-  type GitBranchInfo,
-} from '@/tauri'
+import { workspacePlatform } from '../platform'
+import type { GitBranchChangeOutcome, GitBranchInfo } from '../types'
 
 type MenuView = 'branches' | 'create' | 'graph'
 type MenuDirection = 'up' | 'down'
@@ -14,6 +8,7 @@ type MenuDirection = 'up' | 'down'
 interface GitBranchSelectorProps {
   workspacePath: string
   disabled?: boolean
+  onBranchChanged?: () => void
 }
 
 function errorMessage(reason: unknown): string {
@@ -22,7 +17,7 @@ function errorMessage(reason: unknown): string {
   return 'Git could not complete that action.'
 }
 
-export default function GitBranchSelector({ workspacePath, disabled = false }: GitBranchSelectorProps) {
+export default function GitBranchSelector({ workspacePath, disabled = false, onBranchChanged }: GitBranchSelectorProps) {
   const [info, setInfo] = useState<GitBranchInfo | null>(null)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -44,7 +39,7 @@ export default function GitBranchSelector({ workspacePath, disabled = false }: G
       return
     }
     try {
-      const nextInfo = await getGitBranchInfo(workspacePath)
+      const nextInfo = await workspacePlatform.getGitBranchInfo(workspacePath)
       setInfo(nextInfo)
       setError('')
     } catch (reason) {
@@ -60,7 +55,7 @@ export default function GitBranchSelector({ workspacePath, disabled = false }: G
       setOpen(false)
       return
     }
-    getGitBranchInfo(workspacePath)
+    workspacePlatform.getGitBranchInfo(workspacePath)
       .then((nextInfo) => {
         if (cancelled) return
         setInfo(nextInfo)
@@ -151,18 +146,30 @@ export default function GitBranchSelector({ workspacePath, disabled = false }: G
 
   const branchLabel = info.currentBranch || (info.detachedHead ? `Detached ${info.detachedHead}` : 'No branch')
 
-  const confirmDirtyChange = (description: string) => !info.isDirty || window.confirm(
-    `This workspace has uncommitted changes. ${description} Git will stop if the changes conflict.`,
-  )
-
   const applyBranchResult = (nextInfo: GitBranchInfo) => {
     setInfo(nextInfo)
     setOpen(false)
     setQuery('')
     setMenuView('branches')
-    window.dispatchEvent(new CustomEvent('mint:workspace-branch-changed', {
-      detail: { workspacePath, branch: nextInfo.currentBranch },
-    }))
+  }
+
+  const executeBranchChange = async (
+    description: string,
+    change: (confirmedDirtyWorkspace: boolean) => Promise<GitBranchChangeOutcome>,
+  ) => {
+    let outcome = await change(false)
+    if (outcome.status === 'confirmation_required') {
+      const confirmed = window.confirm(
+        `This workspace has uncommitted changes. ${description} Git will stop if the changes conflict.`,
+      )
+      if (!confirmed) return
+      outcome = await change(true)
+    }
+    if (outcome.status === 'confirmation_required') {
+      throw new Error('Workspace confirmation was not accepted.')
+    }
+    applyBranchResult(outcome.info)
+    onBranchChanged?.()
   }
 
   const handleSwitch = async (branch: string) => {
@@ -170,13 +177,13 @@ export default function GitBranchSelector({ workspacePath, disabled = false }: G
       setOpen(false)
       return
     }
-    if (!confirmDirtyChange(`Switch from ${branchLabel} to ${branch}?`)) return
-
     try {
       setError('')
       setSwitchingBranch(branch)
-      const nextInfo = await switchGitBranch(workspacePath, branch, info.isDirty)
-      applyBranchResult(nextInfo)
+      await executeBranchChange(
+        `Switch from ${branchLabel} to ${branch}?`,
+        (confirmed) => workspacePlatform.switchGitBranch(workspacePath, branch, confirmed),
+      )
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -186,12 +193,13 @@ export default function GitBranchSelector({ workspacePath, disabled = false }: G
 
   const handleRemoteCheckout = async (remoteBranch: string) => {
     if (switchingBranch) return
-    if (!confirmDirtyChange(`Check out ${remoteBranch}?`)) return
     try {
       setError('')
       setSwitchingBranch(remoteBranch)
-      const nextInfo = await checkoutRemoteGitBranch(workspacePath, remoteBranch, info.isDirty)
-      applyBranchResult(nextInfo)
+      await executeBranchChange(
+        `Check out ${remoteBranch}?`,
+        (confirmed) => workspacePlatform.checkoutRemoteGitBranch(workspacePath, remoteBranch, confirmed),
+      )
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -203,13 +211,14 @@ export default function GitBranchSelector({ workspacePath, disabled = false }: G
     event.preventDefault()
     const branch = newBranchName.trim()
     if (!branch || switchingBranch) return
-    if (!confirmDirtyChange(`Create and switch to ${branch}?`)) return
     try {
       setError('')
       setSwitchingBranch(branch)
-      const nextInfo = await createGitBranch(workspacePath, branch, info.isDirty)
+      await executeBranchChange(
+        `Create and switch to ${branch}?`,
+        (confirmed) => workspacePlatform.createGitBranch(workspacePath, branch, confirmed),
+      )
       setNewBranchName('')
-      applyBranchResult(nextInfo)
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -221,7 +230,7 @@ export default function GitBranchSelector({ workspacePath, disabled = false }: G
     try {
       setError('')
       setGraphLoading(true)
-      setGraphLines(await getGitGraph(workspacePath))
+      setGraphLines(await workspacePlatform.getGitGraph(workspacePath))
     } catch (reason) {
       setGraphLines([])
       setError(errorMessage(reason))

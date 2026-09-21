@@ -14,6 +14,45 @@ pub struct BranchInfo {
     pub is_dirty: bool,
 }
 
+/// A requested workspace branch transition, independent of any UI.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BranchChange {
+    Switch { branch: String },
+    Create { branch: String },
+    Track { remote_branch: String },
+}
+
+/// The Git workspace-change module either performs a transition or asks its
+/// caller to obtain an explicit confirmation for a dirty workspace.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum BranchChangeOutcome {
+    Changed { info: BranchInfo },
+    ConfirmationRequired { info: BranchInfo },
+}
+
+pub fn change_branch(
+    root: &Path,
+    change: &BranchChange,
+    confirmed_dirty_workspace: bool,
+) -> Result<BranchChangeOutcome, String> {
+    let before = read_branch_info(root)?;
+    if !before.is_repository {
+        return Err("The selected workspace is not a Git repository.".to_string());
+    }
+    if before.is_dirty && !confirmed_dirty_workspace {
+        return Ok(BranchChangeOutcome::ConfirmationRequired { info: before });
+    }
+
+    let info = match change {
+        BranchChange::Switch { branch } => switch_branch(root, branch, true)?,
+        BranchChange::Create { branch } => create_branch(root, branch, true)?,
+        BranchChange::Track { remote_branch } => checkout_remote_branch(root, remote_branch, true)?,
+    };
+    Ok(BranchChangeOutcome::Changed { info })
+}
+
 pub fn read_branch_info(root: &Path) -> Result<BranchInfo, String> {
     let repository_check = git(root, ["rev-parse", "--is-inside-work-tree"])?;
     if !repository_check.status.success()
@@ -218,6 +257,85 @@ fn ensure_success(output: &std::process::Output, action: &str) -> Result<(), Str
         } else {
             detail
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn repository() -> std::path::PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "mint-git-interface-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "mint@example.test"],
+            vec!["config", "user.name", "Mint Test"],
+        ] {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(&root)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        fs::write(root.join("README.md"), "initial\n").unwrap();
+        assert!(
+            Command::new("git")
+                .args(["add", "."])
+                .current_dir(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("git")
+                .args(["commit", "-m", "initial"])
+                .current_dir(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        root
+    }
+
+    #[test]
+    fn interface_git_change_returns_confirmation_then_changed() {
+        let root = repository();
+        assert!(
+            Command::new("git")
+                .args(["branch", "next"])
+                .current_dir(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::write(root.join("README.md"), "dirty\n").unwrap();
+        let change = BranchChange::Switch {
+            branch: "next".into(),
+        };
+
+        assert!(matches!(
+            change_branch(&root, &change, false).unwrap(),
+            BranchChangeOutcome::ConfirmationRequired { .. }
+        ));
+        assert!(
+            matches!(change_branch(&root, &change, true).unwrap(), BranchChangeOutcome::Changed { info } if info.current_branch.as_deref() == Some("next"))
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }
 

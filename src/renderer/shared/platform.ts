@@ -13,7 +13,6 @@ import type {
   ImageGenRequest,
   ImageGenProviders,
   ImageGenResponse,
-  WorkspaceTreeEntry,
   CodeEdit,
   CodeEditProposal,
   DetectedTools,
@@ -24,6 +23,8 @@ import type {
   AuthUser,
   GitCheckpoint,
   GitBranchInfo,
+  GitBranchChangeOutcome,
+  WorkspaceOperation,
 } from './types'
 
 export function getLocalApiBase(): string {
@@ -94,10 +95,13 @@ export interface MintPlatformApi {
     workspacePath?: string | null,
     chatId?: string | null,
     agentId?: string | null,
+    planMode?: boolean,
+    pinnedMcpServer?: string | null,
+    onApprovalRequested?: (payload: { token: string; approval: any }) => void,
   ): Promise<ChatResponse>
   getTtsUrls(text: string): Promise<TtsUrl[]>
   cancelChatMessage(chatId: string): Promise<void>
-  getRecentInteractions(limit?: number, chatId?: string | null): Promise<InteractionMemory[]>
+  getRecentInteractions(limit?: number, chatId?: string | null, workspacePath?: string | null): Promise<InteractionMemory[]>
   saveSystemInteraction(
     chatId: string,
     userText: string,
@@ -124,15 +128,15 @@ export interface MintPlatformApi {
   generateImages(req: ImageGenRequest): Promise<ImageGenResponse>
   getImageGenProviders(): Promise<ImageGenProviders>
   setDefaultImageProvider(provider: string): Promise<boolean>
-  getWorkspaceTree(path?: string | null): Promise<WorkspaceTreeEntry>
+  getWorkspaceSnapshot(operation: WorkspaceOperation): Promise<import('./types').WorkspaceSnapshot>
   getGitBranchInfo(workspacePath: string): Promise<GitBranchInfo>
-  switchGitBranch(workspacePath: string, branch: string, allowDirty?: boolean): Promise<GitBranchInfo>
-  createGitBranch(workspacePath: string, branch: string, allowDirty?: boolean): Promise<GitBranchInfo>
-  checkoutRemoteGitBranch(workspacePath: string, remoteBranch: string, allowDirty?: boolean): Promise<GitBranchInfo>
+  switchGitBranch(workspacePath: string, branch: string, confirmedDirtyWorkspace?: boolean): Promise<GitBranchChangeOutcome>
+  createGitBranch(workspacePath: string, branch: string, confirmedDirtyWorkspace?: boolean): Promise<GitBranchChangeOutcome>
+  checkoutRemoteGitBranch(workspacePath: string, remoteBranch: string, confirmedDirtyWorkspace?: boolean): Promise<GitBranchChangeOutcome>
   getGitGraph(workspacePath: string): Promise<string[]>
-  createWorkspaceFile(path: string): Promise<void>
-  createWorkspaceFolder(path: string): Promise<void>
-  deleteWorkspaceItem(path: string): Promise<void>
+  createWorkspaceFile(operation: WorkspaceOperation): Promise<import('./types').WorkspaceSnapshot>
+  createWorkspaceFolder(operation: WorkspaceOperation): Promise<import('./types').WorkspaceSnapshot>
+  deleteWorkspaceItem(operation: WorkspaceOperation): Promise<import('./types').WorkspaceSnapshot>
   selectWorkspaceDirectory(): Promise<string | null>
   selectLinkedFolderPath(): Promise<string | null>
   submitToolApproval(token: string, approved: boolean, answer?: string): Promise<void>
@@ -148,4 +152,142 @@ export interface MintPlatformApi {
     url: string,
     headers?: Record<string, string>,
   ): Promise<{ ok: boolean; error?: string; server_info?: any; tools_count?: number; tools?: any[] }>
+}
+
+/** The small workspace interface shared renderer modules cross. */
+export type WorkspacePlatform = Pick<
+  MintPlatformApi,
+  | 'getWorkspaceSnapshot'
+  | 'getGitBranchInfo'
+  | 'switchGitBranch'
+  | 'createGitBranch'
+  | 'checkoutRemoteGitBranch'
+  | 'getGitGraph'
+  | 'createWorkspaceFile'
+  | 'createWorkspaceFolder'
+  | 'deleteWorkspaceItem'
+>
+
+let workspaceAdapter: WorkspacePlatform | undefined
+type RuntimeOperation = (...args: any[]) => any
+export type RendererAdapter = MintPlatformApi & {
+  APP_ICON_PATH: string
+  resolveAvatarUrl: RuntimeOperation
+  fetchProviderModels: RuntimeOperation
+  fetchImageProviderModels: RuntimeOperation
+  fetchVideoProviderModels: RuntimeOperation
+  reauthMcpServer: RuntimeOperation
+  listMcpServerTools: RuntimeOperation
+  listCronJobs: RuntimeOperation
+  addCronJob: RuntimeOperation
+  removeCronJob: RuntimeOperation
+  setCronJobEnabled: RuntimeOperation
+  listLinkedFolders: RuntimeOperation
+  addLinkedFolder: RuntimeOperation
+  removeLinkedFolder: RuntimeOperation
+  startGeminiLiveSession: RuntimeOperation
+  sendGeminiLiveAudioChunk: RuntimeOperation
+  stopGeminiLiveSession: RuntimeOperation
+  generateVideo: RuntimeOperation
+  getVideoGenProviders: RuntimeOperation
+  convertFileSrc: RuntimeOperation
+  setActiveModel: RuntimeOperation
+  selectWorkspaceDirectory: RuntimeOperation
+  selectLinkedFolderPath: RuntimeOperation
+  isTauriRuntime: RuntimeOperation
+}
+let rendererAdapter: RendererAdapter | undefined
+
+/** Install the runtime implementation used by shared renderer modules. */
+export function installRendererPlatform(adapter: RendererAdapter): void {
+  rendererAdapter = adapter
+}
+
+function requireRendererPlatform(): RendererAdapter {
+  if (!rendererAdapter) throw new Error('Renderer platform adapter has not been installed.')
+  return rendererAdapter
+}
+
+function operation<Key extends keyof RendererAdapter>(name: Key): RendererAdapter[Key] {
+  return ((...args: any[]) => {
+    const implementation = requireRendererPlatform()[name]
+    if (typeof implementation !== 'function') throw new Error(`Platform operation is unavailable: ${name}`)
+    return (implementation as RuntimeOperation)(...args)
+  }) as RendererAdapter[Key]
+}
+
+/** Authentication and profile seam. */
+export const authPlatform = {
+  authRegister: operation('authRegister'), authLogin: operation('authLogin'),
+  authLogout: operation('authLogout'), authGetCurrentUser: operation('authGetCurrentUser'),
+  authUploadAvatar: operation('authUploadAvatar'), resolveAvatarUrl: operation('resolveAvatarUrl'),
+}
+
+/** Conversation transport, persistence, live voice, and checkpoint seam. */
+export const conversationPlatform = {
+  clearChatHistory: operation('clearChatHistory'), deleteChatSession: operation('deleteChatSession'),
+  renameChatSession: operation('renameChatSession'), getRecentInteractions: operation('getRecentInteractions'),
+  saveSystemInteraction: operation('saveSystemInteraction'), listChatSessions: operation('listChatSessions'),
+  saveInteractionAgentActivity: operation('saveInteractionAgentActivity'), streamChatMessage: operation('streamChatMessage'),
+  cancelChatMessage: operation('cancelChatMessage'), submitToolApproval: operation('submitToolApproval'),
+  listen: operation('listen'), readClipboardImage: operation('readClipboardImage'), getTtsUrls: operation('getTtsUrls'),
+  startGeminiLiveSession: operation('startGeminiLiveSession'), sendGeminiLiveAudioChunk: operation('sendGeminiLiveAudioChunk'),
+  stopGeminiLiveSession: operation('stopGeminiLiveSession'), listGitCheckpoints: operation('listGitCheckpoints'),
+  rollbackGitCheckpoint: operation('rollbackGitCheckpoint'), undoGitCheckpoint: operation('undoGitCheckpoint'),
+}
+
+/** Models, skills, agents, MCP, schedules, linked folders, and slash commands. */
+export const catalogPlatform = {
+  fetchProviderModels: operation('fetchProviderModels'), listLearnedSkills: operation('listLearnedSkills'),
+  addLearnedSkill: operation('addLearnedSkill'), deleteLearnedSkill: operation('deleteLearnedSkill'),
+  detectSystemTools: operation('detectSystemTools'), listMcpServerTools: operation('listMcpServerTools'),
+  testMcpConnection: operation('testMcpConnection'), reauthMcpServer: operation('reauthMcpServer'),
+  listSubagents: operation('listSubagents'), saveSubagent: operation('saveSubagent'),
+  deleteSubagent: operation('deleteSubagent'), getProfileValue: operation('getProfileValue'),
+  setProfileValue: operation('setProfileValue'), listCronJobs: operation('listCronJobs'),
+  addCronJob: operation('addCronJob'), removeCronJob: operation('removeCronJob'),
+  setCronJobEnabled: operation('setCronJobEnabled'), listLinkedFolders: operation('listLinkedFolders'),
+  addLinkedFolder: operation('addLinkedFolder'), removeLinkedFolder: operation('removeLinkedFolder'),
+  runSlashCommand: operation('runSlashCommand'),
+}
+
+/** Image and video generation and saved media seam. */
+export const mediaPlatform = {
+  generateImages: operation('generateImages'), getImageGenProviders: operation('getImageGenProviders'),
+  fetchImageProviderModels: operation('fetchImageProviderModels'), listSavedPictures: operation('listSavedPictures'),
+  generateVideo: operation('generateVideo'), getVideoGenProviders: operation('getVideoGenProviders'),
+  fetchVideoProviderModels: operation('fetchVideoProviderModels'), convertFileSrc: operation('convertFileSrc'),
+}
+
+/** Runtime capabilities and native picker seam. */
+export const runtimePlatform = {
+  appIconPath: () => String(requireRendererPlatform().APP_ICON_PATH ?? './assets/icon.png'),
+  getRuntimeStatus: operation('getRuntimeStatus'), setActiveModel: operation('setActiveModel'),
+  selectWorkspaceDirectory: operation('selectWorkspaceDirectory'), selectLinkedFolderPath: operation('selectLinkedFolderPath'),
+  isTauriRuntime: operation('isTauriRuntime'), readWorkspaceFile: operation('readWorkspaceFile'),
+}
+
+/** Install the Desktop or Web adapter before rendering the application. */
+export function installWorkspacePlatform(adapter: WorkspacePlatform): void {
+  workspaceAdapter = adapter
+}
+
+function requireWorkspacePlatform(): WorkspacePlatform {
+  if (!workspaceAdapter) {
+    throw new Error('Workspace platform adapter has not been installed.')
+  }
+  return workspaceAdapter
+}
+
+/** One seam for workspace and Git behavior used by shared renderer modules. */
+export const workspacePlatform: WorkspacePlatform = {
+  getWorkspaceSnapshot: (...args) => requireWorkspacePlatform().getWorkspaceSnapshot(...args),
+  getGitBranchInfo: (...args) => requireWorkspacePlatform().getGitBranchInfo(...args),
+  switchGitBranch: (...args) => requireWorkspacePlatform().switchGitBranch(...args),
+  createGitBranch: (...args) => requireWorkspacePlatform().createGitBranch(...args),
+  checkoutRemoteGitBranch: (...args) => requireWorkspacePlatform().checkoutRemoteGitBranch(...args),
+  getGitGraph: (...args) => requireWorkspacePlatform().getGitGraph(...args),
+  createWorkspaceFile: (...args) => requireWorkspacePlatform().createWorkspaceFile(...args),
+  createWorkspaceFolder: (...args) => requireWorkspacePlatform().createWorkspaceFolder(...args),
+  deleteWorkspaceItem: (...args) => requireWorkspacePlatform().deleteWorkspaceItem(...args),
 }

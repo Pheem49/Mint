@@ -2,36 +2,24 @@ import { type ChangeEvent, type CSSProperties, type FormEvent, useCallback, useE
 import {
   compactAgentProgressForPersistence,
   mergeActivitySnapshots,
-  reduceLiveAgentProgressBatch,
 } from '../agentProgress'
-import {
-  clearChatHistory,
-  deleteChatSession,
-  renameChatSession,
-  getRecentInteractions,
-  saveSystemInteraction,
-  getRuntimeStatus,
-  setActiveModel,
-  listChatSessions,
-  listSavedPictures,
-  selectWorkspaceDirectory,
-  selectLinkedFolderPath,
-  saveInteractionAgentActivity,
-  streamChatMessage,
-  cancelChatMessage,
-  submitToolApproval,
-  listen,
-  readClipboardImage,
-  isTauriRuntime,
-  type AgentProgress,
-  type ChatResponse,
-  type ChatSession,
-  type DocumentAttachment,
-  type PictureEntry,
-  type RuntimeStatus,
-} from '@/tauri'
+import { catalogPlatform, conversationPlatform, mediaPlatform, runtimePlatform, type SlashResponse } from '../platform'
+import type { AgentProgress, ChatResponse, ChatSession, DocumentAttachment, PictureEntry, RuntimeStatus } from '../types'
 
-import ChatPanel from './ChatPanel'
+const {
+  clearChatHistory, deleteChatSession, renameChatSession, getRecentInteractions,
+  saveSystemInteraction, listChatSessions, saveInteractionAgentActivity, streamChatMessage,
+  cancelChatMessage, submitToolApproval, listen, readClipboardImage,
+} = conversationPlatform
+const { getRuntimeStatus, setActiveModel, selectWorkspaceDirectory, selectLinkedFolderPath, isTauriRuntime } = runtimePlatform
+const { listSavedPictures } = mediaPlatform
+const {
+  listLearnedSkills, addLearnedSkill, deleteLearnedSkill, detectSystemTools, reauthMcpServer,
+  listMcpServerTools, setProfileValue, listCronJobs, addCronJob, removeCronJob,
+  setCronJobEnabled, listLinkedFolders, addLinkedFolder, removeLinkedFolder, runSlashCommand,
+} = catalogPlatform
+
+import ChatPanel, { type ConversationActions, type ConversationViewModel } from './ChatPanel'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import ImageStudioPanel from './ImageStudioPanel'
 import VeoStudioPanel from './VeoStudioPanel'
@@ -50,6 +38,7 @@ import {
   parseUtcDate,
 } from '../utils/ui'
 import { executeSlashCommand } from '../utils/slashCommandProcessor'
+import { useConversationCoordinator } from '../conversation/useConversationCoordinator'
 
 
 const EXPRESSIONS = [
@@ -107,25 +96,14 @@ function isDesktopRecentlyActive(): boolean {
 // Unsent composer text, stashed per conversation so switching chats or
 // reloading the page doesn't lose an in-progress message.
 const DRAFT_KEY_PREFIX = 'mint:draft:'
-const draftStorageKey = (id: string) => `${DRAFT_KEY_PREFIX}${id}`
 function readDraft(id: string | null | undefined): string {
   if (!id) return ''
   try {
-    return window.localStorage.getItem(draftStorageKey(id)) || ''
+    return window.localStorage.getItem(`${DRAFT_KEY_PREFIX}${id}`) || ''
   } catch {
     return ''
   }
 }
-function writeDraft(id: string | null | undefined, value: string) {
-  if (!id) return
-  try {
-    if (value) window.localStorage.setItem(draftStorageKey(id), value)
-    else window.localStorage.removeItem(draftStorageKey(id))
-  } catch {
-    /* private mode / quota — draft persistence is best-effort */
-  }
-}
-
 const SIDEBAR_DEFAULT_WIDTH = 264
 const SIDEBAR_MIN_WIDTH = 200
 const SIDEBAR_MAX_WIDTH = 420
@@ -250,24 +228,6 @@ import PluginsView from './PluginsView'
 import CliSessionsView from './CliSessionsView'
 import { isSupportedDocument } from '../utils/documentTypes'
 import { useCompanionWidget } from '@/companionWidget'
-import {
-  listLearnedSkills,
-  addLearnedSkill,
-  deleteLearnedSkill,
-  detectSystemTools,
-  reauthMcpServer,
-  listMcpServerTools,
-  setProfileValue,
-  listCronJobs,
-  addCronJob,
-  removeCronJob,
-  setCronJobEnabled,
-  listLinkedFolders,
-  addLinkedFolder,
-  removeLinkedFolder,
-  runSlashCommand,
-} from '@/tauri'
-import type { SlashResponse } from '../platform'
 
 function getInitialViewFromUrl(): DashboardView {
   if (typeof window === 'undefined') return 'chat'
@@ -344,11 +304,27 @@ export default function MintDashboard() {
   // Declared here (not further down with the rest of the workspace-related
   // state) so the URL-change effect below can read it — that effect closes
   // over `workspacePath` to scope its own `getRecentInteractions` call.
-  const [workspacePath, setWorkspacePath] = useState(() => window.localStorage.getItem(LAST_WORKSPACE_PATH_KEY) || '')
+  const { conversation, actions: conversationActions } = useConversationCoordinator(
+    {
+      workspacePath: window.localStorage.getItem(LAST_WORKSPACE_PATH_KEY) || '',
+      message: readDraft(conversationId),
+    },
+    {
+      conversationId,
+      draftKeyPrefix: DRAFT_KEY_PREFIX,
+      workspaceStorageKey: LAST_WORKSPACE_PATH_KEY,
+    },
+  )
+  const {
+    workspacePath, message, imageAttachments, videoAttachments, documentAttachment,
+    sending, sendingMessage, sendingImageCount, sendingVideoCount, streamedReply,
+    streamedResponse, agentProgress, pendingApproval,
+  } = conversation
   // Web only in practice (desktop's window has no mobile-width breakpoint,
   // so nothing ever sets this true there) — declared unconditionally so
   // `changeView` can close it on every navigation without branching.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [workspaceRefreshRevision, setWorkspaceRefreshRevision] = useState(0)
 
   const changeView = (newView: any, targetConversationId?: string) => {
     setMobileSidebarOpen(false)
@@ -398,12 +374,7 @@ export default function MintDashboard() {
         setConversationId(next)
         setInteractions([])
         setAgentActivitySnapshots({})
-        setStreamedReply('')
-        setStreamedResponse(null)
-        setMessage('')
-        setImageAttachments([])
-        setDocumentAttachment(null)
-        setAgentProgress([])
+        conversationActions.switchSession()
       }
     }
     window.addEventListener('popstate', handleUrlChange)
@@ -428,29 +399,16 @@ export default function MintDashboard() {
   }, [])
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [error, setError] = useState('')
-  const [message, setMessage] = useState(() => readDraft(conversationId))
   // When `conversationId` changes we swap `message` to that chat's saved draft;
   // this ref tells the persist effect to skip the render right after that swap,
   // so the outgoing chat's text is never written under the incoming chat's key.
-  const skipDraftPersistRef = useRef(false)
   const [interactions, setInteractions] = useState<any[]>([])
   const [pictures, setPictures] = useState<PictureEntry[]>([])
-  const [sending, setSending] = useState(false)
-  const [sendingMessage, setSendingMessage] = useState('')
-  const [sendingImageCount, setSendingImageCount] = useState(0)
-  const [sendingVideoCount, setSendingVideoCount] = useState(0)
-  const [streamedReply, setStreamedReply] = useState('')
-  const [streamedResponse, setStreamedResponse] = useState<ChatResponse | null>(null)
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null)
-  const [agentProgress, setAgentProgress] = useState<AgentProgress[]>([])
   const [agentActivitySnapshots, setAgentActivitySnapshots] = useState<Record<string, AgentProgress[]>>({})
   const [thinkingExpanded, setThinkingExpanded] = useState<Record<string, boolean>>({})
   const liveThinkingOpenRef = useRef(true)
   const liveExtendedThinkingOpenRef = useRef(true)
-  const [imageAttachments, setImageAttachments] = useState<Array<{ dataUri: string; name: string; previewDataUri?: string }>>([])
-  const [videoAttachments, setVideoAttachments] = useState<Array<{ dataUri: string; name: string }>>([])
-  const [documentAttachment, setDocumentAttachment] = useState<DocumentAttachment | null>(null)
-  const [pendingApproval, setPendingApproval] = useState<any | null>(null)
   const [sessionAutoApproved, setSessionAutoApproved] = useState(false)
   const sessionAutoApprovedRef = useRef(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
@@ -618,26 +576,6 @@ export default function MintDashboard() {
   // before the persist effect so it runs first within the same commit. The
   // first run is a no-op: `message`'s initial value already came from the
   // lazy `useState` initializer above.
-  const draftLoadedRef = useRef(false)
-  useEffect(() => {
-    if (!draftLoadedRef.current) {
-      draftLoadedRef.current = true
-      return
-    }
-    skipDraftPersistRef.current = true
-    setMessage(readDraft(conversationId))
-  }, [conversationId])
-
-  // Persist the composer text for the current conversation (debounced).
-  useEffect(() => {
-    if (skipDraftPersistRef.current) {
-      skipDraftPersistRef.current = false
-      return
-    }
-    const timer = window.setTimeout(() => writeDraft(conversationId, message), 300)
-    return () => window.clearTimeout(timer)
-  }, [message, conversationId])
-
   useEffect(() => {
     if (view !== 'chat' || !conversationId) return
     const interval = window.setInterval(async () => {
@@ -768,13 +706,13 @@ export default function MintDashboard() {
     })
     const unlistenSpotlight = window.api.onSpotlightToChat((query) => {
       changeView('chat')
-      setMessage(query)
+      conversationActions.compose(query)
     })
     const unlistenVision = window.api.onVisionReady((image) => {
       createTrimmedImagePreview(image)
         .catch(() => image)
         .then((previewDataUri) => {
-          setImageAttachments((current) => [...current, { dataUri: image, previewDataUri, name: 'Screen capture' }])
+          conversationActions.attachImage({ dataUri: image, previewDataUri, name: 'Screen capture' })
         })
     })
     const handleWindowFocus = () => {
@@ -795,13 +733,13 @@ export default function MintDashboard() {
       getRuntimeStatus().then(setStatus).catch(() => {})
     })
 
-    const unlistenPromise = listen<any>('tool-approval-requested', (event) => {
+    const unlistenPromise = listen('tool-approval-requested', (event: { payload: any }) => {
       if (sessionAutoApprovedRef.current) {
         submitToolApproval(event.payload.token, true).catch((err) => {
           console.error("Auto approval failed:", err)
         })
       } else {
-        setPendingApproval(event.payload)
+        conversationActions.requestApproval(event.payload)
         notifyPendingApproval(event.payload)
       }
     })
@@ -881,12 +819,7 @@ export default function MintDashboard() {
 
   const updateWorkspacePath = (path: string) => {
     const next = path.trim()
-    if (next) {
-      window.localStorage.setItem(LAST_WORKSPACE_PATH_KEY, next)
-    } else {
-      window.localStorage.removeItem(LAST_WORKSPACE_PATH_KEY)
-    }
-    setWorkspacePath(next)
+    conversationActions.selectWorkspace(next)
   }
 
   useEffect(() => {
@@ -903,26 +836,24 @@ export default function MintDashboard() {
         sessionAutoApprovedRef.current = true
         setSessionAutoApproved(true)
       }
-      await submitToolApproval(pendingApproval.token, approved, answer)
+      await conversationActions.executeApproval(() =>
+        submitToolApproval(pendingApproval.token, approved, answer),
+      )
     } catch (reason) {
       setError(errorMessage(reason))
-    } finally {
-      setPendingApproval(null)
     }
   }
 
   async function handleCancelMessage() {
     if (!sending || !streamingConversationId) return
     try {
-      await cancelChatMessage(streamingConversationId)
+      await conversationActions.executeCancellation(() =>
+        cancelChatMessage(streamingConversationId),
+      )
     } catch (e) {
       console.error("Failed to cancel message stream:", e)
     } finally {
-      setSending(false)
       setStreamingConversationId(null)
-      setSendingMessage('')
-      setSendingImageCount(0)
-      setSendingVideoCount(0)
     }
   }
 
@@ -947,15 +878,9 @@ export default function MintDashboard() {
     const outgoingImage = outgoingImages.map((img) => img.dataUri).join(' ')
     const outgoingVideo = outgoingVideos.map((vid) => vid.dataUri).join(' ')
     const outgoingImageCount = outgoingImages.length
-    setSending(true)
+    conversationActions.startRun(promptText, outgoingImageCount, outgoingVideos.length)
     setStreamingConversationId(conversationId)
-    setSendingMessage(promptText)
-    setSendingImageCount(outgoingImageCount)
-    setSendingVideoCount(outgoingVideos.length)
     setError('')
-    setStreamedReply('')
-    setStreamedResponse(null)
-    setAgentProgress([])
     liveThinkingOpenRef.current = true
     liveExtendedThinkingOpenRef.current = true
     setThinkingExpanded((current) => ({ ...current, live: true, 'live-extended': true }))
@@ -970,7 +895,7 @@ export default function MintDashboard() {
       if (pendingProgress.length === 0) return
       const batch = pendingProgress
       pendingProgress = []
-      setAgentProgress((current) => reduceLiveAgentProgressBatch(current, batch))
+      conversationActions.receiveProgress(batch)
     }
     const queueProgress = (progress: AgentProgress) => {
       pendingProgress.push(progress)
@@ -981,16 +906,13 @@ export default function MintDashboard() {
       }
     }
     if (options.clearComposer) {
-      setMessage('')
-      setImageAttachments([])
-      setVideoAttachments([])
-      setDocumentAttachment(null)
+      conversationActions.clearComposer()
     }
 
     try {
-      const response = await streamChatMessage(
+      const response = await conversationActions.executeStream((onChunk) => streamChatMessage(
         shouldUseAgentMode ? promptText : `/chat ${promptText}`,
-        (chunk) => setStreamedReply((current) => `${current}${chunk}`),
+        onChunk,
         outgoingImage,
         options.audioDataUri ?? null,
         outgoingVideo,
@@ -1011,13 +933,12 @@ export default function MintDashboard() {
               console.error("Auto approval failed:", err)
             })
           } else {
-            setPendingApproval(payload)
+            conversationActions.requestApproval(payload)
             notifyPendingApproval(payload)
           }
         },
-      )
+      ))
       flushPendingProgress()
-      setStreamedResponse(response)
       if (document.hidden || !document.hasFocus()) {
         window.api?.notifyAiResponse?.(truncateForNotification(response.text))
       }
@@ -1060,17 +981,13 @@ export default function MintDashboard() {
         }
       }
       getRuntimeStatus().then(setStatus).catch(() => {})
-      setStreamedReply('')
-      setStreamedResponse(null)
+      conversationActions.clearStream()
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
       flushPendingProgress()
-      setSending(false)
+      conversationActions.finishRun()
       setStreamingConversationId(null)
-      setSendingMessage('')
-      setSendingImageCount(0)
-      setSendingVideoCount(0)
     }
   }
 
@@ -1093,10 +1010,7 @@ export default function MintDashboard() {
         engineResp = null
       }
       if (engineResp && engineResp.kind !== 'not_handled') {
-        setMessage('')
-        setImageAttachments([])
-        setVideoAttachments([])
-        setDocumentAttachment(null)
+        conversationActions.clearComposer()
         await handleEngineSlashResponse(trimmed, engineResp)
         return
       }
@@ -1104,17 +1018,14 @@ export default function MintDashboard() {
       const slashResult = executeSlashCommand(trimmed)
 
       if (slashResult.handled) {
-        setMessage('')
-        setImageAttachments([])
-        setVideoAttachments([])
-        setDocumentAttachment(null)
+        conversationActions.clearComposer()
 
         if (slashResult.action === 'open_image_picker') {
           document.getElementById('vision-file-input')?.click()
           return
         } else if (slashResult.action === 'paste_image') {
           readClipboardImage().then((uri) => {
-            if (uri) setImageAttachments((curr) => [...curr, { dataUri: uri, name: 'Clipboard Image' }])
+            if (uri) conversationActions.attachImage({ dataUri: uri, name: 'Clipboard Image' })
           }).catch(() => {})
           return
         } else if (slashResult.action === 'generate_veo') {
@@ -1207,12 +1118,7 @@ export default function MintDashboard() {
       const objectUrl = createObjectUrlPreview(file).objectUrl
       const dataUri = await readImage(file)
       const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
-      setImageAttachments((current) => {
-        if (current.some((item) => item.name === file.name && item.dataUri === dataUri)) {
-          return current
-        }
-        return [...current, { dataUri, previewDataUri, objectUrl, name: file.name }]
-      })
+      conversationActions.attachImage({ dataUri, previewDataUri, objectUrl, name: file.name })
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -1234,12 +1140,7 @@ export default function MintDashboard() {
         reader.onerror = reject
         reader.readAsDataURL(file)
       })
-      setVideoAttachments((current) => {
-        if (current.some((item) => item.name === file.name && item.dataUri === dataUri)) {
-          return current
-        }
-        return [...current, { dataUri, name: file.name }]
-      })
+      conversationActions.attachVideo({ dataUri, name: file.name })
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -1285,7 +1186,7 @@ export default function MintDashboard() {
               createTrimmedImagePreview(dataUri)
                 .catch(() => dataUri)
                 .then((previewDataUri) => {
-                  setImageAttachments((current) => [...current, { dataUri, previewDataUri, name }])
+                  conversationActions.attachImage({ dataUri, previewDataUri, name })
                 })
             }
           }).catch((err) => {
@@ -1308,7 +1209,7 @@ export default function MintDashboard() {
         createTrimmedImagePreview(dataUri)
           .catch(() => dataUri)
           .then((previewDataUri) => {
-            setImageAttachments((current) => [...current, { dataUri, previewDataUri, name }])
+            conversationActions.attachImage({ dataUri, previewDataUri, name })
           })
       })
       .catch((reason) => setError(errorMessage(reason)))
@@ -1324,7 +1225,7 @@ export default function MintDashboard() {
       if (!isSupportedDocument(file.name)) {
         throw new Error('Unsupported document type')
       }
-      setDocumentAttachment({
+      conversationActions.attachDocument({
         filename: file.name,
         dataUri: await readDocument(file),
       })
@@ -1337,7 +1238,7 @@ export default function MintDashboard() {
 
   function startWebSearch() {
     updateAgentMode(true)
-    setMessage((current) => current.trim() ? `Search web: ${current.trim()}` : 'Search web: ')
+    conversationActions.compose(message.trim() ? `Search web: ${message.trim()}` : 'Search web: ')
   }
 
   async function selectWorkspace() {
@@ -1367,12 +1268,7 @@ export default function MintDashboard() {
         setConversationId(next)
         setInteractions([])
         setAgentActivitySnapshots({})
-        setStreamedReply('')
-        setStreamedResponse(null)
-        setMessage('')
-        setImageAttachments([])
-        setDocumentAttachment(null)
-        setAgentProgress([])
+        conversationActions.switchSession()
         setViewState('chat')
         if (typeof window !== 'undefined') {
           const currentPath = (window.location.pathname || '').replace(/\/+$/, '')
@@ -1387,10 +1283,7 @@ export default function MintDashboard() {
       }
       setInteractions([])
       setAgentActivitySnapshots({})
-      setStreamedReply('')
-      setStreamedResponse(null)
-      setMessage('')
-      setImageAttachments([])
+      conversationActions.switchSession()
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -1442,7 +1335,7 @@ export default function MintDashboard() {
         const wsChange = resp.effects.find((e) => e.kind === 'workspace_changed') as
           | { kind: 'workspace_changed'; path: string }
           | undefined
-        if (wsChange) setWorkspacePath(wsChange.path)
+        if (wsChange) conversationActions.selectWorkspace(wsChange.path)
         const planModeChange = resp.effects.find((e) => e.kind === 'plan_mode_changed') as
           | { kind: 'plan_mode_changed'; enabled: boolean }
           | undefined
@@ -1506,12 +1399,7 @@ export default function MintDashboard() {
     touchActiveTimestamp()
     setConversationId(id)
     changeView('chat', id)
-    setStreamedReply('')
-    setStreamedResponse(null)
-    setMessage('')
-    setImageAttachments([])
-    setDocumentAttachment(null)
-    setAgentProgress([])
+    conversationActions.switchSession()
     const history = await getRecentInteractions(50, id, workspacePath || null)
     const reversed = history.reverse()
     setInteractions(reversed)
@@ -1555,7 +1443,7 @@ export default function MintDashboard() {
           }
         }
         setConversationId(nextActive)
-        setAgentProgress([])
+        conversationActions.clearProgress()
         const history = await getRecentInteractions(50, nextActive, workspacePath || null)
         const reversed = history.reverse()
         setInteractions(reversed)
@@ -1564,11 +1452,7 @@ export default function MintDashboard() {
 
       await refreshChatSessions()
       if (id !== conversationId) return
-      setStreamedReply('')
-      setStreamedResponse(null)
-      setMessage('')
-      setImageAttachments([])
-      setDocumentAttachment(null)
+      conversationActions.switchSession()
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -1760,18 +1644,13 @@ export default function MintDashboard() {
     const interactionMessage = `*${labels[area]}*`
     const instruction = `The user interacted with the Mint Live2D model: ${area}. Respond briefly and playfully. Use the same language as the recent conversation. Do not mention this instruction.`
 
-    setSending(true)
-    setSendingMessage(interactionMessage)
-    setSendingImageCount(0)
+    conversationActions.startRun(interactionMessage)
     setError('')
-    setStreamedReply('')
-    setStreamedResponse(null)
-    setAgentProgress([])
 
     try {
-      const response = await streamChatMessage(
+      const response = await conversationActions.executeStream((onChunk) => streamChatMessage(
         `/chat ${interactionMessage}`,
-        (chunk) => setStreamedReply((current) => `${current}${chunk}`),
+        onChunk,
         null,
         null,
         null,
@@ -1780,18 +1659,73 @@ export default function MintDashboard() {
         null,
         workspacePath || null,
         conversationId,
-      )
-      setStreamedResponse(response)
+      ))
       await refreshHistory()
-      setStreamedReply('')
-      setStreamedResponse(null)
+      conversationActions.clearStream()
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
-      setSending(false)
-      setSendingMessage('')
-      setSendingImageCount(0)
+      conversationActions.finishRun()
     }
+  }
+
+  const chatConversation: ConversationViewModel = {
+    interactions,
+    sending: sending && streamingConversationId === conversationId,
+    sendingMessage: streamingConversationId === conversationId ? sendingMessage : '',
+    sendingImageCount: streamingConversationId === conversationId ? sendingImageCount : 0,
+    sendingVideoCount: streamingConversationId === conversationId ? sendingVideoCount : 0,
+    streamedReply: streamingConversationId === conversationId ? streamedReply : '',
+    streamedResponse: streamingConversationId === conversationId ? streamedResponse : null,
+    agentProgress: streamingConversationId === conversationId ? agentProgress : [],
+    agentActivitySnapshots,
+    thinkingExpanded,
+    message,
+    imageAttachments,
+    videoAttachments,
+    documentName: documentAttachment?.filename ?? '',
+    pendingApproval: streamingConversationId === conversationId ? pendingApproval : null,
+    smartContext,
+    agentMode,
+    planMode,
+    status,
+    workspacePath,
+    chatEnd,
+    welcomeInteraction: MOCK_WELCOME_INTERACTION,
+    settingsConfig,
+    isCliSession: conversationId.startsWith('cli') || conversationId === 'cli',
+    cliSessionId: conversationId.startsWith('cli') ? conversationId : undefined,
+    conversationTitle: chatSessions.find((session) => session.id === conversationId)?.title,
+  }
+  const chatActions: ConversationActions = {
+    onThinkingExpandedChange: handleThinkingExpandedChange,
+    onSubmit: handleSubmit,
+    onSelectImage: selectImage,
+    onSelectVideo: selectVideo,
+    onSelectDocument: selectDocument,
+    onPasteImage: pasteImage,
+    onSetMessage: conversationActions.compose,
+    onSendVoiceMessage: sendVoiceMessage,
+    onRemoveImage: conversationActions.removeImage,
+    onRemoveVideo: conversationActions.removeVideo,
+    onRemoveDocument: () => conversationActions.attachDocument(null),
+    onStartWebSearch: startWebSearch,
+    onCaptureScreen: captureScreen,
+    onSetSmartContext: updateSmartContext,
+    onSetAgentMode: updateAgentMode,
+    onSetPlanMode: isDesktopApp ? updatePlanMode : undefined,
+    onSetProvider: changeProvider,
+    onSelectWorkspace: isDesktopApp ? selectWorkspace : undefined,
+    onWorkspaceChanged: () => setWorkspaceRefreshRevision((revision) => revision + 1),
+    onApproval: handleApproval,
+    onUpdateSettings: (updated) => setSettingsConfig(updated),
+    onSetModel: changeModel,
+    onSelectModelAndProvider: changeProviderAndModel,
+    onCancelMessage: handleCancelMessage,
+    onClearMessages: () => clearHistory('Clear history'),
+    onSetGeminiLiveVoice: changeGeminiLiveVoice,
+    onToggleMobileSidebar: () => setMobileSidebarOpen(!mobileSidebarOpen),
+    onBackToCode: () => changeView('code'),
   }
 
   return (
@@ -1905,8 +1839,9 @@ export default function MintDashboard() {
               sending={sending}
               workspacePath={workspacePath}
               onEnableAgentMode={() => updateAgentMode(true)}
-              onSetMessage={setMessage}
+              onSetMessage={conversationActions.compose}
               onWorkspaceReady={updateWorkspacePath}
+              refreshRevision={workspaceRefreshRevision}
             />
           )}
           <ModelPanel
@@ -1928,65 +1863,7 @@ export default function MintDashboard() {
             onInteract={handleModelInteraction}
             onModelLoadComplete={() => setModelReady(true)}
           />
-          <ChatPanel
-            interactions={interactions}
-            sending={sending && streamingConversationId === conversationId}
-            sendingMessage={streamingConversationId === conversationId ? sendingMessage : ''}
-            sendingImageCount={streamingConversationId === conversationId ? sendingImageCount : 0}
-            streamedReply={streamingConversationId === conversationId ? streamedReply : ''}
-            streamedResponse={streamingConversationId === conversationId ? streamedResponse : null}
-            agentProgress={streamingConversationId === conversationId ? agentProgress : []}
-            sendingVideoCount={streamingConversationId === conversationId ? sendingVideoCount : 0}
-            agentActivitySnapshots={agentActivitySnapshots}
-            thinkingExpanded={thinkingExpanded}
-            onThinkingExpandedChange={handleThinkingExpandedChange}
-            message={message}
-            imageAttachments={imageAttachments}
-            videoAttachments={videoAttachments}
-            documentName={documentAttachment?.filename ?? ''}
-            pendingApproval={streamingConversationId === conversationId ? pendingApproval : null}
-            smartContext={smartContext}
-            agentMode={agentMode}
-            planMode={planMode}
-            status={status}
-            workspacePath={workspacePath}
-            chatEnd={chatEnd}
-            welcomeInteraction={MOCK_WELCOME_INTERACTION}
-            onSubmit={handleSubmit}
-            onSelectImage={selectImage}
-            onSelectVideo={selectVideo}
-            onSelectDocument={selectDocument}
-            onPasteImage={pasteImage}
-            onSetMessage={setMessage}
-            onSendVoiceMessage={sendVoiceMessage}
-            onRemoveImage={(idx: number) => {
-              setImageAttachments((current) => current.filter((_, i) => i !== idx))
-            }}
-            onRemoveVideo={(idx: number) => {
-              setVideoAttachments((current) => current.filter((_, i) => i !== idx))
-            }}
-            onRemoveDocument={() => setDocumentAttachment(null)}
-            onStartWebSearch={startWebSearch}
-            onCaptureScreen={captureScreen}
-            onSetSmartContext={updateSmartContext}
-            onSetAgentMode={updateAgentMode}
-            onSetPlanMode={isDesktopApp ? updatePlanMode : undefined}
-            onSetProvider={changeProvider}
-            onSelectWorkspace={isDesktopApp ? selectWorkspace : undefined}
-            settingsConfig={settingsConfig}
-            onUpdateSettings={(updated) => setSettingsConfig(updated)}
-            onSetModel={changeModel}
-            onSelectModelAndProvider={changeProviderAndModel}
-            onSetGeminiLiveVoice={changeGeminiLiveVoice}
-            onApproval={handleApproval}
-            onCancelMessage={handleCancelMessage}
-            onClearMessages={() => clearHistory('Clear history')}
-            onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-            isCliSession={conversationId.startsWith('cli') || conversationId === 'cli'}
-            cliSessionId={conversationId.startsWith('cli') ? conversationId : undefined}
-            onBackToCode={() => changeView('code')}
-            conversationTitle={chatSessions.find((s) => s.id === conversationId)?.title}
-          />
+          <ChatPanel conversation={chatConversation} actions={chatActions} />
         </main>
         {view === 'skills' && (
           <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
@@ -2075,7 +1952,7 @@ export default function MintDashboard() {
           onRefreshPictures={refreshPictures}
           onSendToChat={(_url, imgPrompt) => {
             changeView('chat')
-            setMessage(imgPrompt)
+            conversationActions.compose(imgPrompt)
           }}
           onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
         />
@@ -2083,7 +1960,7 @@ export default function MintDashboard() {
           view={view}
           onSendToChat={(vidPrompt) => {
             changeView('chat')
-            setMessage(vidPrompt)
+            conversationActions.compose(vidPrompt)
           }}
           onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
         />
@@ -2135,7 +2012,7 @@ export default function MintDashboard() {
           setToastMessage(`Switched provider to ${provider}`)
         }}
         onExecuteSlash={(cmd) => {
-          setMessage(cmd + ' ')
+          conversationActions.compose(cmd + ' ')
           setIsSearchOpen(false)
         }}
         chatSessions={chatSessions}
