@@ -566,13 +566,6 @@ pub(super) fn strip_ansi_escapes(s: &str) -> String {
     result
 }
 
-pub(super) fn is_thai_combining(c: char) -> bool {
-    matches!(c,
-        '\u{0e31}' | '\u{0e34}'..='\u{0e37}' | '\u{0e38}'..='\u{0e39}' |
-        '\u{0e47}'..='\u{0e4e}'
-    )
-}
-
 pub(super) fn apply_wave_effect(text: &str, tick: usize) -> String {
     let (label, metadata) = if let Some(idx) = text.rfind(" • Esc to interrupt)") {
         if let Some(open_paren_idx) = text[..idx].rfind('(') {
@@ -1133,37 +1126,29 @@ pub(super) fn insert_permanent_lines(status: &mut LiveStatus, lines: &[String]) 
         return;
     };
 
-    let (tw, _) = markdown::terminal_size_or_default();
-    let width = tw as usize;
-    let mut height: u16 = 0;
-    for line in lines {
-        let stripped = strip_ansi_escapes(line);
-        let line_len = stripped.chars().filter(|&c| !is_thai_combining(c)).count();
-        let physical_lines = if width > 0 {
-            line_len.div_ceil(width)
-        } else {
-            1
-        }
-        .max(1);
-        height = height.saturating_add(physical_lines as u16);
-    }
-
     let Ok(text) = lines.join("\n").into_text() else {
         return;
     };
+    let (width, _) = markdown::terminal_size_or_default();
+    let height = wrapped_text_height(&text, width);
     let _ = terminal.insert_before(height, |buf| {
         use ratatui::widgets::Widget as _;
-        // `height` above is computed assuming lines longer than the
-        // terminal width wrap onto extra rows; without `.wrap(...)` here
-        // the `Paragraph` instead clips each source line to a single row,
-        // so a long committed line (e.g. a full shell command) reserved
-        // more rows than it painted — leaving stray blank rows behind in
-        // the scrollback. Wrapping keeps what's actually drawn in sync
-        // with what was reserved.
+        // Measure and render with the same Paragraph/Wrap implementation.
+        // Counting Rust chars here under-reserved rows for wide Unicode,
+        // emoji, ANSI-styled spans, and word-boundary wrapping, clipping the
+        // tail of otherwise complete assistant responses in scrollback.
         ratatui::widgets::Paragraph::new(text)
             .wrap(ratatui::widgets::Wrap { trim: false })
             .render(buf.area, buf);
     });
+}
+
+fn wrapped_text_height(text: &ratatui::text::Text<'_>, width: u16) -> u16 {
+    ratatui::widgets::Paragraph::new(text.clone())
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .line_count(width)
+        .max(1)
+        .min(u16::MAX as usize) as u16
 }
 
 /// Tears down the shared inline `ratatui` terminal (if one is currently
@@ -1631,6 +1616,13 @@ mod streamed_answer_tests {
 
         assert!(rendered.contains('┌'));
         assert!(!rendered.contains("| --- | --- |"));
+    }
+
+    #[test]
+    fn scrollback_height_accounts_for_wide_unicode() {
+        let text = ratatui::text::Text::raw("🙂🙂🙂");
+
+        assert_eq!(wrapped_text_height(&text, 4), 2);
     }
 }
 

@@ -7,6 +7,7 @@
 - Fixed CLI rendering for streamed Markdown: every interactive response now renders from its accumulated text in the live viewport, keeping long paragraphs wrapped and tables intact instead of splitting them at provider chunk boundaries.
 - Render Markdown tables through the same terminal-table renderer in both the CLI live viewport and its final scrollback snapshot, instead of reverting to raw pipe-delimited source when a streamed answer completes.
 - Reconcile the CLI's streamed draft with the Agent's completed summary before committing it, restoring any delta a provider omitted so the CLI cannot end before the final paragraph.
+- Measure final CLI scrollback with Ratatui's actual Unicode-aware wrapping before insertion, preventing Thai text, emoji, and rich option cards from clipping the end of a complete response.
 - Updated CLI streamed-answer rendering to print the `Mint:` header and clear the live status only once, append each incoming text delta continuously, and print collected web sources after the response finishes.
 - Kept the CLI follow-up composer visible during streaming, rendered the current answer above it, and committed that answer to scrollback when the turn completes.
 - Prevented late thinking/network progress events from restoring the "Mulling" status after streamed answer text has started.
