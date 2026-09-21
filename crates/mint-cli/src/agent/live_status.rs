@@ -222,35 +222,6 @@ pub(super) fn print_table_block(table_lines: &[String], is_first: &mut bool) {
     }
 }
 
-pub(super) fn should_show_verification(verification: &str) -> bool {
-    let normalized = verification.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        return false;
-    }
-    if normalized.starts_with("information retrieved from web search")
-        || normalized.starts_with("successfully ran background command")
-        || normalized.starts_with("opened ")
-        || normalized.contains("background command to open")
-        || normalized.contains("web search results")
-    {
-        return false;
-    }
-    !matches!(
-        normalized.as_str(),
-        "not run"
-            | "not run."
-            | "no checks run"
-            | "no checks run."
-            | "no technical task requested"
-            | "no technical task requested."
-            | "no technical task requested, just a greeting."
-            | "not required"
-            | "not required."
-            | "none"
-            | "n/a"
-    )
-}
-
 #[derive(Debug, Default)]
 pub(super) struct LiveStatus {
     pub(super) thinking: Option<String>,

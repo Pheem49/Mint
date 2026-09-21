@@ -1208,9 +1208,6 @@ pub async fn run_code_agent_with_options(
         println!();
     }
 
-    if should_show_verification(&res.verification) {
-        println!("  Verification: {}", res.verification);
-    }
     let badge_plain = if let Some(orig_provider) = &res.fallback {
         let reason_suffix = if let Some(reason) = &res.fallback_reason {
             format!(" ({reason})")
