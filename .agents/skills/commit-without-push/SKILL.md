@@ -1,7 +1,7 @@
 ---
 name: commit-without-push
 description: Create local git commits on request while honoring a 'don't push yet' instruction — group changes into logical commits, follow repo conventions, and never push without explicit instruction; also verify that an already-made commit captured everything when the user asks 'I committed already — nothing left to fix, right?'. Use when the user says 'commit this' / 'commit ให้หน่อย' / 'commit but don't push' / 'commit แยกเป็นคอมมิต', makes any bare request to commit working/staged changes, or asks whether their last commit is complete.
-revisions: 3
+revisions: 4
 ---
 
 # Commit Without Push
@@ -11,7 +11,7 @@ A request to *commit* is never a request to *push*. Treat "don't push yet" (or i
 This skill has two modes:
 
 - **Mode A — commit.** The user asks you to commit working/staged changes.
-- **Mode B — verify.** The user asks whether an *already-made* commit captured everything ("ฉันcommit ไปแล้ว ไม่มีอะไรให้แก้แล้วใช่ป่ะ", "did I commit everything?", "is there anything left to fix?"). Read-only.
+- **Mode B — verify.** The user asks whether an *already-made* commit captured everything. This includes when the user **committed it themselves** ("ฉัน commit เองไปหมดละ / commit เองไปหมดแล้ว", "I already committed everything", "did I commit everything?", "is there anything left to fix?"). Read-only.
 
 ## Hard rules
 
@@ -19,7 +19,7 @@ This skill has two modes:
 - **Never amend, reset, or rebase away existing commits** unless explicitly asked. The user's history is theirs.
 - **Never stage files you weren't asked about** when the change set is mixed and unrelated — see grouping below.
 - **In Mode B, change nothing.** No staging, no committing, no edits. Inspect and report only.
-- **Answer in the user's language.** Thai trigger ("commit ให้หน่อย", "คอมมิตไปแล้วนะ") → reply in Thai.
+- **Answer in the user's language.** Thai trigger ("commit ให้หน่อย", "คอมมิตไปแล้วนะ", "ฉัน commit เองไปหมดละ") → reply in Thai.
 
 ## Mode A — commit
 
@@ -90,11 +90,14 @@ They can disagree. A clean tree can be true while the work is still unverified, 
 ### B1. Inspect
 
 ```bash
-git status --short --branch     # the ?? / M lines are the whole answer
+git status --porcelain --untracked-files=all   # the ?? / M lines are the whole answer
 git log --oneline -5
 git show --stat HEAD            # what the last commit actually captured
 git show -s --format='%H%n%an%n%ad%n%s' HEAD
 ```
+
+- **Use `--untracked-files=all` (a.k.a. `-uall`), not bare `git status --short`.** Plain `git status` collapses each untracked directory into a single `?? dir/` entry, which can hide whether individual files inside it were recorded. `-uall` expands to every untracked file, so an empty untracked section is real proof rather than a collapsed summary. (The report can print a labelled `---UNTRACKED---` section beneath the status output so the emptiness is visible.)
+- Comparing `--porcelain` output against a prior round's is the cleanest way to show that a previously-untracked directory (e.g. a new skill dir) has since been captured by the user's own commit.
 
 ### B2. Classify any leftovers — "leftover" is not the same as "bug"
 
@@ -104,23 +107,25 @@ Read the porcelain codes literally:
 - **`?? <path>` untracked** → *not* something to fix; something never recorded. Repeatedly this is a **new skill / doc / scaffold directory** (e.g. `.agents/skills/<name>/SKILL.md`). Say plainly it is untracked, not modified, and offer to commit it as its own commit per repo convention.
 - **`M <path>` (unstaged) or `M  <path>` (staged)** → a genuine uncommitted edit. This *is* something left. Do **not** say "nothing to fix."
 - **`git show --stat HEAD`** → confirm the committed file list matches the change set the user believed they committed (compare against the change set from an earlier round if you have it). A stat that matches the expected files is the strongest single confirmation.
+- **When the user says they committed it themselves**, also confirm HEAD advanced: `git log --oneline -5` should show their new commit on top, and the previously-untracked path should now appear in its `--stat`. HEAD-moved + untracked-now-empty together is the complete "yes, it's all in" answer.
 
 ### B3. Report the two answers separately
 
 1. **Completeness verdict** — "working tree clean of tracked changes: `<hash>` captured all N files" **or** "1 genuine uncommitted edit remains: `<path>`".
 2. **Name the leftover** — if only `??` files remain, state they are untracked (never committed), name them, and note it's a doc/skill addition, not a broken change.
-3. **Remote state** — the `ahead N` count and an explicit "nothing pushed." Never imply pushed.
+3. **Remote state** — the `ahead N` count and an explicit "nothing pushed." Never imply pushed. Optionally list the pending local commits (`git log --oneline origin/<branch>..HEAD`) so the user sees what's queued.
 4. **Verification gap** — say exactly which gates ran against the committed content and which did not. `cargo fmt --check` passing ≠ `clippy`/`test` passing. Do not imply green CI.
-5. **Options**, short and scannable: commit the leftover as its own commit / run the missing verification / acknowledge and stop. Recommend the low-risk one; perform none of them without instruction.
+5. **Options**, short and scannable: push the queue (only on explicit instruction) / run the missing verification / view the combined diff (`git diff origin/<branch>..HEAD --stat`). Recommend the low-risk one; perform none of them without instruction.
 
 If the user wants to un-commit, `git reset --soft HEAD~1` is safe — files return to staged, nothing lost.
 
 ## Gotchas
 
 - **"Commit" ≠ "push".** The single most important distinction. Report `ahead N` and stop; pushing is a separate, explicitly-authorized action.
-- **"Nothing to commit" ≠ "nothing to fix" ≠ "verified".** The user asking "ไม่มีอะไรให้แก้แล้วใช่ป่ะ" usually means *"is the work done?"* A clean tree answers only the completeness half. State the verification gap in the same breath, or the user assumes green CI.
+- **"Nothing to commit" ≠ "nothing to fix" ≠ "verified".** The user asking "ไม่มีอะไรให้แก้แล้วใช่ป่ะ" — or "ฉัน commit เองไปหมดละ" — usually means *"is the work done?"* A clean tree answers only the completeness half. State the verification gap in the same breath, or the user assumes green CI.
 - **Untracked `??` files are leftovers, not bugs.** New skill/doc directories land here constantly (and in this repo are committed separately). Don't lump them into "something you still have to fix" — name them, say they're untracked, and offer the separate commit.
 - **Read the porcelain codes literally.** `M ` (staged) and ` M` (unstaged) mean *there is an uncommitted change*; `??` means *never recorded*. They lead to different answers.
+- **Bare `git status` hides untracked files inside directories.** Use `--untracked-files=all` when you're proving the tree is fully recorded — otherwise a collapsed `?? dir/` can mask whether the individual files were captured.
 - **Mixed working tree.** Untracked scaffolding (skills, generated dirs) sitting next to real feature edits is common. Split it; don't silently sweep it into the feature commit.
 - **Deletion commits without a build.** A commit that *removes* a function is the easiest to verify cheaply: grep/`search_code` for references to the removed symbol. Zero hits means no dangling caller and the change can't break the build on that account. Present this as read-only evidence, explicitly *not* a `clippy`/`test` run.
 - **CI gates you didn't run.** A previously-passed `fmt --check` does not mean `clippy`/`test` passed on this change set. State which checks ran and which didn't rather than claiming green. When the machine is RAM-constrained, say so and run gates one at a time (or hand the commands to the user) rather than skipping silently.
