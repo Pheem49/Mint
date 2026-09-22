@@ -901,6 +901,15 @@ h1 {
   height: 100%;
 }
 
+.chat-panel-split-wrapper.has-preview .code-review-page {
+  flex: 0 0 var(--preview-width, 50%);
+  width: var(--preview-width, 50%);
+  min-width: 280px;
+  max-width: none;
+  height: 100%;
+  border-left: 1px solid var(--border);
+}
+
 .preview-split-resizer {
   width: 8px;
   margin: 0 -4px;

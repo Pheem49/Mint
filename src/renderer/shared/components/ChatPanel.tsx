@@ -34,6 +34,8 @@ import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../utils/documen
 import ModelSelectorPopover from './ModelSelectorPopover'
 import GitBranchSelector from './GitBranchSelector'
 import WorkspaceSelector from './WorkspaceSelector'
+import CodeReviewPage from './CodeReviewPage'
+import type { ToolSurface } from './ToolSurfacePage'
 
 import { catalogPlatform, conversationPlatform, runtimePlatform } from '../platform'
 
@@ -105,6 +107,10 @@ interface ChatPanelContract {
   cliSessionId?: string
   onBackToCode?: () => void
   conversationTitle?: string
+  onOpenTerminal?: () => void
+  onOpenBrowser?: (url: string) => void
+  onOpenArtifact?: (artifact: ArtifactFile) => void
+  onOpenReview?: (review: Extract<ToolSurface, { kind: 'review' }>) => void
 }
 
 export type ConversationViewModel = Pick<ChatPanelContract,
@@ -182,6 +188,10 @@ export default function ChatPanel({
   cliSessionId,
   onBackToCode,
   conversationTitle,
+  onOpenTerminal,
+  onOpenBrowser,
+  onOpenArtifact,
+  onOpenReview,
   } = { ...conversation, ...actions }
   const agentActivities = activitiesFrom(agentProgress)
   const activeFallbackNotice = fallbackNotice(streamedResponse)
@@ -195,10 +205,25 @@ export default function ChatPanel({
   const [openActivityIds, setOpenActivityIds] = useState<Record<string, boolean>>({})
   const [openReviewIds, setOpenReviewIds] = useState<Record<string, boolean>>({})
   const [openFileDiffs, setOpenFileDiffs] = useState<Record<string, boolean>>({})
+  const [showAllFileChanges, setShowAllFileChanges] = useState<Record<string, boolean>>({})
+  const [reviewPage, setReviewPage] = useState<{ title: string; changes: FileChange[] } | null>(null)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactFile | null>(null)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
+  const [desktopToolsMenuOpen, setDesktopToolsMenuOpen] = useState(false)
+  const desktopToolsMenuRef = useRef<HTMLDivElement>(null)
+  const [browserAddress, setBrowserAddress] = useState('https://www.google.com')
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
+
+  const openArtifact = (artifact: ArtifactFile) => {
+    if (onOpenArtifact) onOpenArtifact(artifact)
+    else setActiveArtifact(artifact)
+  }
+
+  const openReview = (title: string, changes: FileChange[]) => {
+    if (onOpenReview) onOpenReview({ id: `review:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: title, changes })
+    else setReviewPage({ title, changes })
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -924,6 +949,21 @@ export default function ChatPanel({
     return () => window.removeEventListener('mousedown', closeMenu)
   }, [toolMenuOpen])
   useEffect(() => {
+    if (!desktopToolsMenuOpen) return
+    const closeMenu = (event: MouseEvent) => {
+      if (!desktopToolsMenuRef.current?.contains(event.target as Node)) setDesktopToolsMenuOpen(false)
+    }
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setDesktopToolsMenuOpen(false)
+    }
+    window.addEventListener('mousedown', closeMenu)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.removeEventListener('mousedown', closeMenu)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [desktopToolsMenuOpen])
+  useEffect(() => {
     const handleWindowPaste = (event: globalThis.ClipboardEvent) => {
       if (!event.clipboardData) return
       if (onPasteImage(event.clipboardData)) {
@@ -1017,9 +1057,11 @@ export default function ChatPanel({
   }, [agentActivitySnapshots])
 
   const renderChangesList = (changes: ReturnType<typeof parseFileChangesFromProgress>, idPrefix: string) => {
+    const showAll = Boolean(showAllFileChanges[idPrefix])
+    const visibleChanges = showAll ? changes : changes.slice(0, 3)
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        {changes.map((change) => {
+      <div className="file-changes-list" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        {visibleChanges.map((change) => {
           const fileKey = `${idPrefix}-${change.path}`
           const isDiffOpen = Boolean(openFileDiffs[fileKey])
           const fileName = change.path.split('/').pop() || change.path
@@ -1066,7 +1108,7 @@ export default function ChatPanel({
                         change.created && change.hunks.length > 0
                           ? change.hunks.map((h) => h.newText).filter(Boolean).join('\n')
                           : undefined
-                      setActiveArtifact({ path: change.path, content: fallbackContent })
+                    openArtifact({ path: change.path, content: fallbackContent })
                     }}
                     title="Open Live Preview Split View"
                   >
@@ -1107,6 +1149,17 @@ export default function ChatPanel({
             </div>
           )
         })}
+        {changes.length > 3 && (
+          <button
+            type="button"
+            className="file-changes-show-more"
+            aria-expanded={showAll}
+            onClick={() => setShowAllFileChanges((current) => ({ ...current, [idPrefix]: !current[idPrefix] }))}
+          >
+            {showAll ? 'Show fewer files' : `Show ${changes.length - 3} more ${changes.length - 3 === 1 ? 'file' : 'files'}`}
+            <span aria-hidden="true" className={showAll ? 'is-expanded' : ''}>⌄</span>
+          </button>
+        )}
       </div>
     )
   }
@@ -1121,7 +1174,7 @@ export default function ChatPanel({
     const totalDeletions = changes.reduce((sum, c) => sum + c.deletions, 0)
     const createdCount = changes.filter((c) => c.created).length
     const modifiedCount = changes.length - createdCount
-    const isOpen = Boolean(openReviewIds[interactionId])
+    const isOpen = openReviewIds[interactionId] ?? true
 
     let summaryLabel = ''
     if (createdCount > 0 && modifiedCount === 0) {
@@ -1195,56 +1248,49 @@ export default function ChatPanel({
     }
 
     return (
-      <div className="file-changes-summary-container" style={{ marginBottom: '8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-          <button
-            type="button"
-            className="agent-activity-toggle file-changes-toggle"
-            aria-expanded={isOpen}
-            onClick={() => setOpenReviewIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-              <polyline points="22 4 12 14.01 9 11.01" />
-            </svg>
-            <span>
-              {summaryLabel}
-              {createdCount > 0 && modifiedCount === 0 ? (
-                <span className="file-changes-count-add" style={{ marginLeft: '6px' }}>
-                  (+{totalAdditions} {totalAdditions === 1 ? 'line' : 'lines'})
+      <div className="file-changes-summary-container">
+        <div className="agent-activity-card file-changes-card">
+          <div className="file-changes-summary-row">
+            <div className="file-changes-summary">
+              <span className="file-changes-summary-icon" aria-hidden="true">⊞</span>
+              <span className="file-changes-summary-copy">
+                <span className="file-changes-summary-label">{summaryLabel}</span>
+                <span className="file-changes-summary-counts">
+                  {totalAdditions > 0 && <span className="file-changes-count-add">+{totalAdditions}</span>}
+                  {totalDeletions > 0 && <span className="file-changes-count-del">-{totalDeletions}</span>}
                 </span>
-              ) : (
-                <>
-                  {totalAdditions > 0 && <span className="file-changes-count-add" style={{ marginLeft: '6px' }}>+{totalAdditions}</span>}
-                  {totalDeletions > 0 && <span className="file-changes-count-del" style={{ marginLeft: '4px' }}>-{totalDeletions}</span>}
-                </>
-              )}
-            </span>
-            <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
-          </button>
-
-          <button
-            type="button"
-            className="file-changes-rewind-btn"
-            onClick={handleRewind}
-            title="Rewind workspace to before these file edits (Git Checkpoint)"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="1 4 1 10 7 10" />
-              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-            </svg>
-            Rewind
-          </button>
-        </div>
-
-        {isOpen && (
-          <div className="agent-activity-card file-changes-card">
-            {renderChangesList(changes, interactionId)}
+              </span>
+            </div>
+            <div className="file-changes-summary-actions">
+              <button
+                type="button"
+                className="file-changes-rewind-btn"
+                onClick={handleRewind}
+                title="Rewind workspace to before these file edits (Git Checkpoint)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="1 4 7 4 7 10" />
+                  <path d="M3 9a9 9 0 1 0 2.13-5.36L1 7" />
+                </svg>
+                Undo
+              </button>
+              <button
+                type="button"
+                className="file-changes-review-btn"
+                title="Review changed code"
+                onClick={() => {
+                  openReview(summaryLabel, changes)
+                }}
+              >
+                Review
+              </button>
+            </div>
           </div>
-        )}
+          {isOpen && <div className="file-changes-list-container">{renderChangesList(changes, interactionId)}</div>}
+        </div>
       </div>
     )
-  }, [agentActivitySnapshots, openReviewIds, openFileDiffs, workspacePath])
+  }, [agentActivitySnapshots, openReviewIds, openFileDiffs, showAllFileChanges, workspacePath])
 
   const renderActiveFileChanges = () => {
     const changes = parseFileChangesFromProgress(agentProgress)
@@ -1254,49 +1300,45 @@ export default function ChatPanel({
     const totalDeletions = changes.reduce((sum, c) => sum + c.deletions, 0)
     const createdCount = changes.filter((c) => c.created).length
     const modifiedCount = changes.length - createdCount
-    const isOpen = Boolean(openReviewIds['active-run'])
+    const isOpen = openReviewIds['active-run'] ?? true
 
     let summaryLabel = ''
     if (createdCount > 0 && modifiedCount === 0) {
-      summaryLabel = `${createdCount} ${createdCount === 1 ? 'file created' : 'files created'} in this run`
+      summaryLabel = `${createdCount} ${createdCount === 1 ? 'file created' : 'files created'}`
     } else if (createdCount > 0 && modifiedCount > 0) {
-      summaryLabel = `${createdCount} created, ${modifiedCount} modified in this run`
+      summaryLabel = `${createdCount} created, ${modifiedCount} modified`
     } else {
-      summaryLabel = `${changes.length} ${changes.length === 1 ? 'file changed' : 'files changed'} in this run`
+      summaryLabel = `${changes.length} ${changes.length === 1 ? 'file changed' : 'files changed'}`
     }
 
     return (
       <div className="message ai-message agent-activity-message" style={{ marginTop: '4px', marginBottom: '8px' }}>
         <div className="agent-activity-card file-changes-card">
-          <button
-            type="button"
-            className="agent-activity-toggle file-changes-toggle"
-            aria-expanded={isOpen}
-            onClick={() => setOpenReviewIds((current) => ({ ...current, 'active-run': !current['active-run'] }))}
-            style={{ border: 0, background: 'transparent', padding: 0 }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-              <polyline points="22 4 12 14.01 9 11.01" />
-            </svg>
-            <span>
-              {summaryLabel}
-              {createdCount > 0 && modifiedCount === 0 ? (
-                <span className="file-changes-count-add" style={{ marginLeft: '6px' }}>
-                  (+{totalAdditions} {totalAdditions === 1 ? 'line' : 'lines'})
+          <div className="file-changes-summary-row">
+            <div className="file-changes-summary">
+              <span className="file-changes-summary-icon" aria-hidden="true">✓</span>
+              <span className="file-changes-summary-copy">
+                <span className="file-changes-summary-label">{summaryLabel}</span>
+                <span className="file-changes-summary-counts">
+                  {totalAdditions > 0 && <span className="file-changes-count-add">+{totalAdditions}</span>}
+                  {totalDeletions > 0 && <span className="file-changes-count-del">-{totalDeletions}</span>}
                 </span>
-              ) : (
-                <>
-                  {totalAdditions > 0 && <span className="file-changes-count-add" style={{ marginLeft: '6px' }}>+{totalAdditions}</span>}
-                  {totalDeletions > 0 && <span className="file-changes-count-del" style={{ marginLeft: '4px' }}>-{totalDeletions}</span>}
-                </>
-              )}
-            </span>
-            <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
-          </button>
+              </span>
+            </div>
+            <button
+              type="button"
+              className="file-changes-review-btn"
+              title="Review changed code"
+              onClick={() => {
+                openReview(summaryLabel, changes)
+              }}
+            >
+              Review
+            </button>
+          </div>
 
           {isOpen && (
-            <div style={{ marginTop: '8px' }}>
+            <div className="file-changes-list-container" style={{ marginTop: '8px' }}>
               {renderChangesList(changes, 'active')}
             </div>
           )}
@@ -1312,7 +1354,7 @@ export default function ChatPanel({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      style={activeArtifact ? { flex: '0 0 calc(100% - var(--preview-width, 50%))', width: 'calc(100% - var(--preview-width, 50%))', minWidth: '320px', maxWidth: 'none', margin: 0, position: 'relative' } : undefined}
+      style={activeArtifact || reviewPage ? { flex: '0 0 calc(100% - var(--preview-width, 50%))', width: 'calc(100% - var(--preview-width, 50%))', minWidth: '320px', maxWidth: 'none', margin: 0, position: 'relative' } : undefined}
     >
         {isDragging && (
           <div
@@ -1412,6 +1454,51 @@ export default function ChatPanel({
             )}
           </div>
           <div className="chat-header-actions">
+            {(onOpenTerminal || onOpenBrowser) && (
+              <div className="desktop-tools-menu-wrap" ref={desktopToolsMenuRef}>
+                <button
+                  type="button"
+                  className="chat-header-action-btn desktop-tools-trigger"
+                  aria-label="Open desktop tools"
+                  aria-expanded={desktopToolsMenuOpen}
+                  title="Open tools"
+                  onClick={() => setDesktopToolsMenuOpen((open) => !open)}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="4" width="18" height="16" rx="2" />
+                    <path d="M7 9l2 2-2 2M12 13h5" />
+                  </svg>
+                </button>
+                {desktopToolsMenuOpen && (
+                  <div className="desktop-tools-menu" role="menu">
+                    {onOpenTerminal && (
+                      <button type="button" role="menuitem" onClick={() => { onOpenTerminal(); setDesktopToolsMenuOpen(false) }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m4 17 6-5-6-5M12 19h8" /></svg>
+                        <span>Terminal</span><kbd>Ctrl+`</kbd>
+                      </button>
+                    )}
+                    {onOpenBrowser && (
+                      <form onSubmit={(event) => {
+                        event.preventDefault()
+                        const raw = browserAddress.trim()
+                        if (!raw) return
+                        const address = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
+                        onOpenBrowser(address)
+                        setDesktopToolsMenuOpen(false)
+                      }}>
+                        <label htmlFor="mint-browser-address">Browser</label>
+                        <div className="desktop-browser-launch-row">
+                          <input id="mint-browser-address" value={browserAddress} onChange={(event) => setBrowserAddress(event.target.value)} placeholder="Enter a web address" />
+                          <button type="submit" aria-label="Open browser" title="Open browser">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M8 7h9v9" /></svg>
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {activeArtifact && (
               <button
                 type="button"
@@ -2010,13 +2097,13 @@ export default function ChatPanel({
   return (
     <div
       ref={wrapperRef}
-      className={`chat-panel-split-wrapper ${activeArtifact ? 'has-preview' : 'no-preview'}`}
+      className={`chat-panel-split-wrapper ${activeArtifact || reviewPage ? 'has-preview' : 'no-preview'}`}
       style={{
         '--preview-width': `${(splitRatio * 100).toFixed(2)}%`,
       } as React.CSSProperties}
     >
       {sectionContent}
-      {activeArtifact && (
+      {(activeArtifact || reviewPage) && (
         <>
           <div
             className="preview-split-resizer"
@@ -2026,11 +2113,11 @@ export default function ChatPanel({
           >
             <div className="preview-split-resizer-grip" />
           </div>
-          <ArtifactPreviewPanel
-            artifact={activeArtifact}
-            onClose={() => setActiveArtifact(null)}
-            workspacePath={workspacePath}
-          />
+          {reviewPage ? (
+            <CodeReviewPage title={reviewPage.title} changes={reviewPage.changes} onBack={() => setReviewPage(null)} />
+          ) : activeArtifact ? (
+            <ArtifactPreviewPanel artifact={activeArtifact} onClose={() => setActiveArtifact(null)} workspacePath={workspacePath} />
+          ) : null}
         </>
       )}
       {rewindModalState.isOpen && (

@@ -168,20 +168,29 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
   return (
     <section className="workspace-panel">
       <header className="workspace-panel-header">
-        <div>
-          <span className="workspace-kicker">Agent workspace</span>
-          <h2>Workspace</h2>
+        <div className="workspace-title-group">
+          <span className="workspace-title-icon material-icon folder" aria-hidden="true">
+            <img src={folderOpenIcon} alt="" draggable={false} />
+          </span>
+          <div className="workspace-title-copy">
+            <h2 title={workspacePath || 'Workspace'}>{tree?.name || workspacePath.split(/[\\/]/).filter(Boolean).pop() || 'Workspace'}</h2>
+          </div>
+          <span className="workspace-agent-pill" data-state={sending ? 'thinking' : agentMode ? 'agent' : 'idle'}>
+            {sending ? 'Running' : agentMode ? 'Agent mode' : 'Manual'}
+          </span>
         </div>
-        <span className="workspace-agent-pill" data-state={sending ? 'thinking' : agentMode ? 'agent' : 'idle'}>
-          {sending ? 'Running' : agentMode ? 'Agent mode' : 'Manual'}
-        </span>
+        <div className="workspace-panel-actions" aria-label="Workspace actions">
+          <button type="button" onClick={handleCreateFile} disabled={!workspacePath.trim()} aria-label="New file" title="New file">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 11v6M9 14h6"/></svg>
+          </button>
+          <button type="button" onClick={handleCreateFolder} disabled={!workspacePath.trim()} aria-label="New folder" title="New folder">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v6M9 13h6"/></svg>
+          </button>
+          <button type="button" onClick={refresh} disabled={!workspacePath.trim()} aria-label="Refresh workspace" title="Refresh workspace">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.55-2.6L20 12M4 12l2.85 5.6A7 7 0 0 0 18.4 15"/></svg>
+          </button>
+        </div>
       </header>
-
-      <div className="workspace-panel-actions">
-        <button type="button" onClick={handleCreateFile} disabled={!workspacePath.trim()}>New file</button>
-        <button type="button" onClick={handleCreateFolder} disabled={!workspacePath.trim()}>New folder</button>
-        <button type="button" onClick={refresh} disabled={!workspacePath.trim()}>Refresh</button>
-      </div>
 
       <div className="workspace-tree-shell">
         {error ? (

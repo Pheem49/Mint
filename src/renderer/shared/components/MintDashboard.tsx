@@ -21,12 +21,14 @@ const {
 
 import ChatPanel, { type ConversationActions, type ConversationViewModel } from './ChatPanel'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
+import DesktopTitlebar from './DesktopTitlebar'
 import ImageStudioPanel from './ImageStudioPanel'
 import VeoStudioPanel from './VeoStudioPanel'
 import ModelPanel from '@/components/ModelPanel'
 import type { ModelInteraction } from '@/components/ModelPanel'
 import PicturesLibrary from '@/components/PicturesLibrary'
 import WorkspacePanel from '@/components/WorkspacePanel'
+import ToolSurfacePage, { type ToolSurface } from './ToolSurfacePage'
 import { CommandPalette } from './CommandPalette'
 import {
   errorMessage,
@@ -440,10 +442,37 @@ export default function MintDashboard() {
   const [sessionAutoApproved, setSessionAutoApproved] = useState(false)
   const sessionAutoApprovedRef = useRef(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
+  const [toolSurfaces, setToolSurfaces] = useState<ToolSurface[]>([])
+  const [activeSurfaceId, setActiveSurfaceId] = useState<string | null>(null)
+  const [terminalPosition, setTerminalPosition] = useState<'bottom' | 'right'>(
+    () => window.localStorage.getItem('mint:terminal-position') === 'right' ? 'right' : 'bottom',
+  )
+  const [terminalBottomHeight, setTerminalBottomHeight] = useState(() => {
+    const saved = Number(window.localStorage.getItem('mint:terminal-bottom-height'))
+    return saved >= 180 && saved <= 900 ? saved : 300
+  })
+  const [terminalRightWidth, setTerminalRightWidth] = useState(() => {
+    const saved = Number(window.localStorage.getItem('mint:terminal-right-width'))
+    return saved >= 280 && saved <= 900 ? saved : 440
+  })
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(window.localStorage.getItem('mint:sidebar-width'))
     return saved >= SIDEBAR_MIN_WIDTH && saved <= SIDEBAR_MAX_WIDTH ? saved : SIDEBAR_DEFAULT_WIDTH
   })
+
+  useEffect(() => {
+    if (!isDesktopApp) return
+    const handleTerminalShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.isContentEditable || ['INPUT', 'TEXTAREA'].includes(target?.tagName || '')) return
+      if ((event.ctrlKey || event.metaKey) && event.code === 'Backquote') {
+        event.preventDefault()
+        toggleTerminalSurface()
+      }
+    }
+    window.addEventListener('keydown', handleTerminalShortcut)
+    return () => window.removeEventListener('keydown', handleTerminalShortcut)
+  }, [isDesktopApp])
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
   const [planMode, setPlanMode] = useState(() => window.localStorage.getItem('mint:plan-mode') === 'true')
@@ -799,6 +828,98 @@ export default function MintDashboard() {
   const showToast = (nextMessage: string) => {
     setToastMessage(nextMessage)
     setTimeout(() => setToastMessage((current) => current === nextMessage ? '' : current), 3000)
+  }
+
+  const openMintBrowser = async (url: string) => {
+    if (!isDesktopApp) {
+      window.open(url, '_blank', 'noopener,noreferrer')
+      return
+    }
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('open_mint_browser', { url })
+    } catch (error) {
+      showToast(`Could not open browser: ${String(error)}`)
+    }
+  }
+
+  const toggleTerminalPosition = () => {
+    setTerminalPosition((position) => {
+      const next = position === 'bottom' ? 'right' : 'bottom'
+      window.localStorage.setItem('mint:terminal-position', next)
+      return next
+    })
+  }
+
+  const openTerminalSurface = () => {
+    const id = `terminal:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`
+    setToolSurfaces((current) => {
+      const terminalCount = current.filter((surface) => surface.kind === 'terminal').length
+      const title = terminalCount === 0 ? 'Terminal' : `Terminal ${terminalCount + 1}`
+      const next = { id, kind: 'terminal' as const, title }
+      setActiveSurfaceId(id)
+      return [...current, next]
+    })
+  }
+
+  const openBrowserSurface = (url = 'https://www.google.com') => {
+    const id = `browser:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`
+    setToolSurfaces((current) => {
+      const browserCount = current.filter((surface) => surface.kind === 'browser').length
+      const title = browserCount === 0 ? 'Browser' : `Browser ${browserCount + 1}`
+      const next = { id, kind: 'browser' as const, title, url }
+      setActiveSurfaceId(id)
+      return [...current, next]
+    })
+  }
+
+  const navigateBrowserSurface = (id: string, url: string) => {
+    setToolSurfaces((current) => current.map((surface) => surface.id === id && surface.kind === 'browser' ? { ...surface, url } : surface))
+  }
+
+  const toggleTerminalSurface = () => {
+    setToolSurfaces((current) => {
+      const terminal = current.find((surface) => surface.kind === 'terminal')
+      if (!terminal) {
+        const id = `terminal:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`
+        setActiveSurfaceId(id)
+        return [...current, { id, kind: 'terminal' as const, title: 'Terminal' }]
+      }
+      setActiveSurfaceId((active) => active === terminal.id ? null : terminal.id)
+      return current
+    })
+  }
+
+  const openArtifactSurface = (artifact: import('./ArtifactPreviewPanel').ArtifactFile) => {
+    const fileName = artifact.path.replace(/\\/g, '/').split('/').pop() || artifact.path
+    const id = `preview:${artifact.path}`
+    setToolSurfaces((current) => {
+      const next = current.filter((surface) => surface.id !== id)
+      return [...next, { id, kind: 'preview', title: fileName, artifact }]
+    })
+    setActiveSurfaceId(id)
+  }
+
+  const openReviewSurface = (review: Extract<ToolSurface, { kind: 'review' }>) => {
+    setToolSurfaces((current) => [...current.filter((surface) => surface.id !== review.id), review])
+    setActiveSurfaceId(review.id)
+  }
+
+  const closeToolSurface = (id: string) => {
+    setToolSurfaces((current) => {
+      const index = current.findIndex((surface) => surface.id === id)
+      const next = current.filter((surface) => surface.id !== id)
+      setActiveSurfaceId((active) => {
+        if (active !== id) return active
+        return next[Math.max(0, index - 1)]?.id ?? null
+      })
+      return next
+    })
+  }
+
+  const closeAllToolSurfaces = () => {
+    setToolSurfaces([])
+    setActiveSurfaceId(null)
   }
 
   const toggleSidebar = () => {
@@ -1755,13 +1876,30 @@ export default function MintDashboard() {
     onSetGeminiLiveVoice: changeGeminiLiveVoice,
     onToggleMobileSidebar: () => setMobileSidebarOpen(!mobileSidebarOpen),
     onBackToCode: () => changeView('code'),
+    onOpenTerminal: isDesktopApp ? openTerminalSurface : undefined,
+    onOpenArtifact: openArtifactSurface,
+    onOpenReview: openReviewSurface,
+    onOpenBrowser: openBrowserSurface,
   }
 
   return (
     <div className={`app-container ${startupReady ? '' : 'is-loading'}`}>
+      {isDesktopApp && (
+        <DesktopTitlebar
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={toggleSidebar}
+          onNewChat={() => clearHistory('New chat')}
+          onOpenWorkspace={() => selectWorkspace()}
+        onToggleTerminal={toggleTerminalSurface}
+          onShowAbout={() => showToast('Mint Agent — AI workspace')}
+        />
+      )}
       <div
-        className={`app-body ${(sidebarCollapsed && window.innerWidth > 760) ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''}`}
-        style={{ '--sidebar-expanded-width': `${sidebarWidth}px` } as CSSProperties}
+        className={`app-body ${(sidebarCollapsed && window.innerWidth > 760) ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''} ${activeSurfaceId ? 'tool-surface-active' : ''} ${toolSurfaces.find((surface) => surface.id === activeSurfaceId)?.kind === 'terminal' && terminalPosition === 'bottom' ? 'terminal-surface-bottom' : ''}`}
+        style={{
+          '--sidebar-expanded-width': `${sidebarWidth}px`,
+          '--terminal-dock-size': `${terminalPosition === 'bottom' ? terminalBottomHeight : terminalRightWidth}px`,
+        } as CSSProperties}
       >
         {mobileSidebarOpen && (
           <div
@@ -1892,8 +2030,34 @@ export default function MintDashboard() {
             onInteract={handleModelInteraction}
             onModelLoadComplete={() => setModelReady(true)}
           />
-          <ChatPanel conversation={chatConversation} actions={chatActions} />
+        <ChatPanel conversation={chatConversation} actions={chatActions} />
         </main>
+        {isDesktopApp && activeSurfaceId && (
+          <ToolSurfacePage
+            surfaces={toolSurfaces}
+            activeSurfaceId={activeSurfaceId}
+            workspacePath={workspacePath}
+            terminalPosition={terminalPosition}
+            terminalSize={terminalPosition === 'bottom' ? terminalBottomHeight : terminalRightWidth}
+            onSelect={setActiveSurfaceId}
+            onClose={closeToolSurface}
+            onCloseAll={closeAllToolSurfaces}
+            onToggleTerminalPosition={toggleTerminalPosition}
+            onOpenTerminal={openTerminalSurface}
+            onOpenBrowser={() => openBrowserSurface()}
+            onNavigateBrowser={navigateBrowserSurface}
+            onOpenExternalBrowser={openMintBrowser}
+            onResizeTerminal={(size) => {
+              if (terminalPosition === 'bottom') {
+                setTerminalBottomHeight(size)
+                window.localStorage.setItem('mint:terminal-bottom-height', String(size))
+              } else {
+                setTerminalRightWidth(size)
+                window.localStorage.setItem('mint:terminal-right-width', String(size))
+              }
+            }}
+          />
+        )}
         {view === 'skills' && (
           <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
             <SkillsView

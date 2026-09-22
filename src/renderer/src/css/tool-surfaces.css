@@ -1,0 +1,423 @@
+.tool-surface-page {
+  position: absolute;
+  z-index: 260;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  width: var(--tool-surface-width, clamp(360px, 42vw, 620px));
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-gradient);
+  border-left: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.app-body.sidebar-collapsed .tool-surface-page {
+  left: auto;
+}
+
+.app-body.tool-surface-active .assistant-workspace {
+  margin-right: var(--tool-surface-width, clamp(360px, 42vw, 620px));
+}
+
+/* The terminal orientation button controls the actual surface placement. */
+.app-body.terminal-surface-bottom .tool-surface-page {
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: var(--sidebar-expanded-width, 264px);
+  width: auto;
+  height: var(--terminal-dock-size, min(38vh, 420px));
+}
+
+.app-body.terminal-surface-bottom .assistant-workspace {
+  margin-right: 0;
+  margin-bottom: var(--terminal-dock-size, min(38vh, 420px));
+}
+
+.app-body.sidebar-collapsed.terminal-surface-bottom .tool-surface-page {
+  left: var(--sidebar-collapsed-width, 56px);
+}
+
+.tool-surface-tabs {
+  display: flex;
+  align-items: stretch;
+  min-height: 48px;
+  padding: 7px 12px 0;
+  gap: 8px;
+  background: color-mix(in srgb, var(--chrome-bg, #1b1c20) 92%, transparent);
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+}
+
+.tool-surface-add-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.tool-surface-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs, 6px);
+  color: var(--text-muted, #9ca3af);
+  background: transparent;
+  font-size: 1.35rem;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.tool-surface-add:hover,
+.tool-surface-add.is-open {
+  color: var(--text-main, #f1f5f9);
+  background: var(--surface-bg, rgba(255, 255, 255, 0.08));
+  border-color: var(--border-subtle, rgba(255, 255, 255, 0.12));
+}
+
+.tool-surface-add-menu {
+  position: absolute;
+  z-index: 400;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 280px;
+  padding: 6px;
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.14));
+  border-radius: var(--radius-lg, 14px);
+  background: var(--bg-surface, #20232a);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.3));
+}
+
+.tool-surface-add-menu > button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 38px;
+  gap: 10px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-xs, 6px);
+  color: var(--text-main, #e5e7eb);
+  background: transparent;
+  text-align: left;
+  font-size: 0.8rem;
+}
+
+.tool-surface-add-menu > button:hover,
+.tool-surface-add-menu > button:focus-visible {
+  outline: none;
+  background: var(--bg-surface-hover, rgba(255, 255, 255, 0.08));
+}
+
+.tool-surface-menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: var(--text-muted, #9ca3af);
+  font: 600 0.85rem ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.tool-surface-menu-icon.is-terminal { color: #7dd3a7; }
+.tool-surface-menu-icon.is-browser { color: #8ab4ff; }
+
+.tool-surface-add-menu kbd {
+  margin-left: auto;
+  color: var(--text-muted, #9ca3af);
+  font: 0.68rem ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+}
+
+.tool-surface-tab-list {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tool-surface-tab-list::-webkit-scrollbar { display: none; }
+
+.tool-surface-tab {
+  display: flex;
+  align-items: center;
+  min-width: 132px;
+  max-width: 260px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-sm, 8px) var(--radius-sm, 8px) 0 0;
+  color: var(--text-muted, #9ca3af);
+  background: transparent;
+}
+
+.tool-surface-tab.is-active {
+  color: var(--text-main, #f1f5f9);
+  background: var(--panel-bg, #1e1e20);
+  border-color: var(--border-subtle, rgba(255, 255, 255, 0.12));
+}
+
+.tool-surface-tab > button:first-child {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+  gap: 8px;
+  height: 100%;
+  padding: 0 8px 0 11px;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.tool-surface-tab-icon {
+  flex: 0 0 auto;
+  color: var(--accent, #10b981);
+  font: 600 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.tool-surface-tab-icon.is-review { color: #8ab4ff; }
+.tool-surface-tab-icon.is-terminal { color: #7dd3a7; }
+
+.tool-surface-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+}
+
+.tool-surface-tab-close,
+.tool-surface-close-all {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 0;
+  color: var(--text-muted, #9ca3af);
+  background: transparent;
+  cursor: pointer;
+}
+
+.tool-surface-tab-close {
+  width: 28px;
+  height: 28px;
+  margin-right: 3px;
+  border-radius: var(--radius-xs, 6px);
+  font-size: 1rem;
+}
+
+.tool-surface-tab-close:hover,
+.tool-surface-close-all:hover {
+  color: var(--hover-delete, #fca5a5);
+  background: var(--hover-delete-bg, rgba(248, 113, 113, 0.12));
+}
+
+.tool-surface-close-all {
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  border-radius: var(--radius-xs, 6px);
+}
+
+.tool-surface-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--panel-bg, #1e1e20);
+}
+
+.tool-surface-content > .artifact-preview-panel,
+.tool-surface-content > .code-review-page,
+.tool-surface-content > .browser-surface {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  border: 0 !important;
+}
+
+.browser-surface {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: #111318;
+  color: var(--text-main, #e5e7eb);
+}
+
+.browser-surface-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 46px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  background: var(--surface-bg, #1b1c20);
+}
+
+.browser-surface-toolbar > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: var(--radius-xs, 6px);
+  color: var(--text-muted, #9ca3af);
+  background: transparent;
+  font-size: 1.2rem;
+}
+
+.browser-surface-toolbar > button:hover:not(:disabled) {
+  color: var(--text-main, #f1f5f9);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.browser-surface-toolbar > button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.browser-surface-address {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+  height: 30px;
+  gap: 7px;
+  padding-left: 9px;
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.14));
+  border-radius: var(--radius-sm, 8px);
+  background: var(--bg-input, rgba(0, 0, 0, 0.2));
+  color: var(--text-muted, #9ca3af);
+}
+
+.browser-surface-address input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  color: var(--text-main, #e5e7eb);
+  background: transparent;
+  font: 0.76rem ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.browser-surface-address > button {
+  height: 100%;
+  padding: 0 10px;
+  border: 0;
+  border-left: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  color: var(--accent, #10b981);
+  background: transparent;
+  font-size: 0.74rem;
+}
+
+.browser-surface-frame-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+}
+
+.browser-surface-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.browser-surface-loading {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: #64748b;
+  background: #f8fafc;
+  font-size: 0.82rem;
+}
+
+.browser-surface-hint {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  max-width: min(360px, calc(100% - 24px));
+  padding: 7px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: var(--radius-sm, 8px);
+  color: #475569;
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 0.7rem;
+  pointer-events: none;
+}
+
+.browser-surface-hint button {
+  margin-left: 8px;
+  padding: 4px 7px;
+  border: 1px solid rgba(71, 85, 105, 0.3);
+  border-radius: 5px;
+  color: #334155;
+  background: rgba(248, 250, 252, 0.9);
+  font: inherit;
+  pointer-events: auto;
+}
+
+.browser-surface-hint button:hover {
+  color: #0f172a;
+  background: #fff;
+}
+
+.terminal-dock.is-page {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+}
+
+.terminal-dock.is-page .terminal-dock-header {
+  min-height: 46px;
+  border-radius: 0;
+}
+
+.terminal-dock.is-page .terminal-dock-surface {
+  border-radius: 0;
+}
+
+@media (max-width: 760px) {
+  .tool-surface-page,
+  .app-body.sidebar-collapsed .tool-surface-page {
+    left: 0;
+    width: 100%;
+  }
+
+  .app-body.tool-surface-active .assistant-workspace {
+    margin-right: 0;
+    margin-bottom: 0;
+  }
+
+  .app-body.terminal-surface-bottom .tool-surface-page {
+    left: 0;
+    width: 100%;
+    height: var(--terminal-dock-size, 42vh);
+  }
+
+  .app-body.terminal-surface-bottom .assistant-workspace {
+    margin-bottom: var(--terminal-dock-size, 42vh);
+  }
+
+  .tool-surface-tabs { padding-inline: 8px; }
+  .tool-surface-tab { min-width: 116px; }
+}

@@ -22,7 +22,9 @@ use desktop::{
 };
 use events::start_system_events;
 use headless::{run_next_task, start_headless_queue};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::collections::HashMap;
+use std::io::{Read, Write};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::oneshot;
@@ -58,6 +60,248 @@ pub struct GeminiLiveState {
 #[derive(Default)]
 pub struct MicRecordingState {
     pub active: Mutex<Option<MicRecordingHandle>>,
+}
+
+#[derive(Default)]
+struct TerminalSessions {
+    sessions: std::sync::Arc<Mutex<HashMap<String, std::sync::Arc<TerminalSession>>>>,
+}
+
+struct TerminalSession {
+    writer: Mutex<Box<dyn Write + Send>>,
+    pty: Mutex<Box<dyn MasterPty + Send>>,
+    child: Mutex<Box<dyn Child + Send + Sync>>,
+}
+
+impl Drop for TerminalSessions {
+    fn drop(&mut self) {
+        if let Ok(sessions) = self.sessions.lock() {
+            for session in sessions.values() {
+                if let Ok(mut child) = session.child.lock() {
+                    let _ = child.kill();
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalOutput {
+    session_id: String,
+    data: String,
+}
+
+fn terminal_shell() -> String {
+    #[cfg(windows)]
+    {
+        std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".into())
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
+    }
+}
+
+#[tauri::command]
+fn start_interactive_terminal(
+    app: AppHandle,
+    state: tauri::State<'_, TerminalSessions>,
+    cwd: Option<String>,
+) -> Result<String, String> {
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 28,
+            cols: 100,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| format!("Could not create terminal: {error}"))?;
+    let mut command = CommandBuilder::new(terminal_shell());
+    command.env("TERM", "xterm-256color");
+    if let Some(path) = cwd.filter(|path| std::path::Path::new(path).is_dir()) {
+        command.cwd(path);
+    }
+    let child = pair
+        .slave
+        .spawn_command(command)
+        .map_err(|error| format!("Could not start shell: {error}"))?;
+    drop(pair.slave);
+
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| format!("Could not read terminal output: {error}"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|error| format!("Could not write to terminal: {error}"))?;
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let session = std::sync::Arc::new(TerminalSession {
+        writer: Mutex::new(writer),
+        pty: Mutex::new(pair.master),
+        child: Mutex::new(child),
+    });
+    state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state is unavailable".to_string())?
+        .insert(session_id.clone(), session.clone());
+
+    let output_app = app.clone();
+    let output_id = session_id.clone();
+    let sessions = state.sessions.clone();
+    std::thread::spawn(move || {
+        let mut reader = reader;
+        let mut buffer = [0_u8; 8192];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(length) => {
+                    let _ = output_app.emit(
+                        "terminal-output",
+                        TerminalOutput {
+                            session_id: output_id.clone(),
+                            data: BASE64.encode(&buffer[..length]),
+                        },
+                    );
+                }
+            }
+        }
+        let exit_code = session
+            .child
+            .lock()
+            .ok()
+            .and_then(|mut child| child.wait().ok())
+            .map(|status| status.exit_code());
+        if let Ok(mut sessions) = sessions.lock() {
+            sessions.remove(&output_id);
+        }
+        let _ = output_app.emit(
+            "terminal-exit",
+            serde_json::json!({
+                "sessionId": output_id,
+                "exitCode": exit_code,
+            }),
+        );
+    });
+
+    Ok(session_id)
+}
+
+#[tauri::command]
+fn write_interactive_terminal(
+    state: tauri::State<'_, TerminalSessions>,
+    session_id: String,
+    data: String,
+) -> Result<(), String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state is unavailable".to_string())?;
+    let session = sessions
+        .get(&session_id)
+        .ok_or("Terminal session was not found")?;
+    session
+        .writer
+        .lock()
+        .map_err(|_| "Terminal input is unavailable".to_string())?
+        .write_all(data.as_bytes())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn resize_interactive_terminal(
+    state: tauri::State<'_, TerminalSessions>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state is unavailable".to_string())?;
+    let session = sessions
+        .get(&session_id)
+        .ok_or("Terminal session was not found")?;
+    session
+        .pty
+        .lock()
+        .map_err(|_| "Terminal is unavailable".to_string())?
+        .resize(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn stop_interactive_terminal(
+    state: tauri::State<'_, TerminalSessions>,
+    session_id: String,
+) -> Result<(), String> {
+    let session = state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state is unavailable".to_string())?
+        .remove(&session_id)
+        .ok_or("Terminal session was not found")?;
+    session
+        .child
+        .lock()
+        .map_err(|_| "Terminal process is unavailable".to_string())?
+        .kill()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn open_mint_browser(app: AppHandle, url: String) -> Result<(), String> {
+    let url = tauri::Url::parse(&url).map_err(|error| format!("Invalid web address: {error}"))?;
+    if !matches!(url.scheme(), "https" | "http") {
+        return Err("Mint Browser only opens http and https addresses".into());
+    }
+    if let Some(window) = app.get_webview_window("mint-browser") {
+        window.navigate(url).map_err(|error| error.to_string())?;
+        window.show().map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    let browser_app = app.clone();
+    let browser = tauri::webview::WebviewWindowBuilder::new(
+        &app,
+        "mint-browser",
+        tauri::WebviewUrl::External(url),
+    )
+    .title("Mint Browser")
+    .inner_size(1180.0, 800.0)
+    .on_navigation(|url| matches!(url.scheme(), "https" | "http"))
+    .on_new_window(move |url, features| {
+        if !matches!(url.scheme(), "https" | "http") {
+            return tauri::webview::NewWindowResponse::Deny;
+        }
+        static NEXT_BROWSER_WINDOW: AtomicU64 = AtomicU64::new(1);
+        let label = format!(
+            "mint-browser-{}",
+            NEXT_BROWSER_WINDOW.fetch_add(1, Ordering::Relaxed)
+        );
+        let builder = tauri::webview::WebviewWindowBuilder::new(
+            &browser_app,
+            label,
+            tauri::WebviewUrl::External(url.clone()),
+        )
+        .window_features(features)
+        .title("Mint Browser")
+        .on_navigation(|url| matches!(url.scheme(), "https" | "http"));
+        match builder.build() {
+            Ok(window) => tauri::webview::NewWindowResponse::Create { window },
+            Err(_) => tauri::webview::NewWindowResponse::Deny,
+        }
+    })
+    .build()
+    .map_err(|error| format!("Could not open Mint Browser: {error}"))?;
+    browser.show().map_err(|error| error.to_string())
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -1880,6 +2124,7 @@ pub fn run() {
         })
         .manage(GeminiLiveState::default())
         .manage(MicRecordingState::default())
+        .manage(TerminalSessions::default())
         .manage(mint_core::avatar_bridge::AvatarBridge::new(
             load_config()
                 .map(|c| mint_core::avatar_bridge::AvatarBridgeConfig::from_mint_config(&c))
@@ -1910,6 +2155,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            start_interactive_terminal,
+            write_interactive_terminal,
+            resize_interactive_terminal,
+            stop_interactive_terminal,
+            open_mint_browser,
             get_runtime_status,
             detect_system_tools,
             reauth_mcp_server,

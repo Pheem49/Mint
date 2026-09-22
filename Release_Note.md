@@ -1,5 +1,26 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Tool Surface Tabs
+
+- Moved preview, code review, and desktop terminal into dedicated tool pages with a shared tab strip.
+- Added per-tool close buttons and a close-all action so open tool pages can be removed without clearing chat history.
+- Preserved terminal resizing and bottom/right layout controls inside the dedicated terminal page.
+- Added a plus-menu beside the tool tabs for opening the existing Terminal and Browser actions.
+- Terminal entries from the plus-menu now create independent terminal tabs and sessions, with numbered titles when more than one is open.
+- Added embedded Browser surfaces with independent tabs, URL navigation, reload, and per-tab back/forward history.
+- Deferred xterm and embedded-page initialization until after the surface header paints, reducing perceived lag when opening Terminal or Browser.
+- Added an `Open in Mint Browser` fallback button for sites that refuse embedded previews.
+- Fixed the Terminal orientation control so it actually switches the terminal surface between the right-side and bottom layouts.
+- Fixed desktop minimize and maximize/restore controls by calling the Tauri window API directly and surfacing failures in the console.
+- Added transparent edge and corner hit areas so the frameless desktop window can be resized by dragging its borders or corners.
+
+## Desktop Terminal and Browser
+
+- Added an interactive desktop terminal backed by a persistent pseudo-terminal session, with workspace-aware startup, live output, keyboard input, and terminal resizing.
+- Added bottom/right terminal docking with a header control; Mint remembers the selected dock position across launches.
+- Added drag and keyboard resizing for the terminal dock and persisted bottom height/right width separately. Switching workspaces restarts the terminal in the newly selected folder.
+- Added a desktop tools menu for opening the terminal or launching a URL in a native Mint Browser window. Browser navigation is limited to HTTP and HTTPS pages and does not receive Mint's Tauri IPC access.
+
 ## Agent Reply Completion and CLI Rendering
 
 - Wait for the authoritative completed Agent response before displaying assistant text across CLI, Desktop, and Web, while tool activity and working status remain live.
