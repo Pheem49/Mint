@@ -25,8 +25,8 @@ use headless::{run_next_task, start_headless_queue};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 use tokio::sync::oneshot;
 
 use integrations::{channel_inventory, list_plugins};
@@ -256,27 +256,81 @@ fn stop_interactive_terminal(
         .map_err(|error| error.to_string())
 }
 
+const MINT_BROWSER_SHELL_HEIGHT: u32 = 92;
+const MINT_BROWSER_SUGGESTIONS_HEIGHT: u32 = 164;
+static MINT_BROWSER_SUGGESTION_QUERY: LazyLock<Mutex<String>> =
+    LazyLock::new(|| Mutex::new(String::new()));
+
+fn position_mint_browser_suggestions(app: &AppHandle) -> Result<(), String> {
+    let browser = app
+        .get_window("mint-browser")
+        .ok_or("Mint Browser is not open")?;
+    let popup = app
+        .get_webview_window("mint-browser-suggestions")
+        .ok_or("Mint Browser suggestions are not open")?;
+    let position = browser
+        .inner_position()
+        .map_err(|error| error.to_string())?;
+    let size = browser.inner_size().map_err(|error| error.to_string())?;
+    let popup_width = size.width.saturating_sub(164).max(320);
+    popup
+        .set_position(tauri::PhysicalPosition::new(
+            position.x + 114,
+            position.y + 86,
+        ))
+        .map_err(|error| error.to_string())?;
+    popup
+        .set_size(tauri::PhysicalSize::new(
+            popup_width,
+            MINT_BROWSER_SUGGESTIONS_HEIGHT,
+        ))
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn open_mint_browser(app: AppHandle, url: String) -> Result<(), String> {
     let url = tauri::Url::parse(&url).map_err(|error| format!("Invalid web address: {error}"))?;
     if !matches!(url.scheme(), "https" | "http") {
         return Err("Mint Browser only opens http and https addresses".into());
     }
-    if let Some(window) = app.get_webview_window("mint-browser") {
-        window.navigate(url).map_err(|error| error.to_string())?;
+    if let Some(window) = app.get_window("mint-browser") {
+        if let Some(page) = app.get_webview("mint-browser-page") {
+            page.navigate(url.clone())
+                .map_err(|error| error.to_string())?;
+        }
+        let _ = app.emit("mint-browser-address", url.as_str());
         window.show().map_err(|error| error.to_string())?;
         window.set_focus().map_err(|error| error.to_string())?;
         return Ok(());
     }
+    let window = tauri::WindowBuilder::new(&app, "mint-browser")
+        .title("Mint Browser")
+        .inner_size(1180.0, 800.0)
+        .build()
+        .map_err(|error| format!("Could not open Mint Browser: {error}"))?;
+    let shell = tauri::webview::WebviewBuilder::new(
+        "mint-browser-shell",
+        tauri::WebviewUrl::App("index.html?mint-browser-shell=1".into()),
+    );
+    let window_size = window
+        .inner_size()
+        .map_err(|error| format!("Could not measure Mint Browser: {error}"))?;
+    let shell_size = tauri::PhysicalSize::new(window_size.width, MINT_BROWSER_SHELL_HEIGHT);
+
     let browser_app = app.clone();
-    let browser = tauri::webview::WebviewWindowBuilder::new(
-        &app,
-        "mint-browser",
-        tauri::WebviewUrl::External(url),
+    let address_app = app.clone();
+    let page = tauri::webview::WebviewBuilder::new(
+        "mint-browser-page",
+        tauri::WebviewUrl::External(url.clone()),
     )
-    .title("Mint Browser")
-    .inner_size(1180.0, 800.0)
-    .on_navigation(|url| matches!(url.scheme(), "https" | "http"))
+    .on_navigation(move |url| {
+        if matches!(url.scheme(), "https" | "http") {
+            let _ = address_app.emit("mint-browser-address", url.as_str());
+            true
+        } else {
+            false
+        }
+    })
     .on_new_window(move |url, features| {
         if !matches!(url.scheme(), "https" | "http") {
             return tauri::webview::NewWindowResponse::Deny;
@@ -298,10 +352,141 @@ fn open_mint_browser(app: AppHandle, url: String) -> Result<(), String> {
             Ok(window) => tauri::webview::NewWindowResponse::Create { window },
             Err(_) => tauri::webview::NewWindowResponse::Deny,
         }
-    })
-    .build()
-    .map_err(|error| format!("Could not open Mint Browser: {error}"))?;
-    browser.show().map_err(|error| error.to_string())
+    });
+    let shell = window
+        .add_child(shell, tauri::PhysicalPosition::new(0, 0), shell_size)
+        .map_err(|error| format!("Could not create Mint Browser toolbar: {error}"))?;
+    let page = window
+        .add_child(
+            page,
+            tauri::PhysicalPosition::new(0, MINT_BROWSER_SHELL_HEIGHT),
+            tauri::PhysicalSize::new(
+                window_size.width,
+                window_size.height.saturating_sub(MINT_BROWSER_SHELL_HEIGHT),
+            ),
+        )
+        .map_err(|error| format!("Could not create Mint Browser page: {error}"))?;
+    let shell_for_resize = shell.clone();
+    let page_for_resize = page.clone();
+    let popup_app = app.clone();
+    window.on_window_event(move |event| match event {
+        tauri::WindowEvent::Resized(size) => {
+            let _ = shell_for_resize.set_position(tauri::PhysicalPosition::new(0, 0));
+            let _ = shell_for_resize.set_size(tauri::PhysicalSize::new(
+                size.width,
+                MINT_BROWSER_SHELL_HEIGHT,
+            ));
+            let _ = page_for_resize
+                .set_position(tauri::PhysicalPosition::new(0, MINT_BROWSER_SHELL_HEIGHT));
+            let _ = page_for_resize.set_size(tauri::PhysicalSize::new(
+                size.width,
+                size.height.saturating_sub(MINT_BROWSER_SHELL_HEIGHT),
+            ));
+            let _ = position_mint_browser_suggestions(&popup_app);
+        }
+        tauri::WindowEvent::Moved(_) => {
+            let _ = position_mint_browser_suggestions(&popup_app);
+        }
+        tauri::WindowEvent::Destroyed => {
+            if let Some(popup) = popup_app.get_webview_window("mint-browser-suggestions") {
+                let _ = popup.close();
+            }
+        }
+        _ => {}
+    });
+    let _ = app.emit("mint-browser-address", url.as_str());
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn show_mint_browser_suggestions(app: AppHandle, query: String) -> Result<(), String> {
+    *MINT_BROWSER_SUGGESTION_QUERY
+        .lock()
+        .map_err(|_| "Suggestion query is unavailable".to_string())? = query.clone();
+
+    let popup = if let Some(popup) = app.get_webview_window("mint-browser-suggestions") {
+        popup
+    } else {
+        tauri::webview::WebviewWindowBuilder::new(
+            &app,
+            "mint-browser-suggestions",
+            tauri::WebviewUrl::App("index.html?mint-browser-suggestions=1".into()),
+        )
+        .title("Mint Browser Suggestions")
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .focused(false)
+        .visible(false)
+        .build()
+        .map_err(|error| format!("Could not open browser suggestions: {error}"))?
+    };
+
+    position_mint_browser_suggestions(&app)?;
+    let _ = app.emit_to(
+        "mint-browser-suggestions",
+        "mint-browser-suggestions-update",
+        query,
+    );
+    popup.show().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn hide_mint_browser_suggestions(app: AppHandle) -> Result<(), String> {
+    if let Some(popup) = app.get_webview_window("mint-browser-suggestions") {
+        popup.hide().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_mint_browser_suggestion_query() -> Result<String, String> {
+    MINT_BROWSER_SUGGESTION_QUERY
+        .lock()
+        .map(|query| query.clone())
+        .map_err(|_| "Suggestion query is unavailable".to_string())
+}
+
+#[tauri::command]
+fn navigate_mint_browser(app: AppHandle, url: String) -> Result<(), String> {
+    let url = tauri::Url::parse(&url).map_err(|error| format!("Invalid web address: {error}"))?;
+    if !matches!(url.scheme(), "https" | "http") {
+        return Err("Mint Browser only opens http and https addresses".into());
+    }
+    let page = app
+        .get_webview("mint-browser-page")
+        .ok_or("Mint Browser is not open")?;
+    page.navigate(url.clone())
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("mint-browser-address", url.as_str());
+    Ok(())
+}
+
+#[tauri::command]
+fn browser_go_back(app: AppHandle) -> Result<(), String> {
+    app.get_webview("mint-browser-page")
+        .ok_or("Mint Browser is not open")?
+        .eval("history.back()")
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn browser_go_forward(app: AppHandle) -> Result<(), String> {
+    app.get_webview("mint-browser-page")
+        .ok_or("Mint Browser is not open")?
+        .eval("history.forward()")
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn browser_reload(app: AppHandle) -> Result<(), String> {
+    app.get_webview("mint-browser-page")
+        .ok_or("Mint Browser is not open")?
+        .reload()
+        .map_err(|error| error.to_string())
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -2160,6 +2345,13 @@ pub fn run() {
             resize_interactive_terminal,
             stop_interactive_terminal,
             open_mint_browser,
+            show_mint_browser_suggestions,
+            hide_mint_browser_suggestions,
+            get_mint_browser_suggestion_query,
+            navigate_mint_browser,
+            browser_go_back,
+            browser_go_forward,
+            browser_reload,
             get_runtime_status,
             detect_system_tools,
             reauth_mcp_server,

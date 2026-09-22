@@ -4,6 +4,8 @@ import ChunkErrorBoundary from '../shared/components/ChunkErrorBoundary'
 import ModalErrorBoundary from '../shared/components/ModalErrorBoundary'
 import { lazyWithRetry } from '../shared/utils/lazyWithRetry'
 import { listen } from './tauri'
+import BrowserShell from './components/BrowserShell'
+import BrowserSuggestionsPopup from './components/BrowserSuggestionsPopup'
 
 const SettingsWindow = lazyWithRetry(() => import('./components/SettingsWindow'))
 const SpotlightWindow = lazy(() => import('./components/SpotlightWindow'))
@@ -19,6 +21,8 @@ function getCurrentRoute(): string {
 }
 
 export default function App() {
+  const isBrowserShell = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mint-browser-shell') === '1'
+  const isBrowserSuggestions = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mint-browser-suggestions') === '1'
   const [route, setRoute] = useState(getCurrentRoute)
 
   useEffect(() => {
@@ -61,6 +65,9 @@ export default function App() {
     window.addEventListener('vite:preloadError', handlePreloadError)
     return () => window.removeEventListener('vite:preloadError', handlePreloadError)
   }, [])
+
+  if (isBrowserShell) return <BrowserShell />
+  if (isBrowserSuggestions) return <BrowserSuggestionsPopup />
 
 
   // Auxiliary overlay windows (spotlight/widget/proactive-glow/screen-picker)

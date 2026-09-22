@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FileChange } from '../types'
 
 interface Props {
@@ -18,9 +18,14 @@ function diffLines(text: string) {
 
 export default function CodeReviewPage({ title, changes, onBack }: Props) {
   const [selectedPath, setSelectedPath] = useState(changes[0]?.path ?? '')
-  const selected = changes.find((change) => change.path === selectedPath) ?? changes[0]
+  const fileRefs = useRef<Record<string, HTMLElement | null>>({})
   const additions = changes.reduce((sum, change) => sum + change.additions, 0)
   const deletions = changes.reduce((sum, change) => sum + change.deletions, 0)
+
+  useEffect(() => {
+    if (!selectedPath) return
+    fileRefs.current[selectedPath]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [selectedPath])
 
   return (
     <main className="code-review-page">
@@ -34,7 +39,7 @@ export default function CodeReviewPage({ title, changes, onBack }: Props) {
       </header>
 
       <div className="code-review-summary">
-        <span>Last turn</span>
+        <span>Conversation changes</span>
         <span className="file-changes-count-add">+{additions}</span>
         <span className="file-changes-count-del">-{deletions}</span>
         <span className="code-review-file-total">{changes.length} {changes.length === 1 ? 'file' : 'files'}</span>
@@ -42,22 +47,26 @@ export default function CodeReviewPage({ title, changes, onBack }: Props) {
 
       <div className="code-review-layout">
         <section className="code-review-diff" aria-label="Code changes">
-          {selected ? (
-            <>
+          {changes.length > 0 ? changes.map((change) => (
+            <article
+              className={`code-review-file ${selectedPath === change.path ? 'is-selected' : ''}`}
+              key={change.path}
+              ref={(element) => { fileRefs.current[change.path] = element }}
+            >
               <div className="code-review-file-heading">
-                <span className="code-review-filetype">{fileName(selected.path).split('.').pop()?.toUpperCase() ?? 'FILE'}</span>
-                <span className="code-review-path">{selected.path}</span>
-                {selected.created && <span className="file-changes-badge-new">NEW FILE</span>}
-                <span className="file-changes-count-add">+{selected.additions}</span>
-                <span className="file-changes-count-del">-{selected.deletions}</span>
+                <span className="code-review-filetype">{fileName(change.path).split('.').pop()?.toUpperCase() ?? 'FILE'}</span>
+                <span className="code-review-path">{change.path}</span>
+                {change.created && <span className="file-changes-badge-new">NEW FILE</span>}
+                <span className="file-changes-count-add">+{change.additions}</span>
+                <span className="file-changes-count-del">-{change.deletions}</span>
               </div>
-              {selected.hunks.length > 0 ? (
+              {change.hunks.length > 0 ? (
                 <div className="code-review-code">
-                  {selected.hunks.map((hunk, hunkIndex) => {
+                  {change.hunks.map((hunk, hunkIndex) => {
                     const oldLines = diffLines(hunk.oldText)
                     const newLines = diffLines(hunk.newText)
                     return (
-                      <div className="code-review-hunk" key={`${selected.path}-${hunkIndex}`}>
+                      <div className="code-review-hunk" key={`${change.path}-${hunkIndex}`}>
                         {oldLines.map((line, index) => (
                           <div className="code-review-line is-deleted" key={`old-${index}`}>
                             <span className="code-review-line-number">{index + 1}</span><span className="code-review-sign">−</span><code>{line || ' '}</code>
@@ -72,11 +81,9 @@ export default function CodeReviewPage({ title, changes, onBack }: Props) {
                     )
                   })}
                 </div>
-              ) : (
-                <div className="code-review-empty">No diff details were captured for this file.</div>
-              )}
-            </>
-          ) : <div className="code-review-empty">No changed files to review.</div>}
+              ) : <div className="code-review-empty">No diff details were captured for this file.</div>}
+            </article>
+          )) : <div className="code-review-empty">No changed files to review.</div>}
         </section>
 
         <aside className="code-review-file-list" aria-label="Changed files">
@@ -85,7 +92,7 @@ export default function CodeReviewPage({ title, changes, onBack }: Props) {
             <button
               type="button"
               key={change.path}
-              className={`code-review-file-option ${selected?.path === change.path ? 'is-selected' : ''}`}
+              className={`code-review-file-option ${selectedPath === change.path ? 'is-selected' : ''}`}
               onClick={() => setSelectedPath(change.path)}
               title={change.path}
             >

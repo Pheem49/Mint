@@ -19,6 +19,31 @@
 
 ## Tool Surface Tabs
 
+- Removed the legacy Terminal/Browser dropdown from the chat header; desktop tools are now opened through the Apps launcher and right-side tool panel.
+- Added a draggable resize handle to the Apps/tool panel, with the selected width persisted for the next opening.
+- Changed the active tool switcher into a working floating menu that opens Review, Terminal, Browser, Files, or Side chat without leaving the current tool page.
+- Removed the horizontal bottom-docked Terminal layout; Terminal now opens only as a resizable right-side tool page.
+- Fixed the Switch tools button being blocked by the active Terminal surface; the tool header now stays above Terminal content for reliable clicks.
+- Fixed the Apps launcher button being pushed onto a second titlebar row by the titlebar grid; it now stays in the main toolbar and opens the Tools panel correctly.
+- Removed the redundant Open tools launcher button; Open tools panel is now the single titlebar control for the Tools surface.
+- Fixed the Switch tools menu being hidden behind the active Terminal surface; the tool header now renders above Terminal content.
+- Improved Browser surfaces with loading/error states, Home and Stop controls, clearer external-browser fallback, persistent per-tab history while switching tools, same-surface iframe navigation, and Duplicate/Rename/Close-other tab actions.
+- Replaced the Browser address bar's text `Go` action with a compact arrow icon while preserving Enter-to-navigate behavior.
+- Changed the Apps Browser action to open the native Tauri Mint Browser window, allowing sites such as Google and YouTube to run with normal cookies, JavaScript, navigation, and login behavior.
+- Added a native Mint Browser toolbar with URL input, Home, Back, Forward, Reload, and direct navigation through the embedded native page WebView.
+- Refined the native Mint Browser shell with a browser-style tab row, full-width URL toolbar, active-site label, and functional tab close/new-tab controls.
+- Fixed the native browser toolbar WebView overlapping the page WebView and leaving a black/blank tab area; the shell now occupies only its 92px toolbar region.
+- Added browser-style URL autocomplete suggestions for web searches, domains, and direct addresses.
+- Fixed URL suggestions being clipped or moving the toolbar below the page; the native layout now keeps the toolbar first and temporarily moves the page below the expanded suggestion area.
+- Replaced the expanded browser suggestion area with a separate floating Tauri popup, keeping the page WebView fixed while suggestions open, update, and close independently.
+
+- Fixed the native window Minimize, Maximize, and Close controls being pushed out of narrow titlebars after adding the Tools and Apps launcher buttons; window controls now stay pinned to the far-right edge.
+- Restored a dedicated Apps launcher button in the desktop titlebar; it always opens the right-side tool launcher even after the panel has been collapsed.
+- Added a visible collapse button inside the right-side Tools panel, including the empty launcher state, so the panel can be dismissed without reaching back to the titlebar.
+- Replaced the tool dropdown with a right-side tool panel launcher; the titlebar Tools button opens the panel and presents Review, Terminal, Browser, Files, and Side chat as a vertical launcher before a surface is selected.
+- Added Review, Files, and Side chat actions alongside Terminal and Browser; Review opens the current conversation-wide change set, Files returns to the workspace view, and Side chat returns to the conversation.
+- Updated Review to aggregate code changes across the entire conversation instead of only the latest turn; repeated edits to the same file are combined into one review entry with accumulated additions, deletions, and hunks.
+- Changed the Review surface to render every changed file in one scrollable conversation-wide diff, with the changed-file list on the right acting as an anchor navigator.
 - Added a compact composer status pill for the current or latest Agent run: it shows files changed with green additions and red deletions, switches to a live editing state while work is running, and opens Review when clicked.
 - Moved preview, code review, and desktop terminal into dedicated tool pages with a shared tab strip.
 - Added per-tool close buttons and a close-all action so open tool pages can be removed without clearing chat history.

@@ -283,3 +283,35 @@ export function parseFileChangesFromProgress(progress: AgentProgress[]): FileCha
 
   return Array.from(changes.values())
 }
+
+/**
+ * Combine file changes from multiple agent turns into one conversation-level
+ * review. Keeping this fold next to the parser means every surface (chat,
+ * desktop review, and future exports) gets the same aggregation semantics.
+ */
+export function mergeFileChanges(changeGroups: FileChange[][]): FileChange[] {
+  const merged = new Map<string, FileChange>()
+
+  for (const changes of changeGroups) {
+    for (const change of changes) {
+      const existing = merged.get(change.path)
+      if (!existing) {
+        merged.set(change.path, {
+          path: change.path,
+          created: change.created,
+          additions: change.additions,
+          deletions: change.deletions,
+          hunks: [...change.hunks],
+        })
+        continue
+      }
+
+      existing.created = existing.created || change.created
+      existing.additions += change.additions
+      existing.deletions += change.deletions
+      existing.hunks.push(...change.hunks)
+    }
+  }
+
+  return Array.from(merged.values())
+}

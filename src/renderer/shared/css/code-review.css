@@ -85,6 +85,16 @@
   overflow: auto;
 }
 
+.code-review-file {
+  border-bottom: 1px solid var(--border);
+  scroll-margin-top: 8px;
+}
+
+.code-review-file.is-selected {
+  outline: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  outline-offset: -1px;
+}
+
 .code-review-file-heading {
   align-items: center;
   background: var(--surface-bg, #1e1e20);

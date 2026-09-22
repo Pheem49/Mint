@@ -8,6 +8,7 @@
   min-width: 0;
   height: 38px;
   padding-left: 7px;
+  padding-right: 132px;
   color: var(--text-secondary, #aeb4c0);
   background: var(--chrome-bg, #1b1c20);
   border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
@@ -337,6 +338,9 @@ button.workspace-context-row:disabled { opacity: 0.52; cursor: default; }
 .mint-window-resize-handle.is-southeast { right: 0; bottom: 0; cursor: nwse-resize; }
 
 .mint-titlebar-window-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
   gap: 0;
   -webkit-app-region: no-drag;
 }
@@ -467,6 +471,7 @@ button.workspace-context-row:disabled { opacity: 0.52; cursor: default; }
 @media (max-width: 760px) {
   .mint-titlebar {
     padding-left: 3px;
+    padding-right: 108px;
   }
 
   .mint-titlebar-icon-button {

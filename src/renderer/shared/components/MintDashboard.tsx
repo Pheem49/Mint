@@ -2,6 +2,7 @@ import { lazy, Suspense, type ChangeEvent, type CSSProperties, type FormEvent, u
 import {
   compactAgentProgressForPersistence,
   mergeActivitySnapshots,
+  mergeFileChanges,
   parseFileChangesFromProgress,
 } from '../agentProgress'
 import { catalogPlatform, conversationPlatform, mediaPlatform, runtimePlatform, type SlashResponse } from '../platform'
@@ -451,13 +452,7 @@ export default function MintDashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
   const [toolSurfaces, setToolSurfaces] = useState<ToolSurface[]>([])
   const [activeSurfaceId, setActiveSurfaceId] = useState<string | null>(null)
-  const [terminalPosition, setTerminalPosition] = useState<'bottom' | 'right'>(
-    () => window.localStorage.getItem('mint:terminal-position') === 'right' ? 'right' : 'bottom',
-  )
-  const [terminalBottomHeight, setTerminalBottomHeight] = useState(() => {
-    const saved = Number(window.localStorage.getItem('mint:terminal-bottom-height'))
-    return saved >= 180 && saved <= 900 ? saved : 300
-  })
+  const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
   const [terminalRightWidth, setTerminalRightWidth] = useState(() => {
     const saved = Number(window.localStorage.getItem('mint:terminal-right-width'))
     return saved >= 280 && saved <= 900 ? saved : 440
@@ -467,6 +462,13 @@ export default function MintDashboard() {
     return saved >= SIDEBAR_MIN_WIDTH && saved <= SIDEBAR_MAX_WIDTH ? saved : SIDEBAR_DEFAULT_WIDTH
   })
   const recentAgentChanges = parseFileChangesFromProgress(agentProgress)
+  const conversationReviewChanges = mergeFileChanges([
+    ...interactions.map((interaction) => {
+      const interactionId = String(interaction.id)
+      return parseFileChangesFromProgress(agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? [])
+    }),
+    parseFileChangesFromProgress(agentProgress),
+  ])
   const workspaceSourceNames = [
     ...imageAttachments.map((attachment) => attachment.name),
     ...videoAttachments.map((attachment) => attachment.name),
@@ -865,15 +867,8 @@ export default function MintDashboard() {
     }
   }
 
-  const toggleTerminalPosition = () => {
-    setTerminalPosition((position) => {
-      const next = position === 'bottom' ? 'right' : 'bottom'
-      window.localStorage.setItem('mint:terminal-position', next)
-      return next
-    })
-  }
-
   const openTerminalSurface = () => {
+    setToolsPanelOpen(true)
     const id = `terminal:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`
     setToolSurfaces((current) => {
       const terminalCount = current.filter((surface) => surface.kind === 'terminal').length
@@ -884,19 +879,32 @@ export default function MintDashboard() {
     })
   }
 
-  const openBrowserSurface = (url = 'https://www.google.com') => {
-    const id = `browser:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`
+  const openNativeBrowser = (url = 'https://www.google.com') => {
+    void openMintBrowser(url)
+  }
+
+  const duplicateToolSurface = (id: string) => {
     setToolSurfaces((current) => {
-      const browserCount = current.filter((surface) => surface.kind === 'browser').length
-      const title = browserCount === 0 ? 'Browser' : `Browser ${browserCount + 1}`
-      const next = { id, kind: 'browser' as const, title, url }
-      setActiveSurfaceId(id)
-      return [...current, next]
+      const source = current.find((surface) => surface.id === id)
+      if (!source) return current
+      const duplicateId = `${source.kind}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`
+      const duplicate = { ...source, id: duplicateId, title: `${source.title} copy` } as ToolSurface
+      setActiveSurfaceId(duplicateId)
+      return [...current, duplicate]
     })
   }
 
-  const navigateBrowserSurface = (id: string, url: string) => {
-    setToolSurfaces((current) => current.map((surface) => surface.id === id && surface.kind === 'browser' ? { ...surface, url } : surface))
+  const renameToolSurface = (id: string) => {
+    const source = toolSurfaces.find((surface) => surface.id === id)
+    if (!source) return
+    const nextTitle = window.prompt('Rename tab', source.title)?.trim()
+    if (!nextTitle) return
+    setToolSurfaces((current) => current.map((surface) => surface.id === id ? { ...surface, title: nextTitle } : surface))
+  }
+
+  const closeOtherToolSurfaces = (id: string) => {
+    setToolSurfaces((current) => current.filter((surface) => surface.id === id))
+    setActiveSurfaceId(id)
   }
 
   const toggleTerminalSurface = () => {
@@ -922,6 +930,7 @@ export default function MintDashboard() {
   }
 
   const openArtifactSurface = (artifact: import('./ArtifactPreviewPanel').ArtifactFile) => {
+    setToolsPanelOpen(true)
     const fileName = artifact.path.replace(/\\/g, '/').split('/').pop() || artifact.path
     const id = `preview:${artifact.path}`
     setToolSurfaces((current) => {
@@ -932,8 +941,20 @@ export default function MintDashboard() {
   }
 
   const openReviewSurface = (review: Extract<ToolSurface, { kind: 'review' }>) => {
+    setToolsPanelOpen(true)
     setToolSurfaces((current) => [...current.filter((surface) => surface.id !== review.id), review])
     setActiveSurfaceId(review.id)
+  }
+
+  const openConversationReview = () => {
+    setToolsPanelOpen(true)
+    openReviewSurface({
+      id: `review:conversation:${conversationId}`,
+      kind: 'review',
+      title: 'Review',
+      reviewTitle: 'All conversation changes',
+      changes: conversationReviewChanges,
+    })
   }
 
   const closeToolSurface = (id: string) => {
@@ -1907,13 +1928,8 @@ export default function MintDashboard() {
     onSetGeminiLiveVoice: changeGeminiLiveVoice,
     onToggleMobileSidebar: () => setMobileSidebarOpen(!mobileSidebarOpen),
     onBackToCode: () => changeView('code'),
-    // Web browsers cannot host a native shell or a desktop webview. Keep those
-    // capabilities honest: terminal stays desktop-only, browser opens a real
-    // browser tab, and preview/review use ChatPanel's built-in split view.
-    onOpenTerminal: isDesktopApp ? openTerminalSurface : undefined,
     onOpenArtifact: isDesktopApp ? openArtifactSurface : undefined,
     onOpenReview: isDesktopApp ? openReviewSurface : undefined,
-    onOpenBrowser: isDesktopApp ? openBrowserSurface : openMintBrowser,
   }
 
   return (
@@ -1926,7 +1942,9 @@ export default function MintDashboard() {
           onOpenWorkspace={() => selectWorkspace()}
           onOpenTerminal={openTerminalSurface}
           onToggleTerminal={toggleTerminalSurface}
-          onOpenBrowser={() => openBrowserSurface()}
+          onOpenBrowser={() => openNativeBrowser()}
+          toolsPanelOpen={toolsPanelOpen}
+          onToggleToolsPanel={() => setToolsPanelOpen((open) => !open)}
           onOpenSettings={() => changeView('settings')}
           onCheckForUpdates={checkForUpdatesFromMenu}
           onShowAbout={() => showToast('Mint Agent — AI workspace')}
@@ -1939,16 +1957,14 @@ export default function MintDashboard() {
         />
       )}
       <div
-        className={`app-body ${(sidebarCollapsed && window.innerWidth > 760) ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''} ${activeSurfaceId ? 'tool-surface-active' : ''} ${toolSurfaces.find((surface) => surface.id === activeSurfaceId)?.kind === 'terminal' && terminalPosition === 'bottom' ? 'terminal-surface-bottom' : ''}`}
+        className={`app-body ${(sidebarCollapsed && window.innerWidth > 760) ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''} ${toolsPanelOpen ? 'tool-surface-active' : ''}`}
         style={{
           '--sidebar-expanded-width': `${sidebarWidth}px`,
-          '--terminal-dock-size': `${terminalPosition === 'bottom' ? terminalBottomHeight : terminalRightWidth}px`,
+          '--terminal-dock-size': `${terminalRightWidth}px`,
           // A terminal shown in the right tool surface resizes the surface
           // itself (and therefore the remaining chat area), not just its
           // inner xterm viewport.
-          '--tool-surface-width': toolSurfaces.find((surface) => surface.id === activeSurfaceId)?.kind === 'terminal' && terminalPosition === 'right'
-            ? `${terminalRightWidth}px`
-            : undefined,
+          '--tool-surface-width': `${terminalRightWidth}px`,
         } as CSSProperties}
       >
         {mobileSidebarOpen && (
@@ -2086,30 +2102,36 @@ export default function MintDashboard() {
           </Suspense>
         <ChatPanel conversation={chatConversation} actions={chatActions} />
         </main>
-        {isDesktopApp && activeSurfaceId && (
+        {isDesktopApp && toolsPanelOpen && (
           <Suspense fallback={<LazyPanelFallback />}>
             <ToolSurfacePage
               surfaces={toolSurfaces}
               activeSurfaceId={activeSurfaceId}
               workspacePath={workspacePath}
-              terminalPosition={terminalPosition}
-              terminalSize={terminalPosition === 'bottom' ? terminalBottomHeight : terminalRightWidth}
+              terminalSize={terminalRightWidth}
               onSelect={setActiveSurfaceId}
               onClose={closeToolSurface}
               onCloseAll={closeAllToolSurfaces}
-              onToggleTerminalPosition={toggleTerminalPosition}
+              onDuplicate={duplicateToolSurface}
+              onRename={renameToolSurface}
+              onCloseOthers={closeOtherToolSurfaces}
               onOpenTerminal={openTerminalSurface}
-              onOpenBrowser={() => openBrowserSurface()}
-              onNavigateBrowser={navigateBrowserSurface}
-              onOpenExternalBrowser={openMintBrowser}
+              onOpenBrowser={() => openNativeBrowser()}
+              onOpenReview={openConversationReview}
+              onOpenFiles={() => {
+                setActiveSurfaceId(null)
+                setToolsPanelOpen(false)
+                changeView('workspace')
+              }}
+              onOpenSideChat={() => { setActiveSurfaceId(null); setToolsPanelOpen(false) }}
+              onClosePanel={() => setToolsPanelOpen(false)}
               onResizeTerminal={(size) => {
-                if (terminalPosition === 'bottom') {
-                  setTerminalBottomHeight(size)
-                  window.localStorage.setItem('mint:terminal-bottom-height', String(size))
-                } else {
-                  setTerminalRightWidth(size)
-                  window.localStorage.setItem('mint:terminal-right-width', String(size))
-                }
+                setTerminalRightWidth(size)
+                window.localStorage.setItem('mint:terminal-right-width', String(size))
+              }}
+              onResizePanel={(size) => {
+                setTerminalRightWidth(size)
+                window.localStorage.setItem('mint:terminal-right-width', String(size))
               }}
             />
           </Suspense>

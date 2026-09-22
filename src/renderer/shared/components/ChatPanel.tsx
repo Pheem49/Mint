@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
-import { hasAgentToolActivity, thoughtsFrom, extendedThoughtsFrom, parseFileChangesFromProgress } from '../agentProgress'
+import { hasAgentToolActivity, thoughtsFrom, extendedThoughtsFrom, mergeFileChanges, parseFileChangesFromProgress } from '../agentProgress'
 import {
   GEMINI_MODELS,
   OPENAI_MODELS,
@@ -136,8 +136,6 @@ interface ChatPanelContract {
   cliSessionId?: string
   onBackToCode?: () => void
   conversationTitle?: string
-  onOpenTerminal?: () => void
-  onOpenBrowser?: (url: string) => void
   onOpenArtifact?: (artifact: ArtifactFile) => void
   onOpenReview?: (review: Extract<ToolSurface, { kind: 'review' }>) => void
 }
@@ -217,8 +215,6 @@ export default function ChatPanel({
   cliSessionId,
   onBackToCode,
   conversationTitle,
-  onOpenTerminal,
-  onOpenBrowser,
   onOpenArtifact,
   onOpenReview,
   } = { ...conversation, ...actions }
@@ -237,6 +233,15 @@ export default function ChatPanel({
   const composerChangeLabel = composerChanges.length === 1
     ? '1 file changed'
     : `${composerChanges.length} files changed`
+  const conversationChanges = useMemo(() => {
+    const historicalGroups = interactions.map((interaction) => {
+      const interactionId = String(interaction.id)
+      const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
+      return parseFileChangesFromProgress(progress)
+    })
+    const activeChanges = parseFileChangesFromProgress(agentProgress)
+    return mergeFileChanges([...historicalGroups, activeChanges])
+  }, [agentActivitySnapshots, agentProgress, interactions])
   // Markdown parsing can be expensive for code, tables, and interactive cards.
   // Limit it to a steady cadence instead of parsing on every stream chunk.
   const throttledStreamedReply = useThrottledValue(streamedReply, STREAM_MARKDOWN_UPDATE_MS)
@@ -255,9 +260,6 @@ export default function ChatPanel({
   const [reviewPage, setReviewPage] = useState<{ title: string; changes: FileChange[] } | null>(null)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactFile | null>(null)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
-  const [desktopToolsMenuOpen, setDesktopToolsMenuOpen] = useState(false)
-  const desktopToolsMenuRef = useRef<HTMLDivElement>(null)
-  const [browserAddress, setBrowserAddress] = useState('https://www.google.com')
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
 
@@ -1016,21 +1018,6 @@ export default function ChatPanel({
     return () => window.removeEventListener('mousedown', closeMenu)
   }, [toolMenuOpen])
   useEffect(() => {
-    if (!desktopToolsMenuOpen) return
-    const closeMenu = (event: MouseEvent) => {
-      if (!desktopToolsMenuRef.current?.contains(event.target as Node)) setDesktopToolsMenuOpen(false)
-    }
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') setDesktopToolsMenuOpen(false)
-    }
-    window.addEventListener('mousedown', closeMenu)
-    window.addEventListener('keydown', closeOnEscape)
-    return () => {
-      window.removeEventListener('mousedown', closeMenu)
-      window.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [desktopToolsMenuOpen])
-  useEffect(() => {
     const handleWindowPaste = (event: globalThis.ClipboardEvent) => {
       if (!event.clipboardData) return
       if (onPasteImage(event.clipboardData)) {
@@ -1346,7 +1333,7 @@ export default function ChatPanel({
                 className="file-changes-review-btn"
                 title="Review changed code"
                 onClick={() => {
-                  openReview(summaryLabel, changes)
+                  openReview('All conversation changes', conversationChanges)
                 }}
               >
                 Review
@@ -1357,7 +1344,7 @@ export default function ChatPanel({
         </div>
       </div>
     )
-  }, [agentActivitySnapshots, openReviewIds, openFileDiffs, showAllFileChanges, workspacePath])
+  }, [agentActivitySnapshots, conversationChanges, openReviewIds, openFileDiffs, showAllFileChanges, workspacePath])
 
   const renderActiveFileChanges = () => {
     const changes = parseFileChangesFromProgress(agentProgress)
@@ -1397,7 +1384,7 @@ export default function ChatPanel({
               className="file-changes-review-btn"
               title="Review changed code"
               onClick={() => {
-                openReview(summaryLabel, changes)
+                openReview('All conversation changes', conversationChanges)
               }}
             >
               Review
@@ -1521,51 +1508,6 @@ export default function ChatPanel({
             )}
           </div>
           <div className="chat-header-actions">
-            {(onOpenTerminal || onOpenBrowser) && (
-              <div className="desktop-tools-menu-wrap" ref={desktopToolsMenuRef}>
-                <button
-                  type="button"
-                  className="chat-header-action-btn desktop-tools-trigger"
-                  aria-label={onOpenTerminal ? 'Open desktop tools' : 'Open browser in a new tab'}
-                  aria-expanded={desktopToolsMenuOpen}
-                  title={onOpenTerminal ? 'Open tools' : 'Open browser in a new tab'}
-                  onClick={() => setDesktopToolsMenuOpen((open) => !open)}
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="4" width="18" height="16" rx="2" />
-                    <path d="M7 9l2 2-2 2M12 13h5" />
-                  </svg>
-                </button>
-                {desktopToolsMenuOpen && (
-                  <div className="desktop-tools-menu" role="menu">
-                    {onOpenTerminal && (
-                      <button type="button" role="menuitem" onClick={() => { onOpenTerminal(); setDesktopToolsMenuOpen(false) }}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m4 17 6-5-6-5M12 19h8" /></svg>
-                        <span>Terminal</span><kbd>Ctrl+`</kbd>
-                      </button>
-                    )}
-                    {onOpenBrowser && (
-                      <form onSubmit={(event) => {
-                        event.preventDefault()
-                        const raw = browserAddress.trim()
-                        if (!raw) return
-                        const address = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
-                        onOpenBrowser(address)
-                        setDesktopToolsMenuOpen(false)
-                      }}>
-                        <label htmlFor="mint-browser-address">Browser</label>
-                        <div className="desktop-browser-launch-row">
-                          <input id="mint-browser-address" value={browserAddress} onChange={(event) => setBrowserAddress(event.target.value)} placeholder="Enter a web address" />
-                          <button type="submit" aria-label="Open browser" title="Open browser">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M8 7h9v9" /></svg>
-                          </button>
-                        </div>
-                      </form>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
             {activeArtifact && (
               <button
                 type="button"

@@ -1,0 +1,55 @@
+.browser-suggestions-popup {
+  width: 100vw;
+  min-height: 52px;
+  overflow: hidden;
+  padding: 5px 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  color: #f3f4f6;
+  background: #2a2b30;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.42);
+  font-family: 'Prompt', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.browser-suggestions-popup-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 12px;
+  border: 0;
+  color: #f3f4f6;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.browser-suggestions-popup-item:hover,
+.browser-suggestions-popup-item:focus-visible {
+  outline: 0;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.browser-suggestions-popup-icon {
+  color: #aeb4bf;
+  font-size: 1rem;
+  text-align: center;
+}
+
+.browser-suggestions-popup-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-suggestions-popup-detail {
+  overflow: hidden;
+  max-width: 170px;
+  color: #aeb4bf;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

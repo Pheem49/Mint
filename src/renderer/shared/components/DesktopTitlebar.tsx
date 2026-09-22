@@ -14,6 +14,8 @@ interface DesktopTitlebarProps {
   onOpenTerminal: () => void
   onToggleTerminal: () => void
   onOpenBrowser: () => void
+  toolsPanelOpen: boolean
+  onToggleToolsPanel: () => void
   onOpenSettings: () => void
   onCheckForUpdates: () => void
   onShowAbout: () => void
@@ -36,6 +38,8 @@ export default function DesktopTitlebar({
   onOpenTerminal,
   onToggleTerminal,
   onOpenBrowser,
+  toolsPanelOpen,
+  onToggleToolsPanel,
   onOpenSettings,
   onCheckForUpdates,
   onShowAbout,
@@ -282,6 +286,16 @@ export default function DesktopTitlebar({
           onOpenReview={onOpenReview}
           onRefreshWorkspace={onRefreshWorkspace}
         />
+        <button
+          type="button"
+          className={`mint-titlebar-icon-button mint-tools-panel-toggle${toolsPanelOpen ? ' is-open' : ''}`}
+          aria-label={toolsPanelOpen ? 'Close tools panel' : 'Open tools panel'}
+          aria-pressed={toolsPanelOpen}
+          title={toolsPanelOpen ? 'Close tools panel' : 'Open tools panel'}
+          onClick={onToggleToolsPanel}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M18 8h1M18 12h1M18 16h1"/></svg>
+        </button>
         <div className="mint-titlebar-window-controls">
           <button type="button" className="mint-window-control" aria-label="Minimize window" title="Minimize" onClick={minimizeWindow}>
             <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8"/></svg>

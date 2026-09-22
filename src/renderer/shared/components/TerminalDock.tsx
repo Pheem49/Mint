@@ -8,15 +8,13 @@ import '@xterm/xterm/css/xterm.css'
 interface TerminalDockProps {
   visible: boolean
   page?: boolean
-  position: 'bottom' | 'right'
   size: number
   cwd?: string | null
   onClose: () => void
-  onTogglePosition: () => void
   onResize: (size: number) => void
 }
 
-export default function TerminalDock({ visible, page = false, position, size, cwd, onClose, onTogglePosition, onResize }: TerminalDockProps) {
+export default function TerminalDock({ visible, page = false, size, cwd, onClose, onResize }: TerminalDockProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -35,25 +33,23 @@ export default function TerminalDock({ visible, page = false, position, size, cw
   }, [])
 
   const clampSize = useCallback((next: number) => {
-    const min = position === 'bottom' ? 180 : 280
-    const max = position === 'bottom'
-      ? Math.max(min, window.innerHeight - 180)
-      : Math.max(min, Math.min(900, window.innerWidth - 560))
+    const min = 280
+    const max = Math.max(min, Math.min(900, window.innerWidth - 560))
     return Math.round(Math.min(max, Math.max(min, next)))
-  }, [position])
+  }, [])
 
   const startResize = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault()
-    const startCoordinate = position === 'bottom' ? event.clientY : event.clientX
+    const startCoordinate = event.clientX
     const startSize = size
     const previousCursor = document.body.style.cursor
     const previousUserSelect = document.body.style.userSelect
-    document.body.style.cursor = position === 'bottom' ? 'row-resize' : 'col-resize'
+    document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
     setResizing(true)
 
     const handleMove = (moveEvent: MouseEvent) => {
-      const current = position === 'bottom' ? moveEvent.clientY : moveEvent.clientX
+      const current = moveEvent.clientX
       onResize(clampSize(startSize + startCoordinate - current))
     }
     const handleUp = () => {
@@ -71,8 +67,8 @@ export default function TerminalDock({ visible, page = false, position, size, cw
   }
 
   const resizeWithKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const increase = position === 'bottom' ? event.key === 'ArrowUp' : event.key === 'ArrowLeft'
-    const decrease = position === 'bottom' ? event.key === 'ArrowDown' : event.key === 'ArrowRight'
+    const increase = event.key === 'ArrowLeft'
+    const decrease = event.key === 'ArrowRight'
     if (!increase && !decrease) return
     event.preventDefault()
     onResize(clampSize(size + (increase ? 16 : -16)))
@@ -207,7 +203,7 @@ export default function TerminalDock({ visible, page = false, position, size, cw
 
   return (
     <section
-      className={`terminal-dock ${visible ? 'is-open' : ''} ${page ? 'is-page' : ''} ${position === 'right' ? 'is-right' : ''} ${resizing ? 'is-resizing' : ''}`}
+      className={`terminal-dock is-right ${visible ? 'is-open' : ''} ${page ? 'is-page' : ''} ${resizing ? 'is-resizing' : ''}`}
       style={{ '--terminal-dock-size': `${size}px` } as CSSProperties}
       aria-hidden={!visible}
     >
@@ -215,8 +211,8 @@ export default function TerminalDock({ visible, page = false, position, size, cw
         <div
           className="terminal-dock-resize-handle"
           role="separator"
-          aria-label={position === 'bottom' ? 'Resize terminal height' : 'Resize terminal width'}
-          aria-orientation={position === 'bottom' ? 'horizontal' : 'vertical'}
+          aria-label="Resize terminal width"
+          aria-orientation="vertical"
           aria-valuenow={size}
           tabIndex={0}
           onMouseDown={startResize}
@@ -226,11 +222,6 @@ export default function TerminalDock({ visible, page = false, position, size, cw
       <header className="terminal-dock-header">
         <div className="terminal-dock-title"><span className="terminal-dock-status" />Terminal{cwd ? <span className="terminal-dock-cwd">{cwd}</span> : null}</div>
         <div className="terminal-dock-header-actions">
-          <button type="button" onClick={onTogglePosition} aria-label={position === 'bottom' ? 'Move terminal to the right' : 'Move terminal to the bottom'} title={position === 'bottom' ? 'Move terminal to the right' : 'Move terminal to the bottom'}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              {position === 'bottom' ? <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 14h18" /></> : <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M14 4v16" /></>}
-            </svg>
-          </button>
           <button type="button" onClick={onClose} aria-label="Close terminal" title="Close terminal">×</button>
         </div>
       </header>
