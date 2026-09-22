@@ -1,9 +1,10 @@
-# Installs the Mint CLI via npm (the npm package compiles `mint-cli` from source
-# on postinstall). Ensures every build dependency compile needs is present:
+# Installs the Mint CLI from the latest GitHub Release when a matching prebuilt
+# binary exists. If no matching release asset exists, it falls back to the
+# source-based npm installation below.
 #
 #   Required (build fails without them):
 #     - Node.js & npm                       install vehicle + frontend build
-#     - Rust toolchain (cargo)              compiles mint-core / mint-cli
+#     - Rust toolchain (cargo)              only needed for the source fallback
 #     - Visual Studio C++ Build Tools       rusqlite (bundled SQLite) + tree-sitter
 #                                           grammars link against the MSVC toolchain
 #     (cpal uses WASAPI on Windows - no extra library needed)
@@ -21,6 +22,8 @@ $ErrorActionPreference = "Stop"
 $NpmPkg = "@pheem49/mint@latest"
 $SkipOptional = $env:MINT_SKIP_OPTIONAL -eq "1"
 $AssumeYes = $env:MINT_YES -eq "1"
+$SourceInstall = $env:MINT_SOURCE_INSTALL -eq "1"
+$ReleaseBase = "https://github.com/Pheem49/Mint/releases/latest/download"
 
 function Have($name) { $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
 
@@ -35,6 +38,57 @@ function Refresh-Path {
                 [Environment]::GetEnvironmentVariable("Path", "User")
 }
 
+function Install-Prebuilt {
+    if ($SourceInstall) { return $false }
+
+    $asset = $null
+    if ($env:PROCESSOR_ARCHITECTURE -eq "AMD64" -or $env:PROCESSOR_ARCHITEW6432 -eq "AMD64") {
+        $asset = "mint-cli_windows_x64.exe"
+    } else {
+        return $false
+    }
+
+    Write-Host "--- Checking for prebuilt Mint CLI ($asset) ---" -ForegroundColor Cyan
+    $tmpDir = Join-Path $env:TEMP ("mint-install-" + [guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+    $tmpBin = Join-Path $tmpDir $asset
+    $tmpChecksum = Join-Path $tmpDir "$asset.sha256"
+
+    try {
+        Invoke-WebRequest -Uri "$ReleaseBase/$asset" -OutFile $tmpBin -UseBasicParsing
+        Invoke-WebRequest -Uri "$ReleaseBase/$asset.sha256" -OutFile $tmpChecksum -UseBasicParsing
+    } catch {
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "No matching prebuilt release found; falling back to source installation." -ForegroundColor Yellow
+        return $false
+    }
+
+    $expected = (Get-Content -LiteralPath $tmpChecksum -Raw).Trim().Split()[0]
+    $actual = (Get-FileHash -LiteralPath $tmpBin -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($expected) -or $expected.ToLowerInvariant() -ne $actual) {
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Error "Checksum verification failed for $asset."
+        return $false
+    }
+
+    $installDir = Join-Path $env:LOCALAPPDATA "Mint\bin"
+    New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+    Copy-Item -LiteralPath $tmpBin -Destination (Join-Path $installDir "mint.exe") -Force
+    Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($null -eq $userPath) { $userPath = "" }
+    if (-not (($userPath -split ';') -contains $installDir)) {
+        [Environment]::SetEnvironmentVariable("Path", (($userPath.TrimEnd(';') + ";" + $installDir).Trim(';')), "User")
+        $env:Path += ";$installDir"
+    }
+    Write-Host "Mint CLI installed from a verified prebuilt binary." -ForegroundColor Green
+    & (Join-Path $installDir "mint.exe") --version 2>$null
+    return $true
+}
+
+if (Install-Prebuilt) { exit 0 }
+
 Write-Host "=== Installing Mint CLI ===" -ForegroundColor Green
 Write-Host ""
 
@@ -43,7 +97,7 @@ Write-Host "  - install the MSVC C++ Build Tools (if missing)"
 if (-not (Have "npm"))   { Write-Host "  - install Node.js + npm" }
 if (-not (Have "cargo")) { Write-Host "  - install the Rust toolchain (rustup)" }
 if (-not $SkipOptional)  { Write-Host "  - install optional feature tools: git, ffmpeg" }
-Write-Host "  - run 'npm install -g $NpmPkg' (compiles mint-cli from source)"
+Write-Host "  - run 'npm install -g $NpmPkg' (source-install fallback)"
 Write-Host ""
 Write-Host "  Env toggles: MINT_YES=1 (no prompts)  MINT_SKIP_OPTIONAL=1 (skip extras)"
 Write-Host ""

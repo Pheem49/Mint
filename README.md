@@ -3,7 +3,7 @@
 
   # Mint
 
-  **Your AI agent, reachable from Telegram, Discord, Slack, LINE, or WhatsApp — not just a terminal window.**
+  **Fix code from Telegram — with an AI agent that runs on your own machine.**
 
   [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://v2.tauri.app/)
   [![Rust](https://img.shields.io/badge/Rust-backend-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -11,11 +11,33 @@
   [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 </div>
 
-Mint is a local-first AI assistant and autonomous coding agent that runs on your own machine. Powered by a high-performance Rust **Agent Execution Harness** (`mint-core`), Mint wraps foundation models (Claude, GPT-4o, Gemini, Ollama, DeepSeek) with deterministic tool execution, verification gates, subagent DAG orchestration, memory compaction, and human-in-the-loop safety guardrails.
+Mint is a local-first AI coding agent you can message from Telegram, Discord, Slack, LINE, or WhatsApp. Send it a bug, feature request, or code-review task; Mint inspects your workspace, edits the code, runs tests, and reports the result back to chat — while asking for approval before risky changes.
+
+```text
+You: Fix the failing authentication test in my API
+Mint: I found the cause, prepared a patch, and ran the test suite.
+      4 tests passed · 2 files changed · Ready for your approval
+```
+
+### Why Mint?
+
+- **Reach it from chat:** hand off coding tasks from Telegram or the messaging app you already use.
+- **Keep your code local:** Mint runs on your machine, with support for cloud models and local models such as Ollama.
+- **Stay in control:** Git checkpoints, verification gates, and human approval are built into the workflow.
+
+```bash
+mint onboard
+mint setup
+mint code agent "inspect this repo and fix the failing tests"
+```
+
+> **Best for:** developers who want an always-available coding assistant without handing their workspace to a hosted agent.
+
+Powered by a high-performance Rust **Agent Execution Harness** (`mint-core`), Mint wraps foundation models (Claude, GPT-4o, Gemini, Ollama, DeepSeek) with deterministic tool execution, verification gates, subagent DAG orchestration, memory compaction, and human-in-the-loop safety guardrails.
 
 It follows you wherever you already are: message it from Telegram, Discord, Slack, LINE, or WhatsApp like you'd message a person, no desktop window required. It's also a native desktop app with a Live2D companion, a web application, and a full terminal agent for coding tasks — all backed by the exact same execution harness and safety policies, so chat, memory, knowledge, tools, and safety behave identically no matter which door you walk in through.
 
-See [Release Notes](Release_Note.md) for what's new, and read the [Agent Harness Architecture Guide](docs/AGENT_HARNESS.md) for deep technical details.
+See the [Roadmap](ROADMAP.md) for the project direction, [Contributing Guide](CONTRIBUTING.md) to help improve Mint, and [Release Notes](Release_Note.md) for what's new. Read the [Agent Harness Architecture Guide](docs/AGENT_HARNESS.md) for deep technical details. Questions and ideas belong in [GitHub Discussions](https://github.com/Pheem49/Mint/discussions).
 
 ## 🏛️ Architecture: The Mint Agent Harness
 
@@ -281,8 +303,10 @@ No alias set up? Everything below still works via `npm run cli -- <command>` in 
 Prebuilt downloads from the [Releases page](https://github.com/Pheem49/Mint/releases) — the
 desktop `.dmg` / `.exe` and the standalone `mint-cli_*` binaries — are **not yet code-signed**,
 so macOS Gatekeeper and Windows SmartScreen flag them on first launch. The warnings are
-expected and safe to dismiss. Installing with `install.sh` / `install.ps1` / `npm` builds from
-source and avoids all of this.
+expected and safe to dismiss. Installing with `install.sh` / `install.ps1` uses a verified
+prebuilt CLI when the current platform is available in the latest release. Set
+`MINT_SOURCE_INSTALL=1` to force the source build. Installing through `npm` still uses the
+source build.
 
 **macOS** — Gatekeeper blocks unsigned, un-notarized builds until you clear the quarantine flag:
 

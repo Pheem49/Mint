@@ -1,5 +1,22 @@
 # Release Notes - Mint Agent v1.15.0
 
+## README Positioning
+
+- Reworked the top of the README around the primary use case: assigning coding tasks from Telegram or other messaging apps while Mint runs locally, verifies changes, and requests approval before risky actions.
+- Added a concrete interaction example, focused value proposition, quick-start commands, and a short description of the intended audience.
+
+## Installation
+
+- Added SHA-256 checksum assets for standalone CLI release binaries.
+- Updated `install.sh` and `install.ps1` to install a matching verified prebuilt CLI binary first, with automatic fallback to the existing source-based npm installation when no matching release asset exists.
+- Added `MINT_SOURCE_INSTALL=1` to force the source-install fallback when needed.
+
+## Community and Contributions
+
+- Added a public roadmap covering near-term installation, onboarding, messaging, contributor, and platform priorities.
+- Added `CONTRIBUTING.md` with setup, validation, issue, good-first-issue, and pull-request guidance.
+- Added GitHub issue and discussion templates plus links from the README to the project community resources.
+
 ## Tool Surface Tabs
 
 - Added a compact composer status pill for the current or latest Agent run: it shows files changed with green additions and red deletions, switches to a live editing state while work is running, and opens Review when clicked.

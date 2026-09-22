@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question or propose an idea
+    url: https://github.com/Pheem49/Mint/discussions
+    about: Use Discussions for questions, feedback, and design proposals.
+  - name: Read the contribution guide
+    url: https://github.com/Pheem49/Mint/blob/main/CONTRIBUTING.md
+    about: Learn how to build, test, and contribute to Mint.

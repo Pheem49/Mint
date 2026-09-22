@@ -34,7 +34,8 @@ When releasing:
 The desktop installers (`mint-agent_windows_x64.exe`, `mint-agent_macos_arm64.dmg`)
 and the standalone `mint-cli_*` binaries are **not yet code-signed**, so the OS
 warns you the first time you open them. This is expected. Installing via
-`install.sh` / `install.ps1` / `npm` builds from source and is unaffected.
+`install.sh` / `install.ps1` downloads the matching release binary and verifies
+its checksum. Installing via `npm` remains the source-build path.
 
 **macOS** — clear the quarantine flag:
 
