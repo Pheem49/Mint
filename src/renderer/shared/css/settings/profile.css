@@ -169,7 +169,7 @@
 .crop-modal-reset-btn {
     border: none;
     background: transparent;
-    color: var(--accent, #10b981);
+    color: var(--interactive-fg);
     font-size: 0.82rem;
     font-weight: 600;
     cursor: pointer;

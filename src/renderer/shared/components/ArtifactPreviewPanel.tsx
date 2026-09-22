@@ -162,7 +162,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
               height: '24px',
               borderRadius: 'var(--radius-xs, 4px)',
               background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
-              color: 'var(--accent)',
+              color: 'var(--interactive-fg)',
               fontSize: '0.68rem',
               fontWeight: 700,
               flexShrink: 0,

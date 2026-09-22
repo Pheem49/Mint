@@ -146,7 +146,7 @@ export function renderSpeakerIcon(isSpeaking: boolean): ReactNode {
 export function renderCopyIcon(isCopied: boolean): ReactNode {
   if (isCopied) {
     return (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', color: 'var(--accent, #10b981)' }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', color: 'var(--interactive-fg)' }}>
         <polyline points="20 6 9 17 4 12" />
       </svg>
     )
@@ -603,7 +603,7 @@ const mdComponents = {
   // `style` here comes from the cloneElement calls in `thead`/`tbody` above.
   tr: ({ children, style }: { children?: ReactNode; style?: CSSProperties }) => <tr style={style}>{children}</tr>,
   th: ({ children }) => (
-    <th style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--accent, #38bdf8)', fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>
+    <th style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--interactive-fg)', fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>
       {highlightMentions(children)}
     </th>
   ),

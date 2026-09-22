@@ -1,4 +1,5 @@
 import Live2DStage from './Live2DStage'
+import '../css/model.css'
 import type { DashboardView } from './DashboardSidebar'
 
 type LayoutPreset = 'chat-wide' | 'model-wide'

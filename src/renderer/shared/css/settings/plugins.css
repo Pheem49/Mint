@@ -91,7 +91,7 @@
 }
 
 .plugin-config-panel h4 {
-    color: var(--accent);
+    color: var(--interactive-fg);
     font-size: 0.78rem;
     font-weight: 600;
     letter-spacing: 0.05em;
@@ -168,7 +168,7 @@
 
 .plugin-tag.info {
     background: color-mix(in srgb, var(--accent) 16%, transparent);
-    color: var(--accent-hover);
+    color: var(--interactive-fg-hover);
 }
 
 .plugin-status {

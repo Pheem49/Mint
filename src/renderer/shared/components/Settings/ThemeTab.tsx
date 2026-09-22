@@ -381,7 +381,7 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
           <div className="setting-row">
             <label>Font family</label>
             <select value={config.fontFamily} onChange={(e) => updateField('fontFamily', e.target.value)}>
-              <option value="'Prompt', 'Noto Sans Thai', 'Inter', sans-serif">Prompt / Noto Sans Thai (ChatGPT Style - Default)</option>
+              <option value="'Prompt', sans-serif">Prompt (Thai & Latin - Default)</option>
               <option value="'Outfit', sans-serif">Outfit (Geometric Modern)</option>
               <option value="'Inter', sans-serif">Inter (Clean Sans-Serif)</option>
               <option value="'Prompt', sans-serif">Prompt (Modern Thai)</option>
@@ -397,11 +397,12 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
             <label>Font size</label>
             <div className="pill-segmented" role="radiogroup" aria-label="Font size">
               {[
-                { id: '16px', label: 'Small' },
-                { id: '18px', label: 'Medium' },
-                { id: '22px', label: 'Large' },
-                { id: '26px', label: 'XL' },
-                { id: '30px', label: 'XXL' },
+                { id: '14px', label: 'Compact' },
+                { id: '16px', label: 'Default' },
+                { id: '18px', label: 'Large' },
+                { id: '22px', label: 'XL' },
+                { id: '26px', label: 'XXL' },
+                { id: '30px', label: 'XXXL' },
               ].map((o) => (
                 <button
                   key={o.id}

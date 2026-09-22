@@ -62,7 +62,7 @@
 }
 
 .pictures-kicker {
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -216,7 +216,7 @@
 .filter-tab-btn.active {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-color: var(--accent);
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
   font-weight: 600;
 }
 
@@ -250,7 +250,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   background: var(--surface-bg);
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
   font-size: 1.2rem;
 }
 
@@ -406,7 +406,7 @@
 .pictures-load-more-btn:hover {
   background: var(--border);
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--interactive-fg);
   box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 

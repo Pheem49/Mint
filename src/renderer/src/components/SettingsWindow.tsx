@@ -1,4 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react'
+import '../css/settings/base.css'
+import '../../shared/css/settings/general.css'
+import '../../shared/css/settings/profile.css'
+import '../../shared/css/settings/automation.css'
+import '../../shared/css/settings/theme.css'
+import '../../shared/css/settings/plugins.css'
+import '../../shared/css/settings/agents.css'
+import '../../shared/css/settings/shortcuts.css'
 import { getProfileValue, setProfileValue, setActiveModel, authUpdateProfile } from '../tauri'
 import { useAuthUser } from '../../shared/components/AuthGate'
 import { useProviderModels } from '../hooks/useProviderModels'
@@ -31,7 +39,7 @@ export type {
   CustomProviderConfig,
 } from '../../shared/types'
 
-import { DEFAULT_CONFIG } from '../../shared/constants/config'
+import { DEFAULT_CONFIG, migrateTypographyScale } from '../../shared/constants/config'
 export { DEFAULT_CONFIG }
 import { applyThemeStyles } from '../../shared/utils/ui'
 import { APP_VERSION } from '../../shared/version'
@@ -256,7 +264,7 @@ export default function SettingsWindow() {
         }
         
         if (loadedConfig) {
-          const merged = { ...DEFAULT_CONFIG, ...loadedConfig }
+          const merged = { ...DEFAULT_CONFIG, ...migrateTypographyScale(loadedConfig) }
           setConfig(merged)
           
           // sync helper custom models
@@ -575,6 +583,14 @@ export default function SettingsWindow() {
     const updated = { ...config, ...patch }
     setConfig(updated)
     applyThemeStyles(updated)
+    // Theme choices are immediately visible in this window. Persist the same
+    // complete patch so the main window receives one consistent theme update
+    // instead of retaining a stale combination such as glass + no blur.
+    if (window.settingsApi) {
+      void window.settingsApi.saveSettings(updated).catch((error) => {
+        console.error('Failed to save live theme settings:', error)
+      })
+    }
   }
 
   return (

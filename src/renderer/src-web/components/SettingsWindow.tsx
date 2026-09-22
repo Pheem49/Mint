@@ -1,4 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react'
+// This view is lazy-loaded on the web. Keep every settings stylesheet with the
+// component so its modal does not render as unstyled HTML before its chunk loads.
+import '../css/settings/base.css'
+import '../../shared/css/settings/general.css'
+import '../../shared/css/settings/profile.css'
+import '../../shared/css/settings/automation.css'
+import '../../shared/css/settings/theme.css'
+import '../../shared/css/settings/plugins.css'
+import '../../shared/css/settings/agents.css'
+import '../../shared/css/settings/shortcuts.css'
 import { getLocalApiBase, isTauriRuntime, getProfileValue, setProfileValue, setActiveModel, authUpdateProfile } from '../tauri'
 import { useAuthUser } from '../../shared/components/AuthGate'
 import { useProviderModels } from '../hooks/useProviderModels'

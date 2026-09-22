@@ -1,0 +1,207 @@
+/* Shared full-panel code review styles for desktop and browser dashboards. */
+
+.code-review-page {
+  background: var(--app-bg, var(--input-bg, #111114));
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.code-review-toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex: 0 0 auto;
+  gap: 14px;
+  min-height: 48px;
+  padding: 0 16px;
+}
+
+.code-review-back,
+.code-review-tab {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+}
+
+.code-review-back {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 6px 4px;
+}
+
+.code-review-back:hover { color: var(--text-main); }
+
+.code-review-tab {
+  align-self: stretch;
+  border-bottom: 2px solid var(--accent);
+  color: var(--text-main);
+  font-size: 0.82rem;
+  padding: 0 12px;
+}
+
+.code-review-toolbar-title {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-review-summary {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-soft, var(--text-main));
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 16px;
+}
+
+.code-review-file-total {
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
+  margin-left: 2px;
+  padding-left: 10px;
+}
+
+.code-review-layout {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  min-height: 0;
+}
+
+.code-review-diff {
+  min-width: 0;
+  overflow: auto;
+}
+
+.code-review-file-heading {
+  align-items: center;
+  background: var(--surface-bg, #1e1e20);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 9px;
+  min-height: 38px;
+  padding: 0 12px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.code-review-filetype {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border-radius: 4px;
+  color: var(--interactive-fg);
+  display: inline-flex;
+  font-size: 0.58rem;
+  font-weight: 700;
+  height: 19px;
+  justify-content: center;
+  min-width: 22px;
+  padding: 0 4px;
+}
+
+.code-review-path {
+  flex: 1 1 auto;
+  font-size: 0.76rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-review-code {
+  font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace;
+  font-size: 0.76rem;
+  line-height: 1.55;
+  padding: 10px 0 24px;
+}
+
+.code-review-hunk + .code-review-hunk {
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.code-review-line {
+  align-items: stretch;
+  display: grid;
+  grid-template-columns: 48px 22px minmax(0, 1fr);
+  min-height: 23px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.code-review-line.is-added { background: color-mix(in srgb, var(--status-success) 13%, transparent); }
+.code-review-line.is-deleted { background: color-mix(in srgb, var(--status-error, #ef4444) 12%, transparent); }
+.code-review-line-number { color: var(--text-muted); padding-right: 10px; text-align: right; user-select: none; }
+.code-review-sign { color: var(--text-muted); text-align: center; user-select: none; }
+.code-review-line.is-added .code-review-sign { color: var(--status-success); }
+.code-review-line.is-deleted .code-review-sign { color: var(--status-error, #ef4444); }
+.code-review-line code { color: var(--text-main); font: inherit; padding-right: 14px; }
+.code-review-line.is-added code { color: color-mix(in srgb, var(--status-success) 88%, var(--text-main)); }
+.code-review-line.is-deleted code { color: color-mix(in srgb, var(--status-error, #ef4444) 88%, var(--text-main)); }
+
+/* Diff meaning must remain visible when a monochrome theme uses white accent. */
+.code-review-page .file-changes-count-add { color: var(--status-success); }
+.code-review-page .file-changes-count-del { color: var(--status-error, #ef4444); }
+
+.code-review-file-list {
+  background: color-mix(in srgb, var(--surface-bg, #1e1e20) 75%, transparent);
+  border-left: 1px solid var(--border);
+  min-width: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.code-review-file-list-title {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 0.72rem;
+  font-weight: 600;
+  justify-content: space-between;
+  padding: 3px 6px 9px;
+}
+
+.code-review-file-list-title span { color: var(--text-muted); font-weight: 400; }
+
+.code-review-file-option {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs, 5px);
+  color: var(--text-main);
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 3px;
+  padding: 8px 7px;
+  text-align: left;
+  width: 100%;
+}
+
+.code-review-file-option:hover { background: color-mix(in srgb, var(--text-main) 5%, transparent); }
+.code-review-file-option.is-selected { background: color-mix(in srgb, var(--text-main) 8%, transparent); border-color: var(--border); }
+.code-review-file-option-copy { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.code-review-file-option-copy strong { font-size: 0.74rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-review-file-option-copy small { color: var(--text-muted); font-size: 0.64rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-review-file-option-counts { display: flex; flex: 0 0 auto; gap: 5px; font-size: 0.68rem; }
+.code-review-empty { color: var(--text-muted); font-size: 0.8rem; padding: 24px; }
+
+@media (max-width: 760px) {
+  .code-review-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .code-review-file-list { border-left: 0; border-top: 1px solid var(--border); max-height: 180px; }
+}

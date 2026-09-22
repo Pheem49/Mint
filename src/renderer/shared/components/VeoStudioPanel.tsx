@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
+import '../css/veo-studio.css'
 import { getActiveModel, setActiveModel, subscribeModelChange } from '../utils/modelManager'
 import { catalogPlatform, mediaPlatform } from '../platform'
 import type { VideoGenRequest, VideoGenResponse, VideoGenProviders, VideoGenEntry } from '../types'

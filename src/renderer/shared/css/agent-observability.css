@@ -13,6 +13,9 @@
   padding: 12px 14px;
   margin-bottom: 10px;
   color: var(--text-main, #e8e8ea);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .run-summary-header {
@@ -22,6 +25,21 @@
   border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   padding-bottom: 8px;
   margin-bottom: 10px;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.run-summary-title,
+.run-summary-header > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.run-summary-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .run-summary-title {
@@ -63,8 +81,9 @@
 
 .run-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
   gap: 8px;
+  min-width: 0;
 }
 
 .run-kpi-box {
@@ -75,6 +94,8 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .run-kpi-label {
@@ -99,6 +120,7 @@
 
 .run-timeline-container {
   margin-top: 12px;
+  min-width: 0;
 }
 
 .run-timeline-title {
@@ -116,6 +138,7 @@
   gap: 4px;
   max-height: 160px;
   overflow-y: auto;
+  min-width: 0;
 }
 
 .run-timeline-item {
@@ -128,6 +151,9 @@
   border: 1px solid var(--border, rgba(255, 255, 255, 0.04));
   font-size: 0.75rem;
   transition: background 0.15s ease;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .run-timeline-item:hover {
@@ -139,6 +165,8 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .run-timeline-step {
@@ -154,6 +182,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .run-timeline-target {
@@ -167,6 +197,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 220px;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .run-timeline-note-failed {
@@ -250,7 +282,7 @@
 
 .plan-task-item.in-progress {
   background: color-mix(in srgb, var(--accent, #10b981) 12%, transparent);
-  color: var(--accent-hover, #34d399);
+  color: var(--interactive-fg-hover);
 }
 
 .plan-task-item.completed {

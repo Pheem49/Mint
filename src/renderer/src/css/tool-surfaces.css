@@ -178,7 +178,7 @@
 
 .tool-surface-tab-icon {
   flex: 0 0 auto;
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   font: 600 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -316,7 +316,7 @@
   padding: 0 10px;
   border: 0;
   border-left: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   background: transparent;
   font-size: 0.74rem;
 }
@@ -385,6 +385,12 @@
   visibility: visible;
   pointer-events: auto;
   transform: none;
+}
+
+/* Keep inactive terminal tabs mounted so their shell process and scrollback
+   survive tab changes, while removing them from layout and hit testing. */
+.terminal-dock.is-page:not(.is-open) {
+  display: none;
 }
 
 .terminal-dock.is-page .terminal-dock-header {

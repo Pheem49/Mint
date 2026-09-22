@@ -24,12 +24,20 @@
   min-width: 0;
   padding: 20px;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 16px;
   user-select: text;
   contain: content;
   will-change: transform;
+}
+
+/* Every chat item must be able to shrink inside a narrow conversation panel.
+   Individual code/output blocks provide their own horizontal scrolling. */
+.chat-container > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .chat-container::-webkit-scrollbar {
@@ -113,7 +121,7 @@
 }
 
 .message-time {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   color: var(--text-muted);
   margin-top: 4px;
   margin-bottom: 2px;
@@ -135,7 +143,7 @@
   border: 1px solid var(--border-default);
   border-radius: var(--radius-full, 999px);
   padding: 2px 9px 2px 7px;
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   color: var(--text-secondary);
   line-height: 1.3;
@@ -214,7 +222,7 @@
 }
 
 .message-timestamp {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   color: var(--text-muted);
   opacity: 1;
   user-select: none;
@@ -227,7 +235,7 @@
   white-space: nowrap;
   border: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--interactive-fg);
   font-weight: 600;
   font: inherit;
   line-height: 1.2;
@@ -237,7 +245,7 @@
 
 .provider-badge:hover,
 .provider-badge.is-open {
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -346,7 +354,7 @@
 }
 
 .ai-list-bullet {
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
   font-weight: 700;
   line-height: 1.5;
 }
@@ -397,7 +405,7 @@
   gap: 8px;
   width: 100%;
   font-family: inherit;
-  font-size: 0.94rem;
+  font-size: 1rem;
   line-height: 1.7;
   letter-spacing: 0.01em;
   word-break: break-word;
@@ -486,7 +494,7 @@
 }
 
 .chat-link {
-  color: var(--accent-hover, #34d399);
+  color: var(--interactive-fg-hover);
   text-decoration: underline;
   text-underline-offset: 3px;
   word-break: break-all;
@@ -588,7 +596,7 @@
   padding: 9px 16px;
   font-size: 0.72rem;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--interactive-fg);
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-surface-soft);
   letter-spacing: 0.04em;
@@ -657,20 +665,20 @@
   font-size: 0.84rem;
   font-weight: 600;
   font-family: var(--font-mono, monospace);
-  color: var(--accent);
+  color: var(--interactive-fg);
   min-width: 128px;
   flex-shrink: 0;
   white-space: nowrap;
 }
 
 .slash-suggestion-item.active .slash-cmd-name {
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
 }
 
 .skill-badge {
   font-size: 0.7rem;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--interactive-fg);
   background: var(--accent-subtle);
   padding: 2px 7px;
   border-radius: var(--radius-sm);
@@ -814,7 +822,7 @@
 #chat-tool-btn:hover,
 #screen-capture-btn:hover {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent);
+  color: var(--interactive-fg);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
@@ -1167,6 +1175,7 @@
   gap: 8px;
   margin-bottom: 8px;
   margin-top: 0;
+  min-width: 0;
   max-width: 100%;
 }
 
@@ -1203,6 +1212,7 @@
   border-radius: 0;
   color: var(--text-main);
   width: 100%;
+  min-width: 0;
   max-width: 100%;
   padding: 4px 0;
   box-shadow: none;
@@ -1215,13 +1225,13 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--accent);
+  color: var(--interactive-fg);
   font-weight: 500;
   transition: color 0.15s ease;
 }
 
 .file-changes-toggle:hover {
-  color: var(--accent-hover, var(--accent));
+  color: var(--interactive-fg-hover);
 }
 
 .file-changes-rewind-btn {
@@ -1283,7 +1293,7 @@
   align-items: center;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border-radius: 7px;
-  color: var(--accent);
+  color: var(--interactive-fg);
   display: inline-flex;
   flex: 0 0 30px;
   font-size: 1rem;
@@ -1393,7 +1403,7 @@
 }
 
 .file-changes-filename.is-new {
-  color: var(--accent);
+  color: var(--interactive-fg);
 }
 
 .file-changes-dirpath {
@@ -1406,7 +1416,7 @@
 .file-changes-badge-new {
   font-size: 0.68rem;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--interactive-fg);
   margin-left: 8px;
   padding: 1px 6px;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
@@ -1416,7 +1426,7 @@
 }
 
 .file-changes-count-add {
-  color: var(--accent);
+  color: var(--interactive-fg);
   font-weight: 600;
 }
 
@@ -1433,7 +1443,7 @@
   font-size: 0.68rem;
   border-radius: var(--radius-xs, 4px);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
+  color: var(--interactive-fg);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   cursor: pointer;
   font-weight: 500;
@@ -1442,7 +1452,7 @@
 
 .file-changes-preview-btn:hover {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: var(--accent-hover, var(--accent));
+  color: var(--interactive-fg-hover);
 }
 
 .file-changes-diff-box {
@@ -1487,7 +1497,7 @@
 }
 
 .file-changes-diff-sign-add {
-  color: var(--accent);
+  color: var(--interactive-fg);
   margin-right: 6px;
   user-select: none;
   font-weight: 600;
@@ -1598,7 +1608,7 @@
   align-items: center;
   background: color-mix(in srgb, var(--accent) 13%, transparent);
   border-radius: 4px;
-  color: var(--accent);
+  color: var(--interactive-fg);
   display: inline-flex;
   font-size: 0.58rem;
   font-weight: 700;
@@ -1639,7 +1649,7 @@
 .code-review-line.is-deleted { background: color-mix(in srgb, var(--status-error, #ef4444) 12%, transparent); }
 .code-review-line-number { color: var(--text-muted); padding-right: 10px; text-align: right; user-select: none; }
 .code-review-sign { color: var(--text-muted); text-align: center; user-select: none; }
-.code-review-line.is-added .code-review-sign { color: var(--accent); }
+.code-review-line.is-added .code-review-sign { color: var(--interactive-fg); }
 .code-review-line.is-deleted .code-review-sign { color: var(--status-error, #ef4444); }
 .code-review-line code { color: var(--text-main); font: inherit; padding-right: 14px; }
 
@@ -1881,7 +1891,7 @@
 .agent-activity-inline-result {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.76rem;
-  color: var(--accent, #38bdf8);
+  color: var(--interactive-fg);
   font-weight: 500;
   flex-shrink: 0;
   background: color-mix(in srgb, var(--accent, #38bdf8) 10%, transparent);
@@ -1899,11 +1909,11 @@
 }
 
 .agent-activity-status-check {
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
 }
 
 .agent-activity-status-spin {
-  color: var(--accent, #38bdf8);
+  color: var(--interactive-fg);
   animation: spin 1.2s linear infinite;
 }
 
@@ -2484,7 +2494,7 @@
 .agent-activity-thought-cursor {
   display: inline-block;
   margin-left: 2px;
-  color: var(--accent);
+  color: var(--interactive-fg);
   animation: agent-thought-cursor-blink 0.9s steps(1) infinite;
 }
 
@@ -2523,7 +2533,7 @@
 }
 
 .smart-context-control.is-active .smart-context-label {
-  color: var(--accent);
+  color: var(--interactive-fg);
 }
 
 .smart-context-label {
@@ -2713,7 +2723,7 @@ input:checked + .slider:before {
 .message-bubble {
   padding: 10px 12px;
   border-radius: var(--radius-md);
-  font-size: 0.9rem;
+  font-size: 1rem;
   line-height: 1.48;
   box-shadow: none;
   backdrop-filter: var(--glass-blur);
@@ -2742,7 +2752,7 @@ input:checked + .slider:before {
 }
 
 .provider-badge {
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
 }
 
 /* Force AI replies to render as plain inline text (no bubble/frame). */
@@ -2831,7 +2841,7 @@ input:checked + .slider:before {
   align-items: center;
   justify-content: center;
   flex: 0 0 16px;
-  color: var(--accent);
+  color: var(--interactive-fg);
 }
 
 .workspace-select-copy {
@@ -2890,7 +2900,7 @@ input:checked + .slider:before {
 }
 
 .workspace-select-search:focus-within {
-  color: var(--accent);
+  color: var(--interactive-fg);
 }
 
 .workspace-select-search input {
@@ -2971,7 +2981,7 @@ input:checked + .slider:before {
 }
 
 .workspace-select-current {
-  color: var(--accent);
+  color: var(--interactive-fg);
 }
 
 .workspace-select-empty {
@@ -3198,7 +3208,7 @@ input:checked + .slider:before {
 }
 
 .git-branch-option[aria-selected='true'] svg {
-  color: var(--accent);
+  color: var(--interactive-fg);
 }
 
 .git-branch-option:disabled {
@@ -3925,7 +3935,7 @@ input:checked + .slider:before {
 #mic-btn.voice-mode-active {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface-strong));
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
 }
 
 #send-btn {
@@ -4129,7 +4139,7 @@ input:checked + .slider:before {
   padding: 4px 10px;
   font-size: 0.73rem;
   font-weight: 600;
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   background: color-mix(in srgb, var(--accent, #10b981) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent, #10b981) 28%, transparent);
   border-radius: 999px;
@@ -4214,7 +4224,7 @@ input:checked + .slider:before {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
 }
 
 /* Animations and Recording States */
@@ -4300,7 +4310,7 @@ input:checked + .slider:before {
 }
 
 .system-event-pill svg {
-  color: var(--accent, #38bdf8);
+  color: var(--interactive-fg);
 }
 
 /* Stop button styling overrides for ChatPanel */
@@ -4353,14 +4363,14 @@ input:checked + .slider:before {
 }
 
 .msg-action-btn.is-copied {
-  color: var(--accent, #10b981) !important;
+  color: var(--interactive-fg) !important;
   background: color-mix(in srgb, var(--accent, #10b981) 12%, transparent);
   border-color: color-mix(in srgb, var(--accent, #10b981) 25%, transparent);
   opacity: 1 !important;
 }
 
 .msg-action-btn.is-speaking {
-  color: var(--accent, #10b981) !important;
+  color: var(--interactive-fg) !important;
   background: color-mix(in srgb, var(--accent, #10b981) 12%, transparent);
   border-color: color-mix(in srgb, var(--accent, #10b981) 25%, transparent);
   animation: aura-breathe-bar 1.8s infinite ease-in-out;

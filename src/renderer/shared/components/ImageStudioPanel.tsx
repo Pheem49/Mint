@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
+import '../css/image-studio.css'
 import { mediaPlatform } from '../platform'
 import type { ImageGenRequest, ImageGenResponse, ImageGenProviders, PictureEntry } from '../types'
 

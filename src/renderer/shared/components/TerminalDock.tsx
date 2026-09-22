@@ -193,8 +193,14 @@ export default function TerminalDock({ visible, page = false, position, size, cw
     if (!terminalReady || !visible || !hostRef.current) return
     const observer = new ResizeObserver(fit)
     observer.observe(hostRef.current)
-    requestAnimationFrame(fit)
-    return () => observer.disconnect()
+    const frame = window.requestAnimationFrame(() => {
+      fit()
+      terminalRef.current?.focus()
+    })
+    return () => {
+      observer.disconnect()
+      window.cancelAnimationFrame(frame)
+    }
   }, [terminalReady, visible, fit])
 
   useEffect(() => () => resizeCleanupRef.current?.(), [])

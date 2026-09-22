@@ -62,7 +62,7 @@
 .settings-btn:hover {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-color: color-mix(in srgb, var(--accent) 20%, transparent);
-  color: var(--accent);
+  color: var(--interactive-fg);
 }
 
 .sidebar-toggle {
@@ -147,7 +147,7 @@
 }
 
 .sidebar-brand.clickable:hover .sidebar-brand-name {
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
 }
 
 .sidebar-brand.clickable:hover .sidebar-logo {
@@ -667,7 +667,7 @@
   margin-left: auto;
   font-size: 0.72rem;
   font-weight: 500;
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   opacity: 0.85;
 }
 

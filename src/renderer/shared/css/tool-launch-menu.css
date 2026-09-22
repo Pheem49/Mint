@@ -1,0 +1,97 @@
+.desktop-tools-menu-wrap {
+  position: relative;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-tools-trigger:hover {
+  color: var(--text-primary, #f1f5f9);
+  background: color-mix(in srgb, var(--accent, #10b981) 14%, var(--bg-surface, #202632));
+  border-color: color-mix(in srgb, var(--accent, #10b981) 28%, transparent);
+  box-shadow: none;
+  transform: none;
+}
+
+.desktop-tools-menu {
+  position: absolute;
+  z-index: 500;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 280px;
+  padding: 6px;
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.14));
+  border-radius: 12px;
+  background: var(--bg-surface, #20232a);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.38);
+}
+
+.desktop-tools-menu > button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 38px;
+  gap: 10px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text-main, #e5e7eb);
+  background: transparent;
+  text-align: left;
+}
+
+.desktop-tools-menu > button:hover,
+.desktop-tools-menu > button:focus-visible {
+  outline: none;
+  background: var(--bg-surface-hover, rgba(255, 255, 255, 0.08));
+}
+
+.desktop-tools-menu kbd {
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 5px;
+  color: var(--text-muted, #9ca3af);
+  font: 11px 'Fira Code', monospace;
+}
+
+.desktop-tools-menu form {
+  padding: 8px 8px 4px;
+}
+
+.desktop-tools-menu label {
+  display: block;
+  margin: 0 0 7px 2px;
+  color: var(--text-muted, #9ca3af);
+  font-size: 0.72rem;
+}
+
+.desktop-browser-launch-row {
+  display: flex;
+  height: 36px;
+  overflow: hidden;
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.14));
+  border-radius: 7px;
+  background: var(--bg-input, rgba(0, 0, 0, 0.18));
+}
+
+.desktop-browser-launch-row input {
+  width: 100%;
+  min-width: 0;
+  padding: 0 9px;
+  border: 0;
+  outline: 0;
+  color: var(--text-main, #e5e7eb);
+  background: transparent;
+  font-size: 0.76rem;
+}
+
+.desktop-browser-launch-row > button {
+  width: 36px;
+  flex: 0 0 36px;
+  border: 0;
+  color: var(--text-main, #e5e7eb);
+  background: transparent;
+}
+
+.desktop-browser-launch-row > button:hover {
+  color: var(--interactive-fg);
+}

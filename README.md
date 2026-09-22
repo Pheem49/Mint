@@ -237,11 +237,16 @@ cp .env.example .env
 Open the `.env` file and insert your API keys (e.g. `GEMINI_API_KEY=your_key_here`).
 
 ### 2. Desktop Application
-Install the dependencies and start the application in development mode:
+Install the dependencies and start the application in development mode with HMR:
 ```bash
 npm install
-npm run tauri:dev
+npm run dev
 ```
+To open the normal production-mode desktop app locally (without a Vite dev server):
+```bash
+npm start
+```
+`npm start` always rebuilds the local Desktop release before opening it, so it always runs the latest production code. Use `npm run launch` when you deliberately want to open the already-built release binary without rebuilding.
 To compile and build a production standalone desktop package:
 ```bash
 npm run tauri:build
@@ -818,4 +823,3 @@ We welcome contributions from the community! Whether you want to fix a bug, add 
 ## License
 
 Mint is licensed under the [AGPL-3.0-only license](LICENSE).
-

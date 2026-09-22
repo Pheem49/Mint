@@ -154,7 +154,7 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
                 strokeWidth="2.2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                style={{ color: 'var(--accent, #10b981)' }}
+                style={{ color: 'var(--interactive-fg)' }}
               >
                 <polyline points="4 17 10 11 4 5"></polyline>
                 <line x1="12" y1="19" x2="20" y2="19"></line>
@@ -393,7 +393,7 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
                         {session.title || 'Untitled Session'}
                       </div>
                       <div className="code-session-snippet">
-                        <span style={{ color: 'var(--accent, #10b981)', opacity: 0.8, marginRight: '4px' }}>
+                        <span style={{ color: 'var(--interactive-fg)', opacity: 0.8, marginRight: '4px' }}>
                           &gt;
                         </span>
                         <span>{session.title || 'Interactive shell'}</span>

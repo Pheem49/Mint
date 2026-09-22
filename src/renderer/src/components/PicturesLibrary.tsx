@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, memo } from 'react'
+import '../css/pictures.css'
 import { createPortal } from 'react-dom'
 import { type PictureEntry, convertFileSrc, isTauriRuntime, getLocalApiBase, deleteSavedPicture } from '../tauri'
 import type { DashboardView } from './DashboardSidebar'

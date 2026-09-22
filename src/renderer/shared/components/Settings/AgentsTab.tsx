@@ -251,7 +251,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
 
         {isEditing ? (
           <div className="form-grid single" style={{ background: 'var(--panel-soft)', padding: '20px', borderRadius: '8px', border: '1px solid var(--panel-raised)', marginTop: '10px' }}>
-            <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: 'var(--accent)' }}>
+            <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: 'var(--interactive-fg)' }}>
               {editingAgent ? `Edit Agent: ${editingAgent.name}` : 'Create New Agent'}
             </h3>
             
@@ -500,7 +500,7 @@ function SubagentsSection() {
 
       {isEditing ? (
         <div className="form-grid single" style={{ background: 'var(--panel-soft)', padding: '20px', borderRadius: '8px', border: '1px solid var(--panel-raised)' }}>
-          <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: 'var(--accent)' }}>
+          <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: 'var(--interactive-fg)' }}>
             {editingSourcePath ? `Edit Subagent: ${form.name}` : 'Create New Subagent'}
           </h3>
 

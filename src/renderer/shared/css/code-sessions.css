@@ -226,7 +226,7 @@
   font-weight: 600;
   text-transform: none;
   letter-spacing: 0.04em;
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   background: color-mix(in srgb, var(--accent, #10b981) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent, #10b981) 25%, transparent);
   padding: 1px 5px;
@@ -432,7 +432,7 @@
   justify-content: space-between;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.84rem;
-  color: var(--accent, #34d399);
+  color: var(--interactive-fg);
 }
 
 /* Responsive adjustment for small screens */

@@ -33,7 +33,8 @@ const ACCESSORY_MAP: Record<number, string | null> = {
 
 const TRACKING_SPEED = 1.25
 const MAX_DEVICE_PIXEL_RATIO = 1.25
-const ACTIVE_MAX_FPS = 60
+const IDLE_MAX_FPS = 24
+const INTERACTION_MAX_FPS = 45
 
 const clampToUnitCircle = (x: number, y: number) => {
   if (isNaN(x) || isNaN(y) || !isFinite(x) || !isFinite(y)) {
@@ -57,6 +58,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
   const [shouldRender, setShouldRender] = useState(isActive)
   const baseWidthRef = useRef<number | null>(null)
   const baseHeightRef = useRef<number | null>(null)
+  const pointerInsideRef = useRef(false)
 
   useEffect(() => {
     if (isActive && !shouldRender) {
@@ -64,12 +66,14 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     }
   }, [isActive, shouldRender])
 
-  const setRenderActive = (active: boolean) => {
+  const setRenderActive = (active: boolean, interactive = pointerInsideRef.current) => {
     const app = appRef.current
     const model = modelRef.current
     if (!app) return
 
-    app.ticker.maxFPS = ACTIVE_MAX_FPS
+    // The model idles for most of a chat session. Keep its animation smooth
+    // without reserving a 60 FPS GPU budget until the user actually hovers it.
+    app.ticker.maxFPS = interactive && !isLocked ? INTERACTION_MAX_FPS : IDLE_MAX_FPS
     if (model) {
       model.autoUpdate = active
       model.renderable = active
@@ -114,7 +118,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
           resolution: Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO),
           resizeTo: containerRef.current!,
         })
-        appInstance.ticker.maxFPS = ACTIVE_MAX_FPS
+        appInstance.ticker.maxFPS = IDLE_MAX_FPS
         appInstance.ticker.minFPS = 10
         appRef.current = appInstance
 
@@ -280,7 +284,8 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     }
   }, [isActive])
 
-  // Follow the pointer across the whole window and smoothly return to center when tracking stops.
+  // Only observe pointer movement while it is over the model. Listening on the
+  // entire window made normal chat typing and scrolling compete with Live2D.
   useEffect(() => {
     let rafId: number | null = null
     let pendingNormalized: { x: number; y: number } | null = null
@@ -316,9 +321,25 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
       }
     }
 
-    if (isLocked) centerFocus()
+    const handlePointerEnter = () => {
+      if (isLocked || !isActive || document.visibilityState !== 'visible') return
+      pointerInsideRef.current = true
+      setRenderActive(true, true)
+    }
 
-    window.addEventListener('pointermove', handlePointerMove)
+    const handlePointerLeave = () => {
+      pointerInsideRef.current = false
+      centerFocus()
+      setRenderActive(isActive && document.visibilityState === 'visible', false)
+    }
+
+    const container = containerRef.current
+    if (!container) return
+    if (isLocked) handlePointerLeave()
+
+    container.addEventListener('pointermove', handlePointerMove)
+    container.addEventListener('pointerenter', handlePointerEnter)
+    container.addEventListener('pointerleave', handlePointerLeave)
     window.addEventListener('blur', centerFocus)
 
     return () => {
@@ -326,7 +347,9 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
         cancelAnimationFrame(rafId)
         rafId = null
       }
-      window.removeEventListener('pointermove', handlePointerMove)
+      container.removeEventListener('pointermove', handlePointerMove)
+      container.removeEventListener('pointerenter', handlePointerEnter)
+      container.removeEventListener('pointerleave', handlePointerLeave)
       window.removeEventListener('blur', centerFocus)
     }
   }, [isLocked, isActive])

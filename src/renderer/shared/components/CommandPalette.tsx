@@ -410,7 +410,7 @@ export function CommandPalette({
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
-            style={{ color: 'var(--accent, #10b981)', flexShrink: 0 }}
+            style={{ color: 'var(--interactive-fg)', flexShrink: 0 }}
           >
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />

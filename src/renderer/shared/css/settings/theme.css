@@ -166,7 +166,7 @@
 .theme-preset-badge-tag {
     font-size: 0.72rem;
     font-weight: 600;
-    color: var(--accent);
+    color: var(--interactive-fg);
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     padding: 2px 8px;
     border-radius: var(--radius-full);
@@ -321,7 +321,7 @@
 .theme-preset-number {
     font-size: 0.86rem;
     font-weight: 700;
-    color: var(--accent);
+    color: var(--interactive-fg);
 }
 
 .theme-preset-title {
@@ -525,7 +525,7 @@
 /* Custom Accent */
 .custom-accent-toggle {
     font-size: 0.74rem;
-    color: var(--accent);
+    color: var(--interactive-fg);
     background: transparent;
     border: none;
     cursor: pointer;

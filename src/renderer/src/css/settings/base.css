@@ -86,7 +86,7 @@ button {
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
     background: var(--surface-strong);
-    color: var(--accent-hover);
+    color: var(--interactive-fg-hover);
     font-size: 1rem;
 }
 
@@ -488,7 +488,7 @@ input[type="color"] {
 }
 
 .hint a {
-    color: var(--accent-hover);
+    color: var(--interactive-fg-hover);
     text-decoration: none;
 }
 
@@ -619,7 +619,7 @@ input:checked + .settings-toggle-slider::before {
     border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
     border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--accent) 10%, transparent);
-    color: var(--accent-hover);
+    color: var(--interactive-fg-hover);
     font-size: 0.78rem;
     font-weight: 600;
     text-align: center;
@@ -808,7 +808,7 @@ kbd {
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     background: var(--input-bg);
-    color: var(--accent-hover);
+    color: var(--interactive-fg-hover);
     font-family: 'Outfit', sans-serif;
     font-size: 0.76rem;
     font-weight: 700;

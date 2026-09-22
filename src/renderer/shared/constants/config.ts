@@ -11,10 +11,11 @@ export const DEFAULT_CONFIG = {
   customBgStart: '#0f172a',
   customBgEnd: '#1e1b4b',
   customPanelBg: '#1e293b',
-  surfaceStyle: 'glass' as 'opaque' | 'glass',
-  glassBlur: 'blur(16px)',
-  fontFamily: "'Prompt', 'Noto Sans Thai', 'Inter', sans-serif",
-  fontSize: '18px',
+  surfaceStyle: 'opaque' as 'opaque' | 'glass',
+  glassBlur: 'none',
+  fontFamily: "'Prompt', sans-serif",
+  fontSize: '16px',
+  typographyScaleVersion: 2,
   apiKey: '',
   aiProvider: 'gemini',
   geminiModel: 'gemini-2.5-flash' as string,
@@ -163,4 +164,17 @@ export const DEFAULT_CONFIG = {
 
   // Custom Model Selections per Provider
   customModelSelections: {} as Record<string, string>,
+}
+
+/**
+ * Version 1 used 18px as the implicit default. Move that old default to the
+ * denser 16px scale once, while preserving any size chosen after this update.
+ */
+export function migrateTypographyScale<T extends Record<string, any> | null | undefined>(config: T): T {
+  if (!config || config.typographyScaleVersion === 2) return config
+  return {
+    ...config,
+    fontSize: config.fontSize === '18px' ? '16px' : config.fontSize,
+    typographyScaleVersion: 2,
+  } as T
 }

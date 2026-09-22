@@ -39,6 +39,35 @@ import type { ToolSurface } from './ToolSurfacePage'
 
 import { catalogPlatform, conversationPlatform, runtimePlatform } from '../platform'
 
+const STREAM_MARKDOWN_UPDATE_MS = 120
+
+function useThrottledValue<T>(value: T, intervalMs: number): T {
+  const [throttledValue, setThrottledValue] = useState(value)
+  const latestValueRef = useRef(value)
+  const lastUpdateRef = useRef(0)
+  const timerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+
+  useEffect(() => {
+    latestValueRef.current = value
+    if (Object.is(value, throttledValue)) return
+
+    const flush = () => {
+      timerRef.current = null
+      lastUpdateRef.current = Date.now()
+      setThrottledValue(latestValueRef.current)
+    }
+    const remaining = intervalMs - (Date.now() - lastUpdateRef.current)
+    if (remaining <= 0) flush()
+    else if (timerRef.current === null) timerRef.current = window.setTimeout(flush, remaining)
+  }, [value, throttledValue, intervalMs])
+
+  useEffect(() => () => {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current)
+  }, [])
+
+  return throttledValue
+}
+
 const {
   getTtsUrls, startGeminiLiveSession, sendGeminiLiveAudioChunk, stopGeminiLiveSession,
   listGitCheckpoints, rollbackGitCheckpoint, undoGitCheckpoint,
@@ -194,6 +223,9 @@ export default function ChatPanel({
   onOpenReview,
   } = { ...conversation, ...actions }
   const agentActivities = activitiesFrom(agentProgress)
+  // Markdown parsing can be expensive for code, tables, and interactive cards.
+  // Limit it to a steady cadence instead of parsing on every stream chunk.
+  const throttledStreamedReply = useThrottledValue(streamedReply, STREAM_MARKDOWN_UPDATE_MS)
   const activeFallbackNotice = fallbackNotice(streamedResponse)
   const lastThinkingProgress = [...agentProgress].reverse().find(p => p.type === 'Thinking')
   let activeAgentName: string | null = null
@@ -292,6 +324,7 @@ export default function ChatPanel({
   const chatContainerRef = useRef<HTMLDivElement | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const isNearBottomRef = useRef(true)
+  const scrollFrameRef = useRef<number | null>(null)
 
   const handleChatScroll = useCallback(() => {
     const el = chatContainerRef.current
@@ -300,6 +333,26 @@ export default function ChatPanel({
     const nearBottom = distanceFromBottom <= 240
     setShowScrollToBottom(!nearBottom)
     isNearBottomRef.current = nearBottom
+  }, [])
+
+  const scheduleScrollToLatest = useCallback(() => {
+    if (!isNearBottomRef.current || scrollFrameRef.current !== null) return
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      const element = chatContainerRef.current
+      if (element && isNearBottomRef.current) {
+        // Smooth scrolling on every token restarts animations and causes jank.
+        element.scrollTop = element.scrollHeight
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    scheduleScrollToLatest()
+  }, [interactions, sending, streamedReply, pendingApproval, agentProgress, scheduleScrollToLatest])
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current)
   }, [])
 
   useEffect(() => {
@@ -1383,7 +1436,7 @@ export default function ChatPanel({
               pointerEvents: 'auto',
             }}
           >
-            <div style={{ marginBottom: '16px', color: 'var(--accent)' }}>
+            <div style={{ marginBottom: '16px', color: 'var(--interactive-fg)' }}>
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                 <circle cx="8.5" cy="8.5" r="1.5" />
@@ -1459,9 +1512,9 @@ export default function ChatPanel({
                 <button
                   type="button"
                   className="chat-header-action-btn desktop-tools-trigger"
-                  aria-label="Open desktop tools"
+                  aria-label={onOpenTerminal ? 'Open desktop tools' : 'Open browser in a new tab'}
                   aria-expanded={desktopToolsMenuOpen}
-                  title="Open tools"
+                  title={onOpenTerminal ? 'Open tools' : 'Open browser in a new tab'}
                   onClick={() => setDesktopToolsMenuOpen((open) => !open)}
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -1600,8 +1653,8 @@ export default function ChatPanel({
                 )}
                 <div className="message-bubble">
                   <span>
-                    {streamedReply ? (
-                      renderFormattedMessage(streamedReply)
+                    {throttledStreamedReply ? (
+                      renderFormattedMessage(throttledStreamedReply)
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-soft, #94a3b8)' }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', flexShrink: 0 }}>
@@ -1636,23 +1689,23 @@ export default function ChatPanel({
                       <span className="provider-chip-model">{streamedResponse.model}</span>
                     </span>
                     {activeFallbackNotice && <span className="provider-fallback-notice">{activeFallbackNotice}</span>}
-                    {streamedReply && (
+                    {throttledStreamedReply && (
                       <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
                         <button
                           type="button"
                           className={`msg-action-btn copy-btn ${copiedId === 'live' ? 'is-copied' : ''}`}
-                          onClick={() => handleCopyMessage('live', streamedReply)}
+                          onClick={() => handleCopyMessage('live', throttledStreamedReply)}
                           title={copiedId === 'live' ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
                         >
                           {renderCopyIcon(copiedId === 'live')}
                         </button>
                         <button
                           type="button"
-                          className={`msg-action-btn tts-btn ${speakingText === streamedReply ? 'is-speaking' : ''}`}
-                          onClick={() => speak(streamedReply)}
-                          title={speakingText === streamedReply ? 'Stop reading' : 'Read aloud'}
+                          className={`msg-action-btn tts-btn ${speakingText === throttledStreamedReply ? 'is-speaking' : ''}`}
+                          onClick={() => speak(throttledStreamedReply)}
+                          title={speakingText === throttledStreamedReply ? 'Stop reading' : 'Read aloud'}
                         >
-                          {renderSpeakerIcon(speakingText === streamedReply)}
+                          {renderSpeakerIcon(speakingText === throttledStreamedReply)}
                         </button>
                       </div>
                     )}

@@ -222,7 +222,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
                     padding: '3px 8px',
                     borderRadius: '6px',
                     background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
-                    color: 'var(--accent)',
+                    color: 'var(--interactive-fg)',
                     fontWeight: 600,
                     fontSize: '12px',
                   }}
@@ -316,7 +316,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
                             padding: '1px 6px',
                             borderRadius: '4px',
                             background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
-                            color: 'var(--accent)',
+                            color: 'var(--interactive-fg)',
                           }}
                         >
                           [NEW FILE]
@@ -324,7 +324,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
                       ) : (
                         <>
                           {file.additions > 0 && (
-                            <span style={{ fontSize: '11px', color: 'var(--accent)', fontWeight: 600 }}>
+                            <span style={{ fontSize: '11px', color: 'var(--interactive-fg)', fontWeight: 600 }}>
                               +{file.additions}
                             </span>
                           )}

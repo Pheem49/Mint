@@ -327,7 +327,7 @@
 }
 
 .mgmt-status.running {
-  color: var(--accent, #60a5fa);
+  color: var(--interactive-fg);
 }
 
 .mgmt-empty {
@@ -540,7 +540,7 @@
 .management-card-title-badge {
   font-size: 0.88rem;
   font-weight: 700;
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   background: var(--accent-subtle, rgba(16, 185, 129, 0.12));
   padding: 3px 10px;
   border-radius: var(--radius-sm);
@@ -568,7 +568,7 @@
 
 .management-badge.workspace {
   background: var(--accent-subtle, rgba(59, 130, 246, 0.15));
-  color: var(--accent, #60a5fa);
+  color: var(--interactive-fg);
   border: 1px solid var(--accent-border, rgba(59, 130, 246, 0.3));
 }
 
@@ -606,7 +606,7 @@
 }
 
 .management-tag.workspace {
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
 }
 
 .management-tag.global {
@@ -728,7 +728,7 @@
 
 .management-plugin-icon-btn:hover {
   border-color: var(--accent, #3b82f6);
-  color: var(--accent, #60a5fa);
+  color: var(--interactive-fg);
   background: var(--accent-subtle, rgba(59, 130, 246, 0.1));
 }
 
@@ -757,7 +757,7 @@
   padding: 8px 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
-  color: var(--accent, #38bdf8);
+  color: var(--interactive-fg);
   word-break: break-all;
 }
 
@@ -820,13 +820,13 @@
 .management-expand-btn:hover {
   background: var(--surface-strong, rgba(255, 255, 255, 0.15));
   border-color: var(--accent, #3b82f6);
-  color: var(--accent, #3b82f6);
+  color: var(--interactive-fg);
 }
 
 .management-expand-btn.is-expanded {
   background: var(--accent-subtle, rgba(59, 130, 246, 0.15));
   border-color: var(--accent, #3b82f6);
-  color: var(--accent, #3b82f6);
+  color: var(--interactive-fg);
 }
 
 .management-expand-btn svg {
@@ -1133,7 +1133,7 @@
 }
 
 .mcp-test-status.testing {
-  color: var(--accent, #60a5fa);
+  color: var(--interactive-fg);
 }
 
 .management-badge.remote {

@@ -96,6 +96,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
   const [tree, setTree] = useState<WorkspaceTreeEntry | null>(null)
   const [revision, setRevision] = useState(0)
   const revisionRef = useRef(0)
+  const refreshInFlightRef = useRef(false)
   const [error, setError] = useState('')
 
   const applySnapshot = useCallback((snapshot: WorkspaceSnapshot) => {
@@ -110,31 +111,36 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
       setTree(null)
       return
     }
+    if (refreshInFlightRef.current) return
 
+    refreshInFlightRef.current = true
     try {
       setError('')
       applySnapshot(await workspacePlatform.getWorkspaceSnapshot({ root: workspacePath, relativePath: '', revision: revisionRef.current }))
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      refreshInFlightRef.current = false
     }
   }, [applySnapshot, workspacePath])
 
   useEffect(() => {
-    refresh()
+    void refresh()
 
-    // Refresh when the window gains focus (e.g., switching back from VS Code)
-    const handleFocus = () => {
-      refresh()
+    // There is no filesystem event stream behind this native snapshot API.
+    // Catch up immediately when returning to the app and use a low-frequency
+    // fallback only while this panel is actually visible and focused.
+    const refreshWhenActive = () => {
+      if (document.visibilityState === 'visible' && document.hasFocus()) void refresh()
     }
-    window.addEventListener('focus', handleFocus)
+    window.addEventListener('focus', refreshWhenActive)
+    document.addEventListener('visibilitychange', refreshWhenActive)
 
-    // Poll every 15 seconds to catch edits/updates in real-time
-    const interval = setInterval(() => {
-      refresh()
-    }, 15000)
+    const interval = window.setInterval(refreshWhenActive, 30000)
 
     return () => {
-      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('focus', refreshWhenActive)
+      document.removeEventListener('visibilitychange', refreshWhenActive)
       clearInterval(interval)
     }
   }, [workspacePath, refreshRevision, refresh])

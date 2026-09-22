@@ -290,5 +290,15 @@
 
   --accent: var(--accent-default);
   --accent-contrast: var(--text-on-accent);
+  /* Accent is a surface color; interactive text needs its own semantic role. */
+  --interactive-fg: var(--accent);
+  --interactive-fg-hover: var(--accent-hover);
   --danger: var(--status-error);
+}
+
+/* Pure white remains the primary surface for Dark Monochrome. Its text and
+ * icon affordances use zinc so they stay legible on light selected states. */
+:root[data-accent-mode="monochrome"] {
+  --interactive-fg: #71717a;
+  --interactive-fg-hover: #d4d4d8;
 }

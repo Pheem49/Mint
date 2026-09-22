@@ -1,4 +1,4 @@
-import { type ChangeEvent, type CSSProperties, type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, type ChangeEvent, type CSSProperties, type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import {
   compactAgentProgressForPersistence,
   mergeActivitySnapshots,
@@ -22,14 +22,8 @@ const {
 import ChatPanel, { type ConversationActions, type ConversationViewModel } from './ChatPanel'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import DesktopTitlebar from './DesktopTitlebar'
-import ImageStudioPanel from './ImageStudioPanel'
-import VeoStudioPanel from './VeoStudioPanel'
-import ModelPanel from '@/components/ModelPanel'
 import type { ModelInteraction } from '@/components/ModelPanel'
-import PicturesLibrary from '@/components/PicturesLibrary'
-import WorkspacePanel from '@/components/WorkspacePanel'
-import ToolSurfacePage, { type ToolSurface } from './ToolSurfacePage'
-import { CommandPalette } from './CommandPalette'
+import type { ToolSurface } from './ToolSurfacePage'
 import {
   errorMessage,
   readImage,
@@ -59,7 +53,7 @@ const ACCESSORIES = [
   "Hold Pen",
 ]
 
-import { DEFAULT_CONFIG } from '../constants/config'
+import { DEFAULT_CONFIG, migrateTypographyScale } from '../constants/config'
 
 const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
 const RECENT_WORKSPACE_PATHS_KEY = 'mint:recent-workspace-paths'
@@ -236,14 +230,26 @@ const MOCK_WELCOME_INTERACTION = {
 }
 
 
-import SkillsView from './SkillsView'
-import ScheduledTasksView from './ScheduledTasksView'
-import LinkedFoldersView from './LinkedFoldersView'
-import McpServersView from './McpServersView'
-import PluginsView from './PluginsView'
-import CliSessionsView from './CliSessionsView'
 import { isSupportedDocument } from '../utils/documentTypes'
 import { useCompanionWidget } from '@/companionWidget'
+
+const ModelPanel = lazy(() => import('@/components/ModelPanel'))
+const WorkspacePanel = lazy(() => import('@/components/WorkspacePanel'))
+const ToolSurfacePage = lazy(() => import('./ToolSurfacePage'))
+const SkillsView = lazy(() => import('./SkillsView'))
+const ScheduledTasksView = lazy(() => import('./ScheduledTasksView'))
+const LinkedFoldersView = lazy(() => import('./LinkedFoldersView'))
+const McpServersView = lazy(() => import('./McpServersView'))
+const PluginsView = lazy(() => import('./PluginsView'))
+const CliSessionsView = lazy(() => import('./CliSessionsView'))
+const PicturesLibrary = lazy(() => import('@/components/PicturesLibrary'))
+const ImageStudioPanel = lazy(() => import('./ImageStudioPanel'))
+const VeoStudioPanel = lazy(() => import('./VeoStudioPanel'))
+const CommandPalette = lazy(() => import('./CommandPalette').then(({ CommandPalette: Component }) => ({ default: Component })))
+
+function LazyPanelFallback() {
+  return <div className="auth-gate-loading" style={{ minHeight: 160 }}>Loading panel…</div>
+}
 
 function getInitialViewFromUrl(): DashboardView {
   if (typeof window === 'undefined') return 'chat'
@@ -460,19 +466,6 @@ export default function MintDashboard() {
     return saved >= SIDEBAR_MIN_WIDTH && saved <= SIDEBAR_MAX_WIDTH ? saved : SIDEBAR_DEFAULT_WIDTH
   })
 
-  useEffect(() => {
-    if (!isDesktopApp) return
-    const handleTerminalShortcut = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target?.isContentEditable || ['INPUT', 'TEXTAREA'].includes(target?.tagName || '')) return
-      if ((event.ctrlKey || event.metaKey) && event.code === 'Backquote') {
-        event.preventDefault()
-        toggleTerminalSurface()
-      }
-    }
-    window.addEventListener('keydown', handleTerminalShortcut)
-    return () => window.removeEventListener('keydown', handleTerminalShortcut)
-  }, [isDesktopApp])
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
   const [planMode, setPlanMode] = useState(() => window.localStorage.getItem('mint:plan-mode') === 'true')
@@ -625,6 +618,7 @@ export default function MintDashboard() {
   // than the effect's own dependency array so a poll landing doesn't tear
   // down and recreate the interval on every tick.
   const interactionsRef = useRef(interactions)
+  const chatPollInFlightRef = useRef(false)
   useEffect(() => {
     interactionsRef.current = interactions
   }, [interactions])
@@ -635,11 +629,20 @@ export default function MintDashboard() {
   // lazy `useState` initializer above.
   useEffect(() => {
     if (view !== 'chat' || !conversationId) return
-    const interval = window.setInterval(async () => {
-      // Skip while backgrounded (nothing to show anyone) or mid-send (a
-      // fetch landing here would clobber the in-flight optimistic/streamed
-      // reply with stale history).
-      if (document.visibilityState !== 'visible' || sending) return
+    let disposed = false
+    const syncHistory = async () => {
+      // A shared SQLite database has no cross-process event bus. Refresh as
+      // soon as the user returns, but avoid work while hidden or overlapping
+      // a slow read with the next polling tick.
+      if (
+        disposed ||
+        document.visibilityState !== 'visible' ||
+        !document.hasFocus() ||
+        sending ||
+        chatPollInFlightRef.current
+      ) return
+
+      chatPollInFlightRef.current = true
       try {
         const history = (await getRecentInteractions(50, conversationId, workspacePath || null)).reverse()
         const current = interactionsRef.current
@@ -650,9 +653,22 @@ export default function MintDashboard() {
         setAgentActivitySnapshots((snapshots) => mergeActivitySnapshots(snapshots, history))
       } catch {
         // Best-effort — a transient fetch failure just waits for the next tick.
+      } finally {
+        chatPollInFlightRef.current = false
       }
-    }, 6000)
-    return () => window.clearInterval(interval)
+    }
+
+    const syncWhenActive = () => { void syncHistory() }
+    window.addEventListener('focus', syncWhenActive)
+    document.addEventListener('visibilitychange', syncWhenActive)
+    const interval = window.setInterval(syncWhenActive, 15000)
+
+    return () => {
+      disposed = true
+      window.clearInterval(interval)
+      window.removeEventListener('focus', syncWhenActive)
+      document.removeEventListener('visibilitychange', syncWhenActive)
+    }
   }, [view, conversationId, sending, workspacePath])
 
   const filteredSessions = chatSessions.filter((session) => {
@@ -753,8 +769,9 @@ export default function MintDashboard() {
       refreshChatSessions(),
       window.settingsApi?.getSettings()
         .then((loaded: any) => {
-          setSettingsConfig(loaded)
-          applyThemeStyles({ ...DEFAULT_CONFIG, ...loaded })
+          const migrated = migrateTypographyScale(loaded)
+          setSettingsConfig(migrated)
+          applyThemeStyles({ ...DEFAULT_CONFIG, ...migrated })
         }),
     ]).then((results) => {
       const failure = results.find((result) => result.status === 'rejected')
@@ -776,8 +793,9 @@ export default function MintDashboard() {
       getRuntimeStatus().then(setStatus).catch(() => {})
       window.settingsApi?.getSettings?.().then((loaded: any) => {
         if (loaded) {
-          setSettingsConfig(loaded)
-          applyThemeStyles(loaded)
+          const migrated = migrateTypographyScale(loaded)
+          setSettingsConfig(migrated)
+          applyThemeStyles(migrated)
         }
       }).catch(() => {})
       window.api?.clearAiNotifications?.()
@@ -785,8 +803,9 @@ export default function MintDashboard() {
     window.addEventListener('focus', handleWindowFocus)
 
     window.api?.onSettingsChanged?.((loaded: any) => {
-      setSettingsConfig(loaded)
-      applyThemeStyles(loaded)
+      const migrated = migrateTypographyScale(loaded)
+      setSettingsConfig(migrated)
+      applyThemeStyles(migrated)
       getRuntimeStatus().then(setStatus).catch(() => {})
     })
 
@@ -820,10 +839,6 @@ export default function MintDashboard() {
   useEffect(() => {
     if (view === 'workspace' && !agentMode) updateAgentMode(true)
   }, [view, agentMode])
-
-  useEffect(() => {
-    chatEnd.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [interactions, sending, streamedReply, pendingApproval, agentProgress])
 
   const showToast = (nextMessage: string) => {
     setToastMessage(nextMessage)
@@ -888,6 +903,15 @@ export default function MintDashboard() {
       setActiveSurfaceId((active) => active === terminal.id ? null : terminal.id)
       return current
     })
+  }
+
+  const checkForUpdatesFromMenu = async () => {
+    try {
+      const update = await window.settingsApi.checkForUpdates()
+      showToast(update?.available ? `Mint ${update.version} is available.` : 'Mint is up to date.')
+    } catch (error) {
+      showToast(`Could not check for updates: ${String(error)}`)
+    }
   }
 
   const openArtifactSurface = (artifact: import('./ArtifactPreviewPanel').ArtifactFile) => {
@@ -1876,10 +1900,13 @@ export default function MintDashboard() {
     onSetGeminiLiveVoice: changeGeminiLiveVoice,
     onToggleMobileSidebar: () => setMobileSidebarOpen(!mobileSidebarOpen),
     onBackToCode: () => changeView('code'),
+    // Web browsers cannot host a native shell or a desktop webview. Keep those
+    // capabilities honest: terminal stays desktop-only, browser opens a real
+    // browser tab, and preview/review use ChatPanel's built-in split view.
     onOpenTerminal: isDesktopApp ? openTerminalSurface : undefined,
-    onOpenArtifact: openArtifactSurface,
-    onOpenReview: openReviewSurface,
-    onOpenBrowser: openBrowserSurface,
+    onOpenArtifact: isDesktopApp ? openArtifactSurface : undefined,
+    onOpenReview: isDesktopApp ? openReviewSurface : undefined,
+    onOpenBrowser: isDesktopApp ? openBrowserSurface : openMintBrowser,
   }
 
   return (
@@ -1890,7 +1917,11 @@ export default function MintDashboard() {
           onToggleSidebar={toggleSidebar}
           onNewChat={() => clearHistory('New chat')}
           onOpenWorkspace={() => selectWorkspace()}
-        onToggleTerminal={toggleTerminalSurface}
+          onOpenTerminal={openTerminalSurface}
+          onToggleTerminal={toggleTerminalSurface}
+          onOpenBrowser={() => openBrowserSurface()}
+          onOpenSettings={() => changeView('settings')}
+          onCheckForUpdates={checkForUpdatesFromMenu}
           onShowAbout={() => showToast('Mint Agent — AI workspace')}
         />
       )}
@@ -1899,6 +1930,12 @@ export default function MintDashboard() {
         style={{
           '--sidebar-expanded-width': `${sidebarWidth}px`,
           '--terminal-dock-size': `${terminalPosition === 'bottom' ? terminalBottomHeight : terminalRightWidth}px`,
+          // A terminal shown in the right tool surface resizes the surface
+          // itself (and therefore the remaining chat area), not just its
+          // inner xterm viewport.
+          '--tool-surface-width': toolSurfaces.find((surface) => surface.id === activeSurfaceId)?.kind === 'terminal' && terminalPosition === 'right'
+            ? `${terminalRightWidth}px`
+            : undefined,
         } as CSSProperties}
       >
         {mobileSidebarOpen && (
@@ -2001,174 +2038,204 @@ export default function MintDashboard() {
             </div>
           )}
           {view === 'workspace' && (
-            <WorkspacePanel
-              agentMode={agentMode}
-              sending={sending}
-              workspacePath={workspacePath}
-              onEnableAgentMode={() => updateAgentMode(true)}
-              onSetMessage={conversationActions.compose}
-              onWorkspaceReady={updateWorkspacePath}
-              refreshRevision={workspaceRefreshRevision}
-            />
+            <Suspense fallback={<LazyPanelFallback />}>
+              <WorkspacePanel
+                agentMode={agentMode}
+                sending={sending}
+                workspacePath={workspacePath}
+                onEnableAgentMode={() => updateAgentMode(true)}
+                onSetMessage={conversationActions.compose}
+                onWorkspaceReady={updateWorkspacePath}
+                refreshRevision={workspaceRefreshRevision}
+              />
+            </Suspense>
           )}
-          <ModelPanel
-            scale={scale}
-            expressionIndex={expressionIndex}
-            accessoryIndex={accessoryIndex}
-            isLocked={isLocked}
-            isActive={modelVisible && view !== 'pictures' && view !== 'workspace' && view !== 'imagine' && view !== 'veo' && view !== 'skills' && view !== 'mcp' && view !== 'plugins'}
-            layoutPreset={layoutPreset}
-            sending={sending}
-            interactionEnabled={interactionEnabled}
-            showInteractionGuide={showInteractionGuide}
-            toastMessage={toastMessage}
-            onSetScale={setScale}
-            onSetLocked={setIsLocked}
-            onSetView={changeView}
-            onChangeLayoutPreset={changeLayoutPreset}
-            onDismissToast={() => setToastMessage('')}
-            onInteract={handleModelInteraction}
-            onModelLoadComplete={() => setModelReady(true)}
-          />
+          <Suspense fallback={null}>
+            <ModelPanel
+              scale={scale}
+              expressionIndex={expressionIndex}
+              accessoryIndex={accessoryIndex}
+              isLocked={isLocked}
+              isActive={modelVisible && view !== 'pictures' && view !== 'workspace' && view !== 'imagine' && view !== 'veo' && view !== 'skills' && view !== 'mcp' && view !== 'plugins'}
+              layoutPreset={layoutPreset}
+              sending={sending}
+              interactionEnabled={interactionEnabled}
+              showInteractionGuide={showInteractionGuide}
+              toastMessage={toastMessage}
+              onSetScale={setScale}
+              onSetLocked={setIsLocked}
+              onSetView={changeView}
+              onChangeLayoutPreset={changeLayoutPreset}
+              onDismissToast={() => setToastMessage('')}
+              onInteract={handleModelInteraction}
+              onModelLoadComplete={() => setModelReady(true)}
+            />
+          </Suspense>
         <ChatPanel conversation={chatConversation} actions={chatActions} />
         </main>
         {isDesktopApp && activeSurfaceId && (
-          <ToolSurfacePage
-            surfaces={toolSurfaces}
-            activeSurfaceId={activeSurfaceId}
-            workspacePath={workspacePath}
-            terminalPosition={terminalPosition}
-            terminalSize={terminalPosition === 'bottom' ? terminalBottomHeight : terminalRightWidth}
-            onSelect={setActiveSurfaceId}
-            onClose={closeToolSurface}
-            onCloseAll={closeAllToolSurfaces}
-            onToggleTerminalPosition={toggleTerminalPosition}
-            onOpenTerminal={openTerminalSurface}
-            onOpenBrowser={() => openBrowserSurface()}
-            onNavigateBrowser={navigateBrowserSurface}
-            onOpenExternalBrowser={openMintBrowser}
-            onResizeTerminal={(size) => {
-              if (terminalPosition === 'bottom') {
-                setTerminalBottomHeight(size)
-                window.localStorage.setItem('mint:terminal-bottom-height', String(size))
-              } else {
-                setTerminalRightWidth(size)
-                window.localStorage.setItem('mint:terminal-right-width', String(size))
-              }
-            }}
-          />
+          <Suspense fallback={<LazyPanelFallback />}>
+            <ToolSurfacePage
+              surfaces={toolSurfaces}
+              activeSurfaceId={activeSurfaceId}
+              workspacePath={workspacePath}
+              terminalPosition={terminalPosition}
+              terminalSize={terminalPosition === 'bottom' ? terminalBottomHeight : terminalRightWidth}
+              onSelect={setActiveSurfaceId}
+              onClose={closeToolSurface}
+              onCloseAll={closeAllToolSurfaces}
+              onToggleTerminalPosition={toggleTerminalPosition}
+              onOpenTerminal={openTerminalSurface}
+              onOpenBrowser={() => openBrowserSurface()}
+              onNavigateBrowser={navigateBrowserSurface}
+              onOpenExternalBrowser={openMintBrowser}
+              onResizeTerminal={(size) => {
+                if (terminalPosition === 'bottom') {
+                  setTerminalBottomHeight(size)
+                  window.localStorage.setItem('mint:terminal-bottom-height', String(size))
+                } else {
+                  setTerminalRightWidth(size)
+                  window.localStorage.setItem('mint:terminal-right-width', String(size))
+                }
+              }}
+            />
+          </Suspense>
         )}
         {view === 'skills' && (
           <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
-            <SkillsView
-              listSkills={listLearnedSkills}
-              addSkill={addLearnedSkill}
-              deleteSkill={deleteLearnedSkill}
-              workspacePath={workspacePath}
-            />
+            <Suspense fallback={<LazyPanelFallback />}>
+              <SkillsView
+                listSkills={listLearnedSkills}
+                addSkill={addLearnedSkill}
+                deleteSkill={deleteLearnedSkill}
+                workspacePath={workspacePath}
+              />
+            </Suspense>
           </div>
         )}
         {view === 'mcp' && (
           <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
-            <McpServersView
-              config={settingsConfig || DEFAULT_CONFIG}
-              updateField={handleUpdateSettingsField}
-              mcpName={mcpName}
-              setMcpName={setMcpName}
-              mcpCmd={mcpCmd}
-              setMcpCmd={setMcpCmd}
-              mcpArgs={mcpArgs}
-              setMcpArgs={setMcpArgs}
-              mcpEnv={mcpEnv}
-              setMcpEnv={setMcpEnv}
-              mcpIcon={mcpIcon}
-              setMcpIcon={setMcpIcon}
-              handleAddMcpServer={handleAddMcpServer}
-              handleRemoveMcpServer={handleRemoveMcpServer}
-              detectTools={detectSystemTools}
-              onReauth={reauthMcpServer}
-              listServerTools={listMcpServerTools}
-            />
+            <Suspense fallback={<LazyPanelFallback />}>
+              <McpServersView
+                config={settingsConfig || DEFAULT_CONFIG}
+                updateField={handleUpdateSettingsField}
+                mcpName={mcpName}
+                setMcpName={setMcpName}
+                mcpCmd={mcpCmd}
+                setMcpCmd={setMcpCmd}
+                mcpArgs={mcpArgs}
+                setMcpArgs={setMcpArgs}
+                mcpEnv={mcpEnv}
+                setMcpEnv={setMcpEnv}
+                mcpIcon={mcpIcon}
+                setMcpIcon={setMcpIcon}
+                handleAddMcpServer={handleAddMcpServer}
+                handleRemoveMcpServer={handleRemoveMcpServer}
+                detectTools={detectSystemTools}
+                onReauth={reauthMcpServer}
+                listServerTools={listMcpServerTools}
+              />
+            </Suspense>
           </div>
         )}
         {view === 'plugins' && (
           <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
-            <PluginsView
-              config={settingsConfig || DEFAULT_CONFIG}
-              updateField={handleUpdateSettingsField}
-              handleConnectPlugin={handleConnectPlugin}
-            />
+            <Suspense fallback={<LazyPanelFallback />}>
+              <PluginsView
+                config={settingsConfig || DEFAULT_CONFIG}
+                updateField={handleUpdateSettingsField}
+                handleConnectPlugin={handleConnectPlugin}
+              />
+            </Suspense>
           </div>
         )}
         {view === 'cron' && (
           <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
-            <ScheduledTasksView
-              listCronJobs={listCronJobs}
-              addCronJob={addCronJob}
-              removeCronJob={removeCronJob}
-              setCronJobEnabled={setCronJobEnabled}
-              workspacePath={workspacePath}
-            />
+            <Suspense fallback={<LazyPanelFallback />}>
+              <ScheduledTasksView
+                listCronJobs={listCronJobs}
+                addCronJob={addCronJob}
+                removeCronJob={removeCronJob}
+                setCronJobEnabled={setCronJobEnabled}
+                workspacePath={workspacePath}
+              />
+            </Suspense>
           </div>
         )}
         {view === 'link' && (
           <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
-            <LinkedFoldersView
-              listLinkedFolders={listLinkedFolders}
-              addLinkedFolder={addLinkedFolder}
-              removeLinkedFolder={removeLinkedFolder}
-              // Desktop: native Tauri picker. Web: asks `mint web` (same
-              // machine) to open its own dialog via a loopback-gated route.
-              selectFolder={selectLinkedFolderPath}
-            />
+            <Suspense fallback={<LazyPanelFallback />}>
+              <LinkedFoldersView
+                listLinkedFolders={listLinkedFolders}
+                addLinkedFolder={addLinkedFolder}
+                removeLinkedFolder={removeLinkedFolder}
+                // Desktop: native Tauri picker. Web: asks `mint web` (same
+                // machine) to open its own dialog via a loopback-gated route.
+                selectFolder={selectLinkedFolderPath}
+              />
+            </Suspense>
           </div>
         )}
         {view === 'code' && (
           <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
-            <CliSessionsView
-              chatSessions={chatSessions}
-              activeConversationId={conversationId}
-              workspacePath={workspacePath}
-              onSelectSession={(id) => {
-                selectConversation(id)
-              }}
-              onDeleteSession={deleteConversation}
-              onRenameSession={renameConversation}
-              onRefreshSessions={refreshChatSessions}
-              onShowToast={showToast}
-            />
+            <Suspense fallback={<LazyPanelFallback />}>
+              <CliSessionsView
+                chatSessions={chatSessions}
+                activeConversationId={conversationId}
+                workspacePath={workspacePath}
+                onSelectSession={(id) => {
+                  selectConversation(id)
+                }}
+                onDeleteSession={deleteConversation}
+                onRenameSession={renameConversation}
+                onRefreshSessions={refreshChatSessions}
+                onShowToast={showToast}
+              />
+            </Suspense>
           </div>
         )}
-        <PicturesLibrary view={view} pictures={pictures} onSetView={changeView} onRefreshPictures={refreshPictures} />
-        <ImageStudioPanel
-          view={view}
-          onRefreshPictures={refreshPictures}
-          onSendToChat={async (imagePath, imgPrompt) => {
-            try {
-              const response = await fetch(convertFileSrc(imagePath))
-              if (!response.ok) throw new Error(`Unable to load image (${response.status})`)
-              const blob = await response.blob()
-              const imageName = imagePath.split(/[\\/]/).pop() || 'generated-image.png'
-              const dataUri = await readImage(new File([blob], imageName, { type: blob.type || 'image/png' }))
-              const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
+        {view === 'pictures' && (
+          <Suspense fallback={<LazyPanelFallback />}>
+            <PicturesLibrary view={view} pictures={pictures} onSetView={changeView} onRefreshPictures={refreshPictures} />
+          </Suspense>
+        )}
+        {view === 'imagine' && (
+          <Suspense fallback={<LazyPanelFallback />}>
+            <ImageStudioPanel
+              view={view}
+              onRefreshPictures={refreshPictures}
+              onSendToChat={async (imagePath, imgPrompt) => {
+                try {
+                  const response = await fetch(convertFileSrc(imagePath))
+                  if (!response.ok) throw new Error(`Unable to load image (${response.status})`)
+                  const blob = await response.blob()
+                  const imageName = imagePath.split(/[\\/]/).pop() || 'generated-image.png'
+                  const dataUri = await readImage(new File([blob], imageName, { type: blob.type || 'image/png' }))
+                  const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
 
-              changeView('chat')
-              conversationActions.compose(imgPrompt)
-              conversationActions.attachImage({ dataUri, previewDataUri, name: imageName })
-            } catch (error) {
-              showToast(`Could not attach image: ${errorMessage(error)}`)
-            }
-          }}
-          onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-        />
-        <VeoStudioPanel
-          view={view}
-          onSendToChat={(vidPrompt) => {
-            changeView('chat')
-            conversationActions.compose(vidPrompt)
-          }}
-          onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-        />
+                  changeView('chat')
+                  conversationActions.compose(imgPrompt)
+                  conversationActions.attachImage({ dataUri, previewDataUri, name: imageName })
+                } catch (error) {
+                  showToast(`Could not attach image: ${errorMessage(error)}`)
+                }
+              }}
+              onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+            />
+          </Suspense>
+        )}
+        {view === 'veo' && (
+          <Suspense fallback={<LazyPanelFallback />}>
+            <VeoStudioPanel
+              view={view}
+              onSendToChat={(vidPrompt) => {
+                changeView('chat')
+                conversationActions.compose(vidPrompt)
+              }}
+              onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+            />
+          </Suspense>
+        )}
       </div>
       <div className={`startup-loading ${startupReady ? 'is-hidden' : ''}`} aria-live="polite" aria-busy={!startupReady}>
         <div className="startup-loading-content">
@@ -2188,42 +2255,46 @@ export default function MintDashboard() {
         </div>
       )}
 
-      <CommandPalette
-        isOpen={isSearchOpen}
-        onClose={() => setIsSearchOpen(false)}
-        onSelectChat={(chatId) => {
-          selectConversation(chatId)
-          setIsSearchOpen(false)
-        }}
-        onNewChat={() => {
-          clearHistory('New chat')
-          setIsSearchOpen(false)
-        }}
-        onSelectWorkspace={isDesktopApp ? selectWorkspace : undefined}
-        onOpenSettings={() => {
-          changeView('settings')
-          setIsSearchOpen(false)
-        }}
-        onChangeView={(targetView) => {
-          changeView(targetView)
-          setIsSearchOpen(false)
-        }}
-        onChangeModel={(model) => {
-          handleUpdateSettingsField('model', model)
-          setToastMessage(`Switched model to ${model}`)
-        }}
-        onChangeProvider={(provider) => {
-          handleUpdateSettingsField('provider', provider)
-          setToastMessage(`Switched provider to ${provider}`)
-        }}
-        onExecuteSlash={(cmd) => {
-          conversationActions.compose(cmd + ' ')
-          setIsSearchOpen(false)
-        }}
-        chatSessions={chatSessions}
-        currentChatId={conversationId}
-        workspacePath={workspacePath}
-      />
+      {isSearchOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette
+            isOpen
+            onClose={() => setIsSearchOpen(false)}
+            onSelectChat={(chatId) => {
+              selectConversation(chatId)
+              setIsSearchOpen(false)
+            }}
+            onNewChat={() => {
+              clearHistory('New chat')
+              setIsSearchOpen(false)
+            }}
+            onSelectWorkspace={isDesktopApp ? selectWorkspace : undefined}
+            onOpenSettings={() => {
+              changeView('settings')
+              setIsSearchOpen(false)
+            }}
+            onChangeView={(targetView) => {
+              changeView(targetView)
+              setIsSearchOpen(false)
+            }}
+            onChangeModel={(model) => {
+              handleUpdateSettingsField('model', model)
+              setToastMessage(`Switched model to ${model}`)
+            }}
+            onChangeProvider={(provider) => {
+              handleUpdateSettingsField('provider', provider)
+              setToastMessage(`Switched provider to ${provider}`)
+            }}
+            onExecuteSlash={(cmd) => {
+              conversationActions.compose(cmd + ' ')
+              setIsSearchOpen(false)
+            }}
+            chatSessions={chatSessions}
+            currentChatId={conversationId}
+            workspacePath={workspacePath}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }

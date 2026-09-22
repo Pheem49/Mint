@@ -9,7 +9,11 @@ interface DesktopTitlebarProps {
   onToggleSidebar: () => void
   onNewChat: () => void
   onOpenWorkspace: () => void
+  onOpenTerminal: () => void
   onToggleTerminal: () => void
+  onOpenBrowser: () => void
+  onOpenSettings: () => void
+  onCheckForUpdates: () => void
   onShowAbout: () => void
 }
 
@@ -21,19 +25,31 @@ export default function DesktopTitlebar({
   onToggleSidebar,
   onNewChat,
   onOpenWorkspace,
+  onOpenTerminal,
   onToggleTerminal,
+  onOpenBrowser,
+  onOpenSettings,
+  onCheckForUpdates,
   onShowAbout,
 }: DesktopTitlebarProps) {
   const [openMenu, setOpenMenu] = useState<MenuName | null>(null)
   const [isMaximized, setIsMaximized] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [zoom, setZoom] = useState(() => Number(window.localStorage.getItem('mint:ui-zoom')) || 1)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [hasEditableFocus, setHasEditableFocus] = useState(false)
   const rootRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     let mounted = true
     void import('@tauri-apps/api/window')
-      .then(({ getCurrentWindow }) => getCurrentWindow().isMaximized())
-      .then((maximized) => {
-        if (mounted) setIsMaximized(maximized)
+      .then(async ({ getCurrentWindow }) => {
+        const currentWindow = getCurrentWindow()
+        const [maximized, fullscreen] = await Promise.all([currentWindow.isMaximized(), currentWindow.isFullscreen()])
+        if (mounted) {
+          setIsMaximized(maximized)
+          setIsFullscreen(fullscreen)
+        }
       })
       .catch(() => {})
     return () => { mounted = false }
@@ -53,6 +69,47 @@ export default function DesktopTitlebar({
         setIsMaximized(await currentWindow.isMaximized())
       })
       .catch((error) => console.error('Failed to toggle Mint window size:', error))
+  }
+
+  const toggleFullscreenWindow = () => {
+    void import('@tauri-apps/api/window')
+      .then(async ({ getCurrentWindow }) => {
+        const currentWindow = getCurrentWindow()
+        const fullscreen = !await currentWindow.isFullscreen()
+        await currentWindow.setFullscreen(fullscreen)
+        setIsFullscreen(fullscreen)
+      })
+      .catch((error) => console.error('Failed to toggle Mint fullscreen:', error))
+  }
+
+  const updateZoom = (nextZoom: number) => {
+    const clampedZoom = Math.min(1.5, Math.max(0.8, Math.round(nextZoom * 100) / 100))
+    setZoom(clampedZoom)
+    window.localStorage.setItem('mint:ui-zoom', String(clampedZoom))
+  }
+
+  useEffect(() => {
+    if (zoom === 1) document.documentElement.style.removeProperty('zoom')
+    else document.documentElement.style.setProperty('zoom', String(zoom))
+  }, [zoom])
+
+  const isEditable = (target: EventTarget | null) => target instanceof HTMLElement && (
+    target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
+  )
+
+  const runEditCommand = (command: 'undo' | 'redo' | 'cut' | 'copy' | 'selectAll') => {
+    if (!isEditable(document.activeElement) && command !== 'copy') return
+    document.execCommand(command)
+  }
+
+  const pasteClipboard = async () => {
+    if (!isEditable(document.activeElement)) return
+    try {
+      const text = await window.api.readClipboard()
+      if (text) document.execCommand('insertText', false, text)
+    } catch (error) {
+      console.warn('Failed to paste clipboard text:', error)
+    }
   }
 
   const startResize = (direction: ResizeDirection) => {
@@ -76,25 +133,76 @@ export default function DesktopTitlebar({
     }
   }, [])
 
-  const runMenuAction = (action: () => void) => {
-    action()
+  useEffect(() => {
+    const updateEditableFocus = () => setHasEditableFocus(isEditable(document.activeElement))
+    document.addEventListener('focusin', updateEditableFocus)
+    document.addEventListener('focusout', updateEditableFocus)
+    return () => {
+      document.removeEventListener('focusin', updateEditableFocus)
+      document.removeEventListener('focusout', updateEditableFocus)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const modifier = event.ctrlKey || event.metaKey
+      const editing = isEditable(event.target)
+      if (event.key === 'F11') {
+        event.preventDefault()
+        toggleFullscreenWindow()
+        return
+      }
+      if (!modifier || editing) return
+
+      const key = event.key.toLowerCase()
+      if (key === 'n') { event.preventDefault(); onNewChat() }
+      else if (key === 'o') { event.preventDefault(); onOpenWorkspace() }
+      else if (key === 'b' && event.shiftKey) { event.preventDefault(); onOpenBrowser() }
+      else if (key === 'b') { event.preventDefault(); onToggleSidebar() }
+      else if (key === ',') { event.preventDefault(); onOpenSettings() }
+      else if (key === '/') { event.preventDefault(); setShortcutsOpen(true) }
+      else if (event.code === 'Backquote') { event.preventDefault(); onToggleTerminal() }
+      else if (key === '+' || key === '=') { event.preventDefault(); updateZoom(zoom + 0.1) }
+      else if (key === '-') { event.preventDefault(); updateZoom(zoom - 0.1) }
+      else if (key === '0') { event.preventDefault(); updateZoom(1) }
+    }
+    window.addEventListener('keydown', handleShortcut)
+    return () => window.removeEventListener('keydown', handleShortcut)
+  }, [zoom, onNewChat, onOpenWorkspace, onOpenBrowser, onOpenSettings, onToggleSidebar, onToggleTerminal])
+
+  const runMenuAction = (action: () => void | Promise<void>) => {
+    void action()
     setOpenMenu(null)
   }
 
-  const menuItems: Record<MenuName, Array<{ label: string; shortcut?: string; action: () => void }>> = {
+  const menuItems: Record<MenuName, Array<{ label: string; shortcut?: string; disabled?: boolean; action: () => void | Promise<void> }>> = {
     File: [
       { label: 'New chat', shortcut: 'Ctrl+N', action: onNewChat },
-      { label: 'Open workspace', action: onOpenWorkspace },
+      { label: 'Open workspace', shortcut: 'Ctrl+O', action: onOpenWorkspace },
+      { label: 'New terminal', shortcut: 'Ctrl+Shift+`', action: onOpenTerminal },
+      { label: 'Settings', shortcut: 'Ctrl+,', action: onOpenSettings },
+      { label: 'Quit Mint', shortcut: 'Ctrl+Q', action: () => window.api.quitApp() },
     ],
     Edit: [
-      { label: 'Select all', shortcut: 'Ctrl+A', action: () => document.execCommand('selectAll') },
-      { label: 'Copy', shortcut: 'Ctrl+C', action: () => document.execCommand('copy') },
+      { label: 'Undo', shortcut: 'Ctrl+Z', disabled: !hasEditableFocus, action: () => runEditCommand('undo') },
+      { label: 'Redo', shortcut: 'Ctrl+Shift+Z', disabled: !hasEditableFocus, action: () => runEditCommand('redo') },
+      { label: 'Cut', shortcut: 'Ctrl+X', disabled: !hasEditableFocus, action: () => runEditCommand('cut') },
+      { label: 'Copy', shortcut: 'Ctrl+C', action: () => runEditCommand('copy') },
+      { label: 'Paste', shortcut: 'Ctrl+V', disabled: !hasEditableFocus, action: pasteClipboard },
+      { label: 'Select all', shortcut: 'Ctrl+A', disabled: !hasEditableFocus, action: () => runEditCommand('selectAll') },
     ],
     View: [
       { label: sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar', shortcut: 'Ctrl+B', action: onToggleSidebar },
       { label: 'Toggle terminal', shortcut: 'Ctrl+`', action: onToggleTerminal },
+      { label: 'Open Browser panel', shortcut: 'Ctrl+Shift+B', action: onOpenBrowser },
+      { label: 'Zoom in', shortcut: 'Ctrl++', action: () => updateZoom(zoom + 0.1) },
+      { label: 'Zoom out', shortcut: 'Ctrl+-', action: () => updateZoom(zoom - 0.1) },
+      { label: 'Reset zoom', shortcut: 'Ctrl+0', disabled: zoom === 1, action: () => updateZoom(1) },
+      { label: isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen', shortcut: 'F11', action: toggleFullscreenWindow },
     ],
     Help: [
+      { label: 'Keyboard shortcuts', shortcut: 'Ctrl+/', action: () => setShortcutsOpen(true) },
+      { label: 'Check for updates', action: onCheckForUpdates },
       { label: 'About Mint Agent', action: onShowAbout },
     ],
   }
@@ -134,7 +242,7 @@ export default function DesktopTitlebar({
               {openMenu === name && (
                 <div className="mint-titlebar-menu" role="menu">
                   {menuItems[name].map((item) => (
-                    <button type="button" role="menuitem" key={item.label} onClick={() => runMenuAction(item.action)}>
+                    <button type="button" role="menuitem" key={item.label} disabled={item.disabled} onClick={() => runMenuAction(item.action)}>
                       <span>{item.label}</span>
                       {item.shortcut && <kbd>{item.shortcut}</kbd>}
                     </button>
@@ -165,6 +273,23 @@ export default function DesktopTitlebar({
           </button>
         </div>
       </header>
+      {shortcutsOpen && (
+        <div className="mint-shortcuts-backdrop" role="presentation" onMouseDown={() => setShortcutsOpen(false)}>
+          <section className="mint-shortcuts-dialog" role="dialog" aria-modal="true" aria-labelledby="mint-shortcuts-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header><h2 id="mint-shortcuts-title">Keyboard shortcuts</h2><button type="button" aria-label="Close shortcuts" onClick={() => setShortcutsOpen(false)}>×</button></header>
+            <dl>
+              <div><dt>New chat</dt><dd><kbd>Ctrl+N</kbd></dd></div>
+              <div><dt>Open workspace</dt><dd><kbd>Ctrl+O</kbd></dd></div>
+              <div><dt>Toggle sidebar</dt><dd><kbd>Ctrl+B</kbd></dd></div>
+              <div><dt>Toggle terminal</dt><dd><kbd>Ctrl+`</kbd></dd></div>
+              <div><dt>Open Browser panel</dt><dd><kbd>Ctrl+Shift+B</kbd></dd></div>
+              <div><dt>Settings</dt><dd><kbd>Ctrl+,</kbd></dd></div>
+              <div><dt>Zoom</dt><dd><kbd>Ctrl++</kbd> <kbd>Ctrl+-</kbd> <kbd>Ctrl+0</kbd></dd></div>
+              <div><dt>Fullscreen</dt><dd><kbd>F11</kbd></dd></div>
+            </dl>
+          </section>
+        </div>
+      )}
       <div className="mint-window-resize-handles" aria-hidden="true">
         {RESIZE_DIRECTIONS.map((direction) => (
           <span

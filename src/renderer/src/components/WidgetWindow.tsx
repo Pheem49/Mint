@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import '../css/widget.css'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
 export default function WidgetWindow() {

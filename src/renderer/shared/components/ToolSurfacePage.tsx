@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import '../../src/css/tool-surfaces.css'
 import type { ArtifactFile } from './ArtifactPreviewPanel'
 import { ArtifactPreviewPanel } from './ArtifactPreviewPanel'
 import CodeReviewPage from './CodeReviewPage'
@@ -122,19 +123,19 @@ export default function ToolSurfacePage({
       <div className="tool-surface-content">
         {active.kind === 'preview' && <ArtifactPreviewPanel artifact={active.artifact} onClose={() => onClose(active.id)} workspacePath={workspacePath || undefined} />}
         {active.kind === 'review' && <CodeReviewPage title={active.reviewTitle} changes={active.changes} onBack={() => onClose(active.id)} />}
-        {active.kind === 'terminal' && (
+        {surfaces.filter((surface): surface is Extract<ToolSurface, { kind: 'terminal' }> => surface.kind === 'terminal').map((surface) => (
           <TerminalDock
-            key={active.id}
-            visible
+            key={surface.id}
+            visible={surface.id === active.id}
             page
             position={terminalPosition}
             size={terminalSize}
             cwd={workspacePath}
-            onClose={() => onClose(active.id)}
+            onClose={() => onClose(surface.id)}
             onTogglePosition={onToggleTerminalPosition}
             onResize={onResizeTerminal}
           />
-        )}
+        ))}
         {active.kind === 'browser' && (
           <BrowserSurface
             key={active.id}

@@ -60,7 +60,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   flex-shrink: 0;
 }
 
@@ -330,7 +330,7 @@
 .model-spotlight-item:hover .model-item-provider-icon,
 .model-spotlight-item.is-inspected .model-item-provider-icon,
 .model-spotlight-item.is-active .model-item-provider-icon {
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   opacity: 0.92;
 }
 
@@ -371,7 +371,7 @@
 }
 
 .model-item-check {
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   flex-shrink: 0;
 }
 
@@ -429,7 +429,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   flex-shrink: 0;
 }
 
@@ -525,7 +525,7 @@
 }
 
 .option-icon {
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
 }
 
 .option-label {
@@ -626,7 +626,7 @@
 }
 
 .effort-item-check {
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   flex-shrink: 0;
 }
 
@@ -741,7 +741,7 @@
 }
 
 .model-spotlight-see-more-btn svg {
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   transition: transform 0.18s ease;
 }
 

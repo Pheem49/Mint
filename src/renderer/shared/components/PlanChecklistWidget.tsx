@@ -20,7 +20,7 @@ export function PlanChecklistWidget({ plan, className = '' }: PlanChecklistWidge
     <div className={`plan-checklist-card ${className}`}>
       <div className="plan-checklist-header">
         <div className="plan-checklist-title">
-          <ListTodo style={{ width: '15px', height: '15px', color: 'var(--accent, #10b981)' }} />
+          <ListTodo style={{ width: '15px', height: '15px', color: 'var(--interactive-fg)' }} />
           <span>{plan.objective || 'Task Plan'}</span>
         </div>
         <span className="plan-checklist-count">

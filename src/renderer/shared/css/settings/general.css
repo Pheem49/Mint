@@ -161,7 +161,7 @@
 }
 
 .provider-active-badge {
-    color: var(--accent-hover);
+    color: var(--interactive-fg-hover);
     font-size: 0.7rem;
     font-weight: 600;
     letter-spacing: 0.03em;
@@ -497,7 +497,7 @@
 }
 
 .combobox-check-icon {
-    color: var(--accent, #10b981);
+    color: var(--interactive-fg);
     flex-shrink: 0;
 }
 
@@ -559,7 +559,7 @@
 }
 
 .combobox-see-more-btn svg {
-    color: var(--accent, #10b981);
+    color: var(--interactive-fg);
 }
 
 .combobox-see-more-btn.collapse-btn {

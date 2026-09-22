@@ -81,7 +81,7 @@
   align-items: center;
   justify-content: center;
   background: color-mix(in srgb, var(--accent, #38bdf8) 15%, transparent);
-  color: var(--accent, #38bdf8);
+  color: var(--interactive-fg);
   flex-shrink: 0;
 }
 
@@ -123,7 +123,7 @@
 
 .chat-ui-feature-link:hover {
   opacity: 1;
-  color: var(--accent, #38bdf8);
+  color: var(--interactive-fg);
 }
 
 .chat-ui-feature-subtitle {
@@ -251,7 +251,7 @@
   align-items: center;
   justify-content: center;
   background: color-mix(in srgb, var(--accent, #38bdf8) 12%, transparent);
-  color: var(--accent, #38bdf8);
+  color: var(--interactive-fg);
 }
 
 .chat-ui-grid-item-title {
@@ -366,7 +366,7 @@
 }
 
 .chat-ui-mockup-dropzone.is-active .chat-ui-mockup-dropzone-icon {
-  color: var(--accent, #38bdf8);
+  color: var(--interactive-fg);
 }
 
 .chat-ui-mockup-dropzone-text {
@@ -425,7 +425,7 @@
 
 .chat-ui-mockup-metric-pill {
   font-weight: 700;
-  color: var(--accent, #38bdf8);
+  color: var(--interactive-fg);
   background: color-mix(in srgb, var(--accent, #38bdf8) 12%, transparent);
   padding: 3px 10px;
   border-radius: 8px;

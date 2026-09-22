@@ -13,6 +13,27 @@
 - Fixed the Terminal orientation control so it actually switches the terminal surface between the right-side and bottom layouts.
 - Fixed desktop minimize and maximize/restore controls by calling the Tauri window API directly and surfacing failures in the console.
 - Added transparent edge and corner hit areas so the frameless desktop window can be resized by dragging its borders or corners.
+- Reduced chat-stream jank by batching automatic scrolls to one animation frame, skipping them while the user reads older messages, and throttling live Markdown rendering to 120 ms.
+- Deferred loading workspace, tools, media studios, management views, and the command palette until each is opened, reducing the initial chat bundle and avoiding background effects from hidden panels.
+- Split route-specific styles into their own lazy-loaded panels, so settings, media studios, pictures, spotlight, widget, and tool-surface CSS no longer block the initial chat UI.
+- Reduced Live2D's idle renderer budget to 24 FPS, raising it only while the pointer is over the model and limiting pointer tracking to the model itself.
+- Kept opened terminal tabs mounted while inactive so changing tabs preserves the existing shell process and scrollback instead of restarting them.
+- Reduced chat and workspace background polling: refreshes now run only while the app is visible and focused, prevent overlapping reads, refresh immediately when returning to the app, and use a lighter 15-second chat / 30-second workspace cadence.
+- Reduced initial font downloads by removing duplicated Google Fonts requests and cutting the self-hosted font bundle from 25 broad imports to Thai/Latin Prompt plus Latin/symbol Fira Code subsets; Prompt now covers the default Thai and Latin UI while Fira Code remains available for code and terminals.
+- Split dashboard CSS from the app bootstrap for desktop and web: chat, sidebar, desktop tools, observability, model selector, and UI-card styles now load only with the lazy dashboard route, while page-specific panels retain their own CSS chunks.
+- Fixed right-side terminal resizing so dragging its divider updates the outer tool surface and available chat width, not only the terminal's internal viewport.
+- Increased chat density: the default UI scale is now 16px, conversation text and composer use 16px, code blocks use 13px, and message metadata uses a compact 12.5px-equivalent scale. Existing 18px default settings migrate once to the new 16px default; any size selected afterward is retained. The typography controls now clearly identify Compact, Default, and larger sizes.
+- Fixed chat-panel overflow from agent telemetry and tool activity: activity cards, KPI summaries, and timeline labels now shrink, truncate, or wrap within the available panel width, and the chat container no longer exposes a page-level horizontal scrollbar.
+- Changed the default surface style to Opaque for clearer text and lower compositing cost; Glassmorphism remains available, with selectable blur intensity, in Theme Settings.
+- Separate desktop launch modes: `npm run dev` keeps the Tauri/Vite development session with HMR, while `npm start` opens the local production binary without leaving Vite running (building only when that binary does not exist); `npm run start:rebuild` explicitly refreshes it.
+- Fixed web tool actions: Browser now opens the requested URL in a real browser tab, Preview and Review use the chat split view, and the native-shell Terminal remains desktop-only instead of exposing an unusable web control.
+- Fixed the web Browser launch menu losing its styling after the dashboard CSS split by loading its shared menu stylesheet in both the desktop and web bundles.
+- Fixed web file-change cards falling back to unstyled Review controls by sharing the current summary, action, and list layout CSS between the desktop and web dashboards.
+- Fixed the web full-page Review view rendering as raw HTML by loading its toolbar, diff, and changed-file-list styles from a shared dashboard stylesheet.
+- Fixed the web Settings modal rendering without its layout or tab styles by bundling the settings base and tab styles with its lazy-loaded web component.
+- Made code-review diffs semantic in Dark Monochrome: added lines and counts now use green success styling, while deleted lines and counts use red error styling instead of inheriting the white accent color.
+- Applied the same green-added and red-deleted semantics to inline file-change previews in the normal chat timeline.
+- Improved Dark Monochrome contrast across shared controls by separating interactive text/icon color from the white accent surface; primary actions remain white with dark labels, while accent-colored labels use zinc shades that remain readable on selected or light surfaces.
 
 ## Desktop Terminal and Browser
 
@@ -293,6 +314,9 @@ Overhauled session management in the CLI to give every conversation its own isol
   - Integrated `/resume` dispatch in `slashCommandProcessor.ts` and `MintDashboard.tsx` to hot-swap active conversations seamlessly on Desktop and Web.
 # Unreleased
 
+- Changed `npm start` to rebuild the local Tauri release before launching it, so it always opens the current production code; added `npm run launch` for opening the already-built binary without a rebuild.
+- Fixed Theme & UI's live Opaque/Glass, preset, and accent choices so they save as one complete configuration immediately and synchronize the main window instead of leaving stale surface-style values behind.
+- Expanded the desktop File, Edit, View, and Help menus with usable workspace, tool-surface, settings, zoom, fullscreen, update, clipboard, and keyboard-shortcut actions. Edit commands now disable when focus is outside an editable field, and application shortcuts are owned by the titlebar to prevent duplicate Terminal toggles.
 - Fixed the Git branch menu clipping behind the Workspace pane by positioning it within the conversation panel and aligning to the side with more available room.
 - Added a searchable Workspace menu with up to eight recent folders, a current-workspace checkmark, and an Open folder action that reuses the native folder picker.
 - Restyled Workspace and Git branch selection as a compact project-context bar with a distinct workspace chip and adjacent branch control, preserving folder selection, branch menus, and responsive truncation on Desktop and Web.

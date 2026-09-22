@@ -490,7 +490,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
 
                 {item.isConfigured && (
                   <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border, rgba(255, 255, 255, 0.08))' }}>
-                    <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent, #3b82f6)', textTransform: 'none', letterSpacing: '0.5px', margin: '0 0 12px' }}>
+                    <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--interactive-fg)', textTransform: 'none', letterSpacing: '0.5px', margin: '0 0 12px' }}>
                       Server Config
                     </h4>
                     {srvConfig.url ? (

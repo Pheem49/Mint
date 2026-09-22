@@ -206,7 +206,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
             <div
               className="management-card-icon"
-              style={{ width: 34, height: 34, fontSize: '0.72rem', fontWeight: 700, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)', borderRadius: '6px' }}
+              style={{ width: 34, height: 34, fontSize: '0.72rem', fontWeight: 700, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--interactive-fg)', borderRadius: '6px' }}
             >
               DIFF
             </div>
@@ -234,7 +234,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                   style={{
                     fontSize: '0.75rem',
                     fontWeight: 700,
-                    color: 'var(--accent)',
+                    color: 'var(--interactive-fg)',
                     background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
                     padding: '1px 6px',
                     borderRadius: '4px',
