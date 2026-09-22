@@ -246,7 +246,7 @@ To open the normal production-mode desktop app locally (without a Vite dev serve
 ```bash
 npm start
 ```
-`npm start` always rebuilds the local Desktop release before opening it, so it always runs the latest production code. Use `npm run launch` when you deliberately want to open the already-built release binary without rebuilding.
+`npm start` opens the existing local Desktop binary and only builds it when it does not exist. Use `npm run start:rebuild` to explicitly rebuild with the fast-release profile, `npm run start:release` to rebuild the fully optimized release profile before measuring performance or publishing, or `npm run launch` to require an existing binary without any fallback build.
 To compile and build a production standalone desktop package:
 ```bash
 npm run tauri:build
@@ -272,7 +272,7 @@ Pick one way to get the global `mint` command:
   source ~/.bashrc  # or ~/.zshrc
   ```
 
-No alias set up? Everything below still works via `npm run cli -- <command>` in place of `mint <command>`.
+No alias set up? Everything below still works via `npm run cli -- <command>` in place of `mint <command>`. This uses the existing compiled CLI binary; use `npm run cli:rebuild -- <command>` after changing Rust code, or `npm run cli:dev -- <command>` while developing the CLI.
 
 ---
 

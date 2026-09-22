@@ -2,6 +2,7 @@ import { lazy, Suspense, type ChangeEvent, type CSSProperties, type FormEvent, u
 import {
   compactAgentProgressForPersistence,
   mergeActivitySnapshots,
+  parseFileChangesFromProgress,
 } from '../agentProgress'
 import { catalogPlatform, conversationPlatform, mediaPlatform, runtimePlatform, type SlashResponse } from '../platform'
 import type { AgentProgress, ChatResponse, ChatSession, DocumentAttachment, PictureEntry, RuntimeStatus } from '../types'
@@ -465,6 +466,12 @@ export default function MintDashboard() {
     const saved = Number(window.localStorage.getItem('mint:sidebar-width'))
     return saved >= SIDEBAR_MIN_WIDTH && saved <= SIDEBAR_MAX_WIDTH ? saved : SIDEBAR_DEFAULT_WIDTH
   })
+  const recentAgentChanges = parseFileChangesFromProgress(agentProgress)
+  const workspaceSourceNames = [
+    ...imageAttachments.map((attachment) => attachment.name),
+    ...videoAttachments.map((attachment) => attachment.name),
+    documentAttachment?.filename || '',
+  ]
 
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
@@ -1923,6 +1930,12 @@ export default function MintDashboard() {
           onOpenSettings={() => changeView('settings')}
           onCheckForUpdates={checkForUpdatesFromMenu}
           onShowAbout={() => showToast('Mint Agent — AI workspace')}
+          workspacePath={workspacePath}
+          terminalCount={toolSurfaces.filter((surface) => surface.kind === 'terminal').length}
+          sourceNames={workspaceSourceNames}
+          recentChanges={recentAgentChanges}
+          onOpenReview={(changes) => openReviewSurface({ id: `review:workspace:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: 'Recent agent changes', changes })}
+          onRefreshWorkspace={() => setWorkspaceRefreshRevision((revision) => revision + 1)}
         />
       )}
       <div

@@ -2,7 +2,7 @@
   position: relative;
   z-index: 300;
   display: grid;
-  grid-template-columns: auto minmax(24px, 1fr) auto;
+  grid-template-columns: auto minmax(24px, 1fr) auto auto;
   align-items: center;
   flex: 0 0 38px;
   min-width: 0;
@@ -21,6 +21,139 @@
   align-items: center;
   height: 100%;
 }
+
+.workspace-context {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-context-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-context-trigger:hover,
+.workspace-context-trigger.is-open {
+  color: var(--text-main, #f1f2f4);
+  background: var(--bg-surface-hover, rgba(255, 255, 255, 0.08));
+}
+
+.workspace-context-trigger svg,
+.workspace-context-heading svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.workspace-context-popover {
+  position: absolute;
+  z-index: 550;
+  top: calc(100% + 5px);
+  right: 6px;
+  width: min(360px, calc(100vw - 24px));
+  overflow: hidden;
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.14));
+  border-radius: 12px;
+  color: var(--text-main, #f1f2f4);
+  background: var(--bg-overlay, #111113);
+  box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.6));
+}
+
+.workspace-context-heading,
+.workspace-context-sources-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.workspace-context-heading {
+  min-height: 42px;
+  padding: 0 10px 0 14px;
+  color: var(--text-secondary, #cbd5e1);
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.workspace-context-heading button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text-muted, #94a3b8);
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-context-heading button:hover:not(:disabled) {
+  color: var(--text-main, #f1f2f4);
+  background: var(--bg-surface-hover, rgba(255, 255, 255, 0.08));
+}
+
+.workspace-context-heading button:disabled { opacity: 0.5; cursor: wait; }
+
+.workspace-context-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  min-height: 54px;
+  padding: 7px 14px;
+  border: 0;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+button.workspace-context-row { cursor: pointer; }
+button.workspace-context-row:hover:not(:disabled) { background: var(--bg-surface-hover, rgba(255, 255, 255, 0.08)); }
+button.workspace-context-row:disabled { opacity: 0.52; cursor: default; }
+
+.workspace-context-icon {
+  color: var(--interactive-fg, var(--accent));
+  font-family: var(--font-mono, monospace);
+  font-size: 0.82rem;
+}
+
+.workspace-context-copy { min-width: 0; }
+.workspace-context-copy strong,
+.workspace-context-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-context-copy strong { font-size: 0.77rem; font-weight: 600; }
+.workspace-context-copy small { margin-top: 2px; color: var(--text-muted, #94a3b8); font-size: 0.68rem; }
+.workspace-context-action { color: var(--interactive-fg, var(--accent)); font-size: 0.68rem; }
+.workspace-context-status { color: var(--text-muted, #94a3b8); font-size: 0.68rem; }
+.workspace-context-status.is-dirty { color: var(--status-warning, #fbbf24); }
+.workspace-context-diff { display: flex; gap: 5px; font: 0.68rem var(--font-mono, monospace); }
+.workspace-context-diff b { color: var(--status-success, #34d399); font-weight: 600; }
+.workspace-context-diff i { color: var(--status-error, #ef4444); font-style: normal; }
+
+.workspace-context-sources {
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.workspace-context-sources-heading { margin-bottom: 6px; color: var(--text-muted, #94a3b8); font-size: 0.68rem; font-weight: 600; }
+.workspace-context-sources p { overflow: hidden; margin: 4px 0 0; color: var(--text-secondary, #cbd5e1); font-size: 0.7rem; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-context-sources .workspace-context-more { color: var(--interactive-fg, var(--accent)); }
 
 .mint-titlebar-left {
   gap: 3px;

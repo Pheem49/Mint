@@ -2,6 +2,7 @@
 
 ## Tool Surface Tabs
 
+- Added a compact composer status pill for the current or latest Agent run: it shows files changed with green additions and red deletions, switches to a live editing state while work is running, and opens Review when clicked.
 - Moved preview, code review, and desktop terminal into dedicated tool pages with a shared tab strip.
 - Added per-tool close buttons and a close-all action so open tool pages can be removed without clearing chat history.
 - Preserved terminal resizing and bottom/right layout controls inside the dedicated terminal page.
@@ -314,7 +315,10 @@ Overhauled session management in the CLI to give every conversation its own isol
   - Integrated `/resume` dispatch in `slashCommandProcessor.ts` and `MintDashboard.tsx` to hot-swap active conversations seamlessly on Desktop and Web.
 # Unreleased
 
-- Changed `npm start` to rebuild the local Tauri release before launching it, so it always opens the current production code; added `npm run launch` for opening the already-built binary without a rebuild.
+- Fixed the web Pictures page not loading its gallery stylesheet, which caused saved images to render at their intrinsic size instead of inside the responsive card grid.
+- Changed `npm start` to reuse the existing desktop binary and build only when it is missing; `npm run start:rebuild` now explicitly refreshes the fast local release.
+- Changed `npm run cli` to use the existing compiled CLI binary; added `npm run cli:rebuild` for an explicit release rebuild and `npm run cli:dev` for Cargo development runs.
+- Added a desktop Workspace context popover in the titlebar for on-demand workspace, Git branch/status, recent agent-change review, terminal-tab, attachment-source, and refresh information without consuming chat space.
 - Fixed Theme & UI's live Opaque/Glass, preset, and accent choices so they save as one complete configuration immediately and synchronize the main window instead of leaving stale surface-style values behind.
 - Expanded the desktop File, Edit, View, and Help menus with usable workspace, tool-surface, settings, zoom, fullscreen, update, clipboard, and keyboard-shortcut actions. Edit commands now disable when focus is outside an editable field, and application shortcuts are owned by the titlebar to prevent duplicate Terminal toggles.
 - Fixed the Git branch menu clipping behind the Workspace pane by positioning it within the conversation panel and aligning to the side with more available room.

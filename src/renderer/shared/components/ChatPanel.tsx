@@ -223,6 +223,20 @@ export default function ChatPanel({
   onOpenReview,
   } = { ...conversation, ...actions }
   const agentActivities = activitiesFrom(agentProgress)
+  // Keep the composer summary tied to the active/latest agent run. This is cheap
+  // metadata, but memoizing it avoids parsing the activity stream while typing.
+  const composerChanges = useMemo(() => parseFileChangesFromProgress(agentProgress), [agentProgress])
+  const composerAdditions = useMemo(
+    () => composerChanges.reduce((sum, change) => sum + change.additions, 0),
+    [composerChanges],
+  )
+  const composerDeletions = useMemo(
+    () => composerChanges.reduce((sum, change) => sum + change.deletions, 0),
+    [composerChanges],
+  )
+  const composerChangeLabel = composerChanges.length === 1
+    ? '1 file changed'
+    : `${composerChanges.length} files changed`
   // Markdown parsing can be expensive for code, tables, and interactive cards.
   // Limit it to a steady cadence instead of parsing on every stream chunk.
   const throttledStreamedReply = useThrottledValue(streamedReply, STREAM_MARKDOWN_UPDATE_MS)
@@ -1741,6 +1755,23 @@ export default function ChatPanel({
       </div>
 
       <div className={`input-area ${voiceMode ? 'voice-active' : ''}`}>
+        {composerChanges.length > 0 && (
+          <button
+            type="button"
+            className={`composer-change-status ${sending ? 'is-live' : ''}`}
+            onClick={() => openReview(composerChangeLabel, composerChanges)}
+            title="Review recent agent changes"
+          >
+            <span className="composer-change-status-copy">
+              {sending && <span className="composer-change-status-spinner" aria-hidden="true" />}
+              <span>{sending ? `Editing ${composerChanges.length} ${composerChanges.length === 1 ? 'file' : 'files'}…` : composerChangeLabel}</span>
+            </span>
+            <span className="composer-change-status-counts" aria-label={`${composerAdditions} additions and ${composerDeletions} deletions`}>
+              {composerAdditions > 0 && <strong>+{composerAdditions}</strong>}
+              {composerDeletions > 0 && <em>-{composerDeletions}</em>}
+            </span>
+          </button>
+        )}
         {isEmptyChat && <div className="empty-chat-prompt">Mint Agent is ready to work</div>}
         {onSelectWorkspace && (
           <div className="project-context-row">

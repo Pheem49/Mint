@@ -2467,6 +2467,102 @@ input:checked + .slider:before {
   pointer-events: auto;
 }
 
+/* A compact, reviewable handoff between the latest agent run and the next prompt. */
+.composer-change-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  max-width: calc(100% - 28px);
+  min-height: 30px;
+  margin: 0 auto 8px;
+  padding: 5px 11px;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: left;
+  background: var(--bg-surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.composer-change-status:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.composer-change-status:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.composer-change-status-copy,
+.composer-change-status-counts {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.composer-change-status-copy {
+  gap: 7px;
+  overflow: hidden;
+}
+
+.composer-change-status-copy > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-change-status-counts {
+  flex: 0 0 auto;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.94em;
+}
+
+.composer-change-status-counts strong {
+  color: var(--status-success);
+}
+
+.composer-change-status-counts em {
+  color: var(--status-error);
+  font-style: normal;
+}
+
+.composer-change-status.is-live {
+  color: var(--interactive-fg-hover);
+  border-color: var(--accent-border);
+}
+
+.composer-change-status-spinner {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border: 1.5px solid var(--accent-border);
+  border-top-color: var(--interactive-fg-hover);
+  border-radius: 50%;
+  animation: composer-change-status-spin 700ms linear infinite;
+}
+
+@keyframes composer-change-status-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-change-status,
+  .composer-change-status-spinner {
+    transition: none;
+    animation: none;
+  }
+}
+
 /* Project context is the first row of the composer, not a promotional CTA. */
 .project-context-row {
   position: relative;

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import type { FileChange } from '../types'
+import WorkspaceContextPopover from './WorkspaceContextPopover'
 
 type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West'
 
@@ -15,6 +17,12 @@ interface DesktopTitlebarProps {
   onOpenSettings: () => void
   onCheckForUpdates: () => void
   onShowAbout: () => void
+  workspacePath: string
+  terminalCount: number
+  sourceNames: string[]
+  recentChanges: FileChange[]
+  onOpenReview: (changes: FileChange[]) => void
+  onRefreshWorkspace: () => void
 }
 
 const MENU_NAMES: MenuName[] = ['File', 'Edit', 'View', 'Help']
@@ -31,6 +39,12 @@ export default function DesktopTitlebar({
   onOpenSettings,
   onCheckForUpdates,
   onShowAbout,
+  workspacePath,
+  terminalCount,
+  sourceNames,
+  recentChanges,
+  onOpenReview,
+  onRefreshWorkspace,
 }: DesktopTitlebarProps) {
   const [openMenu, setOpenMenu] = useState<MenuName | null>(null)
   const [isMaximized, setIsMaximized] = useState(false)
@@ -258,6 +272,15 @@ export default function DesktopTitlebar({
           data-tauri-drag-region
           aria-hidden="true"
           onDoubleClick={toggleMaximizeWindow}
+        />
+        <WorkspaceContextPopover
+          workspacePath={workspacePath}
+          terminalCount={terminalCount}
+          sourceNames={sourceNames}
+          recentChanges={recentChanges}
+          onOpenWorkspace={onOpenWorkspace}
+          onOpenReview={onOpenReview}
+          onRefreshWorkspace={onRefreshWorkspace}
         />
         <div className="mint-titlebar-window-controls">
           <button type="button" className="mint-window-control" aria-label="Minimize window" title="Minimize" onClick={minimizeWindow}>
