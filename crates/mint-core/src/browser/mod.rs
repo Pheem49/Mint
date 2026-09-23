@@ -23,7 +23,10 @@ use serde::Serialize;
 
 pub use input::{key_press, mouse_click, mouse_move, type_text_native};
 pub use interact::{click, get_element_coordinates, type_text};
-pub use lifecycle::{ensure_page_open, is_browser_running, spawn_automation_browser};
+pub use lifecycle::{
+    enable_browser_tools, ensure_page_open, is_browser_running, spawn_automation_browser,
+    spawn_automation_browser_with_url,
+};
 pub use navigate::{list_tabs, navigate, read_page_text, screenshot};
 
 #[derive(Debug, Clone, Serialize)]

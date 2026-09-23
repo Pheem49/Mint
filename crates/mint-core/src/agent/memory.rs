@@ -362,6 +362,25 @@ impl MemoryStore {
         Ok(())
     }
 
+    pub fn set_chat_session_workspace(
+        &self,
+        chat_id: &str,
+        workspace_path: Option<&str>,
+    ) -> Result<(), MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        let connection = self.connection()?;
+        ensure_builtin_chat_sessions(&connection)?;
+        ensure_chat_session_row(&connection, &chat_id)?;
+        connection.execute(
+            "UPDATE chat_sessions
+             SET workspace_path = ?2,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+            params![chat_id, workspace_path],
+        )?;
+        Ok(())
+    }
+
     pub fn create_cli_session(
         &self,
         workspace_path: Option<&str>,

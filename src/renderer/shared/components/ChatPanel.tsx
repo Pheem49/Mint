@@ -242,6 +242,15 @@ export default function ChatPanel({
     const activeChanges = parseFileChangesFromProgress(agentProgress)
     return mergeFileChanges([...historicalGroups, activeChanges])
   }, [agentActivitySnapshots, agentProgress, interactions])
+
+  const projectName = useMemo(() => {
+    if (!workspacePath) return null
+    const clean = workspacePath.replace(/[\\/]+$/, '').trim()
+    if (!clean) return null
+    const parts = clean.split(/[\\/]/)
+    return parts[parts.length - 1] || clean
+  }, [workspacePath])
+
   // Markdown parsing can be expensive for code, tables, and interactive cards.
   // Limit it to a steady cadence instead of parsing on every stream chunk.
   const throttledStreamedReply = useThrottledValue(streamedReply, STREAM_MARKDOWN_UPDATE_MS)
@@ -1504,6 +1513,14 @@ export default function ChatPanel({
                 >
                   {conversationTitle && conversationTitle.trim() && conversationTitle !== 'New chat' ? conversationTitle.trim() : 'Mint Agent'}
                 </span>
+                {projectName && (
+                  <span className="chat-header-project-pill" title={`Project: ${workspacePath}`}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <span>{projectName}</span>
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -1714,7 +1731,19 @@ export default function ChatPanel({
             </span>
           </button>
         )}
-        {isEmptyChat && <div className="empty-chat-prompt">Mint Agent is ready to work</div>}
+        {isEmptyChat && (
+          <div className="empty-chat-prompt-wrap">
+            <div className="empty-chat-prompt">Mint Agent is ready to work</div>
+            {projectName && (
+              <div className="empty-chat-project-badge">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span>Working in <strong>{projectName}</strong></span>
+              </div>
+            )}
+          </div>
+        )}
         {onSelectWorkspace && (
           <div className="project-context-row">
             <WorkspaceSelector
@@ -2140,7 +2169,12 @@ export default function ChatPanel({
             <div className="preview-split-resizer-grip" />
           </div>
           {reviewPage ? (
-            <CodeReviewPage title={reviewPage.title} changes={reviewPage.changes} onBack={() => setReviewPage(null)} />
+            <CodeReviewPage
+              title={reviewPage.title}
+              changes={reviewPage.changes}
+              workspacePath={workspacePath}
+              onBack={() => setReviewPage(null)}
+            />
           ) : activeArtifact ? (
             <ArtifactPreviewPanel artifact={activeArtifact} onClose={() => setActiveArtifact(null)} workspacePath={workspacePath} />
           ) : null}

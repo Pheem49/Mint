@@ -7,14 +7,14 @@ import { installTauriAdapters } from './tauri'
 import * as tauriPlatform from './tauri'
 import {
   checkoutRemoteGitBranch, createGitBranch, createWorkspaceFile, createWorkspaceFolder,
-  deleteWorkspaceItem, getGitBranchInfo, getGitGraph, getWorkspaceSnapshot, switchGitBranch,
+  deleteWorkspaceItem, getGitBranchInfo, getGitGraph, getWorkspaceGitDiff, getWorkspaceSnapshot, switchGitBranch,
 } from './tauri'
 import { installRendererPlatform, installWorkspacePlatform } from '@shared/platform'
 
 installTauriAdapters()
 installRendererPlatform(tauriPlatform)
 installWorkspacePlatform({
-  getWorkspaceSnapshot, getGitBranchInfo, switchGitBranch, createGitBranch,
+  getWorkspaceSnapshot, getWorkspaceGitDiff, getGitBranchInfo, switchGitBranch, createGitBranch,
   checkoutRemoteGitBranch, getGitGraph, createWorkspaceFile, createWorkspaceFolder, deleteWorkspaceItem,
 })
 

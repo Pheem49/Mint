@@ -86,9 +86,9 @@ pub use auto_shorts::{
     MakeShortsResult, ShortClipInfo, ai_edit_video, make_shorts,
 };
 pub use browser::{
-    BrowserTab, click, get_element_coordinates, is_browser_running, key_press, list_tabs,
-    mouse_click, mouse_move, navigate, read_page_text, screenshot, spawn_automation_browser,
-    type_text, type_text_native,
+    BrowserTab, click, enable_browser_tools, get_element_coordinates, is_browser_running,
+    key_press, list_tabs, mouse_click, mouse_move, navigate, read_page_text, screenshot,
+    spawn_automation_browser, spawn_automation_browser_with_url, type_text, type_text_native,
 };
 pub use calculation::{CalculationError, CalculationReport, calculate};
 pub use code_tools::{
@@ -115,11 +115,11 @@ pub use gemini_live::{
     GeminiLiveEvent, GeminiLiveHandle, start_session as start_gemini_live_session,
 };
 pub use git::{
-    BranchChange, BranchChangeOutcome, BranchInfo, Checkpoint, change_branch,
-    checkout_remote_branch, commit_task_changes, create_branch, create_checkpoint,
+    BranchChange, BranchChangeOutcome, BranchInfo, Checkpoint, DiffHunk, WorkspaceFileChange,
+    change_branch, checkout_remote_branch, commit_task_changes, create_branch, create_checkpoint,
     create_task_branch, generate_commit_message, get_head_hash, is_git_repo, list_checkpoints,
-    read_branch_info, read_graph, record_checkpoint, restore_file, rollback_checkpoint,
-    rollback_task_changes, rollback_to_step, switch_branch, undo_rollback,
+    read_branch_info, read_graph, read_workspace_git_diff, record_checkpoint, restore_file,
+    rollback_checkpoint, rollback_task_changes, rollback_to_step, switch_branch, undo_rollback,
 };
 pub use hooks::{
     HookEntry, HookError, HookEvent, PreHookOutcome, add_hook, clear_hooks, list_hooks,

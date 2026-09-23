@@ -112,6 +112,7 @@ export interface MintPlatformApi {
 
   saveInteractionAgentActivity(interactionId: number, progress: any[]): Promise<void>
   listChatSessions(): Promise<ChatSession[]>
+  updateChatSessionWorkspace(chatId: string, workspacePath: string | null): Promise<void>
   deleteChatSession(chatId: string): Promise<number>
   renameChatSession(chatId: string, newTitle: string): Promise<number>
   getProfileValue(key: string): Promise<string>
@@ -129,6 +130,7 @@ export interface MintPlatformApi {
   getImageGenProviders(): Promise<ImageGenProviders>
   setDefaultImageProvider(provider: string): Promise<boolean>
   getWorkspaceSnapshot(operation: WorkspaceOperation): Promise<import('./types').WorkspaceSnapshot>
+  getWorkspaceGitDiff(workspacePath: string): Promise<import('./types').FileChange[]>
   getGitBranchInfo(workspacePath: string): Promise<GitBranchInfo>
   switchGitBranch(workspacePath: string, branch: string, confirmedDirtyWorkspace?: boolean): Promise<GitBranchChangeOutcome>
   createGitBranch(workspacePath: string, branch: string, confirmedDirtyWorkspace?: boolean): Promise<GitBranchChangeOutcome>
@@ -158,6 +160,7 @@ export interface MintPlatformApi {
 export type WorkspacePlatform = Pick<
   MintPlatformApi,
   | 'getWorkspaceSnapshot'
+  | 'getWorkspaceGitDiff'
   | 'getGitBranchInfo'
   | 'switchGitBranch'
   | 'createGitBranch'
@@ -228,6 +231,7 @@ export const conversationPlatform = {
   clearChatHistory: operation('clearChatHistory'), deleteChatSession: operation('deleteChatSession'),
   renameChatSession: operation('renameChatSession'), getRecentInteractions: operation('getRecentInteractions'),
   saveSystemInteraction: operation('saveSystemInteraction'), listChatSessions: operation('listChatSessions'),
+  updateChatSessionWorkspace: operation('updateChatSessionWorkspace'),
   saveInteractionAgentActivity: operation('saveInteractionAgentActivity'), streamChatMessage: operation('streamChatMessage'),
   cancelChatMessage: operation('cancelChatMessage'), submitToolApproval: operation('submitToolApproval'),
   listen: operation('listen'), readClipboardImage: operation('readClipboardImage'), getTtsUrls: operation('getTtsUrls'),
@@ -282,6 +286,7 @@ function requireWorkspacePlatform(): WorkspacePlatform {
 /** One seam for workspace and Git behavior used by shared renderer modules. */
 export const workspacePlatform: WorkspacePlatform = {
   getWorkspaceSnapshot: (...args) => requireWorkspacePlatform().getWorkspaceSnapshot(...args),
+  getWorkspaceGitDiff: (...args) => requireWorkspacePlatform().getWorkspaceGitDiff(...args),
   getGitBranchInfo: (...args) => requireWorkspacePlatform().getGitBranchInfo(...args),
   switchGitBranch: (...args) => requireWorkspacePlatform().switchGitBranch(...args),
   createGitBranch: (...args) => requireWorkspacePlatform().createGitBranch(...args),

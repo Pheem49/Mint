@@ -1,5 +1,6 @@
 pub mod branches;
 pub mod checkpoint;
+pub mod diff;
 
 pub use branches::{
     BranchChange, BranchChangeOutcome, BranchInfo, change_branch, checkout_remote_branch,
@@ -11,3 +12,5 @@ pub use checkpoint::{
     is_git_repo, list_checkpoints, record_checkpoint, restore_file, rollback_checkpoint,
     rollback_task_changes, rollback_to_step, undo_rollback,
 };
+pub use diff::{DiffHunk, WorkspaceFileChange, read_workspace_git_diff};
+

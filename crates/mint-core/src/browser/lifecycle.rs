@@ -15,7 +15,30 @@ pub async fn is_browser_running(config: &MintConfig) -> bool {
     fetch_pages_endpoint(endpoint).await.is_ok()
 }
 
-pub async fn spawn_automation_browser(config: &MintConfig) -> Result<(), String> {
+pub fn enable_browser_tools(config: &mut MintConfig) -> bool {
+    let mut changed = false;
+    for tool in &[
+        "browser_open",
+        "browser_click",
+        "browser_type",
+        "browser_read",
+        "browser_mouse_move",
+        "browser_mouse_click",
+        "browser_key_press",
+        "browser_screenshot",
+    ] {
+        if config.disabled_tools.contains(&tool.to_string()) {
+            config.disabled_tools.retain(|x| x != *tool);
+            changed = true;
+        }
+    }
+    changed
+}
+
+pub async fn spawn_automation_browser_with_url(
+    config: &MintConfig,
+    initial_url: Option<&str>,
+) -> Result<(), String> {
     let endpoint = config
         .extra
         .get("browserDebugUrl")
@@ -23,6 +46,13 @@ pub async fn spawn_automation_browser(config: &MintConfig) -> Result<(), String>
         .unwrap_or("http://127.0.0.1:9222/json/list");
 
     if fetch_pages_endpoint(endpoint).await.is_ok() {
+        if let Some(url) = initial_url {
+            let trimmed = url.trim();
+            if !trimmed.is_empty() {
+                ensure_page_open(config).await?;
+                super::navigate::navigate(config, trimmed).await?;
+            }
+        }
         return Ok(());
     }
 
@@ -38,12 +68,19 @@ pub async fn spawn_automation_browser(config: &MintConfig) -> Result<(), String>
         .join("automation-profile");
     let profile_arg = format!("--user-data-dir={}", profile_dir.to_string_lossy());
 
-    let args = [
+    let mut args = vec![
         "--remote-debugging-port=9222".to_owned(),
         "--no-first-run".to_owned(),
         "--no-default-browser-check".to_owned(),
         profile_arg,
     ];
+
+    if let Some(url) = initial_url {
+        let trimmed = url.trim();
+        if !trimmed.is_empty() {
+            args.push(trimmed.to_owned());
+        }
+    }
 
     let mut spawned = false;
     let executables: Vec<&str> = if cfg!(target_os = "windows") {
@@ -93,6 +130,10 @@ pub async fn spawn_automation_browser(config: &MintConfig) -> Result<(), String>
     }
 
     Err("Browser spawned but remote debugging port 9222 did not become available.".to_string())
+}
+
+pub async fn spawn_automation_browser(config: &MintConfig) -> Result<(), String> {
+    spawn_automation_browser_with_url(config, None).await
 }
 
 pub async fn ensure_page_open(config: &MintConfig) -> Result<(), String> {

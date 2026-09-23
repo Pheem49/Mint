@@ -119,6 +119,14 @@ pub async fn orchestrate_chat(
         &response.model,
         response.fallback_provider.as_deref(),
     )?;
+    if let Some(ref ws) = request.workspace_path {
+        if !ws.trim().is_empty() {
+            let _ = memory.set_chat_session_workspace(
+                &request_chat_id(request),
+                Some(ws.trim()),
+            );
+        }
+    }
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -155,6 +163,14 @@ where
         &response.model,
         response.fallback_provider.as_deref(),
     )?;
+    if let Some(ref ws) = request.workspace_path {
+        if !ws.trim().is_empty() {
+            let _ = memory.set_chat_session_workspace(
+                &request_chat_id(request),
+                Some(ws.trim()),
+            );
+        }
+    }
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -223,6 +239,14 @@ where
         &response.model,
         response.fallback_provider.as_deref(),
     )?;
+    if let Some(ref ws) = request.workspace_path {
+        if !ws.trim().is_empty() {
+            let _ = memory.set_chat_session_workspace(
+                &request_chat_id(request),
+                Some(ws.trim()),
+            );
+        }
+    }
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),

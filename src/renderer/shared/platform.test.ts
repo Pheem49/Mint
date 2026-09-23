@@ -23,7 +23,7 @@ describe('renderer platform interfaces', () => {
       git: { isRepository: false, currentBranch: null, detachedHead: null, branches: [], remoteBranches: [], isDirty: false } }
     const createWorkspaceFile = vi.fn(async () => snapshot)
     const adapter = {
-      getWorkspaceSnapshot: vi.fn(), getGitBranchInfo: vi.fn(), switchGitBranch: vi.fn(),
+      getWorkspaceSnapshot: vi.fn(), getWorkspaceGitDiff: vi.fn(), getGitBranchInfo: vi.fn(), switchGitBranch: vi.fn(),
       createGitBranch: vi.fn(), checkoutRemoteGitBranch: vi.fn(), getGitGraph: vi.fn(),
       createWorkspaceFile, createWorkspaceFolder: vi.fn(), deleteWorkspaceItem: vi.fn(),
     } satisfies WorkspacePlatform

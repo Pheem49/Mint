@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react'
+import { useState, useEffect, useRef, useMemo, type MouseEvent as ReactMouseEvent, type DragEvent as ReactDragEvent } from 'react'
 import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon, renderScheduledTasksSvgIcon, renderLinkedFoldersSvgIcon } from '../constants/plugins'
 import { useAuthUser } from './AuthGate'
 import { runtimePlatform } from '../platform'
@@ -11,6 +11,7 @@ interface ChatSessionItem {
   kind?: string
   createdAt?: string
   updatedAt?: string
+  workspacePath?: string | null
 }
 
 interface DashboardSidebarProps {
@@ -53,6 +54,11 @@ interface DashboardSidebarProps {
   onSetInteractionEnabled?: (enabled: boolean) => void
   onSetShowInteractionGuide?: (visible: boolean) => void
   onShowToast?: (message: string) => void
+  activeWorkspacePath?: string
+  recentWorkspacePaths?: string[]
+  onBrowseFolder?: () => Promise<string | null>
+  onUpdateSessionWorkspace?: (sessionId: string, workspacePath: string | null) => void
+  onNewChatInProject?: (workspacePath: string) => void
 }
 
 export default function DashboardSidebar({
@@ -86,11 +92,23 @@ export default function DashboardSidebar({
   onSetSearchOpen,
   showWorkspaceTab,
   promoteMediaStudios,
+  activeWorkspacePath,
+  recentWorkspacePaths,
+  onBrowseFolder,
+  onUpdateSessionWorkspace,
+  onNewChatInProject,
 }: DashboardSidebarProps) {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editTitleValue, setEditTitleValue] = useState('')
   const [isMoreOpen, setIsMoreOpen] = useState(false)
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false)
+  const [moveMenu, setMoveMenu] = useState<{
+    sessionId: string
+    currentWorkspacePath?: string | null
+    top: number
+    left: number
+  } | null>(null)
+  const moveMenuRef = useRef<HTMLDivElement>(null)
   const moreContainerRef = useRef<HTMLDivElement>(null)
   const accountContainerRef = useRef<HTMLDivElement>(null)
   const asideRef = useRef<HTMLElement>(null)
@@ -151,6 +169,9 @@ export default function DashboardSidebar({
       if (accountContainerRef.current && !accountContainerRef.current.contains(event.target as Node)) {
         setIsAccountMenuOpen(false)
       }
+      if (moveMenuRef.current && !moveMenuRef.current.contains(event.target as Node)) {
+        setMoveMenu(null)
+      }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
@@ -176,6 +197,219 @@ export default function DashboardSidebar({
 
   const conversationSessions = chatSessions.filter((session) => session.kind !== 'cli' && !session.id.startsWith('cli') && session.id !== 'conversation-default')
   const cliSessions = chatSessions.filter((session) => session.kind === 'cli' || session.id.startsWith('cli'))
+
+  const [projectOrder, setProjectOrder] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const saved = localStorage.getItem('mint_project_order')
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
+  const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null)
+  const [dragOverProjectId, setDragOverProjectId] = useState<string | null>(null)
+  const [dropPosition, setDropPosition] = useState<'before' | 'after' | null>(null)
+
+  const handleProjectDragStart = (e: ReactDragEvent, projectId: string) => {
+    e.dataTransfer.setData('text/plain', projectId)
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggedProjectId(projectId)
+  }
+
+  const handleProjectDragOver = (e: ReactDragEvent, targetId: string) => {
+    if (!draggedProjectId || draggedProjectId === targetId) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const midY = rect.top + rect.height / 2
+    const pos = e.clientY < midY ? 'before' : 'after'
+
+    if (dragOverProjectId !== targetId || dropPosition !== pos) {
+      setDragOverProjectId(targetId)
+      setDropPosition(pos)
+    }
+  }
+
+  const handleProjectDragLeave = (e: ReactDragEvent, targetId: string) => {
+    e.stopPropagation()
+    if (dragOverProjectId === targetId) {
+      const related = e.relatedTarget as Node | null
+      if (!related || !(e.currentTarget as HTMLElement).contains(related)) {
+        setDragOverProjectId(null)
+        setDropPosition(null)
+      }
+    }
+  }
+
+  const handleProjectDrop = (e: ReactDragEvent, targetId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!draggedProjectId || draggedProjectId === targetId) {
+      setDraggedProjectId(null)
+      setDragOverProjectId(null)
+      setDropPosition(null)
+      return
+    }
+
+    const allIds = projectGroups.map((g) => g.id)
+    let newOrder = [...projectOrder]
+    for (const id of allIds) {
+      if (!newOrder.includes(id)) {
+        newOrder.push(id)
+      }
+    }
+
+    newOrder = newOrder.filter((id) => id !== draggedProjectId)
+    const targetIdx = newOrder.indexOf(targetId)
+    if (targetIdx !== -1) {
+      const insertIdx = dropPosition === 'after' ? targetIdx + 1 : targetIdx
+      newOrder.splice(insertIdx, 0, draggedProjectId)
+    } else {
+      newOrder.push(draggedProjectId)
+    }
+
+    setProjectOrder(newOrder)
+    try {
+      localStorage.setItem('mint_project_order', JSON.stringify(newOrder))
+    } catch (err) {
+      console.error('Failed to save project order', err)
+    }
+
+    setDraggedProjectId(null)
+    setDragOverProjectId(null)
+    setDropPosition(null)
+  }
+
+  const handleProjectDragEnd = () => {
+    setDraggedProjectId(null)
+    setDragOverProjectId(null)
+    setDropPosition(null)
+  }
+
+  // Group conversations by Workspace Project
+  const { projectGroups, recentSessions } = useMemo(() => {
+    const getProjectInfo = (workspacePath?: string | null): { id: string; name: string } | null => {
+      if (!workspacePath) return null
+      const clean = workspacePath.replace(/[\\/]+$/, '').trim()
+      if (!clean) return null
+      const parts = clean.split(/[\\/]/)
+      const name = parts[parts.length - 1] || clean
+      return { id: clean, name }
+    }
+
+    const groupsMap = new Map<string, { id: string; name: string; sessions: ChatSessionItem[] }>()
+    const recents: ChatSessionItem[] = []
+
+    // If active workspace is known, initialize its project folder
+    const activeProj = getProjectInfo(activeWorkspacePath)
+    if (activeProj) {
+      groupsMap.set(activeProj.id, { id: activeProj.id, name: activeProj.name, sessions: [] })
+    }
+
+    for (const session of conversationSessions) {
+      const effectivePath = session.workspacePath || null
+      const proj = getProjectInfo(effectivePath)
+      if (proj) {
+        if (!groupsMap.has(proj.id)) {
+          groupsMap.set(proj.id, { id: proj.id, name: proj.name, sessions: [] })
+        }
+        groupsMap.get(proj.id)!.sessions.push(session)
+      } else {
+        recents.push(session)
+      }
+    }
+
+    // Sort groups stably according to user custom projectOrder, fallback to name
+    const sortedGroups = Array.from(groupsMap.values()).sort((a, b) => {
+      const idxA = projectOrder.indexOf(a.id)
+      const idxB = projectOrder.indexOf(b.id)
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB
+      if (idxA !== -1) return -1
+      if (idxB !== -1) return 1
+      return a.name.localeCompare(b.name)
+    })
+
+    return { projectGroups: sortedGroups, recentSessions: recents }
+  }, [conversationSessions, activeWorkspacePath, activeConversationId, projectOrder])
+
+  const availableProjects = useMemo(() => {
+    const getProjectInfo = (workspacePath?: string | null): { id: string; name: string } | null => {
+      if (!workspacePath) return null
+      const clean = workspacePath.replace(/[\\/]+$/, '').trim()
+      if (!clean) return null
+      const parts = clean.split(/[\\/]/)
+      const name = parts[parts.length - 1] || clean
+      return { id: clean, name }
+    }
+
+    const map = new Map<string, string>()
+    if (activeWorkspacePath) {
+      const info = getProjectInfo(activeWorkspacePath)
+      if (info) map.set(info.id, info.name)
+    }
+    for (const g of projectGroups) {
+      map.set(g.id, g.name)
+    }
+    if (recentWorkspacePaths) {
+      for (const p of recentWorkspacePaths) {
+        const info = getProjectInfo(p)
+        if (info && !map.has(info.id)) {
+          map.set(info.id, info.name)
+        }
+      }
+    }
+    return Array.from(map.entries()).map(([path, name]) => ({ path, name }))
+  }, [projectGroups, activeWorkspacePath, recentWorkspacePaths])
+
+  const openMoveMenu = (event: ReactMouseEvent, session: ChatSessionItem) => {
+    event.stopPropagation()
+    event.preventDefault()
+    if (moveMenu?.sessionId === session.id) {
+      setMoveMenu(null)
+      return
+    }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+    const popoverWidth = 220
+    const left = Math.min(rect.left, Math.max(10, window.innerWidth - popoverWidth - 10))
+    const top = rect.bottom + 6
+    setMoveMenu({
+      sessionId: session.id,
+      currentWorkspacePath: session.workspacePath || (session.id === activeConversationId && activeWorkspacePath ? activeWorkspacePath : null),
+      top,
+      left,
+    })
+  }
+
+  const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>(() => {
+    if (typeof window === 'undefined') return {}
+    try {
+      const saved = localStorage.getItem('mint_collapsed_projects')
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
+
+  const [expandedShowMore, setExpandedShowMore] = useState<Record<string, boolean>>({})
+
+  const toggleProjectCollapse = (projectId: string) => {
+    setCollapsedProjects((prev) => {
+      const next = { ...prev, [projectId]: !prev[projectId] }
+      try {
+        localStorage.setItem('mint_collapsed_projects', JSON.stringify(next))
+      } catch {
+        // ignore
+      }
+      return next
+    })
+  }
+
+  const toggleShowMore = (projectId: string) => {
+    setExpandedShowMore((prev) => ({ ...prev, [projectId]: !prev[projectId] }))
+  }
 
   // Remember the last active CLI session so it remains pinned in the sidebar
   // even when the user navigates away to a regular conversation!
@@ -485,97 +719,370 @@ export default function DashboardSidebar({
             </button>
           )}
         </div>
-        <div className="sidebar-section-title sidebar-subsection-title">Conversations</div>
-        <div className="sidebar-chat-list">
-          {conversationSessions.map((session) => (
-            <button
-              key={session.id}
-              className={`sidebar-project sidebar-chat-item ${session.id === activeConversationId ? 'active' : ''}`}
-              onClick={() => onSelectConversation(session.id)}
-              title={session.title}
-            >
-              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                </svg>
-              </span>
-              {editingSessionId === session.id ? (
-                <input
-                  type="text"
-                  className="sidebar-chat-rename-input"
-                  value={editTitleValue}
-                  onChange={(e) => setEditTitleValue(e.target.value)}
-                  onBlur={() => handleSaveRename(session.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleSaveRename(session.id)
-                    } else if (e.key === 'Escape') {
-                      setEditingSessionId(null)
-                    }
-                  }}
-                  autoFocus
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <span className="sidebar-chat-title">{session.title || 'New chat'}</span>
-              )}
-              {session.id === activeConversationId && sending && (
-                <span className="sidebar-generating-text">Thinking...</span>
-              )}
-              {editingSessionId !== session.id && (
-                <>
-                  <span
-                    className="sidebar-chat-edit"
-                    role="button"
-                    tabIndex={0}
-                    title="Rename conversation"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      setEditingSessionId(session.id)
-                      setEditTitleValue(session.title || '')
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        setEditingSessionId(session.id)
-                        setEditTitleValue(session.title || '')
-                      }
-                    }}
+        {projectGroups.length > 0 && (
+          <>
+            <div className="sidebar-section-title sidebar-subsection-title">Projects</div>
+            <div className="sidebar-projects-list">
+              {projectGroups.map((group) => {
+                const isCollapsed = !!collapsedProjects[group.id]
+                const isExpanded = !!expandedShowMore[group.id]
+                const maxVisible = 3
+                const hasMore = group.sessions.length > maxVisible
+                const visibleSessions = (isExpanded || !hasMore)
+                  ? group.sessions
+                  : group.sessions.slice(0, maxVisible)
+
+                const isDragging = draggedProjectId === group.id
+                const isDragOver = dragOverProjectId === group.id
+
+                return (
+                  <div
+                    key={group.id}
+                    className={`sidebar-project-group ${isDragging ? 'is-dragging' : ''} ${isDragOver ? (dropPosition === 'before' ? 'drop-before' : 'drop-after') : ''}`}
+                    onDragOver={(e) => handleProjectDragOver(e, group.id)}
+                    onDragLeave={(e) => handleProjectDragLeave(e, group.id)}
+                    onDrop={(e) => handleProjectDrop(e, group.id)}
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 20h9"></path>
-                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      className="sidebar-project-group-header"
+                      onClick={() => toggleProjectCollapse(group.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          toggleProjectCollapse(group.id)
+                        }
+                      }}
+                      title={`${group.name} (${group.id}) - Drag to reorder`}
+                      draggable
+                      onDragStart={(e) => handleProjectDragStart(e, group.id)}
+                      onDragEnd={handleProjectDragEnd}
+                    >
+                      <span className="sidebar-project-group-left">
+                        <span className="sidebar-project-drag-grip" title="Drag to reorder" aria-hidden="true">
+                          <svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor">
+                            <circle cx="2" cy="2" r="1.2" />
+                            <circle cx="6" cy="2" r="1.2" />
+                            <circle cx="2" cy="6" r="1.2" />
+                            <circle cx="6" cy="6" r="1.2" />
+                            <circle cx="2" cy="10" r="1.2" />
+                            <circle cx="6" cy="10" r="1.2" />
+                          </svg>
+                        </span>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="sidebar-project-folder-icon"
+                        >
+                          {!isCollapsed ? (
+                            <>
+                              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                              <polygon points="3 20 6 10 23 10 20 20 3 20" fill="currentColor" fillOpacity="0.15"></polygon>
+                            </>
+                          ) : (
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                          )}
+                        </svg>
+                        <span className="sidebar-project-group-name">{group.name}</span>
+                      </span>
+                      <span className="sidebar-project-group-right">
+                        {onNewChatInProject && (
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            className="sidebar-project-add-btn"
+                            title={`New chat in ${group.name}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setCollapsedProjects((prev) => ({ ...prev, [group.id]: false }))
+                              onNewChatInProject(group.id)
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                setCollapsedProjects((prev) => ({ ...prev, [group.id]: false }))
+                                onNewChatInProject(group.id)
+                              }
+                            }}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="12" y1="5" x2="12" y2="19"></line>
+                              <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                          </span>
+                        )}
+                        <span className="sidebar-project-group-count">{group.sessions.length}</span>
+                        <span
+                          className="sidebar-project-group-chevron"
+                          style={{
+                            transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                            transition: 'transform 0.18s ease'
+                          }}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                          </svg>
+                        </span>
+                      </span>
+                    </div>
+                    {!isCollapsed && (
+                      <div className="sidebar-project-sessions">
+                        {visibleSessions.map((session) => (
+                          <button
+                            key={session.id}
+                            className={`sidebar-project sidebar-chat-item is-indented ${session.id === activeConversationId ? 'active' : ''}`}
+                            onClick={() => onSelectConversation(session.id)}
+                            title={session.title}
+                          >
+                            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                              </svg>
+                            </span>
+                            {editingSessionId === session.id ? (
+                              <input
+                                type="text"
+                                className="sidebar-chat-rename-input"
+                                value={editTitleValue}
+                                onChange={(e) => setEditTitleValue(e.target.value)}
+                                onBlur={() => handleSaveRename(session.id)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handleSaveRename(session.id)
+                                  } else if (e.key === 'Escape') {
+                                    setEditingSessionId(null)
+                                  }
+                                }}
+                                autoFocus
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            ) : (
+                              <span className="sidebar-chat-title">{session.title || 'New chat'}</span>
+                            )}
+                            {session.id === activeConversationId && sending && (
+                              <span className="sidebar-generating-text">Thinking...</span>
+                            )}
+                            {editingSessionId !== session.id && (
+                              <>
+                                <span
+                                  className="sidebar-chat-edit"
+                                  role="button"
+                                  tabIndex={0}
+                                  title="Rename conversation"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    setEditingSessionId(session.id)
+                                    setEditTitleValue(session.title || '')
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      setEditingSessionId(session.id)
+                                      setEditTitleValue(session.title || '')
+                                    }
+                                  }}
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M12 20h9"></path>
+                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                                  </svg>
+                                </span>
+                                {onUpdateSessionWorkspace && (
+                                  <span
+                                    className="sidebar-chat-edit"
+                                    role="button"
+                                    tabIndex={0}
+                                    title="Move conversation..."
+                                    onClick={(event) => openMoveMenu(event, session)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault()
+                                        openMoveMenu(event as any, session)
+                                      }
+                                    }}
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                                      <polyline points="12 11 12 17"></polyline>
+                                      <polyline points="9 14 12 11 15 14"></polyline>
+                                    </svg>
+                                  </span>
+                                )}
+                                <span
+                                  className="sidebar-chat-delete"
+                                  role="button"
+                                  tabIndex={0}
+                                  title="Delete conversation"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    onDeleteConversation(session.id)
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      onDeleteConversation(session.id)
+                                    }
+                                  }}
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                  </svg>
+                                </span>
+                              </>
+                            )}
+                          </button>
+                        ))}
+                        {hasMore && (
+                          <button
+                            type="button"
+                            className="sidebar-show-more-btn"
+                            onClick={() => toggleShowMore(group.id)}
+                          >
+                            {isExpanded
+                              ? 'Show less ⌃'
+                              : `Show more (${group.sessions.length - maxVisible}) ⌄`}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+
+        {(recentSessions.length > 0 || projectGroups.length === 0) && (
+          <>
+            <div className="sidebar-section-title sidebar-subsection-title">
+              {projectGroups.length > 0 ? 'Recents' : 'Conversations'}
+            </div>
+            <div className="sidebar-chat-list">
+              {recentSessions.map((session) => (
+                <button
+                  key={session.id}
+                  className={`sidebar-project sidebar-chat-item ${session.id === activeConversationId ? 'active' : ''}`}
+                  onClick={() => onSelectConversation(session.id)}
+                  title={session.title}
+                >
+                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                     </svg>
                   </span>
-                  <span
-                    className="sidebar-chat-delete"
-                    role="button"
-                    tabIndex={0}
-                    title="Delete conversation"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onDeleteConversation(session.id)
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        onDeleteConversation(session.id)
-                      }
-                    }}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="3 6 5 6 21 6"></polyline>
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
-                      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                  </span>
-                </>
-              )}
-            </button>
-          ))}
-        </div>
+                  {editingSessionId === session.id ? (
+                    <input
+                      type="text"
+                      className="sidebar-chat-rename-input"
+                      value={editTitleValue}
+                      onChange={(e) => setEditTitleValue(e.target.value)}
+                      onBlur={() => handleSaveRename(session.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleSaveRename(session.id)
+                        } else if (e.key === 'Escape') {
+                          setEditingSessionId(null)
+                        }
+                      }}
+                      autoFocus
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <span className="sidebar-chat-title">{session.title || 'New chat'}</span>
+                  )}
+                  {session.id === activeConversationId && sending && (
+                    <span className="sidebar-generating-text">Thinking...</span>
+                  )}
+                  {editingSessionId !== session.id && (
+                    <>
+                      <span
+                        className="sidebar-chat-edit"
+                        role="button"
+                        tabIndex={0}
+                        title="Rename conversation"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          setEditingSessionId(session.id)
+                          setEditTitleValue(session.title || '')
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            setEditingSessionId(session.id)
+                            setEditTitleValue(session.title || '')
+                          }
+                        }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 20h9"></path>
+                          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                        </svg>
+                      </span>
+                      {onUpdateSessionWorkspace && (
+                        <span
+                          className="sidebar-chat-edit"
+                          role="button"
+                          tabIndex={0}
+                          title="Move conversation..."
+                          onClick={(event) => openMoveMenu(event, session)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              openMoveMenu(event as any, session)
+                            }
+                          }}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                            <polyline points="12 11 12 17"></polyline>
+                            <polyline points="9 14 12 11 15 14"></polyline>
+                          </svg>
+                        </span>
+                      )}
+                      <span
+                        className="sidebar-chat-delete"
+                        role="button"
+                        tabIndex={0}
+                        title="Delete conversation"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onDeleteConversation(session.id)
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            onDeleteConversation(session.id)
+                          }
+                        }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                      </span>
+                    </>
+                  )}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {user && (
@@ -644,6 +1151,85 @@ export default function DashboardSidebar({
               </svg>
             </span>
           </button>
+        </div>
+      )}
+
+      {moveMenu && (
+        <div
+          ref={moveMenuRef}
+          className="sidebar-move-popover"
+          style={{
+            position: 'fixed',
+            top: `${moveMenu.top}px`,
+            left: `${moveMenu.left}px`,
+            zIndex: 99999,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="sidebar-move-header">Move to Project</div>
+          <div className="sidebar-move-list">
+            {availableProjects.map((p) => {
+              const isCurrent = moveMenu.currentWorkspacePath === p.path
+              return (
+                <button
+                  key={p.path}
+                  type="button"
+                  className={`sidebar-move-item ${isCurrent ? 'is-current' : ''}`}
+                  onClick={() => {
+                    onUpdateSessionWorkspace?.(moveMenu.sessionId, p.path)
+                    setMoveMenu(null)
+                  }}
+                  title={p.path}
+                >
+                  <span className="sidebar-move-item-icon">📁</span>
+                  <span className="sidebar-move-item-name">{p.name}</span>
+                  {isCurrent && <span className="sidebar-move-item-check">✓</span>}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="sidebar-move-divider" />
+
+          <button
+            type="button"
+            className={`sidebar-move-item ${!moveMenu.currentWorkspacePath ? 'is-current' : ''}`}
+            onClick={() => {
+              onUpdateSessionWorkspace?.(moveMenu.sessionId, null)
+              setMoveMenu(null)
+            }}
+          >
+            <span className="sidebar-move-item-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 14 4 9 9 4"></polyline>
+                <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
+              </svg>
+            </span>
+            <span className="sidebar-move-item-name">Recents (No project)</span>
+            {!moveMenu.currentWorkspacePath && <span className="sidebar-move-item-check">✓</span>}
+          </button>
+
+          {onBrowseFolder && (
+            <button
+              type="button"
+              className="sidebar-move-item"
+              onClick={async () => {
+                const picked = await onBrowseFolder()
+                if (picked) {
+                  onUpdateSessionWorkspace?.(moveMenu.sessionId, picked)
+                }
+                setMoveMenu(null)
+              }}
+            >
+              <span className="sidebar-move-item-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </span>
+              <span className="sidebar-move-item-name">Choose folder...</span>
+            </button>
+          )}
         </div>
       )}
     </aside>

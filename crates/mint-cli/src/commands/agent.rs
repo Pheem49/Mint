@@ -367,23 +367,7 @@ pub async fn handle_auto() -> Result<()> {
 
     // Enable the browser tools if they are disabled
     let mut config_mut = config.clone();
-    let mut changed = false;
-    for tool in &[
-        "browser_open",
-        "browser_click",
-        "browser_type",
-        "browser_read",
-        "browser_mouse_move",
-        "browser_mouse_click",
-        "browser_key_press",
-        "browser_screenshot",
-    ] {
-        if config_mut.disabled_tools.contains(&tool.to_string()) {
-            config_mut.disabled_tools.retain(|x| x != *tool);
-            changed = true;
-        }
-    }
-    if changed {
+    if mint_core::enable_browser_tools(&mut config_mut) {
         mint_core::save_config(&config_mut)?;
         println!(
             "✅ Enabled browser automation tools in config: browser_open, browser_click, browser_type, browser_read, browser_mouse_move, browser_mouse_click, browser_key_press, browser_screenshot"

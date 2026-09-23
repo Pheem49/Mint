@@ -10,7 +10,7 @@ import type { AgentProgress, ChatResponse, ChatSession, DocumentAttachment, Pict
 
 const {
   clearChatHistory, deleteChatSession, renameChatSession, getRecentInteractions,
-  saveSystemInteraction, listChatSessions, saveInteractionAgentActivity, streamChatMessage,
+  saveSystemInteraction, listChatSessions, updateChatSessionWorkspace, saveInteractionAgentActivity, streamChatMessage,
   cancelChatMessage, submitToolApproval, listen, readClipboardImage,
 } = conversationPlatform
 const { getRuntimeStatus, setActiveModel, selectWorkspaceDirectory, selectLinkedFolderPath, isTauriRuntime } = runtimePlatform
@@ -760,6 +760,24 @@ export default function MintDashboard() {
     }
   }, [])
 
+  const handleUpdateSessionWorkspace = useCallback(async (sessionId: string, targetPath: string | null) => {
+    try {
+      await updateChatSessionWorkspace(sessionId, targetPath)
+      await refreshChatSessions()
+    } catch (e) {
+      console.error('Failed to update session workspace:', e)
+    }
+  }, [refreshChatSessions])
+
+  const handleBrowseFolderForMove = useCallback(async () => {
+    try {
+      const selected = await selectWorkspaceDirectory()
+      return selected || null
+    } catch {
+      return null
+    }
+  }, [])
+
   const [picturesRefreshing, setPicturesRefreshing] = useState(false)
 
   async function refreshPictures() {
@@ -860,6 +878,7 @@ export default function MintDashboard() {
       return
     }
     try {
+      showToast('Opening Co-browsing browser (Mint Auto)...')
       const { invoke } = await import('@tauri-apps/api/core')
       await invoke('open_mint_browser', { url })
     } catch (error) {
@@ -1462,7 +1481,7 @@ export default function MintDashboard() {
     }
   }
 
-  async function clearHistory(action: 'New chat' | 'Clear history') {
+  async function clearHistory(action: 'New chat' | 'Clear history', targetWorkspacePath?: string | null) {
     try {
       if (action === 'New chat') {
         const next = createConversationId()
@@ -1471,6 +1490,18 @@ export default function MintDashboard() {
         setAgentActivitySnapshots({})
         conversationActions.switchSession()
         setViewState('chat')
+
+        if (targetWorkspacePath !== undefined) {
+          updateWorkspacePath(targetWorkspacePath || '')
+        } else {
+          const currentSession = chatSessions.find((s) => s.id === conversationId)
+          if (!currentSession || !currentSession.workspacePath) {
+            updateWorkspacePath('')
+          } else {
+            updateWorkspacePath(currentSession.workspacePath)
+          }
+        }
+
         if (typeof window !== 'undefined') {
           const currentPath = (window.location.pathname || '').replace(/\/+$/, '')
           if (currentPath !== '' && currentPath !== '/chat') {
@@ -1601,11 +1632,27 @@ export default function MintDashboard() {
     setConversationId(id)
     changeView('chat', id)
     conversationActions.switchSession()
-    const history = await getRecentInteractions(50, id, workspacePath || null)
+    const session = chatSessions.find((item) => item.id === id)
+    if (session) {
+      if (session.workspacePath) {
+        if (session.workspacePath !== workspacePath) {
+          updateWorkspacePath(session.workspacePath)
+        }
+      } else {
+        if (workspacePath) {
+          updateWorkspacePath('')
+        }
+      }
+    }
+    const history = await getRecentInteractions(50, id, session?.workspacePath || workspacePath || null)
     const reversed = history.reverse()
     setInteractions(reversed)
     setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
   }
+
+  const handleNewChatInProject = useCallback((targetPath: string) => {
+    clearHistory('New chat', targetPath)
+  }, [])
 
   async function deleteConversation(id: string) {
     if (id === 'cli') {
@@ -2014,6 +2061,11 @@ export default function MintDashboard() {
           onSetSearchOpen={setIsSearchOpen}
           showWorkspaceTab={isDesktopApp}
           promoteMediaStudios={!isDesktopApp}
+          activeWorkspacePath={workspacePath}
+          recentWorkspacePaths={recentWorkspacePaths}
+          onBrowseFolder={isDesktopApp ? handleBrowseFolderForMove : undefined}
+          onUpdateSessionWorkspace={handleUpdateSessionWorkspace}
+          onNewChatInProject={handleNewChatInProject}
         />
         <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible || view === 'workspace' ? '' : 'model-hidden'} ${view === 'workspace' ? 'workspace-open' : ''}`} style={(view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' || view === 'pictures' || view === 'imagine' || view === 'veo' || view === 'code') ? { display: 'none' } : undefined}>
           {proactiveSuggestion && (

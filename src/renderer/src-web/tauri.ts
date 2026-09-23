@@ -811,6 +811,24 @@ export async function listChatSessions(): Promise<ChatSession[]> {
   return invoke<ChatSession[]>('list_chat_sessions')
 }
 
+export async function updateChatSessionWorkspace(chatId: string, workspacePath: string | null): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    try {
+      await authFetch(`${API_BASE}/chat-sessions/workspace`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, workspacePath })
+      });
+    } catch (e) {
+      console.error("Failed to update chat session workspace on local server:", e);
+    }
+    return;
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('update_chat_session_workspace', { chatId, workspacePath })
+}
+
 export async function deleteChatSession(chatId: string): Promise<number> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
@@ -1927,6 +1945,22 @@ export async function getWorkspaceSnapshot(operation: import('../shared/types').
   return invoke('get_workspace_snapshot', { operation })
 }
 
+export async function getWorkspaceGitDiff(workspacePath: string): Promise<import('../shared/types').FileChange[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    try {
+      const res = await fetch(`/api/git/diff?workspace=${encodeURIComponent(workspacePath)}`)
+      if (res.ok) {
+        return (await res.json()) || []
+      }
+    } catch {
+      // fallback
+    }
+    return []
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<import('../shared/types').FileChange[]>('get_workspace_git_diff', { workspacePath })
+}
+
 export async function getGitBranchInfo(workspacePath: string): Promise<GitBranchInfo> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     return { isRepository: false, currentBranch: null, detachedHead: null, branches: [], remoteBranches: [], isDirty: false }
@@ -2498,6 +2532,7 @@ const _apiCheck: MintPlatformApi = {
   saveSystemInteraction,
   saveInteractionAgentActivity,
   listChatSessions,
+  updateChatSessionWorkspace,
   deleteChatSession,
   renameChatSession,
   getProfileValue,
@@ -2515,6 +2550,7 @@ const _apiCheck: MintPlatformApi = {
   getImageGenProviders,
   setDefaultImageProvider,
   getWorkspaceSnapshot,
+  getWorkspaceGitDiff,
   getGitBranchInfo,
   switchGitBranch,
   createGitBranch,

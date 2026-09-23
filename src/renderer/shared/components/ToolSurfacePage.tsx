@@ -29,7 +29,7 @@ interface Props {
   onOpenBrowser: () => void
   onOpenReview: () => void
   onOpenFiles: () => void
-  onOpenSideChat: () => void
+  onOpenSideChat?: () => void
   onClosePanel: () => void
 }
 
@@ -80,18 +80,44 @@ export default function ToolSurfacePage({
     window.addEventListener('pointerup', onUp, { once: true })
   }
 
+  const IconReview = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="3" />
+      <path d="M3 9h18M9 21V9" />
+    </svg>
+  )
+
+  const IconTerminal = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="3" />
+      <path d="m7 10 3 2-3 2M13 14h4" />
+    </svg>
+  )
+
+  const IconBrowser = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 3a15 15 0 0 0 0 18M12 3a15 15 0 0 1 0 18M3 12h18" />
+    </svg>
+  )
+
+  const IconFiles = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  )
+
   const launcherItems = [
-    { label: 'Review', shortcut: 'Ctrl+Shift+G', icon: '⊞', className: 'is-review', action: onOpenReview },
-    { label: 'Terminal', shortcut: 'Ctrl`', icon: '〉_', className: 'is-terminal', action: onOpenTerminal },
-    { label: 'Browser', shortcut: 'Ctrl+T', icon: '◎', className: 'is-browser', action: onOpenBrowser },
-    { label: 'Files', shortcut: 'Ctrl+P', icon: '▱', className: 'is-files', action: onOpenFiles },
-    { label: 'Side chat', shortcut: 'Ctrl+Alt+S', icon: '◉', className: 'is-side-chat', action: onOpenSideChat },
+    { label: 'Review', title: 'Review changes', shortcut: 'Ctrl+Shift+G', icon: <IconReview />, className: 'is-review', action: onOpenReview },
+    { label: 'Terminal', title: 'Integrated terminal', shortcut: 'Ctrl`', icon: <IconTerminal />, className: 'is-terminal', action: onOpenTerminal },
+    { label: 'Browser', title: 'Browser (Co-browsing with AI)', shortcut: 'Ctrl+T', icon: <IconBrowser />, className: 'is-browser', action: onOpenBrowser },
+    { label: 'Workspace', title: 'Workspace files', shortcut: 'Ctrl+P', icon: <IconFiles />, className: 'is-files', action: onOpenFiles },
   ]
 
   const renderLauncher = (className = '') => (
     <div className={`tool-surface-launcher ${className}`.trim()} role="menu" aria-label="Open a tool">
       {launcherItems.map((item) => (
-        <button type="button" role="menuitem" className="tool-surface-launcher-item" key={item.label} onClick={() => { item.action(); setSwitcherOpen(false) }}>
+        <button type="button" role="menuitem" className="tool-surface-launcher-item" key={item.label} title={item.title} onClick={() => { item.action(); setSwitcherOpen(false) }}>
           <span className={`tool-surface-menu-icon ${item.className}`} aria-hidden="true">{item.icon}</span>
           <span>{item.label}</span><kbd>{item.shortcut}</kbd>
         </button>
@@ -151,7 +177,15 @@ export default function ToolSurfacePage({
       <div className={`tool-surface-content${active ? '' : ' is-launcher'}`}>
         {!active && renderLauncher()}
         {active?.kind === 'preview' && <ArtifactPreviewPanel artifact={active.artifact} onClose={() => onClose(active.id)} workspacePath={workspacePath || undefined} />}
-        {active?.kind === 'review' && <CodeReviewPage title={active.reviewTitle} changes={active.changes} onBack={() => onClose(active.id)} />}
+        {active?.kind === 'review' && (
+          <CodeReviewPage
+            title={active.reviewTitle}
+            changes={active.changes}
+            workspacePath={workspacePath}
+            onBack={() => onClose(active.id)}
+            onOpenFiles={onOpenFiles}
+          />
+        )}
         {surfaces.filter((surface): surface is Extract<ToolSurface, { kind: 'terminal' }> => surface.kind === 'terminal').map((surface) => (
           <TerminalDock
             key={surface.id}
