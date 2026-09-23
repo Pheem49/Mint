@@ -1,5 +1,24 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Real Git Workspace Diff and Code Review
+
+- Implemented real Git workspace diffing across CLI, Desktop, and Web using `git diff -U3 HEAD` and `git status --porcelain` to detect uncommitted, staged, and untracked file changes.
+- Removed mock and sample diffs entirely; Code Review now inspects actual files within the active workspace.
+- Added working tree scope toggling between `Workspace Git` (all project-level repository changes) and `AI Edits` (edits accumulated during the current chat session).
+- Integrated live branch switching via `GitBranchSelector` in the review header, allowing users to view and switch branches directly.
+- Added clean working tree detection with a refresh action when no uncommitted changes exist.
+
+## Sidebar Workspace Projects and Session Organization
+
+- Grouped conversations into collapsible project workspace folders under **Projects**, with unassigned chats organized under **Recents**.
+- **Stable Project Order**: Eliminated project list jumping when selecting conversations; project order remains deterministic.
+- **Drag-to-Reorder**: Added drag-and-drop reordering for project folders with smooth visual indicators, persisted to `localStorage` (`mint_project_order`).
+- **Unified Smooth Scrolling**: Enabled full-height scrolling on `.sidebar-section`, ensuring `Code`, `Projects`, and `Recents` scroll together smoothly without being cut off behind the bottom account footer.
+- **Recents Stability**: Conversations in Recents strictly remain in Recents when viewed or active, avoiding unintentional auto-linking to projects.
+- **Move Conversation Popover**: Added an inline move action to easily transfer chat sessions between Projects or back to Recents.
+- **Inline Project Chat Creation**: Added a `+` button on hover for each project folder in the sidebar to create new chats directly scoped to that project.
+- **Project Context Indicators**: Added a subtle `📁 ProjectName` badge in the chat header and empty chat welcome screen across both Desktop and Web to clearly indicate the active project context.
+
 ## README Positioning
 
 - Reworked the top of the README around the primary use case: assigning coding tasks from Telegram or other messaging apps while Mint runs locally, verifies changes, and requests approval before risky actions.
