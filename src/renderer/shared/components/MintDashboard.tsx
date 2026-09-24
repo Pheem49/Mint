@@ -457,6 +457,7 @@ export default function MintDashboard() {
     const saved = Number(window.localStorage.getItem('mint:terminal-right-width'))
     return saved >= 280 && saved <= 900 ? saved : 440
   })
+  const terminalSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(window.localStorage.getItem('mint:sidebar-width'))
     return saved >= SIDEBAR_MIN_WIDTH && saved <= SIDEBAR_MAX_WIDTH ? saved : SIDEBAR_DEFAULT_WIDTH
@@ -891,7 +892,13 @@ export default function MintDashboard() {
     const id = `terminal:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`
     setToolSurfaces((current) => {
       const terminalCount = current.filter((surface) => surface.kind === 'terminal').length
-      const title = terminalCount === 0 ? 'Terminal' : `Terminal ${terminalCount + 1}`
+      let baseTitle = 'terminal'
+      if (workspacePath && workspacePath.trim()) {
+        const cleanPath = workspacePath.trim().replace(/[\\/]+$/, '')
+        const folderName = cleanPath.split(/[\\/]/).pop()
+        if (folderName) baseTitle = folderName
+      }
+      const title = terminalCount === 0 ? baseTitle : `${baseTitle} (${terminalCount + 1})`
       const next = { id, kind: 'terminal' as const, title }
       setActiveSurfaceId(id)
       return [...current, next]
@@ -967,12 +974,19 @@ export default function MintDashboard() {
 
   const openConversationReview = () => {
     setToolsPanelOpen(true)
-    openReviewSurface({
-      id: `review:conversation:${conversationId}`,
-      kind: 'review',
-      title: 'Review',
-      reviewTitle: 'All conversation changes',
-      changes: conversationReviewChanges,
+    setToolSurfaces((current) => {
+      const reviewCount = current.filter((surface) => surface.kind === 'review').length
+      const id = `review:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`
+      const title = reviewCount === 0 ? 'Review' : `Review (${reviewCount + 1})`
+      const next = {
+        id,
+        kind: 'review' as const,
+        title,
+        reviewTitle: 'All conversation changes',
+        changes: conversationReviewChanges,
+      }
+      setActiveSurfaceId(id)
+      return [...current, next]
     })
   }
 
@@ -2179,11 +2193,17 @@ export default function MintDashboard() {
               onClosePanel={() => setToolsPanelOpen(false)}
               onResizeTerminal={(size) => {
                 setTerminalRightWidth(size)
-                window.localStorage.setItem('mint:terminal-right-width', String(size))
+                if (terminalSaveTimeoutRef.current) clearTimeout(terminalSaveTimeoutRef.current)
+                terminalSaveTimeoutRef.current = setTimeout(() => {
+                  window.localStorage.setItem('mint:terminal-right-width', String(size))
+                }, 250)
               }}
               onResizePanel={(size) => {
                 setTerminalRightWidth(size)
-                window.localStorage.setItem('mint:terminal-right-width', String(size))
+                if (terminalSaveTimeoutRef.current) clearTimeout(terminalSaveTimeoutRef.current)
+                terminalSaveTimeoutRef.current = setTimeout(() => {
+                  window.localStorage.setItem('mint:terminal-right-width', String(size))
+                }, 250)
               }}
             />
           </Suspense>

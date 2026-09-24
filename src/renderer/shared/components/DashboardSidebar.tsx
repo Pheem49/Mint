@@ -457,7 +457,7 @@ export default function DashboardSidebar({
         <span className="sidebar-brand-name">Mint Agent</span>
       </div>
 
-      <button className="sidebar-new-chat" onClick={() => onClearHistory('New chat')}>
+      <button className="sidebar-new-chat" onClick={() => onClearHistory('New chat')} title="New chat (Ctrl+N)">
         <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -467,7 +467,7 @@ export default function DashboardSidebar({
         <span>New chat</span>
       </button>
 
-      <button className="sidebar-top-action sidebar-search-btn" onClick={() => onSetSearchOpen(true)}>
+      <button className="sidebar-top-action sidebar-search-btn" onClick={() => onSetSearchOpen(true)} title="Search chats (Ctrl+K)">
         <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8"></circle>
@@ -477,7 +477,7 @@ export default function DashboardSidebar({
         <span>Search chats</span>
       </button>
 
-      <button className={`sidebar-top-action ${view === 'chat' ? 'is-active' : ''}`} onClick={() => onSetView('chat')}>
+      <button className={`sidebar-top-action ${view === 'chat' ? 'is-active' : ''}`} onClick={() => onSetView('chat')} title="Chat">
         <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -486,7 +486,7 @@ export default function DashboardSidebar({
         <span>Chat</span>
       </button>
 
-      <button className={`sidebar-top-action ${view === 'pictures' ? 'is-active' : ''}`} onClick={() => onSetView('pictures')}>
+      <button className={`sidebar-top-action ${view === 'pictures' ? 'is-active' : ''}`} onClick={() => onSetView('pictures')} title="Pictures">
         <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -524,7 +524,7 @@ export default function DashboardSidebar({
         </>
       )}
       {showWorkspaceTab && (
-        <button className={`sidebar-top-action ${view === 'workspace' ? 'is-active' : ''}`} onClick={() => onSetView('workspace')}>
+        <button className={`sidebar-top-action ${view === 'workspace' ? 'is-active' : ''}`} onClick={() => onSetView('workspace')} title="Workspace">
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>
@@ -535,7 +535,7 @@ export default function DashboardSidebar({
         </button>
       )}
       {onToggleModel && (
-        <button className={`sidebar-top-action ${modelVisible ? 'is-active' : ''}`} onClick={onToggleModel}>
+        <button className={`sidebar-top-action ${modelVisible ? 'is-active' : ''}`} onClick={onToggleModel} title="Live2D model">
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -547,7 +547,7 @@ export default function DashboardSidebar({
       )}
 
       <div className="sidebar-more-container" ref={moreContainerRef}>
-        <button className={`sidebar-top-action ${isMoreOpen || (!promoteMediaStudios && (view === 'imagine' || view === 'veo')) || view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)}>
+        <button className={`sidebar-top-action ${isMoreOpen || (!promoteMediaStudios && (view === 'imagine' || view === 'veo')) || view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)} title="More">
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="1.5"></circle>
@@ -665,8 +665,58 @@ export default function DashboardSidebar({
         </div>
       )}
 
-      <div className="sidebar-section">
-        <div className="sidebar-section-title">Code</div>
+      {sidebarCollapsed ? (
+        <div className="sidebar-collapsed-sessions">
+          <button
+            type="button"
+            className={`sidebar-collapsed-item ${view === 'code' ? 'is-active' : ''}`}
+            onClick={() => onSetView('code')}
+            title="Code sessions Hub"
+            aria-label="Code sessions Hub"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="4 17 10 11 4 5"></polyline>
+              <line x1="12" y1="19" x2="20" y2="19"></line>
+            </svg>
+            {view === 'code' && <span className="sidebar-collapsed-dot" />}
+          </button>
+          {pinnedCliSession && (
+            <button
+              type="button"
+              className={`sidebar-collapsed-item ${pinnedCliSession.id === activeConversationId && view !== 'code' ? 'is-active' : ''}`}
+              onClick={() => onSelectConversation(pinnedCliSession.id)}
+              title={pinnedCliSession.title && pinnedCliSession.title !== 'cli' ? pinnedCliSession.title : 'Terminal Session'}
+              aria-label={pinnedCliSession.title && pinnedCliSession.title !== 'cli' ? pinnedCliSession.title : 'Terminal Session'}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+              </svg>
+              {pinnedCliSession.id === activeConversationId && view !== 'code' && <span className="sidebar-collapsed-dot" />}
+            </button>
+          )}
+          {conversationSessions.slice(0, 25).map((session) => {
+            const isActive = session.id === activeConversationId && view !== 'code'
+            return (
+              <button
+                type="button"
+                key={session.id}
+                className={`sidebar-collapsed-item ${isActive ? 'is-active' : ''}`}
+                onClick={() => onSelectConversation(session.id)}
+                title={session.title || 'Chat'}
+                aria-label={session.title || 'Chat'}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
+                {isActive && <span className="sidebar-collapsed-dot" />}
+              </button>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="sidebar-section">
+          <div className="sidebar-section-title">Code</div>
         <div className="sidebar-chat-list sidebar-cli-list">
           <button
             className={`sidebar-project sidebar-chat-item ${view === 'code' ? 'active' : ''}`}
@@ -1084,6 +1134,7 @@ export default function DashboardSidebar({
           </>
         )}
       </div>
+      )}
 
       {user && (
         <div className="sidebar-account-container" ref={accountContainerRef}>

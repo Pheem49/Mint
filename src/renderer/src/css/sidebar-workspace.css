@@ -647,12 +647,112 @@
   gap: 4px;
 }
 
-.app-body.sidebar-collapsed .sidebar-account {
+/* Collapsed Sessions Rail */
+.sidebar-collapsed-sessions {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  margin-top: 4px;
+  width: 100%;
+  border-top: 1px solid var(--border-subtle);
+  scrollbar-width: none;
+}
+
+.sidebar-collapsed-sessions::-webkit-scrollbar {
+  display: none;
+}
+
+.sidebar-collapsed-item {
+  position: relative;
   width: 40px;
-  margin: 0 auto;
-  padding: 4px;
+  height: 34px;
+  display: flex;
+  align-items: center;
   justify-content: center;
-  gap: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-soft, #94a3b8);
+  cursor: pointer;
+  transition: all 0.16s ease;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.sidebar-collapsed-item:hover {
+  background: var(--bg-surface-hover, rgba(255, 255, 255, 0.08));
+  color: var(--text-primary, #ffffff);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-collapsed-item.is-active {
+  background: var(--bg-surface-active, rgba(255, 255, 255, 0.12));
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.sidebar-collapsed-dot {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #6366f1);
+  box-shadow: 0 0 6px var(--accent, #6366f1);
+}
+
+.app-body.sidebar-collapsed .sidebar-account-container {
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.app-body.sidebar-collapsed .sidebar-account {
+  width: 36px;
+  height: 36px;
+  margin: 0 auto;
+  padding: 0;
+  justify-content: center;
+  align-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface-raised);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.app-body.sidebar-collapsed .sidebar-account:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.app-body.sidebar-collapsed .sidebar-account-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.app-body.sidebar-collapsed .sidebar-account-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .app-body.sidebar-collapsed .sidebar-account-info,

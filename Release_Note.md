@@ -36,8 +36,12 @@
 - Added `CONTRIBUTING.md` with setup, validation, issue, good-first-issue, and pull-request guidance.
 - Added GitHub issue and discussion templates plus links from the README to the project community resources.
 
-## Tool Surface Tabs
+## Tool Surface Tabs & Modernized Terminal UI
 
+- **Unified Single Header**: Removed the duplicate inner terminal header (`.terminal-dock-header`); path, active cwd badge (`~/.../folder`), and window controls are now seamlessly unified into the topmost Tab Bar.
+- **Inline `+` New Terminal Tab**: Added a dedicated `+` button directly after the tabs to open additional terminal sessions quickly.
+- **Project-Scoped Tab Titles**: Terminal tabs now clearly display the active project/folder name (e.g., `>_ Mint-CLI`, `>_ Mint-CLI (2)`) along with a modern SVG prompt icon (`>_`).
+- **Maximize & Split Toggle (`⤢`)**: Added a maximize/restore button in the header actions allowing instant expansion across the full workspace or collapsing back to the split side view, with automatic `xterm` terminal re-fitting via `ResizeObserver`.
 - Removed the legacy Terminal/Browser dropdown from the chat header; desktop tools are now opened through the Apps launcher and right-side tool panel.
 - Added a draggable resize handle to the Apps/tool panel, with the selected width persisted for the next opening.
 - Changed the active tool switcher into a working floating menu that opens Review, Terminal, Browser, Files, or Side chat without leaving the current tool page.

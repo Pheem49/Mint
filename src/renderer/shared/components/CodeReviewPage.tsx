@@ -3,6 +3,14 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { FileChange, GitBranchInfo } from '../types'
 import { workspacePlatform } from '../platform'
 import GitBranchSelector from './GitBranchSelector'
+import {
+  materialFolderIcon,
+  materialFileIcon,
+  getExtension,
+  folderOpenIcon,
+  folderIcon,
+  documentIcon,
+} from '../utils/fileIcons'
 import '../css/code-review.css'
 
 interface Props {
@@ -233,6 +241,7 @@ export default function CodeReviewPage({
     return nodes.map((node) => {
       if (node.isDir) {
         const isCollapsed = Boolean(collapsedFolders[node.path])
+        const folderIconSrc = materialFolderIcon(node.name, !isCollapsed) || (isCollapsed ? folderIcon : folderOpenIcon)
         return (
           <div className="code-review-tree-folder" key={node.path}>
             <button
@@ -243,6 +252,9 @@ export default function CodeReviewPage({
               aria-expanded={!isCollapsed}
             >
               <span className="code-review-chevron">{isCollapsed ? '›' : '⌄'}</span>
+              <span className="code-review-tree-icon material-icon folder" aria-hidden="true">
+                {folderIconSrc && <img src={folderIconSrc} alt="" draggable={false} />}
+              </span>
               <span className="code-review-folder-name">{node.name}</span>
               <span className="code-review-mod-dot" title="Modified in this folder" aria-hidden="true">•</span>
             </button>
@@ -256,6 +268,10 @@ export default function CodeReviewPage({
       }
 
       const isSelected = node.path === selectedPath
+      const ext = getExtension(node.name)
+      const fileIconSrc = materialFileIcon(node.name, ext) || documentIcon
+      const isCreated = Boolean(node.change?.created)
+
       return (
         <button
           type="button"
@@ -265,11 +281,13 @@ export default function CodeReviewPage({
           onClick={() => setSelectedPath(node.path)}
           title={node.path}
         >
-          <span className="code-review-file-status-icon" aria-hidden="true">
-            {node.change?.created ? '+' : 'M⤓'}
+          <span className="code-review-tree-icon material-icon file" aria-hidden="true">
+            {fileIconSrc && <img src={fileIconSrc} alt="" draggable={false} />}
           </span>
           <span className="code-review-tree-file-name">{node.name}</span>
-          <span className="code-review-tree-file-badge" aria-hidden="true">[+]</span>
+          <span className={`code-review-file-status-icon ${isCreated ? 'is-created' : 'is-modified'}`} aria-hidden="true">
+            {isCreated ? 'A' : 'M'}
+          </span>
         </button>
       )
     })
@@ -328,8 +346,9 @@ export default function CodeReviewPage({
               title="Open workspace files (Ctrl+P)"
               aria-label="Open workspace files"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+                <path d="M3 6v12" />
               </svg>
             </button>
           )}
@@ -427,11 +446,14 @@ export default function CodeReviewPage({
           {selectedChange ? (
             <article className="code-review-file-view" key={selectedChange.path}>
               <div className="code-review-file-bar">
-                <span className="code-review-file-bar-status">
-                  {selectedChange.created ? '+' : 'M⤓'}
+                <span className="code-review-tree-icon material-icon file" aria-hidden="true">
+                  <img src={materialFileIcon(selectedChange.path.split('/').pop() || '', getExtension(selectedChange.path)) || documentIcon} alt="" draggable={false} />
+                </span>
+                <span className={`code-review-file-bar-status ${selectedChange.created ? 'is-created' : 'is-modified'}`}>
+                  {selectedChange.created ? 'A' : 'M'}
                 </span>
                 <span className="code-review-file-bar-path" title={selectedChange.path}>
-                  ...{selectedChange.path.split('/').pop()}
+                  {selectedChange.path}
                 </span>
                 <span className="code-review-file-bar-stat-add">+{selectedChange.additions}</span>
                 <span className="code-review-file-bar-stat-del">-{selectedChange.deletions}</span>

@@ -333,10 +333,22 @@
 }
 
 .code-review-file-bar-status {
-  color: #22c55e;
   font-weight: 700;
-  font-size: 0.75rem;
-  letter-spacing: -0.02em;
+  font-size: 0.72rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  line-height: 1.2;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.code-review-file-bar-status.is-modified {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.code-review-file-bar-status.is-created {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
 }
 
 .code-review-file-bar-path {
@@ -613,12 +625,45 @@
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
+.code-review-tree-icon {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.code-review-tree-icon.material-icon img {
+  width: 16px;
+  height: 16px;
+  display: block;
+  object-fit: contain;
+  flex: 0 0 auto;
+  pointer-events: none;
+  user-select: none;
+}
+
 .code-review-file-status-icon {
-  color: #10b981;
   font-weight: 700;
-  font-size: 0.72rem;
-  letter-spacing: -0.02em;
+  font-size: 0.7rem;
+  margin-left: auto;
   flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  line-height: 1.2;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.code-review-file-status-icon.is-modified {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+}
+
+.code-review-file-status-icon.is-created {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
 }
 
 .code-review-tree-file-name {
@@ -627,27 +672,67 @@
   white-space: nowrap;
 }
 
-.code-review-tree-file-badge {
-  color: #10b981;
-  font-weight: 600;
-  font-size: 0.72rem;
-  margin-left: auto;
-  flex-shrink: 0;
+.code-review-branch-group .git-branch-selector {
+  flex: 0 0 auto;
+  max-width: none;
+  min-width: 0;
 }
 
 .code-review-branch-group .git-branch-trigger {
-  padding: 4px 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
-  font-size: 0.82rem;
+  font-size: 0.84rem;
+  font-weight: 500;
   color: var(--text-main, #f1f5f9);
-  height: auto;
+  height: 28px;
+  min-height: 28px;
+  max-width: 260px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .code-review-branch-group .git-branch-trigger:hover {
   background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.code-review-branch-group .git-branch-name {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-main, #f1f5f9);
+  line-height: 1.2;
+}
+
+.code-review-branch-group .git-branch-icon {
+  color: var(--accent, #6366f1);
+  flex-shrink: 0;
+}
+
+.code-review-branch-group .git-branch-dirty {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+.code-review-branch-group .git-branch-chevron {
+  color: var(--text-muted, #94a3b8);
+  flex-shrink: 0;
+}
+
+.code-review-branch-group .git-branch-menu {
+  z-index: 200;
 }
 
 .code-review-branch-static {

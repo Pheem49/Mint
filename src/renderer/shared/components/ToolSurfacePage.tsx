@@ -1,5 +1,5 @@
 import '../../src/css/tool-surfaces.css'
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { ArtifactFile } from './ArtifactPreviewPanel'
 import { ArtifactPreviewPanel } from './ArtifactPreviewPanel'
@@ -33,10 +33,32 @@ interface Props {
   onClosePanel: () => void
 }
 
+
 function surfaceIcon(kind: ToolSurface['kind']) {
-  if (kind === 'terminal') return '〉_'
-  if (kind === 'review') return '▣'
-  return '◫'
+  if (kind === 'terminal') {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ verticalAlign: '-1px' }}>
+        <path d="m5 7 5 5-5 5M12 17h7" />
+      </svg>
+    )
+  }
+  if (kind === 'review') {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ verticalAlign: '-1px' }}>
+        <circle cx="5" cy="6" r="3" />
+        <path d="M5 9v12" />
+        <path d="m15 9-3-3 3-3" />
+        <path d="M12 6h5a2 2 0 0 1 2 2v7" />
+        <circle cx="19" cy="18" r="3" />
+      </svg>
+    )
+  }
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ verticalAlign: '-1px' }}>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+    </svg>
+  )
 }
 
 export default function ToolSurfacePage({
@@ -59,31 +81,94 @@ export default function ToolSurfacePage({
   onOpenSideChat,
   onClosePanel,
 }: Props) {
-  const active = surfaces.find((surface) => surface.id === activeSurfaceId) ?? null
+  const active = surfaces.find((surface) => surface.id === activeSurfaceId) ?? surfaces[0] ?? null
   const [switcherOpen, setSwitcherOpen] = useState(false)
-  const [openTabMenuId, setOpenTabMenuId] = useState<string | null>(null)
+  const [tabMenuState, setTabMenuState] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [isMaximized, setIsMaximized] = useState(false)
 
-  const handlePanelResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === 'mouse' && event.button !== 0) return
+  const [isEntering, setIsEntering] = useState(true)
+  const [isResizing, setIsResizing] = useState(false)
+  const resizeCleanupRef = useRef<(() => void) | null>(null)
+
+  const handlePanelResizeStart = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
     event.preventDefault()
+    event.stopPropagation()
+
     const startX = event.clientX
-    const startWidth = event.currentTarget.parentElement?.getBoundingClientRect().width ?? 440
-    const handle = event.currentTarget
-    handle.setPointerCapture?.(event.pointerId)
-    const onMove = (moveEvent: PointerEvent) => {
-      const maxWidth = Math.min(900, window.innerWidth - 120)
-      const nextWidth = Math.max(300, Math.min(maxWidth, startWidth + startX - moveEvent.clientX))
-      onResizePanel(Math.round(nextWidth))
+    const startWidth = terminalSize || event.currentTarget.parentElement?.getBoundingClientRect().width || 480
+    const prevCursor = document.body.style.cursor
+    const prevUserSelect = document.body.style.userSelect
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.body.classList.add('is-tool-resizing')
+    setIsResizing(true)
+
+    let frameId: number | null = null
+    let latestWidth = startWidth
+
+    const onMove = (moveEvent: MouseEvent) => {
+      const deltaX = startX - moveEvent.clientX
+      const maxWidth = Math.min(1200, window.innerWidth - 120)
+      latestWidth = Math.max(280, Math.min(maxWidth, startWidth + deltaX))
+
+      document.documentElement.style.setProperty('--tool-surface-width', `${Math.round(latestWidth)}px`)
+
+      if (frameId == null) {
+        frameId = requestAnimationFrame(() => {
+          frameId = null
+          onResizePanel(Math.round(latestWidth))
+        })
+      }
     }
-    const onUp = () => window.removeEventListener('pointermove', onMove)
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp, { once: true })
+
+    const onUp = () => {
+      if (frameId != null) {
+        cancelAnimationFrame(frameId)
+        frameId = null
+      }
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevUserSelect
+      document.body.classList.remove('is-tool-resizing')
+      document.documentElement.style.removeProperty('--tool-surface-width')
+      resizeCleanupRef.current = null
+      setIsResizing(false)
+      onResizePanel(Math.round(latestWidth))
+    }
+
+    resizeCleanupRef.current?.()
+    resizeCleanupRef.current = onUp
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
   }
+
+  const handleResizeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      onResizePanel(Math.min(1200, (terminalSize || 480) + 24))
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      onResizePanel(Math.max(280, (terminalSize || 480) - 24))
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      resizeCleanupRef.current?.()
+      document.body.classList.remove('is-tool-resizing')
+    }
+  }, [])
 
   const IconReview = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="3" width="18" height="18" rx="3" />
-      <path d="M3 9h18M9 21V9" />
+      <circle cx="5" cy="6" r="3" />
+      <path d="M5 9v12" />
+      <path d="m15 9-3-3 3-3" />
+      <path d="M12 6h5a2 2 0 0 1 2 2v7" />
+      <circle cx="19" cy="18" r="3" />
     </svg>
   )
 
@@ -125,16 +210,126 @@ export default function ToolSurfacePage({
     </div>
   )
 
+  const [menuAlignRight, setMenuAlignRight] = useState(false)
+  const newTabWrapRef = useRef<HTMLDivElement>(null)
+
+  const toggleSwitcher = () => {
+    setSwitcherOpen((open) => {
+      const next = !open
+      if (next && newTabWrapRef.current) {
+        const rect = newTabWrapRef.current.getBoundingClientRect()
+        setMenuAlignRight(window.innerWidth - rect.left < 210)
+      }
+      return next
+    })
+  }
+
+  useEffect(() => {
+    if (!switcherOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && !target.closest('.tool-surface-new-tab-wrap')) {
+        setSwitcherOpen(false)
+      }
+    }
+    window.addEventListener('mousedown', handleClickOutside)
+    return () => window.removeEventListener('mousedown', handleClickOutside)
+  }, [switcherOpen])
+
+  useEffect(() => {
+    if (!tabMenuState) return
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && !target.closest('.tool-surface-tab-menu')) {
+        setTabMenuState(null)
+      }
+    }
+    window.addEventListener('mousedown', handleClickOutside)
+    return () => window.removeEventListener('mousedown', handleClickOutside)
+  }, [tabMenuState])
+
+  const tabListRef = useRef<HTMLDivElement>(null)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
+
+  const checkTabScroll = useCallback(() => {
+    const el = tabListRef.current
+    if (!el) return
+    const hasOverflow = el.scrollWidth > el.clientWidth + 2
+    setCanScrollLeft(hasOverflow && el.scrollLeft > 2)
+    setCanScrollRight(hasOverflow && el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
+  }, [])
+
+  useEffect(() => {
+    checkTabScroll()
+    const el = tabListRef.current
+    if (!el) return
+    el.addEventListener('scroll', checkTabScroll, { passive: true })
+    const ro = new ResizeObserver(checkTabScroll)
+    ro.observe(el)
+    return () => {
+      el.removeEventListener('scroll', checkTabScroll)
+      ro.disconnect()
+    }
+  }, [checkTabScroll, surfaces.length])
+
+  // Scroll active tab into view when active surface changes
+  useEffect(() => {
+    if (!active?.id || !tabListRef.current) return
+    const activeEl = tabListRef.current.querySelector<HTMLElement>('.tool-surface-tab.is-active')
+    if (activeEl) {
+      activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+    }
+    checkTabScroll()
+  }, [active?.id, checkTabScroll])
+
+  const scrollTabs = (direction: 'left' | 'right') => {
+    if (!tabListRef.current) return
+    const amount = direction === 'left' ? -180 : 180
+    tabListRef.current.scrollBy({ left: amount, behavior: 'smooth' })
+  }
+
+  const handleTabWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY !== 0) {
+      e.currentTarget.scrollLeft += e.deltaY
+    }
+  }
+
+  const handleAddNewTab = () => {
+    if (active?.kind === 'review') {
+      onOpenReview()
+    } else if (active?.kind === 'preview') {
+      onDuplicate(active.id)
+    } else {
+      onOpenTerminal()
+    }
+  }
+
+  const newTabTooltip = active?.kind === 'review'
+    ? 'New Review Tab'
+    : active?.kind === 'preview'
+    ? 'Duplicate Preview Tab'
+    : 'New Terminal Tab (Ctrl+`)'
+
   return (
-    <section className="tool-surface-page" aria-label="Open tools">
-      <div
-        className="tool-surface-resize-handle"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize tools panel"
-        title="Drag to resize tools panel"
-        onPointerDown={handlePanelResizeStart}
-      />
+    <section
+      className={`tool-surface-page ${isEntering ? 'is-entering' : ''} ${isMaximized ? 'is-maximized' : ''} ${isResizing ? 'is-resizing' : ''}`}
+      onAnimationEnd={() => setIsEntering(false)}
+      aria-label="Open tools"
+    >
+      {!isMaximized && (
+        <div
+          className={`tool-surface-resize-handle ${isResizing ? 'is-resizing' : ''}`}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize tools panel"
+          aria-valuenow={terminalSize}
+          tabIndex={0}
+          title="Drag to resize tools panel"
+          onMouseDown={handlePanelResizeStart}
+          onKeyDown={handleResizeKeyDown}
+        />
+      )}
       {!active && (
         <header className="tool-surface-launcher-header">
           <span>Tools</span>
@@ -145,51 +340,173 @@ export default function ToolSurfacePage({
       )}
       {active && (
         <header className="tool-surface-tabs">
-          <button type="button" className="tool-surface-switcher" onClick={() => setSwitcherOpen((open) => !open)} aria-label="Switch tool" aria-expanded={switcherOpen} title="Switch tool">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 8h8M8 12h5M8 16h8"/></svg>
-          </button>
-          {switcherOpen && <div className="tool-surface-switch-menu">{renderLauncher('is-switch-menu')}</div>}
-          <div className="tool-surface-tab-list" role="tablist" aria-label="Open tool pages">
-            {surfaces.map((surface) => (
-              <div className={`tool-surface-tab ${surface.id === active.id ? 'is-active' : ''}`} key={surface.id}>
-                <button type="button" role="tab" aria-selected={surface.id === active.id} onClick={() => { setOpenTabMenuId(null); onSelect(surface.id) }}>
-                  <span className={`tool-surface-tab-icon is-${surface.kind}`} aria-hidden="true">{surfaceIcon(surface.kind)}</span>
-                  <span className="tool-surface-tab-title">{surface.title}</span>
-                </button>
-                <button type="button" className="tool-surface-tab-menu-trigger" onClick={(event) => { event.stopPropagation(); setOpenTabMenuId((current) => current === surface.id ? null : surface.id) }} aria-label={`More actions for ${surface.title}`} aria-expanded={openTabMenuId === surface.id} title="Tab actions">⋯</button>
-                <button type="button" className="tool-surface-tab-close" onClick={() => onClose(surface.id)} aria-label={`Close ${surface.title}`} title="Close">×</button>
-                {openTabMenuId === surface.id && (
-                  <div className="tool-surface-tab-menu" role="menu">
-                    <button type="button" role="menuitem" onClick={() => { onDuplicate(surface.id); setOpenTabMenuId(null) }}>Duplicate tab</button>
-                    <button type="button" role="menuitem" onClick={() => { onRename(surface.id); setOpenTabMenuId(null) }}>Rename tab</button>
-                    <button type="button" role="menuitem" onClick={() => { onCloseOthers(surface.id); setOpenTabMenuId(null) }}>Close other tabs</button>
-                  </div>
-                )}
-              </div>
-            ))}
+          <div className="tool-surface-tabs-container">
+            {canScrollLeft && (
+              <button
+                type="button"
+                className="tool-surface-tab-scroll-btn is-left"
+                onClick={() => scrollTabs('left')}
+                aria-label="Scroll tabs left"
+                title="Scroll tabs left"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+              </button>
+            )}
+            <div
+              className="tool-surface-tab-list"
+              ref={tabListRef}
+              onWheel={handleTabWheel}
+              role="tablist"
+              aria-label="Open tool pages"
+            >
+              {surfaces.map((surface) => (
+                <div
+                  className={`tool-surface-tab ${surface.id === active.id ? 'is-active' : ''}`}
+                  key={surface.id}
+                  onContextMenu={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    setTabMenuState({
+                      id: surface.id,
+                      x: Math.min(event.clientX, window.innerWidth - 180),
+                      y: Math.min(event.clientY, window.innerHeight - 150),
+                    })
+                  }}
+                >
+                  <button type="button" role="tab" aria-selected={surface.id === active.id} onClick={() => { setTabMenuState(null); onSelect(surface.id) }}>
+                    <span className={`tool-surface-tab-icon is-${surface.kind}`} aria-hidden="true">{surfaceIcon(surface.kind)}</span>
+                    <span className="tool-surface-tab-title">{surface.title}</span>
+                  </button>
+                  <button type="button" className="tool-surface-tab-close" onClick={() => onClose(surface.id)} aria-label={`Close ${surface.title}`} title="Close">×</button>
+                </div>
+              ))}
+            </div>
+            {canScrollRight && (
+              <button
+                type="button"
+                className="tool-surface-tab-scroll-btn is-right"
+                onClick={() => scrollTabs('right')}
+                aria-label="Scroll tabs right"
+                title="Scroll tabs right"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </button>
+            )}
           </div>
-          <button type="button" className="tool-surface-close-all" onClick={onClosePanel} title="Close tools panel" aria-label="Close tools panel">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4h8v2M19 6l-1 14H6L5 6" /><path d="M10 11v5M14 11v5" /></svg>
-          </button>
+          <div className="tool-surface-new-tab-wrap" ref={newTabWrapRef}>
+            <button
+              type="button"
+              className="tool-surface-new-tab-btn"
+              onClick={handleAddNewTab}
+              onContextMenu={(e) => { e.preventDefault(); toggleSwitcher() }}
+              title={newTabTooltip}
+              aria-label={newTabTooltip}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={`tool-surface-dropdown-btn ${switcherOpen ? 'is-active' : ''}`}
+              onClick={(e) => { e.stopPropagation(); toggleSwitcher() }}
+              title="Switch tool or open page"
+              aria-label="Switch tool"
+              aria-expanded={switcherOpen}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+            {switcherOpen && (
+              <div
+                className={`tool-surface-switch-menu ${menuAlignRight ? 'is-align-right' : ''}`}
+                role="menu"
+              >
+                {renderLauncher('is-switch-menu')}
+              </div>
+            )}
+          </div>
+          <div className="tool-surface-header-right">
+            <div className="tool-surface-header-actions">
+              <button
+                type="button"
+                className={`tool-surface-action-btn ${isMaximized ? 'is-active' : ''}`}
+                onClick={() => setIsMaximized((prev) => !prev)}
+                title={isMaximized ? 'Restore side split' : 'Maximize terminal (⤢)'}
+                aria-label={isMaximized ? 'Restore side split' : 'Maximize terminal'}
+              >
+                {isMaximized ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+                  </svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                  </svg>
+                )}
+              </button>
+              <button
+                type="button"
+                className="tool-surface-action-btn is-close"
+                onClick={onClosePanel}
+                title="Close tools panel"
+                aria-label="Close tools panel"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          {tabMenuState && (
+            <div
+              className="tool-surface-tab-menu is-floating"
+              style={{
+                position: 'fixed',
+                top: `${tabMenuState.y}px`,
+                left: `${tabMenuState.x}px`,
+                zIndex: 1000,
+              }}
+              role="menu"
+            >
+              <button type="button" role="menuitem" onClick={() => { onDuplicate(tabMenuState.id); setTabMenuState(null) }}>
+                Duplicate tab
+              </button>
+              <button type="button" role="menuitem" onClick={() => { onRename(tabMenuState.id); setTabMenuState(null) }}>
+                Rename tab
+              </button>
+              <button type="button" role="menuitem" onClick={() => { onCloseOthers(tabMenuState.id); setTabMenuState(null) }}>
+                Close other tabs
+              </button>
+              <button type="button" role="menuitem" onClick={() => { onClose(tabMenuState.id); setTabMenuState(null) }}>
+                Close tab
+              </button>
+            </div>
+          )}
         </header>
       )}
 
       <div className={`tool-surface-content${active ? '' : ' is-launcher'}`}>
         {!active && renderLauncher()}
-        {active?.kind === 'preview' && <ArtifactPreviewPanel artifact={active.artifact} onClose={() => onClose(active.id)} workspacePath={workspacePath || undefined} />}
+        {active?.kind === 'preview' && <ArtifactPreviewPanel artifact={active.artifact} onClose={() => active && onClose(active.id)} workspacePath={workspacePath || undefined} />}
         {active?.kind === 'review' && (
           <CodeReviewPage
             title={active.reviewTitle}
             changes={active.changes}
             workspacePath={workspacePath}
-            onBack={() => onClose(active.id)}
+            onBack={() => active && onClose(active.id)}
             onOpenFiles={onOpenFiles}
           />
         )}
         {surfaces.filter((surface): surface is Extract<ToolSurface, { kind: 'terminal' }> => surface.kind === 'terminal').map((surface) => (
           <TerminalDock
             key={surface.id}
-            visible={surface.id === active.id}
+            visible={Boolean(active && surface.id === active.id)}
             page
             size={terminalSize}
             cwd={workspacePath}

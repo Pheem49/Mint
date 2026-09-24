@@ -74,6 +74,9 @@ export default function TerminalDock({ visible, page = false, size, cwd, onClose
     onResize(clampSize(size + (increase ? 16 : -16)))
   }
 
+  const lastColsRef = useRef(0)
+  const lastRowsRef = useRef(0)
+
   const fit = useCallback(() => {
     const terminal = terminalRef.current
     const addon = fitRef.current
@@ -81,6 +84,11 @@ export default function TerminalDock({ visible, page = false, size, cwd, onClose
     if (!terminal || !addon || !sessionId || !visible) return
     try {
       addon.fit()
+      if (terminal.cols === lastColsRef.current && terminal.rows === lastRowsRef.current) {
+        return
+      }
+      lastColsRef.current = terminal.cols
+      lastRowsRef.current = terminal.rows
       void invoke('resize_interactive_terminal', {
         sessionId,
         cols: terminal.cols,
@@ -207,7 +215,7 @@ export default function TerminalDock({ visible, page = false, size, cwd, onClose
       style={{ '--terminal-dock-size': `${size}px` } as CSSProperties}
       aria-hidden={!visible}
     >
-      {visible && (
+      {visible && !page && (
         <div
           className="terminal-dock-resize-handle"
           role="separator"
@@ -219,12 +227,14 @@ export default function TerminalDock({ visible, page = false, size, cwd, onClose
           onKeyDown={resizeWithKeyboard}
         />
       )}
-      <header className="terminal-dock-header">
-        <div className="terminal-dock-title"><span className="terminal-dock-status" />Terminal{cwd ? <span className="terminal-dock-cwd">{cwd}</span> : null}</div>
-        <div className="terminal-dock-header-actions">
-          <button type="button" onClick={onClose} aria-label="Close terminal" title="Close terminal">×</button>
-        </div>
-      </header>
+      {!page && (
+        <header className="terminal-dock-header">
+          <div className="terminal-dock-title"><span className="terminal-dock-status" />Terminal{cwd ? <span className="terminal-dock-cwd">{cwd}</span> : null}</div>
+          <div className="terminal-dock-header-actions">
+            <button type="button" onClick={onClose} aria-label="Close terminal" title="Close terminal">×</button>
+          </div>
+        </header>
+      )}
       <div className="terminal-dock-surface" ref={hostRef} />
     </section>
   )
