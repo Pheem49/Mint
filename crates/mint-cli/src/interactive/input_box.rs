@@ -788,7 +788,7 @@ pub fn read_line_interactive(
                         }
                     }
                     KeyCode::Char('d') if ctrl => {
-                        if ctrl_d_pressed || ctrl_c_pressed {
+                        if ctrl_d_pressed {
                             disable_raw_mode()?;
                             clear_input_box(cursor_row);
                             let _ = io::stdout().flush();

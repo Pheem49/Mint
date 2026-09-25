@@ -65,6 +65,20 @@ pub(super) async fn wait_for_escape_interrupt(
 ) {
     use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 
+    let tui = live_status
+        .lock()
+        .ok()
+        .and_then(|status| status.tui.clone());
+    if let Some(tui) = tui {
+        loop {
+            if tui.take_interrupted() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+        return;
+    }
+
     // Fixed for the whole turn (set once when it starts), so it's safe to
     // snapshot instead of re-locking every tick.
     let queueing = live_status

@@ -27,7 +27,7 @@ mod markdown_render;
 use approval_prompts::*;
 use diff_render::*;
 pub(crate) use live_status::*;
-use markdown_render::*;
+pub(crate) use markdown_render::*;
 
 const RESET: &str = "\x1b[0m";
 const MINT: &str = "\x1b[32m";
@@ -61,6 +61,9 @@ pub struct AgentOptions {
     pub pinned_mcp_server: Option<String>,
     /// Chat ID / session ID for this turn. Defaults to `CHAT_CLI_ID` if omitted.
     pub chat_id: Option<String>,
+    /// Full-screen UI event sink. When present, agent output never writes
+    /// directly to stdout and stdin remains owned by the TUI controller.
+    pub tui: Option<crate::interactive::TuiHandle>,
 }
 
 pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Result<AgentResult> {
@@ -330,6 +333,187 @@ fn save_plan_file(root: &Path, plan: &str) -> io::Result<std::path::PathBuf> {
     Ok(path)
 }
 
+fn tui_persistable_approval(
+    tui: &crate::interactive::TuiHandle,
+    tool: &str,
+    subject: &str,
+    title: &str,
+    body: String,
+    root: &Path,
+    permission_rules: &mut Vec<PermissionRule>,
+) -> ApprovalOutcome {
+    if let Some(decision) = permission_decision_for(permission_rules, tool, subject, root) {
+        return match decision {
+            PermissionDecision::Allow => ApprovalOutcome::Approved,
+            PermissionDecision::Deny => ApprovalOutcome::Denied,
+        };
+    }
+    match tui.choose(
+        title,
+        body,
+        vec![
+            "Yes".into(),
+            "Yes, allow for this session".into(),
+            "No".into(),
+        ],
+    ) {
+        Some(0) => ApprovalOutcome::Approved,
+        Some(1) => {
+            permission_rules.push(PermissionRule {
+                tool: tool.to_owned(),
+                pattern: subject.to_owned(),
+                decision: PermissionDecision::Allow,
+                project_root: None,
+            });
+            ApprovalOutcome::Approved
+        }
+        _ => ApprovalOutcome::Denied,
+    }
+}
+
+fn tui_approval(
+    tui: &crate::interactive::TuiHandle,
+    approval: &AgentApproval,
+    root: &Path,
+    permission_rules: &mut Vec<PermissionRule>,
+) -> Result<ApprovalOutcome, String> {
+    let yes_no = |title: &str, body: String| match tui.choose(
+        title,
+        body,
+        vec!["Approve".into(), "Deny".into()],
+    ) {
+        Some(0) => ApprovalOutcome::Approved,
+        _ => ApprovalOutcome::Denied,
+    };
+    Ok(match approval {
+        AgentApproval::WriteFile { path, diff, .. } => tui_persistable_approval(
+            tui,
+            "write_file",
+            path,
+            "Create file",
+            format!("Path: {path}\n\n{diff}"),
+            root,
+            permission_rules,
+        ),
+        AgentApproval::ApplyPatch { path, diff, .. } => tui_persistable_approval(
+            tui,
+            "apply_patch",
+            path,
+            "Update file",
+            format!("Path: {path}\n\n{diff}"),
+            root,
+            permission_rules,
+        ),
+        AgentApproval::RunShell {
+            command,
+            mode,
+            background,
+        } => tui_persistable_approval(
+            tui,
+            "run_shell",
+            command,
+            "Local shell command",
+            format!(
+                "Command: {command}\nMode: {mode}\nBackground: {}",
+                if *background { "yes" } else { "no" }
+            ),
+            root,
+            permission_rules,
+        ),
+        AgentApproval::NoteWrite { path, .. } => tui_persistable_approval(
+            tui,
+            "note_write",
+            path,
+            "Create note",
+            format!("Path: {path}"),
+            root,
+            permission_rules,
+        ),
+        AgentApproval::RunPlugin { name, instruction } => {
+            let subject = format!("{name}: {instruction}");
+            tui_persistable_approval(
+                tui,
+                "run_plugin",
+                &subject,
+                "Run plugin",
+                format!("Plugin: {name}\n\n{instruction}"),
+                root,
+                permission_rules,
+            )
+        }
+        AgentApproval::McpTool {
+            server,
+            tool,
+            arguments,
+        } => {
+            let body = format!("Server: {server}\nTool: {tool}\nArguments: {arguments}");
+            if tui.choose(
+                "MCP tool call",
+                body,
+                vec![format!("Allow all tools on {server}"), "No".into()],
+            ) == Some(0)
+            {
+                ApprovalOutcome::Intercepted(mint_core::MCP_ALLOW_ALL_SENTINEL.to_owned())
+            } else {
+                ApprovalOutcome::Denied
+            }
+        }
+        AgentApproval::UserApproval { title, prompt } => yes_no(title, prompt.to_owned()),
+        AgentApproval::EnterPlanMode { reason } => yes_no("Enter plan mode?", reason.to_owned()),
+        AgentApproval::ExitPlanMode { plan } => {
+            let outcome = yes_no("Review plan", plan.to_owned());
+            if outcome == ApprovalOutcome::Approved {
+                match save_plan_file(root, plan) {
+                    Ok(path) => tui.push_notice(format!("Plan saved to {}", path.display())),
+                    Err(error) => tui.push_notice(format!("Could not save plan: {error}")),
+                }
+            }
+            outcome
+        }
+        AgentApproval::AskUser {
+            question,
+            options,
+            header,
+            multi_select,
+        } => {
+            let title = header.as_deref().unwrap_or("Mint needs your input");
+            if options.is_empty() {
+                tui.prompt_text(title, question)
+                    .map(ApprovalOutcome::Intercepted)
+                    .unwrap_or(ApprovalOutcome::Denied)
+            } else {
+                let labels = options
+                    .iter()
+                    .map(|option| match &option.description {
+                        Some(description) => format!("{} — {description}", option.label),
+                        None => option.label.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                if *multi_select {
+                    let selected = tui.choose_many(title, question, labels);
+                    let answer = selected
+                        .into_iter()
+                        .filter_map(|index| options.get(index))
+                        .map(|option| option.label.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if answer.is_empty() {
+                        ApprovalOutcome::Denied
+                    } else {
+                        ApprovalOutcome::Intercepted(answer)
+                    }
+                } else {
+                    let choice = tui.choose(title, question, labels);
+                    choice
+                        .and_then(|choice| options.get(choice))
+                        .map(|option| ApprovalOutcome::Intercepted(option.label.clone()))
+                        .unwrap_or(ApprovalOutcome::Denied)
+                }
+            }
+        }
+    })
+}
+
 pub async fn run_code_agent_with_options(
     task: &str,
     root: &Path,
@@ -354,7 +538,11 @@ pub async fn run_code_agent_with_options(
     let live_status = Arc::new(Mutex::new(LiveStatus::default()));
     {
         use crossterm::tty::IsTty;
+        if let Ok(mut status) = live_status.lock() {
+            status.tui = options.tui.clone();
+        }
         if options.queueing
+            && options.tui.is_none()
             && !options.fast_mode
             && io::stdout().is_tty()
             && io::stdin().is_tty()
@@ -376,6 +564,11 @@ pub async fn run_code_agent_with_options(
 
     let approve_cb = |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         approve_approval_active.store(true, Ordering::Relaxed);
+        if let Some(tui) = &options.tui {
+            let result = tui_approval(tui, approval, root, &mut permission_rules);
+            approve_approval_active.store(false, Ordering::Relaxed);
+            return result;
+        }
         // Synchronous, not polled: `wait_for_escape_interrupt` holds raw
         // mode continuously while the queueing box is live (see its docs),
         // and only reacts to `approval_active` on its next ~15ms tick. Every
@@ -1054,18 +1247,40 @@ pub async fn run_code_agent_with_options(
         status.accepting_input = false;
         commit_activity_snapshot(&mut status);
         if let Ok(mut out) = queued_out.lock() {
-            *out = status.queued.clone();
+            *out = options
+                .tui
+                .as_ref()
+                .map(|tui| tui.take_queued())
+                .unwrap_or_else(|| status.queued.clone());
         }
         if let Ok(mut out) = draft_out.lock() {
-            *out = if status.draft.is_empty() {
-                None
-            } else {
-                Some(status.draft.iter().collect())
-            };
+            *out = options
+                .tui
+                .as_ref()
+                .and_then(|tui| tui.draft())
+                .or_else(|| (!status.draft.is_empty()).then(|| status.draft.iter().collect()));
         }
         clear_live_status(&mut status);
     }
     let res = res.map_err(|e| anyhow!("{}", e))?;
+
+    if let Some(tui) = &options.tui {
+        tui.push_assistant(res.summary.clone());
+        if let Ok(mut status) = live_status.lock()
+            && !status.web_sources.is_empty()
+        {
+            let sources = status
+                .web_sources
+                .drain(..)
+                .enumerate()
+                .map(|(index, (title, url))| format!("{}. {title}\n   {url}", index + 1))
+                .collect::<Vec<_>>()
+                .join("\n");
+            tui.push_notice(format!("Sources:\n{sources}"));
+        }
+        avatar_bridge.on_talking(false);
+        return Ok(res);
+    }
 
     let formatted_summary = format_markdown_bold(&sanitize_latex(&res.summary));
     print!("\n  {MINT}Mint:{RESET} ");

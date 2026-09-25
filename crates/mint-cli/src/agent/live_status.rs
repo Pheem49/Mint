@@ -224,6 +224,7 @@ pub(super) fn print_table_block(table_lines: &[String], is_first: &mut bool) {
 
 #[derive(Debug, Default)]
 pub(super) struct LiveStatus {
+    pub(super) tui: Option<crate::interactive::TuiHandle>,
     pub(super) thinking: Option<String>,
     /// Context-window usage (0-100) as of the last completed step —
     /// mirrored here (not just built into `thinking`'s label text) so the
@@ -798,6 +799,11 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
         }
     }
 
+    if let Some(tui) = &status.tui {
+        tui.set_status(lines.iter().map(|line| strip_ansi_escapes(line)).collect());
+        return true;
+    }
+
     if lines.is_empty() && box_lines.is_empty() {
         status.inline_tui.teardown();
         return false;
@@ -1010,6 +1016,16 @@ fn strip_intermediate_greeting(text: &str) -> &str {
 /// Falls back to plain `println!` if no inline terminal is currently live
 /// (e.g. committing before anything has rendered yet this turn).
 pub(super) fn insert_permanent_lines(status: &mut LiveStatus, lines: &[String]) {
+    if let Some(tui) = &status.tui {
+        tui.push_notice(
+            lines
+                .iter()
+                .map(|line| strip_ansi_escapes(line))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        return;
+    }
     let Some(terminal) = status.inline_tui.terminal.as_mut() else {
         // Defensive, same reasoning as `approve_cb`/`on_chunk`: this is a
         // plain `println!`, so it needs cooked mode regardless of whether
@@ -1056,6 +1072,10 @@ fn wrapped_text_height(text: &ratatui::text::Text<'_>, width: u16) -> u16 {
 /// `render_live_status` call reconstructs it fresh, re-querying the
 /// terminal for where the cursor actually is now.
 pub(super) fn clear_live_status(status: &mut LiveStatus) {
+    if let Some(tui) = &status.tui {
+        tui.clear_status();
+        return;
+    }
     if status.inline_tui.terminal.is_none() {
         clear_working_status();
         return;
@@ -1201,8 +1221,12 @@ pub(super) fn explored_lines(actions: &[ExploredAction]) -> Vec<String> {
         .take(24)
         .enumerate()
         .map(|(index, action)| {
-            let prefix = if index == 0 { "    └" } else { "     " };
-            format!("{DIM}{prefix} {action}{RESET}")
+            if index == 0 {
+                // └ connector in DIM, tool text in BRIGHT (bold white)
+                format!("{DIM}    └{RESET} {BRIGHT}{action}{RESET}")
+            } else {
+                format!("      {BRIGHT}{action}{RESET}")
+            }
         })
         .collect();
     if grouped.len() > 24 {
@@ -1357,8 +1381,12 @@ pub(super) fn activities_lines(activities: &[String]) -> Vec<String> {
         .take(24)
         .enumerate()
         .map(|(index, act)| {
-            let prefix = if index == 0 { "    └" } else { "     " };
-            format!("{DIM}{prefix} {act}{RESET}")
+            if index == 0 {
+                // └ connector in DIM, activity text in BRIGHT (bold white)
+                format!("{DIM}    └{RESET} {BRIGHT}{act}{RESET}")
+            } else {
+                format!("      {BRIGHT}{act}{RESET}")
+            }
         })
         .collect();
     if activities.len() > 24 {
@@ -1425,8 +1453,12 @@ pub(super) fn tasks_lines(tasks: &[TaskEntry]) -> Vec<String> {
     }
     let mut lines = Vec::new();
     for (index, task) in tasks.iter().take(24).enumerate() {
-        let prefix = if index == 0 { "    └" } else { "     " };
-        lines.push(format!("{DIM}{prefix} {}{RESET}", task.label));
+        if index == 0 {
+            // └ connector in DIM, task label in BRIGHT (bold white)
+            lines.push(format!("{DIM}    └{RESET} {BRIGHT}{}{RESET}", task.label));
+        } else {
+            lines.push(format!("      {BRIGHT}{}{RESET}", task.label));
+        }
         for out_line in &task.output {
             lines.push(format!("{DIM}       │ {}{RESET}", out_line));
         }

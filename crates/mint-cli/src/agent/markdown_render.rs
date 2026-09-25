@@ -276,7 +276,7 @@ fn try_render_single_line_custom_block(raw: &str, term_width: usize) -> Option<V
     None
 }
 
-pub(super) fn format_markdown_bold(text: &str) -> String {
+pub(crate) fn format_markdown_bold(text: &str) -> String {
     let (term_width, _) = markdown::terminal_size_or_default();
     let term_width = term_width as usize;
 
@@ -285,10 +285,39 @@ pub(super) fn format_markdown_bold(text: &str) -> String {
     let mut highlighter: Option<HighlightLines> = None;
     let mut active_custom_block: Option<String> = None;
     let mut custom_block_buffer: Vec<String> = Vec::new();
+    let mut active_alert_color: Option<&'static str> = None;
+    // Markdown table buffering: collect consecutive `|...|` lines so we can
+    // flush them through `render_markdown_table` as a unit (same as classic
+    // mode in `render_live_summary`).
+    let mut table_buffer: Vec<String> = Vec::new();
+
+    // Flush any buffered table rows into `formatted_lines`.
+    macro_rules! flush_table {
+        () => {
+            if !table_buffer.is_empty() {
+                let rendered = markdown::render_markdown_table(&table_buffer);
+                for tl in rendered.split('\n') {
+                    formatted_lines.push(tl.to_string());
+                }
+                table_buffer.clear();
+            }
+        };
+    }
 
     for line in text.lines() {
         let mut formatted_line = line.to_string();
         let trimmed = line.trim_start();
+
+        // Markdown table rows (`|...|`) — buffer them and let
+        // `render_markdown_table` produce the box-drawing output once the
+        // table ends.  Skip this detection inside code blocks to avoid
+        // treating table-like literal source code as a table.
+        if !in_code_block && markdown::is_table_line(trimmed) {
+            table_buffer.push(line.to_string());
+            continue;
+        }
+        // Non-table line: flush any buffered table rows first.
+        flush_table!();
 
         // Check for single-line custom UI block wrapped in backticks or bare
         if !in_code_block {
@@ -376,6 +405,17 @@ pub(super) fn format_markdown_bold(text: &str) -> String {
             continue;
         }
 
+        // Horizontal rules (---, ***, ___)
+        let is_hr = (trimmed.starts_with("---") && trimmed.chars().all(|c| c == '-'))
+            || (trimmed.starts_with("***") && trimmed.chars().all(|c| c == '*'))
+            || (trimmed.starts_with("___") && trimmed.chars().all(|c| c == '_'));
+        if is_hr && trimmed.len() >= 3 {
+            active_alert_color = None;
+            let hr_width = term_width.clamp(20, 50);
+            formatted_lines.push(format!("\x1b[38;2;75;85;99m{}\x1b[0m", "─".repeat(hr_width)));
+            continue;
+        }
+
         // Handle blockquotes / GitHub alerts (both with and without leading '>')
         let is_quote = trimmed.starts_with('>');
         let is_standalone_alert = trimmed.starts_with("[!");
@@ -387,47 +427,81 @@ pub(super) fn format_markdown_bold(text: &str) -> String {
             };
             let upper = quote_content.to_uppercase();
             if upper.starts_with("[!NOTE]") {
+                active_alert_color = Some("\x1b[38;2;56;189;248m");
                 let body = quote_content[7..].trim();
-                formatted_lines.push(format!(
-                    "\x1b[38;2;56;189;248m│ NOTE:\x1b[0m {}",
-                    process_inline_bold(body)
-                ));
+                if body.is_empty() {
+                    formatted_lines.push("\x1b[38;2;56;189;248m│ NOTE:\x1b[0m".to_string());
+                } else {
+                    formatted_lines.push(format!(
+                        "\x1b[38;2;56;189;248m│ NOTE:\x1b[0m {}",
+                        process_inline_bold(body)
+                    ));
+                }
                 continue;
             } else if upper.starts_with("[!TIP]") {
+                active_alert_color = Some("\x1b[38;2;52;211;153m");
                 let body = quote_content[6..].trim();
-                formatted_lines.push(format!(
-                    "\x1b[38;2;52;211;153m│ TIP:\x1b[0m {}",
-                    process_inline_bold(body)
-                ));
+                if body.is_empty() {
+                    formatted_lines.push("\x1b[38;2;52;211;153m│ TIP:\x1b[0m".to_string());
+                } else {
+                    formatted_lines.push(format!(
+                        "\x1b[38;2;52;211;153m│ TIP:\x1b[0m {}",
+                        process_inline_bold(body)
+                    ));
+                }
                 continue;
             } else if upper.starts_with("[!IMPORTANT]") {
+                active_alert_color = Some("\x1b[38;2;192;132;252m");
                 let body = quote_content[12..].trim();
-                formatted_lines.push(format!(
-                    "\x1b[38;2;192;132;252m│ IMPORTANT:\x1b[0m {}",
-                    process_inline_bold(body)
-                ));
+                if body.is_empty() {
+                    formatted_lines.push("\x1b[38;2;192;132;252m│ IMPORTANT:\x1b[0m".to_string());
+                } else {
+                    formatted_lines.push(format!(
+                        "\x1b[38;2;192;132;252m│ IMPORTANT:\x1b[0m {}",
+                        process_inline_bold(body)
+                    ));
+                }
                 continue;
             } else if upper.starts_with("[!WARNING]") {
+                active_alert_color = Some("\x1b[38;2;251;191;36m");
                 let body = quote_content[10..].trim();
-                formatted_lines.push(format!(
-                    "\x1b[38;2;251;191;36m│ WARNING:\x1b[0m {}",
-                    process_inline_bold(body)
-                ));
+                if body.is_empty() {
+                    formatted_lines.push("\x1b[38;2;251;191;36m│ WARNING:\x1b[0m".to_string());
+                } else {
+                    formatted_lines.push(format!(
+                        "\x1b[38;2;251;191;36m│ WARNING:\x1b[0m {}",
+                        process_inline_bold(body)
+                    ));
+                }
                 continue;
             } else if upper.starts_with("[!CAUTION]") {
+                active_alert_color = Some("\x1b[38;2;248;113;113m");
                 let body = quote_content[10..].trim();
-                formatted_lines.push(format!(
-                    "\x1b[38;2;248;113;113m│ CAUTION:\x1b[0m {}",
-                    process_inline_bold(body)
-                ));
+                if body.is_empty() {
+                    formatted_lines.push("\x1b[38;2;248;113;113m│ CAUTION:\x1b[0m".to_string());
+                } else {
+                    formatted_lines.push(format!(
+                        "\x1b[38;2;248;113;113m│ CAUTION:\x1b[0m {}",
+                        process_inline_bold(body)
+                    ));
+                }
                 continue;
             } else if is_quote {
-                formatted_lines.push(format!(
-                    "\x1b[38;2;100;116;139m│\x1b[0m \x1b[3m{}\x1b[0m",
-                    process_inline_bold(quote_content)
-                ));
+                if let Some(color) = active_alert_color {
+                    formatted_lines.push(format!(
+                        "{color}│\x1b[0m {}",
+                        process_inline_bold(quote_content)
+                    ));
+                } else {
+                    formatted_lines.push(format!(
+                        "\x1b[38;2;100;116;139m│\x1b[0m \x1b[3m{}\x1b[0m",
+                        process_inline_bold(quote_content)
+                    ));
+                }
                 continue;
             }
+        } else {
+            active_alert_color = None;
         }
 
         let mut leading_spaces = 0;
@@ -453,7 +527,7 @@ pub(super) fn format_markdown_bold(text: &str) -> String {
             let marker_len = marker_char.len_utf8();
             let mut new_line = String::new();
             new_line.push_str(&line[..leading_spaces]);
-            new_line.push('•');
+            new_line.push_str("\x1b[38;2;56;189;248m•\x1b[0m");
             new_line.push_str(&line[leading_spaces + marker_len..]);
             formatted_line = process_inline_bold(&new_line);
         } else {
@@ -480,6 +554,9 @@ pub(super) fn format_markdown_bold(text: &str) -> String {
 
         formatted_lines.push(formatted_line);
     }
+
+    // Flush any table that was still buffered at the end of the text.
+    flush_table!();
 
     let mut result = formatted_lines.join("\n");
     if text.ends_with('\n') {
@@ -534,7 +611,31 @@ fn process_inline_badges(text: &str) -> String {
     out
 }
 
-pub(super) fn process_inline_bold(text: &str) -> String {
+pub(crate) fn process_inline_code(text: &str) -> String {
+    if !text.contains('`') {
+        return text.to_string();
+    }
+    let count = text.matches('`').count();
+    let pair_limit = (count / 2) * 2;
+    let mut result = String::with_capacity(text.len());
+    let parts = text.split('`');
+    let mut is_code = false;
+    let mut processed_markers = 0;
+    for part in parts {
+        if is_code && processed_markers < pair_limit {
+            result.push_str(CYAN);
+            result.push_str(part);
+            result.push_str(RESET);
+        } else {
+            result.push_str(part);
+        }
+        processed_markers += 1;
+        is_code = !is_code;
+    }
+    result
+}
+
+pub(crate) fn process_inline_bold(text: &str) -> String {
     let count = text.matches("**").count();
     let pair_limit = (count / 2) * 2;
     let mut result = String::with_capacity(text.len());
@@ -543,6 +644,7 @@ pub(super) fn process_inline_bold(text: &str) -> String {
     let mut processed_markers = 0;
     for part in parts {
         if is_bold && processed_markers < pair_limit {
+            result.push_str(BOLD);
             result.push_str(BLUE);
             result.push_str(part);
             result.push_str(RESET);
@@ -552,12 +654,13 @@ pub(super) fn process_inline_bold(text: &str) -> String {
         processed_markers += 1;
         is_bold = !is_bold;
     }
-    process_inline_badges(&result)
+    let with_code = process_inline_code(&result);
+    process_inline_badges(&with_code)
 }
 
 /// Replace common LaTeX math symbols with Unicode equivalents.
 /// Fixes garbled output like "ightarrow$" from models that emit LaTeX notation.
-pub(super) fn sanitize_latex(text: &str) -> String {
+pub(crate) fn sanitize_latex(text: &str) -> String {
     let mut s = text.to_owned();
     for (pat, uni) in [
         // arrows

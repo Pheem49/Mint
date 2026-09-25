@@ -259,6 +259,27 @@ impl MemoryStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Returns the complete transcript for one conversation in display order.
+    /// This deliberately has no caller supplied `LIMIT`: passing `usize::MAX`
+    /// through SQLite's signed limit is not portable and can wrap on 64-bit
+    /// platforms.
+    pub fn interactions_for_chat(
+        &self,
+        chat_id: &str,
+    ) -> Result<Vec<InteractionMemory>, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        let connection = self.connection()?;
+        ensure_builtin_chat_sessions(&connection)?;
+        let mut statement = connection.prepare(
+            "SELECT id, chat_id, user_text, ai_text, provider, model, fallback_provider, created_at, agent_activity_json
+             FROM interaction_memories
+             WHERE chat_id = ?1
+             ORDER BY id ASC",
+        )?;
+        let rows = statement.query_map(params![chat_id], interaction_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Full-text search over `chat_id`'s past interactions for the turns most
     /// relevant to `query` (BM25 ranked), skipping the `exclude_recent` newest
     /// rows since those are already injected verbatim elsewhere. Returns

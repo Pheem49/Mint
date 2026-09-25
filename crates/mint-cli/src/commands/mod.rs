@@ -299,6 +299,7 @@ pub async fn dispatch(cmd: Command, config: &mut MintConfig, cli: &crate::Cli) -
                 cli.fast,
                 cli.plan,
                 resume_id,
+                !cli.classic,
             )
             .await?;
             Ok(())

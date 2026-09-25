@@ -1,5 +1,22 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Full-Screen Interactive Chat TUI (Complete Default Interface)
+
+- **Markdown Table Rendering (TUI)**: Fixed tables showing as raw `| # | ไฟล์ | สถานะ |` / `|---|---|---|` in the TUI. `format_markdown_bold()` now detects consecutive `|...|` lines (using `is_table_line()`), buffers them, and flushes through `render_markdown_table()` — the same box-drawing Unicode renderer used in classic terminal mode. Tables at any position in the response (middle or end) are handled correctly. Code blocks containing `|`-separated content are exempt.
+
+- **Status Line Color Refinement**: Improved visual hierarchy of live status lines while tools run.
+  - **Tree branch connector `└`**: Styled in `DarkGray` (dim) — fades into the background so it acts as a subtle structural guide rather than competing with content.
+  - **Tool action text** (`[read_file] Read file.rs #L1-50`, etc.): Styled in **Bold White** — immediately readable and clearly identifies the active tool and its target at a glance.
+  - Applied consistently across both **TUI mode** (`chat_tui.rs` span-level styling) and **classic terminal mode** (`live_status.rs` ANSI escape sequences).
+- **Thinking Line Shimmer Animation**: The `Pondering (5s · …)` / `Thinking…` status line now renders with a smooth left-to-right shimmer effect in TUI mode. Each character is individually colored: the bright spot (full **#ffffff** white) sweeps from left to right across the verb text, fading to a dim gray at the trailing edge. The animation is driven by wall-clock time (≈12 fps), independent of the render loop speed. The timer suffix `(elapsed · Esc)` remains in dim gray and does not participate in the shimmer.
+
+- **Default Full-Screen Interface**: Made Ratatui the complete, default interface for interactive `mint` sessions, keeping the entire workflow inside the terminal alternate screen. Retained `--tui` for compatibility and `--classic` (plus automatic fallback on non-TTY or undersized terminals `< 60x12`).
+- **Eliminated Terminal Suspensions**: Completely removed `terminal.suspend()` and deleted the disruptive `"Press Enter to return to Mint TUI"` prompt. All interactions remain inside the TUI session from start to finish.
+- **Unified `CommandUi` Abstraction**: Routed all slash commands (`/branch`, `/resume`, `/palette`, `/mcp`, `/plan`, `/fast`, `/clear`, `/jobs`, `/shells`, `/stats`, etc.) and `$skill` execution through a unified `CommandUi` trait. Interactive prompts, confirmations, and selections render as native, centered Ratatui modal dialogs with arrow-key navigation, numeric shortcuts (`1`–`9`), viewport scrolling, and type-to-filter support.
+- **Clean Startup & Session Picker**: Eliminated raw stdout banner pollution prior to alternate screen initialization. Running `mint -r` (no ID) now launches the interactive session picker directly within an alternate-screen modal dialog, seamlessly switching sessions and re-populating the transcript.
+- **Enhanced Transcript & Roles**: Added styled roles for command outputs (`Command ›` in magenta) and system notices (`System ›` in yellow), providing clear visual separation between user prompts, agent turns, tool activities, and command results.
+- **Parity Across Interfaces**: Verified full feature consistency across CLI (`crates/mint-cli`), Desktop (`src/renderer/src`), and Web (`src/renderer/src-web`), maintaining parity in workspace diffing, branching, session management, and MCP configurations.
+
 ## Real Git Workspace Diff and Code Review
 
 - Implemented real Git workspace diffing across CLI, Desktop, and Web using `git diff -U3 HEAD` and `git status --porcelain` to detect uncommitted, staged, and untracked file changes.

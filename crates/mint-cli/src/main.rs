@@ -170,6 +170,7 @@ pub(crate) async fn run_oneshot_agent_task(
         queueing: false,
         pinned_mcp_server,
         chat_id: None,
+        tui: None,
     };
 
     let queue = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -260,6 +261,14 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub plan: bool,
 
+    /// Explicitly use the full-screen interactive chat interface
+    #[arg(long, global = true, conflicts_with = "classic")]
+    pub tui: bool,
+
+    /// Use the classic scrolling interactive interface
+    #[arg(long, global = true, conflicts_with = "tui")]
+    pub classic: bool,
+
     /// Attach an image file to the prompt
     #[arg(long, global = true)]
     pub image: Option<PathBuf>,
@@ -280,7 +289,7 @@ pub struct Cli {
 fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = crossterm::terminal::disable_raw_mode();
+        interactive::restore_terminal();
         log_panic_to_file(&info.to_string());
         default_hook(info);
     }));
@@ -341,17 +350,20 @@ async fn main() -> Result<()> {
             } else {
                 mint_core::channels::start_channels();
                 mint_core::start_cron_scheduler();
-                let current_dir = std::env::current_dir()?;
                 let resume_id = if let Some(ref r_opt) = cli.resume {
                     match r_opt {
                         Some(id) => Some(id.clone()),
-                        None => interactive::prompt_resume_session_picker(&current_dir, "")?,
+                        None => Some("__prompt__".to_string()),
                     }
                 } else {
                     None
                 };
                 interactive::run_interactive_chat_with_session(
-                    cli.model, cli.fast, cli.plan, resume_id,
+                    cli.model,
+                    cli.fast,
+                    cli.plan,
+                    resume_id,
+                    !cli.classic,
                 )
                 .await?;
             }
@@ -385,6 +397,27 @@ mod cli_tests {
         let cli = Cli::try_parse_from(["mint", "explain this function"]).unwrap();
         assert!(cli.command.is_none());
         assert_eq!(cli.prompt, vec!["explain this function"]);
+    }
+
+    #[test]
+    fn parse_tui_flag() {
+        let cli = Cli::try_parse_from(["mint", "--tui"]).unwrap();
+        assert!(cli.tui);
+        assert!(!cli.classic);
+        assert!(cli.command.is_none());
+        assert!(cli.prompt.is_empty());
+    }
+
+    #[test]
+    fn parse_classic_flag() {
+        let cli = Cli::try_parse_from(["mint", "--classic"]).unwrap();
+        assert!(cli.classic);
+        assert!(!cli.tui);
+    }
+
+    #[test]
+    fn tui_and_classic_conflict() {
+        assert!(Cli::try_parse_from(["mint", "--tui", "--classic"]).is_err());
     }
 
     #[test]

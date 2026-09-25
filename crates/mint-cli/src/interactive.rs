@@ -6,7 +6,10 @@ use mint_core::{CHAT_CLI_ID, MemoryStore, MintConfig};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
+mod chat_tui;
+pub mod command_ui;
 mod commands;
 mod confirm;
 mod format;
@@ -16,6 +19,9 @@ mod resume_picker;
 mod slash_commands;
 mod thought_viewer;
 
+pub(crate) use chat_tui::TuiHandle;
+pub(crate) use chat_tui::restore_terminal;
+pub use command_ui::*;
 pub use commands::*;
 pub use confirm::*;
 pub use format::*;
@@ -69,6 +75,66 @@ pub enum SlashResult {
     /// Break out of the loop.
     Exit,
 }
+
+type FullScreenUi = (
+    chat_tui::ChatTui,
+    Arc<Mutex<chat_tui::ChatViewState>>,
+    TuiHandle,
+);
+
+async fn run_interactive_agent_turn(
+    task: String,
+    session: &mut InteractiveSession,
+    pinned_mcp_server: Option<String>,
+    tui: &mut Option<FullScreenUi>,
+) -> Result<(Vec<String>, Option<String>)> {
+    let mut options = agent::AgentOptions {
+        fast_mode: session.fast_mode,
+        plan_mode: session.plan_mode,
+        queueing: true,
+        pinned_mcp_server,
+        chat_id: Some(session.chat_id.clone()),
+        tui: None,
+    };
+    let image = session.pending_image.take();
+    if let Some((terminal, _, handle)) = tui.as_mut() {
+        terminal.resume()?;
+        options.tui = Some(handle.clone());
+        let current_dir = session.current_dir.clone();
+        let config = session.config.clone();
+        let task = tokio::spawn(async move {
+            crate::run_code_agent_with_saved_image(
+                &task,
+                &current_dir,
+                &config,
+                image,
+                None,
+                options,
+            )
+            .await
+        });
+        terminal.drive_agent(handle, task).await?
+    } else {
+        crate::run_code_agent_with_saved_image(
+            &task,
+            &session.current_dir,
+            &session.config,
+            image,
+            None,
+            options,
+        )
+        .await
+    }
+}
+
+fn report_interactive_turn_error(tui: &Option<FullScreenUi>, error: &anyhow::Error) {
+    if let Some((_, _, handle)) = tui {
+        handle.push_notice(format!("Turn failed: {error}"));
+    } else {
+        print_turn_error(error);
+    }
+}
+
 
 fn apply_welcome_gradient(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
@@ -278,7 +344,7 @@ pub async fn run_interactive_chat_with_options(
     fast_mode: bool,
     plan_mode: bool,
 ) -> Result<()> {
-    run_interactive_chat_with_session(model_override, fast_mode, plan_mode, None).await
+    run_interactive_chat_with_session(model_override, fast_mode, plan_mode, None, true).await
 }
 
 pub async fn run_interactive_chat_with_session(
@@ -286,6 +352,7 @@ pub async fn run_interactive_chat_with_session(
     fast_mode: bool,
     plan_mode: bool,
     resume_id: Option<String>,
+    use_tui: bool,
 ) -> Result<()> {
     let mut config = mint_core::load_config()?;
     if let Some(ref m) = model_override {
@@ -294,23 +361,27 @@ pub async fn run_interactive_chat_with_session(
 
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-    let chat_id = if let Some(rid) = resume_id {
-        let trimmed = rid.trim().to_string();
-        let candidate = if !trimmed.starts_with("cli::") && trimmed != mint_core::CHAT_CLI_ID {
-            format!("cli::{trimmed}")
+    let (chat_id, prompt_resume_at_start) = if let Some(rid) = resume_id {
+        if rid == "__prompt__" {
+            (mint_core::generate_cli_session_id(), true)
         } else {
-            trimmed.clone()
-        };
-        if let Ok(memory) = mint_core::MemoryStore::open_default()
-            && let Ok(sessions) = memory.list_chat_sessions()
-            && sessions.iter().any(|s| s.id == candidate)
-        {
-            candidate
-        } else {
-            trimmed
+            let trimmed = rid.trim().to_string();
+            let candidate = if !trimmed.starts_with("cli::") && trimmed != mint_core::CHAT_CLI_ID {
+                format!("cli::{trimmed}")
+            } else {
+                trimmed.clone()
+            };
+            if let Ok(memory) = mint_core::MemoryStore::open_default()
+                && let Ok(sessions) = memory.list_chat_sessions()
+                && sessions.iter().any(|s| s.id == candidate)
+            {
+                (candidate, false)
+            } else {
+                (trimmed, false)
+            }
         }
     } else {
-        mint_core::generate_cli_session_id()
+        (mint_core::generate_cli_session_id(), false)
     };
 
     // Notifies this prompt loop when web/desktop writes a message into the
@@ -320,30 +391,9 @@ pub async fn run_interactive_chat_with_session(
         Some(&current_dir.to_string_lossy()),
     ));
 
-    print_welcome_banner(&config);
-
-    if let Ok(memory) = mint_core::MemoryStore::open_default() {
-        let sessions = memory.list_chat_sessions().unwrap_or_default();
-        if let Some(target) = sessions.iter().find(|s| s.id == chat_id) {
-            println!(
-                "{MINT}●{RESET} Resumed session: {BOLD}{}{RESET} {DIM}({}){RESET}",
-                target.title, target.id
-            );
-            if let Ok(recent) = memory.get_session_preview(&chat_id, 2)
-                && let Some(last) = recent.first()
-            {
-                let snippet = truncate_utf8(&last.user_text, 60);
-                println!("  {DIM}Last turn: {snippet}{RESET}");
-            }
-            println!();
-        }
-    }
-
-    println!("Type naturally or /help for commands. Ctrl+V pastes images. Ctrl+D exits.\n");
-
     let mut session = InteractiveSession {
         chat_id,
-        config,
+        config: config.clone(),
         current_dir: current_dir.clone(),
         fast_mode,
         plan_mode,
@@ -352,9 +402,83 @@ pub async fn run_interactive_chat_with_session(
         jobs: BackgroundJobs::new(),
     };
 
+    let mut tui = if use_tui {
+        match chat_tui::ChatTui::enter() {
+            Ok(terminal) => {
+                let state = chat_tui::ChatViewState::from_session(&session);
+                let state = Arc::new(Mutex::new(state));
+                let handle = chat_tui::ChatTui::handle(Arc::clone(&state));
+                Some((terminal, state, handle))
+            }
+            Err(error) => {
+                println!(
+                    "{WARN}Could not start full-screen TUI: {error}. Using classic mode.{RESET}\n"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    if tui.is_none() {
+        print_welcome_banner(&session.config);
+
+        if let Ok(memory) = mint_core::MemoryStore::open_default() {
+            let sessions = memory.list_chat_sessions().unwrap_or_default();
+            if let Some(target) = sessions.iter().find(|s| s.id == session.chat_id) {
+                println!(
+                    "{MINT}●{RESET} Resumed session: {BOLD}{}{RESET} {DIM}({}){RESET}",
+                    target.title, target.id
+                );
+                if let Ok(recent) = memory.get_session_preview(&session.chat_id, 2)
+                    && let Some(last) = recent.first()
+                {
+                    let snippet = truncate_utf8(&last.user_text, 60);
+                    println!("  {DIM}Last turn: {snippet}{RESET}");
+                }
+                println!();
+            }
+        }
+
+        println!("Type naturally or /help for commands. Ctrl+V pastes images. Ctrl+D exits.\n");
+    }
+
+    if prompt_resume_at_start {
+        let mut ui: Box<dyn CommandUi> = match tui.as_mut() {
+            Some((terminal, state, handle)) => {
+                Box::new(FullScreenCommandUi::new(terminal, state, handle))
+            }
+            None => Box::new(ClassicCommandUi::new()),
+        };
+        match prompt_resume_session_picker_with_ui(
+            ui.as_mut(),
+            &session.current_dir,
+            &session.chat_id,
+        ) {
+            Ok(Some(target_id)) => {
+                session.chat_id = target_id.clone();
+                ui.reload_transcript(&session.chat_id, &session.current_dir);
+                ui.push_notice(format!("Switched to session: {target_id}"));
+            }
+            Ok(None) => {
+                ui.push_notice("Resume cancelled. Continuing with new session.");
+            }
+            Err(err) => {
+                ui.push_notice(format!("Failed to load sessions: {err}"));
+            }
+        }
+    }
+
     let mut printed_update = false;
     if let Some((current, latest)) = crate::updater::get_cached_update_notice() {
-        crate::updater::print_update_notice(&current, &latest);
+        if let Some((_, state, _)) = tui.as_mut() {
+            if let Ok(mut state) = state.lock() {
+                state.notice(format!("Mint {latest} is available (current: {current})"));
+            }
+        } else {
+            crate::updater::print_update_notice(&current, &latest);
+        }
         printed_update = true;
     }
 
@@ -385,37 +509,56 @@ pub async fn run_interactive_chat_with_session(
                 if let Ok(Some((current, latest))) = handle.await
                     && !printed_update
                 {
-                    crate::updater::print_update_notice(&current, &latest);
+                    if let Some((_, state, _)) = tui.as_mut() {
+                        if let Ok(mut state) = state.lock() {
+                            state
+                                .notice(format!("Mint {latest} is available (current: {current})"));
+                        }
+                    } else {
+                        crate::updater::print_update_notice(&current, &latest);
+                    }
                     printed_update = true;
                 }
             } else {
                 update_handle = Some(handle);
             }
         }
+        if let Some((terminal, state, _)) = tui.as_mut() {
+            if let Ok(mut state) = state.lock() {
+                state.sync_session(&session);
+            }
+            terminal.resume()?;
+        }
 
         let path_str = format_workspace_with_branch(&session.current_dir);
         let model_str = active_model(&session.config.ai_provider, &session.config).to_owned();
 
         let query_str = if let Some(queued) = pending_inputs.pop_front() {
-            let (term_width, _) = crate::markdown::terminal_size_or_default();
-            let echo_divider = format!(
-                "{DIM}{}{RESET}",
-                "─".repeat((term_width as usize).saturating_sub(2))
-            );
-            println!("{echo_divider}");
-            println!("  {BLUE}You ›{RESET} {}", queued);
-            println!("{echo_divider}");
+            if tui.is_none() {
+                let (term_width, _) = crate::markdown::terminal_size_or_default();
+                let echo_divider = format!(
+                    "{DIM}{}{RESET}",
+                    "─".repeat((term_width as usize).saturating_sub(2))
+                );
+                println!("{echo_divider}");
+                println!("  {BLUE}You ›{RESET} {}", queued);
+                println!("{echo_divider}");
+            }
             queued
-        } else if let Some(input) = read_line_interactive(
-            &session.config.ai_provider,
-            &model_str,
-            &path_str,
-            &session.current_dir,
-            &session.history,
-            &session.jobs,
-            session.plan_mode,
-            pending_draft.take().unwrap_or_default().as_str(),
-        )? {
+        } else if let Some(input) = if let Some((terminal, state, _)) = tui.as_mut() {
+            terminal.read_input(state)?
+        } else {
+            read_line_interactive(
+                &session.config.ai_provider,
+                &model_str,
+                &path_str,
+                &session.current_dir,
+                &session.history,
+                &session.jobs,
+                session.plan_mode,
+                pending_draft.take().unwrap_or_default().as_str(),
+            )?
+        } {
             if let Some(uri) = input.pasted_image {
                 if let Some(ref mut current) = session.pending_image {
                     current.push(' ');
@@ -430,9 +573,18 @@ pub async fn run_interactive_chat_with_session(
             }
             text
         } else {
+            if let Some((terminal, _, _)) = tui.as_mut() {
+                terminal.suspend();
+            }
             print_exit_message(&session);
             break;
         };
+
+        if let Some((_, state, _)) = tui.as_mut()
+            && let Ok(mut state) = state.lock()
+        {
+            state.push_user(query_str.clone());
+        }
 
         record_prompt(&mut session.history, &query_str);
 
@@ -456,26 +608,39 @@ pub async fn run_interactive_chat_with_session(
 
             let skill_name = skill_word.trim_start_matches('$').to_lowercase();
             let skills = load_all_available_skills(&session.current_dir);
-            let skill_opt = skills.iter().find(|s| s.name.to_lowercase() == skill_name);
+            let skill_opt = skills.iter().find(|s| s.name.to_lowercase() == skill_name).cloned();
 
             if let Some(skill) = skill_opt {
-                println!("\n{BLUE}Skill: {}{RESET}", skill.name);
-                if let Some(ref desc) = skill.description {
-                    println!("{DIM}{}{RESET}", desc);
-                }
-                println!("{DIM}────────────────────────────────────────────{RESET}");
-                println!("{}", skill.content);
-                println!("{DIM}────────────────────────────────────────────{RESET}\n");
+                let mut ui: Box<dyn CommandUi> = match tui.as_mut() {
+                    Some((terminal, state, handle)) => {
+                        Box::new(FullScreenCommandUi::new(terminal, state, handle))
+                    }
+                    None => Box::new(ClassicCommandUi::new()),
+                };
 
-                if confirm(&format!("Activate skill '{}'? [y/N] ", skill.name))? {
+                let description = skill.description.as_deref().unwrap_or("");
+                ui.push_command_output(format!(
+                    "Skill: {}\n{}\n\n{}",
+                    skill.name, description, skill.content
+                ));
+                let approved = ui
+                    .prompt_confirm(&format!("Activate skill '{}'?", skill.name), true)
+                    .unwrap_or(false);
+
+                if approved {
                     let final_task = if task_part.is_empty() {
-                        print!("Enter task for this skill: ");
-                        let _ = io::stdout().flush();
-                        let mut input = String::new();
-                        io::stdin().read_line(&mut input)?;
+                        let input = ui
+                            .prompt_text(
+                                &format!("Task for {}", skill.name),
+                                "Describe what this skill should do",
+                                None,
+                            )
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
                         let input = input.trim().to_owned();
                         if input.is_empty() {
-                            println!("{WARN}Cancelled: Task cannot be empty.{RESET}\n");
+                            ui.push_notice("Cancelled: task cannot be empty");
                             continue;
                         }
                         input
@@ -491,23 +656,14 @@ pub async fn run_interactive_chat_with_session(
                         skill.name, skill.content, final_task
                     );
 
-                    println!();
-                    println!("{MINT}●{RESET} \x1b[1mSkill({}){RESET}", skill.name);
-                    println!("  {DIM}└ Successfully loaded skill{RESET}");
-                    println!();
-                    match crate::run_code_agent_with_saved_image(
-                        &task_with_skill,
-                        &session.current_dir,
-                        &session.config,
-                        session.pending_image.take(),
-                        None,
-                        agent::AgentOptions {
-                            fast_mode: session.fast_mode,
-                            plan_mode: session.plan_mode,
-                            queueing: true,
-                            pinned_mcp_server: pinned_mcp_server.clone(),
-                            chat_id: Some(session.chat_id.clone()),
-                        },
+                    ui.push_notice(format!("Skill({}) loaded", skill.name));
+                    drop(ui);
+
+                    match run_interactive_agent_turn(
+                        task_with_skill,
+                        &mut session,
+                        pinned_mcp_server.clone(),
+                        &mut tui,
                     )
                     .await
                     {
@@ -515,41 +671,46 @@ pub async fn run_interactive_chat_with_session(
                             pending_inputs.extend(queued);
                             pending_draft = draft;
                         }
-                        Err(error) => print_turn_error(&error),
+                        Err(error) => report_interactive_turn_error(&tui, &error),
                     }
                 } else {
-                    println!("{DIM}Cancelled.{RESET}\n");
+                    ui.push_notice("Skill activation cancelled");
                 }
             } else {
-                println!("{ERROR}Skill '{}' not found.{RESET}\n", skill_name);
+                let mut ui: Box<dyn CommandUi> = match tui.as_mut() {
+                    Some((terminal, state, handle)) => {
+                        Box::new(FullScreenCommandUi::new(terminal, state, handle))
+                    }
+                    None => Box::new(ClassicCommandUi::new()),
+                };
+                ui.push_notice(format!("Skill '{skill_name}' not found"));
             }
             continue;
         }
 
-        // Run slash-command router
-        match handle_slash_command(&mut session, &query_str).await {
+        // Run slash-command router via unified CommandUi abstraction.
+        let mut ui: Box<dyn CommandUi> = match tui.as_mut() {
+            Some((terminal, state, handle)) => {
+                Box::new(FullScreenCommandUi::new(terminal, state, handle))
+            }
+            None => Box::new(ClassicCommandUi::new()),
+        };
+        let slash_result = handle_slash_command(&mut session, ui.as_mut(), &query_str).await;
+        drop(ui);
+
+        match slash_result {
             Some(SlashResult::Handled) => continue,
             Some(SlashResult::Exit) => {
                 print_exit_message(&session);
                 break;
             }
-
             Some(SlashResult::ForwardToAgent(task)) => {
-                // Force code agent for /code forwarded tasks
                 println!();
-                match crate::run_code_agent_with_saved_image(
-                    &task,
-                    &session.current_dir,
-                    &session.config,
-                    session.pending_image.take(),
-                    None,
-                    agent::AgentOptions {
-                        fast_mode: session.fast_mode,
-                        plan_mode: session.plan_mode,
-                        queueing: true,
-                        pinned_mcp_server: pinned_mcp_server.clone(),
-                        chat_id: Some(session.chat_id.clone()),
-                    },
+                match run_interactive_agent_turn(
+                    task,
+                    &mut session,
+                    pinned_mcp_server.clone(),
+                    &mut tui,
                 )
                 .await
                 {
@@ -557,7 +718,7 @@ pub async fn run_interactive_chat_with_session(
                         pending_inputs.extend(queued);
                         pending_draft = draft;
                     }
-                    Err(error) => print_turn_error(&error),
+                    Err(error) => report_interactive_turn_error(&tui, &error),
                 }
                 continue;
             }
@@ -568,19 +729,11 @@ pub async fn run_interactive_chat_with_session(
         // Note: /code is fully handled by handle_slash_command above
         // (its "/code" arm always returns Some(...)), so no separate
         // "/code " fallback is needed here.
-        match crate::run_code_agent_with_saved_image(
-            &query_str,
-            &session.current_dir,
-            &session.config,
-            session.pending_image.take(),
-            None,
-            agent::AgentOptions {
-                fast_mode: session.fast_mode,
-                plan_mode: session.plan_mode,
-                queueing: true,
-                pinned_mcp_server: pinned_mcp_server.clone(),
-                chat_id: Some(session.chat_id.clone()),
-            },
+        match run_interactive_agent_turn(
+            query_str,
+            &mut session,
+            pinned_mcp_server.clone(),
+            &mut tui,
         )
         .await
         {
@@ -588,7 +741,7 @@ pub async fn run_interactive_chat_with_session(
                 pending_inputs.extend(queued);
                 pending_draft = draft;
             }
-            Err(error) => print_turn_error(&error),
+            Err(error) => report_interactive_turn_error(&tui, &error),
         }
     }
 

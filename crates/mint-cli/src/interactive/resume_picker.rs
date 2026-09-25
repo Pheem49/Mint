@@ -71,6 +71,50 @@ fn format_bytes(bytes: usize) -> String {
     }
 }
 
+pub fn prompt_resume_session_picker_with_ui(
+    ui: &mut dyn CommandUi,
+    _current_dir: &Path,
+    active_chat_id: &str,
+) -> Result<Option<String>> {
+    let memory = match mint_core::MemoryStore::open_default() {
+        Ok(m) => m,
+        Err(err) => {
+            ui.push_notice(format!("Failed to open memory store: {err}"));
+            return Ok(None);
+        }
+    };
+
+    let mut sessions = memory.list_chat_sessions().unwrap_or_default();
+    sessions.retain(|s| {
+        (s.kind == "cli" || mint_core::is_cli_chat_id(&s.id))
+            && (s.message_count > 0 || s.id == active_chat_id)
+    });
+
+    if sessions.is_empty() {
+        ui.push_notice("No past conversation sessions found to resume.");
+        return Ok(None);
+    }
+
+    let items: Vec<ChoiceItem> = sessions
+        .iter()
+        .map(|s| {
+            let time_str = format_relative_time(&s.updated_at);
+            let desc = format!("{time_str} · {} msgs", s.message_count);
+            let label = if s.id == active_chat_id {
+                format!("* {} (current)", s.title)
+            } else {
+                s.title.clone()
+            };
+            ChoiceItem::with_description(label, desc, s.id.clone())
+        })
+        .collect();
+
+    match ui.prompt_choice("Resume Session", "Select a conversation to resume", &items)? {
+        Some(idx) => Ok(Some(items[idx].value.clone())),
+        None => Ok(None),
+    }
+}
+
 pub fn prompt_resume_session_picker(
     current_dir: &Path,
     active_chat_id: &str,
