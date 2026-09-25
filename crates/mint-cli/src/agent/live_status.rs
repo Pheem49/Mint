@@ -277,6 +277,9 @@ pub(super) struct LiveStatus {
     pub(super) committed_activities: usize,
     pub(super) committed_tasks: usize,
     pub(super) spinner_tick: usize,
+    /// When the currently running tool began executing — used to animate an
+    /// inline spinner and elapsed timer directly on the active tool line.
+    pub(super) active_tool_started: Option<Instant>,
     /// Sources collected from web_search ToolEnd results (title, url)
     pub(super) web_sources: Vec<(String, String)>,
     pub(super) inline_tui: InlineTui,
@@ -703,6 +706,7 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
         &status.explored[explored_start..],
         true,
         tick,
+        status.active_tool_started,
     ));
     // Built here (not inline below) so both destinations for it — the old
     // trailing-line spot in `lines`, and the queue box's own pinned row —
@@ -902,16 +906,15 @@ pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
         &status.explored[explored_start..],
         false,
         0,
+        None,
     );
     if lines.is_empty() {
         return false;
     }
 
     let (tw, _) = markdown::terminal_size_or_default();
-    let width = tw as usize;
-    lines.push(String::new());
-    lines.push(format!("{DIM}{}{RESET}", "─".repeat(width)));
-    lines.push(String::new());
+    let width = (tw as usize).saturating_sub(8).max(40);
+    lines.push(format!("{DIM}  {}{RESET}", "─".repeat(width)));
     insert_permanent_lines(status, &lines);
 
     status.committed_explored = status.explored.len();
@@ -956,7 +959,7 @@ pub(super) fn print_timeline_note(
             .subsequent_indent("  ")
             .break_words(true);
         let wrapped = textwrap::fill(clean_note, &options);
-        let formatted = format!("\x1b[38;2;226;232;240m{}\x1b[0m", wrapped);
+        let formatted = format!("{WHITE}{wrapped}{RESET}");
         insert_permanent_lines(status, &[formatted]);
     }
 }
@@ -1017,13 +1020,7 @@ fn strip_intermediate_greeting(text: &str) -> &str {
 /// (e.g. committing before anything has rendered yet this turn).
 pub(super) fn insert_permanent_lines(status: &mut LiveStatus, lines: &[String]) {
     if let Some(tui) = &status.tui {
-        tui.push_notice(
-            lines
-                .iter()
-                .map(|line| strip_ansi_escapes(line))
-                .collect::<Vec<_>>()
-                .join("\n"),
-        );
+        tui.push_notice(lines.join("\n"));
         return;
     }
     let Some(terminal) = status.inline_tui.terminal.as_mut() else {
@@ -1135,7 +1132,46 @@ pub(super) fn activity_summary_line(
     let web_count = activities.len();
     let shell_count = tasks
         .iter()
-        .filter(|t| t.label.starts_with("[run_shell]"))
+        .filter(|t| {
+            t.label.starts_with("[run_shell]")
+                || t.label.starts_with("[shell_output]")
+                || t.label.starts_with("[kill_shell]")
+        })
+        .count();
+    let edit_count = tasks
+        .iter()
+        .filter(|t| {
+            t.label.starts_with("[write_file]")
+                || t.label.starts_with("[apply_patch]")
+                || t.label.starts_with("[note_write]")
+        })
+        .count();
+    let git_count = tasks
+        .iter()
+        .filter(|t| t.label.starts_with("[git_"))
+        .count();
+    let subagent_count = tasks
+        .iter()
+        .filter(|t| {
+            t.label.contains("[dispatch_subagent]")
+                || t.label.contains("Subagent dispatched")
+                || t.label.contains("subagent")
+        })
+        .count();
+    let other_count = tasks
+        .iter()
+        .filter(|t| {
+            !t.label.starts_with("[run_shell]")
+                && !t.label.starts_with("[shell_output]")
+                && !t.label.starts_with("[kill_shell]")
+                && !t.label.starts_with("[write_file]")
+                && !t.label.starts_with("[apply_patch]")
+                && !t.label.starts_with("[note_write]")
+                && !t.label.starts_with("[git_")
+                && !t.label.contains("[dispatch_subagent]")
+                && !t.label.contains("Subagent dispatched")
+                && !t.label.contains("subagent")
+        })
         .count();
 
     let mut parts: Vec<String> = Vec::new();
@@ -1149,6 +1185,12 @@ pub(super) fn activity_summary_line(
         parts.push(format!(
             "reading {file_count} file{}",
             if file_count == 1 { "" } else { "s" }
+        ));
+    }
+    if edit_count > 0 {
+        parts.push(format!(
+            "editing {edit_count} file{}",
+            if edit_count == 1 { "" } else { "s" }
         ));
     }
     if dir_count > 0 {
@@ -1175,8 +1217,33 @@ pub(super) fn activity_summary_line(
             if shell_count == 1 { "" } else { "s" }
         ));
     }
+    if git_count > 0 {
+        parts.push(format!(
+            "checking repository {git_count} time{}",
+            if git_count == 1 { "" } else { "s" }
+        ));
+    }
+    if subagent_count > 0 {
+        parts.push(format!(
+            "dispatching {subagent_count} subagent{}",
+            if subagent_count == 1 { "" } else { "s" }
+        ));
+    }
+    if other_count > 0 {
+        parts.push(format!(
+            "running {other_count} tool{}",
+            if other_count == 1 { "" } else { "s" }
+        ));
+    }
 
     if parts.is_empty() {
+        let total = tasks.len() + activities.len() + explored.len();
+        if total > 0 {
+            return Some(format!(
+                "Running {total} tool{}…",
+                if total == 1 { "" } else { "s" }
+            ));
+        }
         return None;
     }
     let sentence = parts.join(", ");
@@ -1197,20 +1264,66 @@ pub(super) fn activity_block_lines(
     explored: &[ExploredAction],
     animate: bool,
     tick: usize,
+    active_tool_started: Option<Instant>,
 ) -> Vec<String> {
     if tasks.is_empty() && activities.is_empty() && explored.is_empty() {
         return Vec::new();
     }
     let char_str = bullet_char(animate, tick);
-    let header_text =
-        activity_summary_line(tasks, activities, explored).unwrap_or_else(|| "activity".into());
+    let header_text = activity_summary_line(tasks, activities, explored)
+        .unwrap_or_else(|| "Running tools…".into());
     let mut lines = vec![format!("  {BLUE}{char_str}{RESET} {header_text}")];
-    lines.extend(tasks_lines(tasks));
-    lines.extend(activities_lines(activities));
-    lines.extend(explored_lines(explored));
+
+    // Collect all items with their output lines
+    let mut all_items: Vec<(String, Vec<String>)> = Vec::new();
+    for task in tasks.iter().take(24) {
+        all_items.push((task.label.clone(), task.output.clone()));
+    }
+    for act in activities.iter().take(24) {
+        all_items.push((act.clone(), Vec::new()));
+    }
+    let grouped = grouped_explored_actions(explored);
+    for action in grouped.into_iter().take(24) {
+        all_items.push((action, Vec::new()));
+    }
+
+    let total_items = all_items.len();
+    const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let spinner = SPINNER_FRAMES[tick % SPINNER_FRAMES.len()];
+
+    for (idx, (label, output)) in all_items.into_iter().enumerate() {
+        let is_active = animate && active_tool_started.is_some() && idx == total_items - 1;
+        let prefix = if idx == 0 {
+            format!("{DIM}    └{RESET}")
+        } else {
+            "      ".to_string()
+        };
+
+        if is_active {
+            let elapsed_secs = active_tool_started.unwrap().elapsed().as_secs_f64();
+            let timer_suffix = format!(" ({:.1}s)", elapsed_secs);
+            lines.push(format!(
+                "{prefix} {CYAN}{spinner}{RESET} {WHITE}{label}{RESET}{DIM}{timer_suffix}{RESET}"
+            ));
+        } else {
+            lines.push(format!(
+                "{prefix} {MINT}✓{RESET} {WHITE}{label}{RESET}"
+            ));
+        }
+
+        for out_line in &output {
+            lines.push(format!("{DIM}       │ {}{RESET}", out_line));
+        }
+    }
+
+    let raw_total = tasks.len() + activities.len() + explored.len();
+    if raw_total > 24 {
+        lines.push(format!("{DIM}     ... {} more{RESET}", raw_total - 24));
+    }
     lines
 }
 
+#[allow(dead_code)]
 pub(super) fn explored_lines(actions: &[ExploredAction]) -> Vec<String> {
     if actions.is_empty() {
         return Vec::new();
@@ -1222,10 +1335,10 @@ pub(super) fn explored_lines(actions: &[ExploredAction]) -> Vec<String> {
         .enumerate()
         .map(|(index, action)| {
             if index == 0 {
-                // └ connector in DIM, tool text in BRIGHT (bold white)
-                format!("{DIM}    └{RESET} {BRIGHT}{action}{RESET}")
+                // └ connector in DIM, tool text in WHITE (plain white)
+                format!("{DIM}    └{RESET} {WHITE}{action}{RESET}")
             } else {
-                format!("      {BRIGHT}{action}{RESET}")
+                format!("      {WHITE}{action}{RESET}")
             }
         })
         .collect();
@@ -1372,6 +1485,7 @@ pub(super) fn truncate_line(line: &str, max_chars: usize) -> String {
     format!("{head}…")
 }
 
+#[allow(dead_code)]
 pub(super) fn activities_lines(activities: &[String]) -> Vec<String> {
     if activities.is_empty() {
         return Vec::new();
@@ -1382,10 +1496,10 @@ pub(super) fn activities_lines(activities: &[String]) -> Vec<String> {
         .enumerate()
         .map(|(index, act)| {
             if index == 0 {
-                // └ connector in DIM, activity text in BRIGHT (bold white)
-                format!("{DIM}    └{RESET} {BRIGHT}{act}{RESET}")
+                // └ connector in DIM, activity text in WHITE (plain white)
+                format!("{DIM}    └{RESET} {WHITE}{act}{RESET}")
             } else {
-                format!("      {BRIGHT}{act}{RESET}")
+                format!("      {WHITE}{act}{RESET}")
             }
         })
         .collect();
@@ -1447,6 +1561,7 @@ pub(super) fn plan_lines(steps: &[String], animate: bool, tick: usize) -> Vec<St
     lines
 }
 
+#[allow(dead_code)]
 pub(super) fn tasks_lines(tasks: &[TaskEntry]) -> Vec<String> {
     if tasks.is_empty() {
         return Vec::new();
@@ -1454,10 +1569,10 @@ pub(super) fn tasks_lines(tasks: &[TaskEntry]) -> Vec<String> {
     let mut lines = Vec::new();
     for (index, task) in tasks.iter().take(24).enumerate() {
         if index == 0 {
-            // └ connector in DIM, task label in BRIGHT (bold white)
-            lines.push(format!("{DIM}    └{RESET} {BRIGHT}{}{RESET}", task.label));
+            // └ connector in DIM, task label in WHITE (plain white)
+            lines.push(format!("{DIM}    └{RESET} {WHITE}{}{RESET}", task.label));
         } else {
-            lines.push(format!("      {BRIGHT}{}{RESET}", task.label));
+            lines.push(format!("      {WHITE}{}{RESET}", task.label));
         }
         for out_line in &task.output {
             lines.push(format!("{DIM}       │ {}{RESET}", out_line));

@@ -38,6 +38,7 @@ const BLUE: &str = "\x1b[38;2;78;201;216m";
 const CYAN: &str = "\x1b[38;2;56;189;248m";
 const DIM: &str = "\x1b[90m";
 const BRIGHT: &str = "\x1b[1;97m";
+const WHITE: &str = "\x1b[97m";
 const BOLD: &str = "\x1b[1m";
 const BG_ADD: &str = "\x1b[48;2;20;53;32m\x1b[38;2;166;226;46m";
 const BG_DEL: &str = "\x1b[48;2;61;23;23m\x1b[38;2;255;121;121m";
@@ -852,6 +853,7 @@ pub async fn run_code_agent_with_options(
                     status.input_tokens = input_tokens;
                     status.generated_tokens = generated_tokens;
                     status.estimated_tokens = estimated_tokens;
+                    status.active_tool_started = None;
                     // Re-derive the animation rate from this real data point
                     // every time one arrives (cumulative generated tokens /
                     // elapsed turn time so far) — see
@@ -953,6 +955,9 @@ pub async fn run_code_agent_with_options(
             } => {
                 progress_tool_running.store(true, Ordering::Relaxed);
                 if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
+                    if let Ok(mut status) = progress_live_status.lock() {
+                        status.active_tool_started = Some(std::time::Instant::now());
+                    }
                     if let Some(subagent_name) = subagent {
                         // A tool call happening *inside* a running subagent's own
                         // nested loop (tagged by `dispatch_one_subagent`) — render
@@ -1028,6 +1033,9 @@ pub async fn run_code_agent_with_options(
             } => {
                 progress_tool_running.store(false, Ordering::Relaxed);
                 if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
+                    if let Ok(mut status) = progress_live_status.lock() {
+                        status.active_tool_started = None;
+                    }
                     if subagent.is_some() {
                         // Nested call inside a subagent finished — the ToolStart
                         // line already shown covers it; only the command-output
@@ -1262,7 +1270,52 @@ pub async fn run_code_agent_with_options(
         }
         clear_live_status(&mut status);
     }
-    let res = res.map_err(|e| anyhow!("{}", e))?;
+    let mut res = res.map_err(|e| anyhow!("{}", e))?;
+    if let Ok(status) = live_status.lock() {
+        if res.input_tokens == 0 && status.input_tokens > 0 {
+            res.input_tokens = status.input_tokens;
+        }
+        if res.generated_tokens == 0 && status.generated_tokens > 0 {
+            res.generated_tokens = status.generated_tokens;
+        }
+    }
+
+    let badge_plain = if let Some(orig_provider) = &res.fallback {
+        let reason_suffix = if let Some(reason) = &res.fallback_reason {
+            format!(" ({reason})")
+        } else {
+            String::new()
+        };
+        format!(
+            "{} • {}{} → fallback: {} • {}",
+            orig_provider,
+            crate::active_model(orig_provider, config),
+            reason_suffix,
+            res.provider,
+            res.model
+        )
+    } else {
+        format!("{} • {}", res.provider, res.model)
+    };
+
+    let (tw, _) = markdown::terminal_size_or_default();
+    let width = (tw as usize).saturating_sub(6).max(40);
+    let tokens_suffix = if res.input_tokens > 0 || res.generated_tokens > 0 {
+        format!(
+            " • ↑ {} · {RESET}↓ {}{DIM}",
+            format_token_count_bare(res.input_tokens),
+            format_token_count_bare(res.generated_tokens)
+        )
+    } else {
+        String::new()
+    };
+    let label = format!(
+        "─ Worked for {}{tokens_suffix} • {badge_plain}",
+        format_elapsed(started_at.elapsed())
+    );
+    let label_width = strip_ansi_escapes(&label).chars().count();
+    let fill_len = width.saturating_sub(label_width + 1);
+    let worked_line = format!("{DIM}{label} {}{RESET}", "─".repeat(fill_len));
 
     if let Some(tui) = &options.tui {
         tui.push_assistant(res.summary.clone());
@@ -1278,6 +1331,7 @@ pub async fn run_code_agent_with_options(
                 .join("\n");
             tui.push_notice(format!("Sources:\n{sources}"));
         }
+        tui.push_notice(worked_line);
         avatar_bridge.on_talking(false);
         return Ok(res);
     }
@@ -1329,55 +1383,7 @@ pub async fn run_code_agent_with_options(
         println!();
     }
 
-    let badge_plain = if let Some(orig_provider) = &res.fallback {
-        let reason_suffix = if let Some(reason) = &res.fallback_reason {
-            format!(" ({reason})")
-        } else {
-            String::new()
-        };
-        format!(
-            "{} • {}{} → fallback: {} • {}",
-            orig_provider,
-            crate::active_model(orig_provider, config),
-            reason_suffix,
-            res.provider,
-            res.model
-        )
-    } else {
-        format!("{} • {}", res.provider, res.model)
-    };
-
-    // "─ Worked for {elapsed} • {provider} • {model}" as one *labeled*
-    // divider — filled out with more "─" to the same width the box's own
-    // two divider lines use — rather than the provider/model badge and the
-    // elapsed-time label as two separate short lines followed by a third,
-    // unlabeled full-width divider directly under them. The three used to
-    // look like unrelated elements stacked on top of each other; folding
-    // both labels into one rule reads as a single line doing all three
-    // jobs, matching the box below it.
-    let (tw, _) = markdown::terminal_size_or_default();
-    let width = tw as usize;
-    // `↑` context stays dim with the rest of the footer; `↓` generated drops
-    // out of DIM for its segment so the "what the model actually produced"
-    // number reads a touch stronger than the divider around it.
-    let tokens_suffix = if res.input_tokens > 0 || res.generated_tokens > 0 {
-        format!(
-            " • ↑ {} · {RESET}↓ {}{DIM}",
-            format_token_count_bare(res.input_tokens),
-            format_token_count_bare(res.generated_tokens)
-        )
-    } else {
-        String::new()
-    };
-    let label = format!(
-        "─ Worked for {}{tokens_suffix} • {badge_plain}",
-        format_elapsed(started_at.elapsed())
-    );
-    // Count only visible columns for the fill — `tokens_suffix` carries ANSI
-    // codes that don't occupy screen width.
-    let label_width = strip_ansi_escapes(&label).chars().count();
-    let fill_len = width.saturating_sub(2).saturating_sub(label_width + 1);
-    println!("  {DIM}{label} {}{RESET}", "─".repeat(fill_len));
+    println!("  {worked_line}");
 
     Ok(res)
 }

@@ -71,14 +71,37 @@ pub fn read_clipboard_image() -> Result<Option<String>> {
     }
 }
 
-pub fn save_sent_image_after_send(data_uri: Option<&str>, message: &str) {
+pub fn save_sent_image_after_send(
+    data_uri: Option<&str>,
+    message: &str,
+    tui: Option<&crate::interactive::TuiHandle>,
+) {
     if let Some(data_uri) = data_uri {
+        let mut saved_names = Vec::new();
         for img in data_uri.split_whitespace() {
             match mint_core::save_sent_image(img, message) {
-                Ok(entry) => println!("\x1b[90mSaved image: {}\x1b[0m", entry.path.display()),
-                Err(error) => {
-                    eprintln!("\x1b[33mWarning: failed to save sent image: {error}\x1b[0m")
+                Ok(entry) => {
+                    if let Some(name) = entry.path.file_name().and_then(|f| f.to_str()) {
+                        saved_names.push(name.to_string());
+                    }
+                    if tui.is_none() {
+                        println!("\x1b[90mSaved image: {}\x1b[0m", entry.path.display());
+                    }
                 }
+                Err(error) => {
+                    if let Some(tui) = tui {
+                        tui.set_notice(format!("Warning: failed to save sent image: {error}"));
+                    } else {
+                        eprintln!("\x1b[33mWarning: failed to save sent image: {error}\x1b[0m");
+                    }
+                }
+            }
+        }
+        if let Some(tui) = tui {
+            if saved_names.len() == 1 {
+                tui.set_notice(format!("Image saved to gallery ({})", saved_names[0]));
+            } else if saved_names.len() > 1 {
+                tui.set_notice(format!("{} images saved to gallery", saved_names.len()));
             }
         }
     }

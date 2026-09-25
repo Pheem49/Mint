@@ -10,11 +10,11 @@ use crossterm::{ExecutableCommand, event, terminal};
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Position, Rect},
+    layout::{Constraint, Direction, Layout, Position},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
-        Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation,
+        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation,
         ScrollbarState, Wrap,
     },
 };
@@ -120,7 +120,7 @@ pub(crate) struct ChatViewState {
     selection_mode: bool,
     selection_anchor: usize,
     selection_head: usize,
-    notice: Option<String>,
+    notice: Option<(String, std::time::Instant)>,
     dialog: Option<DialogState>,
     thought_modal: Option<ThoughtModalState>,
 }
@@ -407,6 +407,11 @@ impl TuiHandle {
             state.scroll_from_bottom = 0;
         }
     }
+    pub fn set_notice(&self, text: impl Into<String>) {
+        if let Ok(mut state) = self.state.lock() {
+            state.set_notice(text);
+        }
+    }
     pub fn take_interrupted(&self) -> bool {
         self.interrupted.swap(false, Ordering::Relaxed)
     }
@@ -576,8 +581,25 @@ impl ChatViewState {
         self.slash_selected = 0;
         true
     }
+    pub fn set_notice(&mut self, text: impl Into<String>) {
+        self.notice = Some((text.into(), std::time::Instant::now()));
+    }
+    pub fn clear_notice(&mut self) {
+        self.notice = None;
+    }
+    pub fn active_notice(&self) -> Option<&str> {
+        self.notice.as_ref().and_then(|(text, created)| {
+            if text.starts_with("Terminal too small")
+                || created.elapsed() < std::time::Duration::from_millis(2500)
+            {
+                Some(text.as_str())
+            } else {
+                None
+            }
+        })
+    }
     pub fn notice(&mut self, text: impl Into<String>) {
-        self.notice = Some(text.into());
+        self.set_notice(text);
     }
     fn transcript_text(&self) -> Text<'static> {
         let mut lines = Vec::new();
@@ -615,7 +637,7 @@ impl ChatViewState {
                 if entry.role == TranscriptRole::Notice {
                     for span in &mut sel_line.spans {
                         if span.style.fg.is_none() {
-                            span.style = span.style.fg(Color::DarkGray);
+                            span.style = span.style.fg(Color::White);
                         }
                     }
                 }
@@ -693,7 +715,7 @@ impl ChatViewState {
         let status_height = if self.status.is_empty() {
             0
         } else {
-            (self.status.len() as u16).min(5)
+            (self.status.len() as u16).min(8)
         };
 fn gradient_logo_line(text: &str) -> Line<'static> {
     let chars: Vec<char> = text.chars().collect();
@@ -791,6 +813,101 @@ fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
     Line::from(spans)
 }
 
+fn format_tool_status_line(line: &str) -> Line<'static> {
+    if line.trim_start().starts_with('│') {
+        return Line::styled(line.to_string(), Style::default().fg(Color::DarkGray));
+    }
+
+    let (prefix, rest) = if let Some(branch_pos) = line.find('└') {
+        let conn_end = branch_pos + '└'.len_utf8();
+        (&line[..conn_end], line[conn_end..].trim_start())
+    } else if line.starts_with("      ") {
+        ("      ", &line[6..])
+    } else {
+        ("", line)
+    };
+
+    let mut spans = Vec::new();
+    if !prefix.is_empty() {
+        spans.push(Span::styled(
+            if prefix.contains('└') {
+                "    └ ".to_string()
+            } else {
+                "      ".to_string()
+            },
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
+    const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    let first_char = rest.chars().next();
+    let (icon_span, after_icon) = if first_char == Some('✓') {
+        let span = Span::styled(
+            "✓ ".to_string(),
+            Style::default().fg(Color::Rgb(105, 230, 166)),
+        );
+        (Some(span), rest['✓'.len_utf8()..].trim_start())
+    } else if let Some(c) = first_char && SPINNER_CHARS.contains(&c) {
+        let span = Span::styled(
+            format!("{} ", c),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        );
+        (Some(span), rest[c.len_utf8()..].trim_start())
+    } else {
+        (None, rest)
+    };
+
+    if let Some(s) = icon_span {
+        spans.push(s);
+    }
+
+    if let Some(timer_pos) = after_icon.rfind(" (") {
+        let text = &after_icon[..timer_pos];
+        let timer = &after_icon[timer_pos..];
+        spans.push(Span::styled(text.to_string(), Style::default().fg(Color::White)));
+        spans.push(Span::styled(timer.to_string(), Style::default().fg(Color::DarkGray)));
+    } else {
+        spans.push(Span::styled(after_icon.to_string(), Style::default().fg(Color::White)));
+    }
+
+    Line::from(spans)
+}
+
+fn format_composer_row_spans(row: &str) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut i = 0;
+    let chars: Vec<char> = row.chars().collect();
+    let mut last_end = 0;
+
+    while i < chars.len() {
+        if chars[i] == '[' {
+            let remaining: String = chars[i..].iter().collect();
+            if remaining.starts_with("[Image") || remaining.starts_with("[Pasted text") {
+                if let Some(end) = remaining.find(']') {
+                    let badge = &remaining[..=end];
+                    if i > last_end {
+                        let text: String = chars[last_end..i].iter().collect();
+                        spans.push(Span::raw(text));
+                    }
+                    spans.push(Span::styled(
+                        badge.to_string(),
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    ));
+                    i += end + 1;
+                    last_end = i;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    if last_end < chars.len() {
+        let text: String = chars[last_end..].iter().collect();
+        spans.push(Span::raw(text));
+    }
+    spans
+}
+
         let horizontal_pad = if frame.area().width >= 80 {
             2
         } else if frame.area().width >= 60 {
@@ -833,6 +950,13 @@ fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
             0
         };
 
+        let thought_height = if self.thought_modal.is_some() {
+            let max_allowed = main_area.height.saturating_sub(9).min(20).max(8);
+            ((main_area.height * 4) / 10).clamp(8, max_allowed)
+        } else {
+            0
+        };
+
         let composer_width = main_area.width.saturating_sub(6).max(1) as usize;
         let (composer_rows, cursor_row, cursor_col) =
             super::wrap_input_into_rows(&self.composer, composer_width, self.cursor);
@@ -845,6 +969,16 @@ fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
                     Constraint::Min(3),
                     Constraint::Length(status_height),
                     Constraint::Length(dialog_height),
+                ])
+                .split(main_area)
+        } else if thought_height > 0 {
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(6),
+                    Constraint::Min(3),
+                    Constraint::Length(status_height),
+                    Constraint::Length(thought_height),
                 ])
                 .split(main_area)
         } else {
@@ -980,23 +1114,39 @@ fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
                 .map(|line| {
                     // Lines with a timing suffix: "Verb (elapsed · …)" —
                     // shimmer animation from bright white (left) to dim (right).
-                    if line.find(" (").is_some() {
+                    if line.find(" (").is_some()
+                        && !line.contains('└')
+                        && !line.starts_with("      ")
+                        && !line.contains('✓')
+                        && !line.chars().any(|c| ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'].contains(&c))
+                    {
                         shimmer_thinking_line(line, tick)
-                    // Lines with a tree branch connector "└": dim connector,
-                    // bold white tool text.
-                    } else if let Some(branch_pos) = line.find('└') {
-                        let connector = &line[..branch_pos + '└'.len_utf8()];
-                        let tool_text = &line[branch_pos + '└'.len_utf8()..];
-                        Line::from(vec![
-                            Span::styled(
-                                connector.to_string(),
-                                Style::default().fg(Color::DarkGray),
-                            ),
-                            Span::styled(
-                                tool_text.to_string(),
-                                Style::default().fg(Color::White),
-                            ),
-                        ])
+                    // Tool status lines (connected by └ or indented by 6 spaces)
+                    } else if line.contains('└') || line.starts_with("      ") {
+                        format_tool_status_line(line)
+                    } else if line.contains('●') || line.contains('○') {
+                        // Header line with bullet: bullet in Cyan bold, text in White bold
+                        let bullet_char = if line.contains('●') { '●' } else { '○' };
+                        if let Some(pos) = line.find(bullet_char) {
+                            let prefix = &line[..pos];
+                            let text = &line[pos + bullet_char.len_utf8()..];
+                            Line::from(vec![
+                                Span::raw(prefix.to_string()),
+                                Span::styled(
+                                    bullet_char.to_string(),
+                                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                                ),
+                                Span::styled(
+                                    text.to_string(),
+                                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                                ),
+                            ])
+                        } else {
+                            Line::styled(
+                                line.to_string(),
+                                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                            )
+                        }
                     } else {
                         // Activity/verb lines: "Reading 1 file…", "Running 2
                         // commands…", etc. — bold white for clarity.
@@ -1009,7 +1159,9 @@ fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
                     }
                 })
                 .collect();
-            frame.render_widget(Paragraph::new(status_lines), rows[2]);
+            let skip = status_lines.len().saturating_sub(status_height as usize);
+            let visible_lines: Vec<Line> = status_lines.into_iter().skip(skip).collect();
+            frame.render_widget(Paragraph::new(visible_lines), rows[2]);
         }
         if let Some(dialog) = &self.dialog {
             let mut lines = Vec::new();
@@ -1248,6 +1400,65 @@ fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
                     rows[3].y + 1 + row_idx as u16,
                 ));
             }
+        } else if let Some(modal) = &self.thought_modal {
+            let panel_area = rows[3];
+            let content_width = (panel_area.width as usize).saturating_sub(4).max(20);
+            let mut wrapped_lines: Vec<String> = Vec::new();
+            for paragraph in &modal.lines {
+                let p_trimmed = paragraph.trim_end();
+                if p_trimmed.is_empty() {
+                    wrapped_lines.push(String::new());
+                } else {
+                    let options = textwrap::Options::new(content_width).break_words(true);
+                    let filled = textwrap::fill(p_trimmed, &options);
+                    for l in filled.lines() {
+                        wrapped_lines.push(l.to_string());
+                    }
+                }
+            }
+
+            let inner_height = (panel_area.height as usize).saturating_sub(2);
+            let max_scroll = wrapped_lines.len().saturating_sub(inner_height);
+            let scroll = modal.scroll.min(max_scroll);
+
+            let scroll_hint = if max_scroll > 0 {
+                format!(
+                    " ↑/↓ scroll {}/{} · Esc / Ctrl+T to close ",
+                    scroll + 1,
+                    max_scroll + 1
+                )
+            } else {
+                " Esc / Ctrl+T to close ".to_string()
+            };
+
+            let block = Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(Color::Rgb(168, 85, 247)))
+                .title(Span::styled(
+                    format!(" Thought Process ({}) ", modal.elapsed_str),
+                    Style::default()
+                        .fg(Color::Rgb(192, 132, 252))
+                        .add_modifier(Modifier::BOLD),
+                ))
+                .title_bottom(Span::styled(
+                    scroll_hint,
+                    Style::default().fg(Color::DarkGray),
+                ));
+
+            let visible = &wrapped_lines[scroll..(scroll + inner_height).min(wrapped_lines.len())];
+            let mut p_lines: Vec<Line> = Vec::with_capacity(inner_height);
+            for l in visible {
+                p_lines.push(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(l.clone(), Style::default().fg(Color::Rgb(226, 232, 240))),
+                ]));
+            }
+            for _ in visible.len()..inner_height {
+                p_lines.push(Line::from(""));
+            }
+
+            let paragraph = Paragraph::new(p_lines).block(block);
+            frame.render_widget(paragraph, panel_area);
         } else {
             if suggestion_height > 0 {
                 let selected = self.slash_selected.min(slash_suggestions.len() - 1);
@@ -1298,15 +1509,16 @@ fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
                         .iter()
                         .enumerate()
                         .map(|(index, row)| {
-                            Line::from(vec![
+                            let mut spans = vec![
                                 Span::styled(
                                     if index == 0 { " › " } else { "   " },
                                     Style::default()
                                         .fg(Color::Rgb(105, 230, 166))
                                         .add_modifier(Modifier::BOLD),
                                 ),
-                                Span::raw(row.clone()),
-                            ])
+                            ];
+                            spans.extend(format_composer_row_spans(row));
+                            Line::from(spans)
                         })
                         .collect::<Vec<_>>(),
                 )
@@ -1338,7 +1550,7 @@ fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
             let right_len = jobs_prefix.chars().count() + path_text.chars().count();
             let available = rows[5].width as usize;
             let gap = available.saturating_sub(left_len + right_len);
-            let footer = if let Some(notice) = &self.notice {
+            let footer = if let Some(notice) = self.active_notice() {
                 Line::styled(
                     format!(" {notice}"),
                     Style::default()
@@ -1366,7 +1578,7 @@ fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
             };
             frame.render_widget(Paragraph::new(footer), rows[5]);
 
-            if !self.selection_mode && self.thought_modal.is_none() {
+            if !self.selection_mode {
                 let row_start = self.cursor.saturating_sub(cursor_col);
                 let visual_col = crate::markdown::unicode_width(
                     &self.composer[row_start..self.cursor]
@@ -1378,76 +1590,6 @@ fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
                     rows[4].y + 1 + cursor_row.min(composer_height.saturating_sub(3) as usize) as u16,
                 ));
             }
-        }
-
-        if let Some(modal) = &self.thought_modal {
-            let area = frame.area();
-            let popup_width = (area.width.saturating_sub(8)).clamp(50, 100);
-            let popup_height = (area.height.saturating_sub(6)).clamp(10, 28);
-            let x = (area.width.saturating_sub(popup_width)) / 2;
-            let y = (area.height.saturating_sub(popup_height)) / 2;
-            let popup_area = Rect::new(x, y, popup_width, popup_height);
-
-            frame.render_widget(Clear, popup_area);
-
-            let content_width = (popup_width as usize).saturating_sub(4).max(20);
-            let mut wrapped_lines: Vec<String> = Vec::new();
-            for paragraph in &modal.lines {
-                let p_trimmed = paragraph.trim_end();
-                if p_trimmed.is_empty() {
-                    wrapped_lines.push(String::new());
-                } else {
-                    let options = textwrap::Options::new(content_width).break_words(true);
-                    let filled = textwrap::fill(p_trimmed, &options);
-                    for l in filled.lines() {
-                        wrapped_lines.push(l.to_string());
-                    }
-                }
-            }
-
-            let inner_height = (popup_height as usize).saturating_sub(2);
-            let max_scroll = wrapped_lines.len().saturating_sub(inner_height);
-            let scroll = modal.scroll.min(max_scroll);
-
-            let scroll_hint = if max_scroll > 0 {
-                format!(
-                    " ↑/↓ scroll {}/{} · Esc / Ctrl+T close ",
-                    scroll + 1,
-                    max_scroll + 1
-                )
-            } else {
-                " Esc / Ctrl+T to close ".to_string()
-            };
-
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Rgb(168, 85, 247)))
-                .title(Span::styled(
-                    format!(" Thought Process ({}) ", modal.elapsed_str),
-                    Style::default()
-                        .fg(Color::Rgb(192, 132, 252))
-                        .add_modifier(Modifier::BOLD),
-                ))
-                .title_bottom(Span::styled(
-                    scroll_hint,
-                    Style::default().fg(Color::DarkGray),
-                ));
-
-            let visible = &wrapped_lines[scroll..(scroll + inner_height).min(wrapped_lines.len())];
-            let mut p_lines: Vec<Line> = Vec::with_capacity(inner_height);
-            for l in visible {
-                p_lines.push(Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled(l.clone(), Style::default().fg(Color::Rgb(203, 213, 225))),
-                ]));
-            }
-            for _ in visible.len()..inner_height {
-                p_lines.push(Line::from(""));
-            }
-
-            let paragraph = Paragraph::new(p_lines).block(block);
-            frame.render_widget(paragraph, popup_area);
         }
     }
 }
@@ -1509,24 +1651,31 @@ impl ChatTui {
             if let Some(time) = last_ctrl_d {
                 if time.elapsed() >= DOUBLE_PRESS_TIMEOUT {
                     last_ctrl_d = None;
-                    if state.notice.as_deref() == Some("Press Ctrl+D again to exit") {
-                        state.notice = None;
+                    if state.active_notice() == Some("Press Ctrl+D again to exit") {
+                        state.clear_notice();
                     }
                 }
             }
 
             self.terminal.draw(|f| state.render(f))?;
 
-            if last_ctrl_d.is_some() {
-                if !event::poll(std::time::Duration::from_millis(100))? {
+            if last_ctrl_d.is_some() || state.active_notice().is_some() {
+                if !event::poll(std::time::Duration::from_millis(50))? {
                     continue;
                 }
             }
 
             match event::read()? {
                 event::Event::Resize(w, h) => {
-                    state.notice = (w < MIN_WIDTH || h < MIN_HEIGHT)
-                        .then(|| format!("Terminal too small: {w}x{h}"))
+                    if w < MIN_WIDTH || h < MIN_HEIGHT {
+                        state.set_notice(format!("Terminal too small: {w}x{h}"));
+                    } else if state
+                        .active_notice()
+                        .map(|n| n.starts_with("Terminal too small"))
+                        .unwrap_or(false)
+                    {
+                        state.clear_notice();
+                    }
                 }
                 event::Event::Mouse(m) => match m.kind {
                     event::MouseEventKind::ScrollUp => {
@@ -1592,8 +1741,8 @@ impl ChatTui {
                         && key.modifiers.contains(KeyModifiers::CONTROL);
                     if !is_ctrl_d && last_ctrl_d.is_some() {
                         last_ctrl_d = None;
-                        if state.notice.as_deref() == Some("Press Ctrl+D again to exit") {
-                            state.notice = None;
+                        if state.active_notice() == Some("Press Ctrl+D again to exit") {
+                            state.clear_notice();
                         }
                     }
 
@@ -1620,15 +1769,16 @@ impl ChatTui {
                                             lines,
                                             scroll: 0,
                                         });
-                                        state.notice = None;
+                                        state.clear_notice();
                                     }
                                 }
                             }
                             KeyCode::Enter | KeyCode::Char('y') => {
                                 let text = state.selected_text();
                                 if text.len() > COPY_LIMIT {
-                                    state.notice =
-                                        Some("Transcript exceeds the 100 KiB copy limit".into());
+                                    state.set_notice(
+                                        "Transcript exceeds the 100 KiB copy limit",
+                                    );
                                 } else {
                                     write!(
                                         io::stdout(),
@@ -1636,7 +1786,7 @@ impl ChatTui {
                                         BASE64.encode(text.as_bytes())
                                     )?;
                                     io::stdout().flush()?;
-                                    state.notice = Some("Transcript copied with OSC52".into());
+                                    state.set_notice("Transcript copied with OSC52");
                                     state.selection_mode = false;
                                 }
                             }
@@ -1670,14 +1820,16 @@ impl ChatTui {
                                         lines,
                                         scroll: 0,
                                     });
-                                    state.notice = None;
+                                    state.clear_notice();
                                 } else {
-                                    state.notice =
-                                        Some("No thought process recorded for this turn".into());
+                                    state.set_notice(
+                                        "No thought process recorded for this turn",
+                                    );
                                 }
                             } else {
-                                state.notice =
-                                    Some("No thought process recorded for this turn".into());
+                                state.set_notice(
+                                    "No thought process recorded for this turn",
+                                );
                             }
                         }
                         KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1688,20 +1840,17 @@ impl ChatTui {
                                 } else {
                                     pasted_image = Some(uri);
                                 }
-                                let marker = "[Image]";
-                                let cursor = state.cursor;
-                                for (offset, character) in marker.chars().enumerate() {
-                                    state.composer.insert(cursor + offset, character);
-                                }
-                                state.cursor += marker.chars().count();
-                                state.notice = Some("Image attached".into());
+                                let mut cursor = state.cursor;
+                                super::insert_image_placeholder(&mut state.composer, &mut cursor);
+                                state.cursor = cursor;
+                                state.set_notice("Image attached");
                             } else {
-                                state.notice = Some("No image found in clipboard".into());
+                                state.set_notice("No image found in clipboard");
                             }
                         }
                         KeyCode::F(6) => {
                             state.selection_mode = true;
-                            state.notice = None;
+                            state.clear_notice();
                             let last = state.plain_transcript_lines().len().saturating_sub(1);
                             state.selection_anchor = last;
                             state.selection_head = last;
@@ -1759,7 +1908,7 @@ impl ChatTui {
                             state.cursor = 0;
                             state.history_index = None;
                             state.draft_before_history.clear();
-                            state.notice = None;
+                            state.clear_notice();
                             if !text.trim().is_empty() {
                                 return Ok(Some(InteractiveInput { text, pasted_image }));
                             }
@@ -1771,16 +1920,16 @@ impl ChatTui {
                                 }
                             }
                             last_ctrl_d = Some(std::time::Instant::now());
-                            state.notice = Some("Press Ctrl+D again to exit".into());
+                            state.set_notice("Press Ctrl+D again to exit");
                         }
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             if !state.composer.is_empty() {
                                 state.composer.clear();
                                 state.cursor = 0;
                                 state.slash_selected = 0;
-                                state.notice = None;
+                                state.clear_notice();
                             } else {
-                                state.notice = Some("Press Ctrl+D twice to exit".into());
+                                state.set_notice("Press Ctrl+D twice to exit");
                             }
                         }
                         KeyCode::Char(c)
@@ -1788,6 +1937,13 @@ impl ChatTui {
                                 .modifiers
                                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
                         {
+                            if state
+                                .active_notice()
+                                .map(|n| !n.starts_with("Terminal too small"))
+                                .unwrap_or(false)
+                            {
+                                state.clear_notice();
+                            }
                             let cursor = state.cursor;
                             state.composer.insert(cursor, c);
                             state.cursor += 1;
@@ -2243,4 +2399,28 @@ mod dialog_tests {
         modal.scroll = modal.scroll.saturating_sub(1);
         assert_eq!(modal.scroll, 0);
     }
+
+    #[test]
+    fn test_notice_expiration_and_clear() {
+        let mut state = ChatViewState::default();
+        assert_eq!(state.active_notice(), None);
+
+        state.set_notice("Image attached");
+        assert_eq!(state.active_notice(), Some("Image attached"));
+
+        // Terminal too small warning doesn't auto-expire
+        state.set_notice("Terminal too small: 40x10");
+        assert_eq!(state.active_notice(), Some("Terminal too small: 40x10"));
+
+        state.clear_notice();
+        assert_eq!(state.active_notice(), None);
+
+        // Manually test expiration logic
+        state.notice = Some((
+            "Old notice".into(),
+            std::time::Instant::now() - std::time::Duration::from_millis(3000),
+        ));
+        assert_eq!(state.active_notice(), None);
+    }
 }
+

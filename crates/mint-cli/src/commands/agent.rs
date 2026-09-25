@@ -595,7 +595,7 @@ pub async fn handle_chat(
             },
         )
         .await?;
-        image::save_sent_image_after_send(image_data_uri.as_deref(), &message);
+        image::save_sent_image_after_send(image_data_uri.as_deref(), &message, None);
         println!("{}", response.text);
     }
     Ok(())
