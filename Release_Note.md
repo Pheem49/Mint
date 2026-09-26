@@ -2,6 +2,7 @@
 
 ## Full-Screen Interactive Chat TUI (Complete Default Interface)
 
+- **Native-Feeling TUI Mouse Selection**: Added Mint-managed click-drag selection across the entire rendered TUI while preserving mouse-wheel transcript scrolling and physical `Up`/`Down` prompt-history navigation. Selected screen cells stay highlighted after mouse release and are copied with right-click, using the native system clipboard first with OSC52 fallback for terminal/remote sessions.
 - **Markdown Table Rendering (TUI)**: Fixed tables showing as raw `| # | ไฟล์ | สถานะ |` / `|---|---|---|` in the TUI. `format_markdown_bold()` now detects consecutive `|...|` lines (using `is_table_line()`), buffers them, and flushes through `render_markdown_table()` — the same box-drawing Unicode renderer used in classic terminal mode. Tables at any position in the response (middle or end) are handled correctly. Code blocks containing `|`-separated content are exempt.
 
 - **Status Line Color Refinement**: Improved visual hierarchy of live status lines and agent timeline notes.

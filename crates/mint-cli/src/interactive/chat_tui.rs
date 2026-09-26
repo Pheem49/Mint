@@ -10,12 +10,13 @@ use crossterm::{ExecutableCommand, event, terminal};
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Position},
+    buffer::Buffer,
+    layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
-        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Wrap,
+        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Wrap,
     },
 };
 use std::io::{self, Write};
@@ -25,6 +26,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
+use unicode_width::UnicodeWidthStr;
 
 const MIN_WIDTH: u16 = 60;
 const MIN_HEIGHT: u16 = 12;
@@ -502,14 +504,10 @@ impl ChatViewState {
             && let Ok(rows) = memory.interactions_for_chat(&scoped)
         {
             for row in rows {
-                self.transcript.push(TranscriptEntry::new(
-                    TranscriptRole::User,
-                    row.user_text,
-                ));
-                self.transcript.push(TranscriptEntry::new(
-                    TranscriptRole::Assistant,
-                    row.ai_text,
-                ));
+                self.transcript
+                    .push(TranscriptEntry::new(TranscriptRole::User, row.user_text));
+                self.transcript
+                    .push(TranscriptEntry::new(TranscriptRole::Assistant, row.ai_text));
             }
         }
     }
@@ -717,196 +715,215 @@ impl ChatViewState {
         } else {
             (self.status.len() as u16).min(8)
         };
-fn gradient_logo_line(text: &str) -> Line<'static> {
-    let chars: Vec<char> = text.chars().collect();
-    let count = chars.len();
-    if count == 0 {
-        return Line::default();
-    }
-    // Gradient stops: Mint Green (105, 230, 166) -> Sky Blue (72, 202, 228) -> Deep Blue (0, 119, 182)
-    let stops = [
-        (105.0, 230.0, 166.0),
-        (72.0, 202.0, 228.0),
-        (0.0, 119.0, 182.0),
-    ];
-    let spans: Vec<Span<'static>> = chars
-        .iter()
-        .enumerate()
-        .map(|(i, &c)| {
-            if c == ' ' {
-                Span::raw(" ")
-            } else {
-                let t = if count > 1 {
-                    i as f32 / (count - 1) as f32
-                } else {
-                    0.0
-                };
-                let (r, g, b) = if t <= 0.5 {
-                    let local_t = t * 2.0;
-                    let r = stops[0].0 + (stops[1].0 - stops[0].0) * local_t;
-                    let g = stops[0].1 + (stops[1].1 - stops[0].1) * local_t;
-                    let b = stops[0].2 + (stops[1].2 - stops[0].2) * local_t;
-                    (r, g, b)
-                } else {
-                    let local_t = (t - 0.5) * 2.0;
-                    let r = stops[1].0 + (stops[2].0 - stops[1].0) * local_t;
-                    let g = stops[1].1 + (stops[2].1 - stops[1].1) * local_t;
-                    let b = stops[1].2 + (stops[2].2 - stops[1].2) * local_t;
-                    (r, g, b)
-                };
-                Span::styled(
-                    c.to_string(),
-                    Style::default().fg(Color::Rgb(r.round() as u8, g.round() as u8, b.round() as u8)),
-                )
+        fn gradient_logo_line(text: &str) -> Line<'static> {
+            let chars: Vec<char> = text.chars().collect();
+            let count = chars.len();
+            if count == 0 {
+                return Line::default();
             }
-        })
-        .collect();
-    Line::from(spans)
-}
-/// Animated shimmer for the “Thinking (5s · …)” status line.
-///
-/// The bright spot travels left-to-right across the text: the character at
-/// `spot` (modulo text length) is rendered at full bright white, characters
-/// nearby fade in/out using a cosine envelope, and the rest are a dim gray.
-fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
-    // Split at the first " (" to isolate the verb from the timer suffix.
-    let (verb, suffix) = if let Some(idx) = line.find(" (") {
-        (&line[..idx], &line[idx..])
-    } else {
-        (line, "")
-    };
-
-    let chars: Vec<char> = verb.chars().collect();
-    let count = chars.len();
-
-    // Bright spot position — full cycle every ~(count * 2) ticks so the
-    // shimmer takes a moment to complete a pass rather than zipping by.
-    let period = (count * 2).max(16);
-    let spot = (tick % period) as f32 / period as f32 * count as f32;
-
-    let mut spans: Vec<Span<'static>> = chars
-        .iter()
-        .enumerate()
-        .map(|(i, &c)| {
-            // Distance from the shimmer spot, normalised.
-            let dist = ((i as f32 - spot).abs() / (count as f32 * 0.35)).min(1.0);
-            // Cosine envelope: 1.0 at centre of spot, 0.0 at edges.
-            let brightness = ((1.0 - dist) * std::f32::consts::PI * 0.5).cos().powi(2);
-            // Interpolate: dim gray (100, 100, 110) -> bright white (255, 255, 255).
-            let r = (100.0 + 155.0 * brightness).round() as u8;
-            let g = (100.0 + 155.0 * brightness).round() as u8;
-            let b = (110.0 + 145.0 * brightness).round() as u8;
-            let style = Style::default()
-                .fg(Color::Rgb(r, g, b))
-                .add_modifier(Modifier::BOLD);
-            Span::styled(c.to_string(), style)
-        })
-        .collect();
-
-    if !suffix.is_empty() {
-        spans.push(Span::styled(
-            suffix.to_string(),
-            Style::default().fg(Color::DarkGray),
-        ));
-    }
-
-    Line::from(spans)
-}
-
-fn format_tool_status_line(line: &str) -> Line<'static> {
-    if line.trim_start().starts_with('│') {
-        return Line::styled(line.to_string(), Style::default().fg(Color::DarkGray));
-    }
-
-    let (prefix, rest) = if let Some(branch_pos) = line.find('└') {
-        let conn_end = branch_pos + '└'.len_utf8();
-        (&line[..conn_end], line[conn_end..].trim_start())
-    } else if line.starts_with("      ") {
-        ("      ", &line[6..])
-    } else {
-        ("", line)
-    };
-
-    let mut spans = Vec::new();
-    if !prefix.is_empty() {
-        spans.push(Span::styled(
-            if prefix.contains('└') {
-                "    └ ".to_string()
-            } else {
-                "      ".to_string()
-            },
-            Style::default().fg(Color::DarkGray),
-        ));
-    }
-
-    const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-    let first_char = rest.chars().next();
-    let (icon_span, after_icon) = if first_char == Some('✓') {
-        let span = Span::styled(
-            "✓ ".to_string(),
-            Style::default().fg(Color::Rgb(105, 230, 166)),
-        );
-        (Some(span), rest['✓'.len_utf8()..].trim_start())
-    } else if let Some(c) = first_char && SPINNER_CHARS.contains(&c) {
-        let span = Span::styled(
-            format!("{} ", c),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        );
-        (Some(span), rest[c.len_utf8()..].trim_start())
-    } else {
-        (None, rest)
-    };
-
-    if let Some(s) = icon_span {
-        spans.push(s);
-    }
-
-    if let Some(timer_pos) = after_icon.rfind(" (") {
-        let text = &after_icon[..timer_pos];
-        let timer = &after_icon[timer_pos..];
-        spans.push(Span::styled(text.to_string(), Style::default().fg(Color::White)));
-        spans.push(Span::styled(timer.to_string(), Style::default().fg(Color::DarkGray)));
-    } else {
-        spans.push(Span::styled(after_icon.to_string(), Style::default().fg(Color::White)));
-    }
-
-    Line::from(spans)
-}
-
-fn format_composer_row_spans(row: &str) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let mut i = 0;
-    let chars: Vec<char> = row.chars().collect();
-    let mut last_end = 0;
-
-    while i < chars.len() {
-        if chars[i] == '[' {
-            let remaining: String = chars[i..].iter().collect();
-            if remaining.starts_with("[Image") || remaining.starts_with("[Pasted text") {
-                if let Some(end) = remaining.find(']') {
-                    let badge = &remaining[..=end];
-                    if i > last_end {
-                        let text: String = chars[last_end..i].iter().collect();
-                        spans.push(Span::raw(text));
+            // Gradient stops: Mint Green (105, 230, 166) -> Sky Blue (72, 202, 228) -> Deep Blue (0, 119, 182)
+            let stops = [
+                (105.0, 230.0, 166.0),
+                (72.0, 202.0, 228.0),
+                (0.0, 119.0, 182.0),
+            ];
+            let spans: Vec<Span<'static>> = chars
+                .iter()
+                .enumerate()
+                .map(|(i, &c)| {
+                    if c == ' ' {
+                        Span::raw(" ")
+                    } else {
+                        let t = if count > 1 {
+                            i as f32 / (count - 1) as f32
+                        } else {
+                            0.0
+                        };
+                        let (r, g, b) = if t <= 0.5 {
+                            let local_t = t * 2.0;
+                            let r = stops[0].0 + (stops[1].0 - stops[0].0) * local_t;
+                            let g = stops[0].1 + (stops[1].1 - stops[0].1) * local_t;
+                            let b = stops[0].2 + (stops[1].2 - stops[0].2) * local_t;
+                            (r, g, b)
+                        } else {
+                            let local_t = (t - 0.5) * 2.0;
+                            let r = stops[1].0 + (stops[2].0 - stops[1].0) * local_t;
+                            let g = stops[1].1 + (stops[2].1 - stops[1].1) * local_t;
+                            let b = stops[1].2 + (stops[2].2 - stops[1].2) * local_t;
+                            (r, g, b)
+                        };
+                        Span::styled(
+                            c.to_string(),
+                            Style::default().fg(Color::Rgb(
+                                r.round() as u8,
+                                g.round() as u8,
+                                b.round() as u8,
+                            )),
+                        )
                     }
-                    spans.push(Span::styled(
-                        badge.to_string(),
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-                    ));
-                    i += end + 1;
-                    last_end = i;
-                    continue;
-                }
-            }
+                })
+                .collect();
+            Line::from(spans)
         }
-        i += 1;
-    }
-    if last_end < chars.len() {
-        let text: String = chars[last_end..].iter().collect();
-        spans.push(Span::raw(text));
-    }
-    spans
-}
+        /// Animated shimmer for the “Thinking (5s · …)” status line.
+        ///
+        /// The bright spot travels left-to-right across the text: the character at
+        /// `spot` (modulo text length) is rendered at full bright white, characters
+        /// nearby fade in/out using a cosine envelope, and the rest are a dim gray.
+        fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
+            // Split at the first " (" to isolate the verb from the timer suffix.
+            let (verb, suffix) = if let Some(idx) = line.find(" (") {
+                (&line[..idx], &line[idx..])
+            } else {
+                (line, "")
+            };
+
+            let chars: Vec<char> = verb.chars().collect();
+            let count = chars.len();
+
+            // Bright spot position — full cycle every ~(count * 2) ticks so the
+            // shimmer takes a moment to complete a pass rather than zipping by.
+            let period = (count * 2).max(16);
+            let spot = (tick % period) as f32 / period as f32 * count as f32;
+
+            let mut spans: Vec<Span<'static>> = chars
+                .iter()
+                .enumerate()
+                .map(|(i, &c)| {
+                    // Distance from the shimmer spot, normalised.
+                    let dist = ((i as f32 - spot).abs() / (count as f32 * 0.35)).min(1.0);
+                    // Cosine envelope: 1.0 at centre of spot, 0.0 at edges.
+                    let brightness = ((1.0 - dist) * std::f32::consts::PI * 0.5).cos().powi(2);
+                    // Interpolate: dim gray (100, 100, 110) -> bright white (255, 255, 255).
+                    let r = (100.0 + 155.0 * brightness).round() as u8;
+                    let g = (100.0 + 155.0 * brightness).round() as u8;
+                    let b = (110.0 + 145.0 * brightness).round() as u8;
+                    let style = Style::default()
+                        .fg(Color::Rgb(r, g, b))
+                        .add_modifier(Modifier::BOLD);
+                    Span::styled(c.to_string(), style)
+                })
+                .collect();
+
+            if !suffix.is_empty() {
+                spans.push(Span::styled(
+                    suffix.to_string(),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+
+            Line::from(spans)
+        }
+
+        fn format_tool_status_line(line: &str) -> Line<'static> {
+            if line.trim_start().starts_with('│') {
+                return Line::styled(line.to_string(), Style::default().fg(Color::DarkGray));
+            }
+
+            let (prefix, rest) = if let Some(branch_pos) = line.find('└') {
+                let conn_end = branch_pos + '└'.len_utf8();
+                (&line[..conn_end], line[conn_end..].trim_start())
+            } else if line.starts_with("      ") {
+                ("      ", &line[6..])
+            } else {
+                ("", line)
+            };
+
+            let mut spans = Vec::new();
+            if !prefix.is_empty() {
+                spans.push(Span::styled(
+                    if prefix.contains('└') {
+                        "    └ ".to_string()
+                    } else {
+                        "      ".to_string()
+                    },
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+
+            const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+            let first_char = rest.chars().next();
+            let (icon_span, after_icon) = if first_char == Some('✓') {
+                let span = Span::styled(
+                    "✓ ".to_string(),
+                    Style::default().fg(Color::Rgb(105, 230, 166)),
+                );
+                (Some(span), rest['✓'.len_utf8()..].trim_start())
+            } else if let Some(c) = first_char
+                && SPINNER_CHARS.contains(&c)
+            {
+                let span = Span::styled(
+                    format!("{} ", c),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                );
+                (Some(span), rest[c.len_utf8()..].trim_start())
+            } else {
+                (None, rest)
+            };
+
+            if let Some(s) = icon_span {
+                spans.push(s);
+            }
+
+            if let Some(timer_pos) = after_icon.rfind(" (") {
+                let text = &after_icon[..timer_pos];
+                let timer = &after_icon[timer_pos..];
+                spans.push(Span::styled(
+                    text.to_string(),
+                    Style::default().fg(Color::White),
+                ));
+                spans.push(Span::styled(
+                    timer.to_string(),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    after_icon.to_string(),
+                    Style::default().fg(Color::White),
+                ));
+            }
+
+            Line::from(spans)
+        }
+
+        fn format_composer_row_spans(row: &str) -> Vec<Span<'static>> {
+            let mut spans = Vec::new();
+            let mut i = 0;
+            let chars: Vec<char> = row.chars().collect();
+            let mut last_end = 0;
+
+            while i < chars.len() {
+                if chars[i] == '[' {
+                    let remaining: String = chars[i..].iter().collect();
+                    if remaining.starts_with("[Image") || remaining.starts_with("[Pasted text") {
+                        if let Some(end) = remaining.find(']') {
+                            let badge = &remaining[..=end];
+                            if i > last_end {
+                                let text: String = chars[last_end..i].iter().collect();
+                                spans.push(Span::raw(text));
+                            }
+                            spans.push(Span::styled(
+                                badge.to_string(),
+                                Style::default()
+                                    .fg(Color::Cyan)
+                                    .add_modifier(Modifier::BOLD),
+                            ));
+                            i += end + 1;
+                            last_end = i;
+                            continue;
+                        }
+                    }
+                }
+                i += 1;
+            }
+            if last_end < chars.len() {
+                let text: String = chars[last_end..].iter().collect();
+                spans.push(Span::raw(text));
+            }
+            spans
+        }
 
         let horizontal_pad = if frame.area().width >= 80 {
             2
@@ -1118,7 +1135,9 @@ fn format_composer_row_spans(row: &str) -> Vec<Span<'static>> {
                         && !line.contains('└')
                         && !line.starts_with("      ")
                         && !line.contains('✓')
-                        && !line.chars().any(|c| ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'].contains(&c))
+                        && !line.chars().any(|c| {
+                            ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'].contains(&c)
+                        })
                     {
                         shimmer_thinking_line(line, tick)
                     // Tool status lines (connected by └ or indented by 6 spaces)
@@ -1134,17 +1153,23 @@ fn format_composer_row_spans(row: &str) -> Vec<Span<'static>> {
                                 Span::raw(prefix.to_string()),
                                 Span::styled(
                                     bullet_char.to_string(),
-                                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                                    Style::default()
+                                        .fg(Color::Cyan)
+                                        .add_modifier(Modifier::BOLD),
                                 ),
                                 Span::styled(
                                     text.to_string(),
-                                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                                    Style::default()
+                                        .fg(Color::White)
+                                        .add_modifier(Modifier::BOLD),
                                 ),
                             ])
                         } else {
                             Line::styled(
                                 line.to_string(),
-                                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                                Style::default()
+                                    .fg(Color::White)
+                                    .add_modifier(Modifier::BOLD),
                             )
                         }
                     } else {
@@ -1339,7 +1364,8 @@ fn format_composer_row_spans(row: &str) -> Vec<Span<'static>> {
                             ];
                             if let Some(desc) = desc {
                                 spans.push(Span::styled("   ", Style::default()));
-                                spans.push(Span::styled(desc, Style::default().fg(Color::DarkGray)));
+                                spans
+                                    .push(Span::styled(desc, Style::default().fg(Color::DarkGray)));
                             }
                             lines.push(Line::from(spans));
                         } else {
@@ -1351,7 +1377,8 @@ fn format_composer_row_spans(row: &str) -> Vec<Span<'static>> {
                             ];
                             if let Some(desc) = desc {
                                 spans.push(Span::styled("   ", Style::default()));
-                                spans.push(Span::styled(desc, Style::default().fg(Color::DarkGray)));
+                                spans
+                                    .push(Span::styled(desc, Style::default().fg(Color::DarkGray)));
                             }
                             lines.push(Line::from(spans));
                         }
@@ -1509,14 +1536,12 @@ fn format_composer_row_spans(row: &str) -> Vec<Span<'static>> {
                         .iter()
                         .enumerate()
                         .map(|(index, row)| {
-                            let mut spans = vec![
-                                Span::styled(
-                                    if index == 0 { " › " } else { "   " },
-                                    Style::default()
-                                        .fg(Color::Rgb(105, 230, 166))
-                                        .add_modifier(Modifier::BOLD),
-                                ),
-                            ];
+                            let mut spans = vec![Span::styled(
+                                if index == 0 { " › " } else { "   " },
+                                Style::default()
+                                    .fg(Color::Rgb(105, 230, 166))
+                                    .add_modifier(Modifier::BOLD),
+                            )];
                             spans.extend(format_composer_row_spans(row));
                             Line::from(spans)
                         })
@@ -1524,17 +1549,19 @@ fn format_composer_row_spans(row: &str) -> Vec<Span<'static>> {
                 )
             };
             frame.render_widget(
-                Paragraph::new(input)
-                    .wrap(Wrap { trim: false })
-                    .block(
-                        Block::default()
-                            .borders(Borders::TOP | Borders::BOTTOM)
-                            .border_style(Style::default().fg(Color::DarkGray)),
-                    ),
+                Paragraph::new(input).wrap(Wrap { trim: false }).block(
+                    Block::default()
+                        .borders(Borders::TOP | Borders::BOTTOM)
+                        .border_style(Style::default().fg(Color::DarkGray)),
+                ),
                 rows[4],
             );
 
-            let mode_label = if self.plan_mode { " [Plan] " } else { " [Agent] " };
+            let mode_label = if self.plan_mode {
+                " [Plan] "
+            } else {
+                " [Agent] "
+            };
             let bg_running = mint_core::bg_shell::running_count();
             let jobs_prefix = if bg_running > 0 {
                 format!(
@@ -1587,7 +1614,9 @@ fn format_composer_row_spans(row: &str) -> Vec<Span<'static>> {
                 );
                 frame.set_cursor_position(Position::new(
                     rows[4].x + 3 + visual_col as u16,
-                    rows[4].y + 1 + cursor_row.min(composer_height.saturating_sub(3) as usize) as u16,
+                    rows[4].y
+                        + 1
+                        + cursor_row.min(composer_height.saturating_sub(3) as usize) as u16,
                 ));
             }
         }
@@ -1597,7 +1626,243 @@ fn format_composer_row_spans(row: &str) -> Vec<Span<'static>> {
 pub(crate) struct ChatTui {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     active: bool,
+    mouse_selection: MouseSelection,
+    last_frame: Option<Buffer>,
+    clipboard: TextClipboard,
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+struct ScreenPoint {
+    row: u16,
+    column: u16,
+}
+
+impl ScreenPoint {
+    fn from_mouse(mouse: event::MouseEvent) -> Self {
+        Self {
+            row: mouse.row,
+            column: mouse.column,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct MouseSelection {
+    anchor: Option<ScreenPoint>,
+    head: Option<ScreenPoint>,
+    dragging: bool,
+    had_drag: bool,
+}
+
+impl MouseSelection {
+    fn start(&mut self, point: ScreenPoint) {
+        self.anchor = Some(point);
+        self.head = Some(point);
+        self.dragging = true;
+        self.had_drag = false;
+    }
+
+    fn update(&mut self, point: ScreenPoint) {
+        if self.dragging {
+            self.head = Some(point);
+            self.had_drag = true;
+        }
+    }
+
+    fn finish(&mut self, point: ScreenPoint) -> bool {
+        if !self.dragging {
+            return false;
+        }
+        self.head = Some(point);
+        self.dragging = false;
+        if self.had_drag {
+            true
+        } else {
+            self.clear();
+            false
+        }
+    }
+
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    fn range(&self) -> Option<(ScreenPoint, ScreenPoint)> {
+        let anchor = self.anchor?;
+        let head = self.head?;
+        Some(if anchor <= head {
+            (anchor, head)
+        } else {
+            (head, anchor)
+        })
+    }
+}
+
+#[derive(Default)]
+struct TextClipboard {
+    native: Option<Box<dyn NativeClipboard>>,
+    initialization_attempted: bool,
+}
+
+trait NativeClipboard {
+    fn set_text(&mut self, text: String) -> std::result::Result<(), String>;
+}
+
+impl NativeClipboard for arboard::Clipboard {
+    fn set_text(&mut self, text: String) -> std::result::Result<(), String> {
+        arboard::Clipboard::set_text(self, text).map_err(|error| error.to_string())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CopyMethod {
+    Native,
+    Osc52,
+}
+
+impl TextClipboard {
+    fn copy<W: Write>(&mut self, text: &str, writer: &mut W) -> io::Result<CopyMethod> {
+        if !self.initialization_attempted {
+            self.initialization_attempted = true;
+            self.native = arboard::Clipboard::new()
+                .ok()
+                .map(|clipboard| Box::new(clipboard) as Box<dyn NativeClipboard>);
+        }
+        if let Some(clipboard) = self.native.as_mut()
+            && clipboard.set_text(text.to_owned()).is_ok()
+        {
+            return Ok(CopyMethod::Native);
+        }
+
+        write!(writer, "\x1b]52;c;{}\x07", BASE64.encode(text.as_bytes()))?;
+        writer.flush()?;
+        Ok(CopyMethod::Osc52)
+    }
+}
+
+fn apply_mouse_selection(buffer: &mut Buffer, selection: MouseSelection) {
+    for selected in selected_rows(buffer.area, selection) {
+        for column in selected.left..=selected.right {
+            if let Some(cell) = buffer.cell_mut(Position::new(column, selected.row)) {
+                cell.modifier.insert(Modifier::REVERSED);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SelectedRow {
+    row: u16,
+    left: u16,
+    right: u16,
+}
+
+fn selected_rows(area: Rect, selection: MouseSelection) -> Vec<SelectedRow> {
+    let Some((start, end)) = selection.range() else {
+        return Vec::new();
+    };
+    if area.is_empty() {
+        return Vec::new();
+    }
+    let top = start.row.max(area.top());
+    let bottom = end.row.min(area.bottom().saturating_sub(1));
+    if top > bottom {
+        return Vec::new();
+    }
+
+    (top..=bottom)
+        .filter_map(|row| {
+            let left = if row == start.row {
+                start.column
+            } else {
+                area.left()
+            }
+            .max(area.left());
+            let right = if row == end.row {
+                end.column
+            } else {
+                area.right().saturating_sub(1)
+            }
+            .min(area.right().saturating_sub(1));
+            (left <= right).then_some(SelectedRow { row, left, right })
+        })
+        .collect()
+}
+
+fn selected_screen_text(buffer: &Buffer, selection: MouseSelection) -> String {
+    let mut lines = Vec::new();
+    for selected in selected_rows(buffer.area, selection) {
+        let mut line = String::new();
+        let mut column = buffer.area.left();
+        while column < buffer.area.right() {
+            let Some(cell) = buffer.cell(Position::new(column, selected.row)) else {
+                break;
+            };
+            let symbol = cell.symbol();
+            let width = UnicodeWidthStr::width(symbol).max(1) as u16;
+            let symbol_right = column.saturating_add(width.saturating_sub(1));
+            if symbol_right >= selected.left && column <= selected.right {
+                line.push_str(symbol);
+            }
+            column = column.saturating_add(width);
+        }
+        lines.push(line.trim_end_matches(' ').to_owned());
+    }
+    lines.join("\n")
+}
+
+fn selected_cells_match(previous: &Buffer, current: &Buffer, selection: MouseSelection) -> bool {
+    if previous.area != current.area {
+        return false;
+    }
+    let rows = selected_rows(current.area, selection);
+    if selection.range().is_some() && rows.is_empty() {
+        return false;
+    }
+    for selected in rows {
+        for column in selected.left..=selected.right {
+            let position = Position::new(column, selected.row);
+            if previous.cell(position).map(|cell| cell.symbol())
+                != current.cell(position).map(|cell| cell.symbol())
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn route_mouse_wheel(state: &mut ChatViewState, kind: event::MouseEventKind) {
+    match kind {
+        event::MouseEventKind::ScrollUp => {
+            if let Some(modal) = state.thought_modal.as_mut() {
+                modal.scroll = modal.scroll.saturating_sub(3);
+            } else {
+                state.scroll_from_bottom = state.scroll_from_bottom.saturating_add(3);
+            }
+        }
+        event::MouseEventKind::ScrollDown => {
+            if let Some(modal) = state.thought_modal.as_mut() {
+                modal.scroll = modal.scroll.saturating_add(3);
+            } else {
+                state.scroll_from_bottom = state.scroll_from_bottom.saturating_sub(3);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn setup_terminal_output<W: Write>(stdout: &mut W) -> io::Result<()> {
+    crossterm::execute!(
+        stdout,
+        terminal::EnterAlternateScreen,
+        // Mouse capture lets Mint distinguish wheel scrolling from physical
+        // Up/Down keys and powers Mint's own drag-to-copy selection layer.
+        event::EnableMouseCapture,
+        event::EnableBracketedPaste
+    )
+}
+
 pub(crate) fn restore_terminal() {
     let mut stdout = io::stdout();
     let _ = stdout.execute(event::DisableBracketedPaste);
@@ -1617,10 +1882,7 @@ impl ChatTui {
         }
         terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
-        let setup = stdout
-            .execute(terminal::EnterAlternateScreen)
-            .and_then(|s| s.execute(event::EnableMouseCapture))
-            .and_then(|s| s.execute(event::EnableBracketedPaste));
+        let setup = setup_terminal_output(&mut stdout);
         if let Err(error) = setup {
             restore_terminal();
             return Err(error.into());
@@ -1629,12 +1891,130 @@ impl ChatTui {
             Ok(terminal) => Ok(Self {
                 terminal,
                 active: true,
+                mouse_selection: MouseSelection::default(),
+                last_frame: None,
+                clipboard: TextClipboard::default(),
             }),
             Err(error) => {
                 restore_terminal();
                 Err(error.into())
             }
         }
+    }
+    fn draw_state(&mut self, state: &ChatViewState) -> Result<()> {
+        let selection = self.mouse_selection;
+        let previous = self.last_frame.as_ref();
+        let mut invalidated = false;
+        let completed = self.terminal.draw(|frame| {
+            state.render(frame);
+            if selection.range().is_some() {
+                let area = frame.area();
+                let hint_area = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
+                frame.render_widget(
+                    Paragraph::new(Line::styled(
+                        " Right-click copy · Esc clear",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    hint_area,
+                );
+            }
+            invalidated = !selection.dragging
+                && selection.range().is_some()
+                && previous
+                    .map(|buffer| !selected_cells_match(buffer, frame.buffer_mut(), selection))
+                    .unwrap_or(false);
+            if !invalidated {
+                apply_mouse_selection(frame.buffer_mut(), selection);
+            }
+        })?;
+        self.last_frame = Some(completed.buffer.clone());
+        if invalidated {
+            self.mouse_selection.clear();
+        }
+        Ok(())
+    }
+
+    fn handle_selection_mouse(
+        &mut self,
+        mouse: event::MouseEvent,
+        state: &mut ChatViewState,
+    ) -> Result<bool> {
+        use event::{MouseButton, MouseEventKind};
+
+        let point = ScreenPoint::from_mouse(mouse);
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let inside_frame = self
+                    .last_frame
+                    .as_ref()
+                    .map(|buffer| buffer.area.contains(Position::new(point.column, point.row)))
+                    .unwrap_or(false);
+                if inside_frame {
+                    self.mouse_selection.start(point);
+                    state.selection_mode = false;
+                    state.clear_notice();
+                } else {
+                    self.mouse_selection.clear();
+                }
+                Ok(true)
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                self.mouse_selection.update(point);
+                Ok(self.mouse_selection.dragging)
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if !self.mouse_selection.finish(point) {
+                    return Ok(true);
+                }
+                if self
+                    .last_frame
+                    .as_ref()
+                    .map(|buffer| {
+                        selected_screen_text(buffer, self.mouse_selection)
+                            .trim()
+                            .is_empty()
+                    })
+                    .unwrap_or(true)
+                {
+                    self.mouse_selection.clear();
+                }
+                Ok(true)
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                let text = self
+                    .last_frame
+                    .as_ref()
+                    .map(|buffer| selected_screen_text(buffer, self.mouse_selection))
+                    .unwrap_or_default();
+                if text.trim().is_empty() {
+                    return Ok(false);
+                }
+                if text.len() > COPY_LIMIT {
+                    state.set_notice("Selection exceeds the 100 KiB copy limit");
+                    return Ok(true);
+                }
+                let character_count = text.chars().count();
+                match self.clipboard.copy(&text, &mut io::stdout()) {
+                    Ok(CopyMethod::Native) => state
+                        .set_notice(format!("Copied {character_count} chars to host clipboard")),
+                    Ok(CopyMethod::Osc52) => {
+                        state.set_notice(format!("Copied {character_count} chars with OSC52"))
+                    }
+                    Err(error) => state.set_notice(format!("Could not copy selection: {error}")),
+                }
+                self.mouse_selection.clear();
+                Ok(true)
+            }
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                self.mouse_selection.clear();
+                Ok(false)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn clear_mouse_selection(&mut self) {
+        self.mouse_selection.clear();
     }
     pub fn read_input(
         &mut self,
@@ -1657,7 +2037,7 @@ impl ChatTui {
                 }
             }
 
-            self.terminal.draw(|f| state.render(f))?;
+            self.draw_state(&state)?;
 
             if last_ctrl_d.is_some() || state.active_notice().is_some() {
                 if !event::poll(std::time::Duration::from_millis(50))? {
@@ -1667,6 +2047,7 @@ impl ChatTui {
 
             match event::read()? {
                 event::Event::Resize(w, h) => {
+                    self.clear_mouse_selection();
                     if w < MIN_WIDTH || h < MIN_HEIGHT {
                         state.set_notice(format!("Terminal too small: {w}x{h}"));
                     } else if state
@@ -1677,24 +2058,14 @@ impl ChatTui {
                         state.clear_notice();
                     }
                 }
-                event::Event::Mouse(m) => match m.kind {
-                    event::MouseEventKind::ScrollUp => {
-                        if let Some(modal) = state.thought_modal.as_mut() {
-                            modal.scroll = modal.scroll.saturating_sub(3);
-                        } else {
-                            state.scroll_from_bottom = state.scroll_from_bottom.saturating_add(3);
-                        }
+                event::Event::Mouse(m) => {
+                    if self.handle_selection_mouse(m, &mut state)? {
+                        continue;
                     }
-                    event::MouseEventKind::ScrollDown => {
-                        if let Some(modal) = state.thought_modal.as_mut() {
-                            modal.scroll = modal.scroll.saturating_add(3);
-                        } else {
-                            state.scroll_from_bottom = state.scroll_from_bottom.saturating_sub(3);
-                        }
-                    }
-                    _ => {}
-                },
+                    route_mouse_wheel(&mut state, m.kind);
+                }
                 event::Event::Paste(text) => {
+                    self.clear_mouse_selection();
                     for c in text.trim_end_matches(['\r', '\n']).chars() {
                         let cursor = state.cursor;
                         state.composer.insert(cursor, c);
@@ -1703,6 +2074,7 @@ impl ChatTui {
                 }
                 event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
                     use event::{KeyCode, KeyModifiers};
+                    self.clear_mouse_selection();
 
                     if let Some(modal) = state.thought_modal.as_mut() {
                         match key.code {
@@ -1776,17 +2148,19 @@ impl ChatTui {
                             KeyCode::Enter | KeyCode::Char('y') => {
                                 let text = state.selected_text();
                                 if text.len() > COPY_LIMIT {
-                                    state.set_notice(
-                                        "Transcript exceeds the 100 KiB copy limit",
-                                    );
+                                    state.set_notice("Transcript exceeds the 100 KiB copy limit");
                                 } else {
-                                    write!(
-                                        io::stdout(),
-                                        "\x1b]52;c;{}\x07",
-                                        BASE64.encode(text.as_bytes())
-                                    )?;
-                                    io::stdout().flush()?;
-                                    state.set_notice("Transcript copied with OSC52");
+                                    match self.clipboard.copy(&text, &mut io::stdout()) {
+                                        Ok(CopyMethod::Native) => {
+                                            state.set_notice("Transcript copied to clipboard")
+                                        }
+                                        Ok(CopyMethod::Osc52) => {
+                                            state.set_notice("Transcript copied with OSC52")
+                                        }
+                                        Err(error) => state.set_notice(format!(
+                                            "Could not copy transcript: {error}"
+                                        )),
+                                    }
                                     state.selection_mode = false;
                                 }
                             }
@@ -1809,12 +2183,8 @@ impl ChatTui {
                         KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             if let Some(record) = super::get_last_thought() {
                                 if !record.thought.trim().is_empty() {
-                                    let lines: Vec<String> = record
-                                        .thought
-                                        .trim()
-                                        .lines()
-                                        .map(str::to_string)
-                                        .collect();
+                                    let lines: Vec<String> =
+                                        record.thought.trim().lines().map(str::to_string).collect();
                                     state.thought_modal = Some(ThoughtModalState {
                                         elapsed_str: record.elapsed_str,
                                         lines,
@@ -1822,14 +2192,10 @@ impl ChatTui {
                                     });
                                     state.clear_notice();
                                 } else {
-                                    state.set_notice(
-                                        "No thought process recorded for this turn",
-                                    );
+                                    state.set_notice("No thought process recorded for this turn");
                                 }
                             } else {
-                                state.set_notice(
-                                    "No thought process recorded for this turn",
-                                );
+                                state.set_notice("No thought process recorded for this turn");
                             }
                         }
                         KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1963,6 +2329,33 @@ impl ChatTui {
             queued: Arc::new(Mutex::new(Vec::new())),
         }
     }
+
+    fn handle_dialog_event(
+        &mut self,
+        input_event: event::Event,
+        state: &mut ChatViewState,
+    ) -> Result<()> {
+        match input_event {
+            event::Event::Mouse(mouse) => {
+                if !self.handle_selection_mouse(mouse, state)? {
+                    route_mouse_wheel(state, mouse.kind);
+                }
+            }
+            event::Event::Resize(_, _) => self.clear_mouse_selection(),
+            event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
+                self.clear_mouse_selection();
+                if let Some(dialog) = state.dialog.as_mut()
+                    && let Some(answer) = dialog.handle_key(key)
+                    && let Some(dialog) = state.dialog.take()
+                {
+                    let _ = dialog.reply.send(answer);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     pub fn prompt_choice(
         &mut self,
         handle: &TuiHandle,
@@ -1976,7 +2369,7 @@ impl ChatTui {
         }
         loop {
             if let Ok(state) = handle.state.lock() {
-                self.terminal.draw(|frame| state.render(frame))?;
+                self.draw_state(&state)?;
             }
             if let Ok(answer) = response.try_recv() {
                 return Ok(match answer {
@@ -1985,16 +2378,9 @@ impl ChatTui {
                 });
             }
             if event::poll(std::time::Duration::from_millis(50))?
-                && let event::Event::Key(key) = event::read()?
-                && key.kind == event::KeyEventKind::Press
                 && let Ok(mut state) = handle.state.lock()
-                && let Some(dialog) = state.dialog.as_mut()
             {
-                if let Some(answer) = dialog.handle_key(key) {
-                    if let Some(dialog) = state.dialog.take() {
-                        let _ = dialog.reply.send(answer);
-                    }
-                }
+                self.handle_dialog_event(event::read()?, &mut state)?;
             }
         }
     }
@@ -2019,7 +2405,7 @@ impl ChatTui {
         }
         loop {
             if let Ok(state) = handle.state.lock() {
-                self.terminal.draw(|frame| state.render(frame))?;
+                self.draw_state(&state)?;
             }
             if let Ok(answer) = response.try_recv() {
                 return Ok(match answer {
@@ -2028,16 +2414,9 @@ impl ChatTui {
                 });
             }
             if event::poll(std::time::Duration::from_millis(50))?
-                && let event::Event::Key(key) = event::read()?
-                && key.kind == event::KeyEventKind::Press
                 && let Ok(mut state) = handle.state.lock()
-                && let Some(dialog) = state.dialog.as_mut()
             {
-                if let Some(answer) = dialog.handle_key(key) {
-                    if let Some(dialog) = state.dialog.take() {
-                        let _ = dialog.reply.send(answer);
-                    }
-                }
+                self.handle_dialog_event(event::read()?, &mut state)?;
             }
         }
     }
@@ -2058,7 +2437,7 @@ impl ChatTui {
         }
         loop {
             if let Ok(state) = handle.state.lock() {
-                self.terminal.draw(|frame| state.render(frame))?;
+                self.draw_state(&state)?;
             }
             if let Ok(answer) = response.try_recv() {
                 return Ok(match answer {
@@ -2067,16 +2446,9 @@ impl ChatTui {
                 });
             }
             if event::poll(std::time::Duration::from_millis(50))?
-                && let event::Event::Key(key) = event::read()?
-                && key.kind == event::KeyEventKind::Press
                 && let Ok(mut state) = handle.state.lock()
-                && let Some(dialog) = state.dialog.as_mut()
             {
-                if let Some(answer) = dialog.handle_key(key) {
-                    if let Some(dialog) = state.dialog.take() {
-                        let _ = dialog.reply.send(answer);
-                    }
-                }
+                self.handle_dialog_event(event::read()?, &mut state)?;
             }
         }
     }
@@ -2088,30 +2460,24 @@ impl ChatTui {
         use event::{KeyCode, KeyModifiers};
         loop {
             if let Ok(state) = handle.state.lock() {
-                self.terminal.draw(|frame| state.render(frame))?;
+                self.draw_state(&state)?;
             }
             if task.is_finished() {
                 return Ok(task.await?);
             }
             if event::poll(std::time::Duration::from_millis(30))? {
                 match event::read()? {
-                    event::Event::Resize(_, _) => {}
+                    event::Event::Resize(_, _) => self.clear_mouse_selection(),
                     event::Event::Mouse(mouse) => {
                         if let Ok(mut state) = handle.state.lock() {
-                            match mouse.kind {
-                                event::MouseEventKind::ScrollUp => {
-                                    state.scroll_from_bottom =
-                                        state.scroll_from_bottom.saturating_add(3)
-                                }
-                                event::MouseEventKind::ScrollDown => {
-                                    state.scroll_from_bottom =
-                                        state.scroll_from_bottom.saturating_sub(3)
-                                }
-                                _ => {}
+                            if self.handle_selection_mouse(mouse, &mut state)? {
+                                continue;
                             }
+                            route_mouse_wheel(&mut state, mouse.kind);
                         }
                     }
                     event::Event::Paste(text) => {
+                        self.clear_mouse_selection();
                         if let Ok(mut state) = handle.state.lock() {
                             let cursor = state.cursor;
                             for (offset, character) in text.chars().enumerate() {
@@ -2121,6 +2487,7 @@ impl ChatTui {
                         }
                     }
                     event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
+                        self.clear_mouse_selection();
                         if let Ok(mut state) = handle.state.lock()
                             && let Some(dialog) = state.dialog.as_mut()
                         {
@@ -2191,10 +2558,7 @@ impl ChatTui {
         }
         terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
-        let setup = stdout
-            .execute(terminal::EnterAlternateScreen)
-            .and_then(|stdout| stdout.execute(event::EnableMouseCapture))
-            .and_then(|stdout| stdout.execute(event::EnableBracketedPaste));
+        let setup = setup_terminal_output(&mut stdout);
         if let Err(error) = setup {
             restore_terminal();
             return Err(error.into());
@@ -2217,6 +2581,7 @@ impl Drop for ChatTui {
 mod dialog_tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use ratatui::layout::Rect;
 
     fn make_key(code: KeyCode) -> KeyEvent {
         KeyEvent {
@@ -2225,6 +2590,180 @@ mod dialog_tests {
             kind: KeyEventKind::Press,
             state: KeyEventState::empty(),
         }
+    }
+
+    fn point(column: u16, row: u16) -> ScreenPoint {
+        ScreenPoint { row, column }
+    }
+
+    struct FakeClipboard {
+        fail: bool,
+    }
+
+    impl NativeClipboard for FakeClipboard {
+        fn set_text(&mut self, _text: String) -> std::result::Result<(), String> {
+            if self.fail {
+                Err("unavailable".to_owned())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn mouse_selection_requires_a_drag_and_normalizes_direction() {
+        let mut selection = MouseSelection::default();
+        selection.start(point(7, 4));
+        assert!(!selection.finish(point(7, 4)));
+        assert_eq!(selection.range(), None);
+
+        selection.start(point(7, 4));
+        selection.update(point(2, 1));
+        assert!(selection.finish(point(2, 1)));
+        assert_eq!(selection.range(), Some((point(2, 1), point(7, 4))));
+    }
+
+    #[test]
+    fn screen_selection_copies_visual_rows_and_trims_only_the_end() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 8, 2));
+        buffer.set_string(0, 0, " hello", Style::default());
+        buffer.set_string(0, 1, "world", Style::default());
+        let selection = MouseSelection {
+            anchor: Some(point(1, 0)),
+            head: Some(point(2, 1)),
+            dragging: false,
+            had_drag: true,
+        };
+
+        assert_eq!(selected_screen_text(&buffer, selection), "hello\nwor");
+    }
+
+    #[test]
+    fn screen_selection_includes_a_wide_grapheme_from_its_continuation_cell() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 8, 1));
+        buffer.set_string(0, 0, "A🙂B ก้", Style::default());
+        let selection = MouseSelection {
+            anchor: Some(point(2, 0)),
+            head: Some(point(2, 0)),
+            dragging: false,
+            had_drag: true,
+        };
+
+        assert_eq!(selected_screen_text(&buffer, selection), "🙂");
+    }
+
+    #[test]
+    fn selection_overlay_changes_style_without_changing_symbols() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 5, 1));
+        buffer.set_string(0, 0, "Mint", Style::default().fg(Color::Green));
+        let before = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol().to_owned())
+            .collect::<Vec<_>>();
+        let selection = MouseSelection {
+            anchor: Some(point(1, 0)),
+            head: Some(point(2, 0)),
+            dragging: false,
+            had_drag: true,
+        };
+
+        apply_mouse_selection(&mut buffer, selection);
+
+        let after = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(after, before);
+        assert!(!buffer[(0, 0)].modifier.contains(Modifier::REVERSED));
+        assert!(buffer[(1, 0)].modifier.contains(Modifier::REVERSED));
+        assert!(buffer[(2, 0)].modifier.contains(Modifier::REVERSED));
+        assert!(!buffer[(3, 0)].modifier.contains(Modifier::REVERSED));
+    }
+
+    #[test]
+    fn completed_selection_is_invalidated_when_selected_cells_change() {
+        let mut previous = Buffer::empty(Rect::new(0, 0, 5, 1));
+        previous.set_string(0, 0, "Mint", Style::default());
+        let selection = MouseSelection {
+            anchor: Some(point(1, 0)),
+            head: Some(point(2, 0)),
+            dragging: false,
+            had_drag: true,
+        };
+        let unchanged = previous.clone();
+        assert!(selected_cells_match(&previous, &unchanged, selection));
+
+        let mut changed_inside = previous.clone();
+        changed_inside.set_string(1, 0, "XX", Style::default());
+        assert!(!selected_cells_match(&previous, &changed_inside, selection));
+
+        let mut changed_outside = previous.clone();
+        changed_outside.set_string(4, 0, "!", Style::default());
+        assert!(selected_cells_match(&previous, &changed_outside, selection));
+    }
+
+    #[test]
+    fn clipboard_prefers_native_and_falls_back_to_osc52() {
+        let mut native = TextClipboard {
+            native: Some(Box::new(FakeClipboard { fail: false })),
+            initialization_attempted: true,
+        };
+        let mut native_output = Vec::new();
+        assert_eq!(
+            native.copy("Mint", &mut native_output).unwrap(),
+            CopyMethod::Native
+        );
+        assert!(native_output.is_empty());
+
+        let mut fallback = TextClipboard {
+            native: Some(Box::new(FakeClipboard { fail: true })),
+            initialization_attempted: true,
+        };
+        let mut osc52_output = Vec::new();
+        assert_eq!(
+            fallback.copy("Mint", &mut osc52_output).unwrap(),
+            CopyMethod::Osc52
+        );
+        assert_eq!(
+            String::from_utf8(osc52_output).unwrap(),
+            "\u{1b}]52;c;TWludA==\u{7}"
+        );
+    }
+
+    #[test]
+    fn terminal_setup_keeps_wheel_and_history_navigation_distinct() {
+        let mut output = Vec::new();
+        setup_terminal_output(&mut output).expect("terminal setup should render ANSI commands");
+
+        let output = String::from_utf8(output).expect("terminal commands should be UTF-8");
+        assert!(output.contains("\u{1b}[?1049h"));
+        assert!(
+            output.contains("\u{1b}[?1000h")
+                && output.contains("\u{1b}[?1002h")
+                && output.contains("\u{1b}[?1003h")
+                && output.contains("\u{1b}[?1006h"),
+            "mouse reporting is required to distinguish wheel events from Up/Down keys"
+        );
+        assert!(output.contains("\u{1b}[?2004h"));
+    }
+
+    #[test]
+    fn mouse_wheel_routes_to_transcript_or_open_thought_panel() {
+        let mut state = ChatViewState::default();
+        route_mouse_wheel(&mut state, event::MouseEventKind::ScrollUp);
+        assert_eq!(state.scroll_from_bottom, 3);
+
+        state.thought_modal = Some(ThoughtModalState {
+            elapsed_str: "1.0s".to_owned(),
+            lines: vec!["thought".to_owned()],
+            scroll: 4,
+        });
+        route_mouse_wheel(&mut state, event::MouseEventKind::ScrollUp);
+        assert_eq!(state.thought_modal.as_ref().unwrap().scroll, 1);
+        route_mouse_wheel(&mut state, event::MouseEventKind::ScrollDown);
+        assert_eq!(state.thought_modal.as_ref().unwrap().scroll, 4);
     }
 
     #[test]
@@ -2374,15 +2913,24 @@ mod dialog_tests {
 
         // Check divider line rendering (converted --- into sleek box drawing ─)
         let divider_line = &entry.plain_lines[2];
-        assert!(divider_line.contains('─'), "--- should be converted to ─ divider: {divider_line}");
+        assert!(
+            divider_line.contains('─'),
+            "--- should be converted to ─ divider: {divider_line}"
+        );
 
         // Check TIP alert formatting
         let alert_line = &entry.plain_lines[3];
-        assert!(alert_line.contains("│ TIP:"), "Alert should format as │ TIP: : {alert_line}");
+        assert!(
+            alert_line.contains("│ TIP:"),
+            "Alert should format as │ TIP: : {alert_line}"
+        );
 
         // Check bullet formatting
         let bullet_line = &entry.plain_lines[1];
-        assert!(bullet_line.contains('•'), "List item should format with bullet • : {bullet_line}");
+        assert!(
+            bullet_line.contains('•'),
+            "List item should format with bullet • : {bullet_line}"
+        );
     }
 
     #[test]
@@ -2423,4 +2971,3 @@ mod dialog_tests {
         assert_eq!(state.active_notice(), None);
     }
 }
-

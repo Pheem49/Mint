@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
 base64.workspace = true
 clap.workspace = true
 chrono-tz.workspace = true
@@ -25,6 +26,7 @@ crossterm = "0.28"
 ratatui = { version = "0.28", features = ["unstable-rendered-line-info"] }
 chrono.workspace = true
 textwrap = "0.16"
+unicode-width = "0.1"
 indicatif = "0.17"
 # `default-fancy` swaps in the pure-Rust `fancy-regex` backend instead of the default
 # Oniguruma (onig) backend, which needs a C toolchain to build — not worth requiring
