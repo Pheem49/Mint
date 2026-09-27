@@ -13,7 +13,6 @@ type Duration = 5 | 8
 interface VeoStudioPanelProps {
   view: string
   onSendToChat?: (prompt: string) => void
-  onToggleMobileSidebar?: () => void
 }
 
 import { VIDEO_ASPECT_RATIOS, VIDEO_STYLE_PRESETS } from '../constants/studio'
@@ -69,7 +68,7 @@ function VideoSkeletonCard() {
   )
 }
 
-export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSidebar }: VeoStudioPanelProps) {
+export default function VeoStudioPanel({ view, onSendToChat }: VeoStudioPanelProps) {
   const [prompt, setPrompt] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
   const [showNegative, setShowNegative] = useState(false)
@@ -224,15 +223,6 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
       {/* Header */}
       <header className="veo-studio-header">
         <div className="veo-studio-header-title">
-          <button
-            className="mobile-menu-btn"
-            type="button"
-            onClick={onToggleMobileSidebar}
-            aria-label="Toggle menu"
-            style={{ marginRight: '8px' }}
-          >
-            ☰
-          </button>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <polygon points="23 7 16 12 23 17 23 7" />
             <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />

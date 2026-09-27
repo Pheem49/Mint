@@ -192,6 +192,7 @@ export default function ModelSelectorPopover({
   onUpdateSettings,
 }: ModelSelectorPopoverProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const [mobilePane, setMobilePane] = useState<'models' | 'options'>('models')
   const [search, setSearch] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const [expandOtherModels, setExpandOtherModels] = useState(false)
@@ -497,8 +498,9 @@ export default function ModelSelectorPopover({
   useEffect(() => {
     if (isOpen) {
       setSearch('')
+      setMobilePane('models')
       setTimeout(() => {
-        searchInputRef.current?.focus()
+        if (!window.matchMedia('(max-width: 760px)').matches) searchInputRef.current?.focus()
       }, 50)
     }
   }, [isOpen])
@@ -616,7 +618,11 @@ export default function ModelSelectorPopover({
 
       {/* ─── Spotlight 2-Column Master-Detail Floating Popover ─── */}
       {isOpen && (
-        <div ref={popoverRef} className="model-spotlight-popover" onKeyDown={handleKeyDown}>
+        <div ref={popoverRef} className={`model-spotlight-popover mobile-pane-${mobilePane}`} onKeyDown={handleKeyDown}>
+          <div className="model-spotlight-mobile-tabs" role="tablist" aria-label="Model selector view">
+            <button type="button" role="tab" aria-selected={mobilePane === 'models'} onClick={() => setMobilePane('models')}>Models</button>
+            <button type="button" role="tab" aria-selected={mobilePane === 'options'} onClick={() => setMobilePane('options')}>Options</button>
+          </div>
           {/* ─── Left Column: Model List ─── */}
           <div className="model-spotlight-left-pane">
             {/* Search Header */}
@@ -708,7 +714,9 @@ export default function ModelSelectorPopover({
                                   data-item-index={currentIndex}
                                   className={`model-spotlight-item ${isSelected ? 'is-active' : ''} ${isInspected ? 'is-inspected' : ''}`}
                                   onClick={() => {
+                                    setInspectedItem({ providerId: group.providerId, model: m })
                                     onSelect(group.providerId, m)
+                                    if (window.matchMedia('(max-width: 760px)').matches) setMobilePane('options')
                                   }}
                                   onMouseEnter={() => {
                                     setHighlightedIndex(currentIndex)

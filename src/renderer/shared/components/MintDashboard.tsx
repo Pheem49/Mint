@@ -348,6 +348,15 @@ export default function MintDashboard() {
   // so nothing ever sets this true there) — declared unconditionally so
   // `changeView` can close it on every navigation without branching.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+
+  useEffect(() => {
+    if (!mobileSidebarOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileSidebarOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [mobileSidebarOpen])
   const [workspaceRefreshRevision, setWorkspaceRefreshRevision] = useState(0)
   const [recentWorkspacePaths, setRecentWorkspacePaths] = useState<string[]>(readRecentWorkspacePaths)
 
@@ -2028,8 +2037,25 @@ export default function MintDashboard() {
           '--tool-surface-width': `${terminalRightWidth}px`,
         } as CSSProperties}
       >
+        {!isDesktopApp && view !== 'chat' && (
+          <button
+            type="button"
+            className="web-mobile-nav-btn"
+            aria-label="Open navigation menu"
+            aria-expanded={mobileSidebarOpen}
+            onClick={() => setMobileSidebarOpen(true)}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
+        )}
         {mobileSidebarOpen && (
-          <div
+          <button
+            type="button"
+            aria-label="Close navigation menu"
             className="sidebar-backdrop"
             onClick={() => setMobileSidebarOpen(false)}
             style={{
@@ -2209,7 +2235,7 @@ export default function MintDashboard() {
           </Suspense>
         )}
         {view === 'skills' && (
-          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+          <div className="web-view-scroll" style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
             <Suspense fallback={<LazyPanelFallback />}>
               <SkillsView
                 listSkills={listLearnedSkills}
@@ -2221,7 +2247,7 @@ export default function MintDashboard() {
           </div>
         )}
         {view === 'mcp' && (
-          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+          <div className="web-view-scroll" style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
             <Suspense fallback={<LazyPanelFallback />}>
               <McpServersView
                 config={settingsConfig || DEFAULT_CONFIG}
@@ -2246,7 +2272,7 @@ export default function MintDashboard() {
           </div>
         )}
         {view === 'plugins' && (
-          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+          <div className="web-view-scroll" style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
             <Suspense fallback={<LazyPanelFallback />}>
               <PluginsView
                 config={settingsConfig || DEFAULT_CONFIG}
@@ -2257,7 +2283,7 @@ export default function MintDashboard() {
           </div>
         )}
         {view === 'cron' && (
-          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+          <div className="web-view-scroll" style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
             <Suspense fallback={<LazyPanelFallback />}>
               <ScheduledTasksView
                 listCronJobs={listCronJobs}
@@ -2270,7 +2296,7 @@ export default function MintDashboard() {
           </div>
         )}
         {view === 'link' && (
-          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+          <div className="web-view-scroll" style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
             <Suspense fallback={<LazyPanelFallback />}>
               <LinkedFoldersView
                 listLinkedFolders={listLinkedFolders}
@@ -2284,7 +2310,7 @@ export default function MintDashboard() {
           </div>
         )}
         {view === 'code' && (
-          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+          <div className="web-view-scroll" style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
             <Suspense fallback={<LazyPanelFallback />}>
               <CliSessionsView
                 chatSessions={chatSessions}
@@ -2327,7 +2353,6 @@ export default function MintDashboard() {
                   showToast(`Could not attach image: ${errorMessage(error)}`)
                 }
               }}
-              onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
             />
           </Suspense>
         )}
@@ -2339,7 +2364,6 @@ export default function MintDashboard() {
                 changeView('chat')
                 conversationActions.compose(vidPrompt)
               }}
-              onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
             />
           </Suspense>
         )}

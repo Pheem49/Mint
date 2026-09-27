@@ -1,0 +1,54 @@
+.mint-pull-refresh {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .mint-pull-refresh {
+    position: fixed;
+    top: calc(64px + env(safe-area-inset-top));
+    left: 50%;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100vw - 32px);
+    padding: 9px 14px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface-strong);
+    color: var(--text-main);
+    box-shadow: var(--shadow-sm);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 140ms ease;
+  }
+
+  .mint-pull-refresh.is-visible {
+    opacity: 1;
+  }
+
+  .mint-pull-refresh-icon {
+    color: var(--accent);
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .mint-pull-refresh.is-refreshing .mint-pull-refresh-icon {
+    animation: mint-pull-refresh-spin 700ms linear infinite;
+  }
+
+  .chat-container,
+  .pictures-library,
+  .img-studio-content,
+  .veo-studio-content,
+  .web-view-scroll {
+    overscroll-behavior-y: contain;
+  }
+}
+
+@keyframes mint-pull-refresh-spin {
+  to { transform: rotate(360deg); }
+}

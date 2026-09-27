@@ -613,8 +613,8 @@ export default function GeneralTab({
 
               return (
                 <div className="setting-row stacked setting-feature-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                    <label style={{ margin: 0, fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                  <div className="thinking-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <label className="thinking-card-title" style={{ margin: 0, fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--interactive-fg)' }}>
                         <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" />
                         <path d="M9 21h6" />
@@ -626,7 +626,7 @@ export default function GeneralTab({
                         </span>
                       )}
                     </label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div className="thinking-card-status" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <span className="section-current-badge" style={{ fontSize: '0.75rem' }}>
                         {currentEnabled
                           ? `Thinking ON (${effortLabelMap[currentEffort] || 'Medium'})${!isThinkingSupported ? ' · Force' : ''}`
@@ -647,7 +647,7 @@ export default function GeneralTab({
                   </div>
 
                   {/* Toggle Row */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0' }}>
+                  <div className="thinking-card-toggle-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0' }}>
                     <div>
                       <span style={{ fontSize: '0.82rem', fontWeight: 500 }}>Enable thinking</span>
                       <p style={{ margin: '2px 0 0 0', fontSize: '0.73rem', color: 'var(--text-muted)' }}>
@@ -671,11 +671,11 @@ export default function GeneralTab({
                   {/* Effort Level Row */}
                   {currentEnabled && (
                     <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div className="thinking-card-effort-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'none', letterSpacing: '0.04em' }}>
                           Reasoning Effort
                         </span>
-                        <div style={{ display: 'flex', gap: '4px' }}>
+                        <div className="thinking-card-effort-options" style={{ display: 'flex', gap: '4px' }}>
                           {(['low', 'medium', 'high', 'extra_high'] as const).map((eff) => (
                             <button
                               key={eff}

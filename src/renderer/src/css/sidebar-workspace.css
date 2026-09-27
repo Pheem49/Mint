@@ -128,6 +128,10 @@
   }
 }
 
+.sidebar-mobile-close {
+  display: none;
+}
+
 .sidebar-brand {
   display: flex;
   align-items: center;
@@ -1646,5 +1650,4 @@
   background: var(--border-subtle, rgba(255, 255, 255, 0.08));
   margin: 4px 2px;
 }
-
 

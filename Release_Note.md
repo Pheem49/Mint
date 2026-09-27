@@ -427,6 +427,17 @@ Overhauled session management in the CLI to give every conversation its own isol
   - Integrated `/resume` dispatch in `slashCommandProcessor.ts` and `MintDashboard.tsx` to hot-swap active conversations seamlessly on Desktop and Web.
 # Unreleased
 
+- Kept the mobile chat header anchored inside the chat panel during iPhone keyboard panning, and made keyboard detection use the pre-focus viewport height so the empty prompt and footer make room for typing.
+- Fixed the iPhone keyboard layout by keeping Mint Web aligned with the visual viewport as Safari pans it, while reclaiming chat space from the footer during typing.
+- Fixed the mobile sidebar's More menu to expand inside the drawer instead of beyond the screen, and added a visible close button and roomier menu targets.
+- Added pull-to-refresh on mobile Mint Web content pages, with a visible release indicator and protection against accidental refresh while editing Settings or generating a chat response.
+- Reworked Web Settings on phones so form rows and provider cards use the available width, Thinking controls wrap into readable rows, effort buttons form a two-column grid, the close button sits in the header, and fields no longer cause page-wide horizontal scrolling.
+- Reflowed the mobile Chat composer into distinct message, full-width model, and action rows so icon buttons no longer overlap the model label. The mobile model picker now fits the composer width and offers Models/Options tabs without a desktop-width panel spilling past the screen.
+- Matched the mobile Chat navigation button to the new 44px rounded menu button used on other Web pages, including its icon size, themed surface, border, and keyboard focus state.
+- Added a mobile-only rounded surface treatment that follows the existing Opaque and Glassmorphism theme setting. Opaque chrome is fully solid; Glassmorphism frosts navigation and control bars while the composer, message bubbles, studio content, settings, and confirmation modals stay opaque for readability.
+- Added a consistent mobile navigation button to every non-chat Mint Web page, including Image Studio, Veo Studio, Pictures, and management views. Image and Veo Studio now use one vertical scroll flow for controls and results on phones, with compact headers and mobile-sized form fields.
+- Reworked Mint Web's phone layout: the chat now follows the visible viewport when the mobile keyboard opens, the composer and header have larger touch targets and safe-area spacing, artifact/code previews use the full screen instead of a cramped split pane, and the Pictures gallery has compact responsive spacing and filters.
+- Made Web settings full screen on phones with horizontally scrollable section navigation and persistent Reset/Save actions; the mobile navigation backdrop is now a keyboard-accessible button and closes with Escape.
 - Fixed the web Pictures page not loading its gallery stylesheet, which caused saved images to render at their intrinsic size instead of inside the responsive card grid.
 - Changed `npm start` to reuse the existing desktop binary and build only when it is missing; `npm run start:rebuild` now explicitly refreshes the fast local release.
 - Changed `npm run cli` to use the existing compiled CLI binary; added `npm run cli:rebuild` for an explicit release rebuild and `npm run cli:dev` for Cargo development runs.

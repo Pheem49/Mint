@@ -456,6 +456,11 @@ export default function DashboardSidebar({
         <img src={runtimePlatform.appIconPath()} alt="Mint Agent Logo" className="sidebar-logo" />
         <span className="sidebar-brand-name">Mint Agent</span>
       </div>
+      <button type="button" className="sidebar-mobile-close" aria-label="Close navigation menu" onClick={onToggleSidebar}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+          <path d="M5 5l14 14M19 5L5 19" />
+        </svg>
+      </button>
 
       <button className="sidebar-new-chat" onClick={() => onClearHistory('New chat')} title="New chat (Ctrl+N)">
         <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
@@ -547,7 +552,7 @@ export default function DashboardSidebar({
       )}
 
       <div className="sidebar-more-container" ref={moreContainerRef}>
-        <button className={`sidebar-top-action ${isMoreOpen || (!promoteMediaStudios && (view === 'imagine' || view === 'veo')) || view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)} title="More">
+        <button className={`sidebar-top-action ${isMoreOpen || (!promoteMediaStudios && (view === 'imagine' || view === 'veo')) || view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)} title="More" aria-expanded={isMoreOpen} aria-controls="sidebar-more-menu">
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="1.5"></circle>
@@ -558,7 +563,7 @@ export default function DashboardSidebar({
           <span>More</span>
         </button>
         {isMoreOpen && (
-          <div className="sidebar-more-popover" style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px', minWidth: '160px' }}>
+          <div id="sidebar-more-menu" className="sidebar-more-popover" style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px', minWidth: '160px' }}>
             <button className={`popover-item ${view === 'skills' ? 'active' : ''}`} onClick={() => { onSetView('skills'); setIsMoreOpen(false); }}>
               <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderSkillsSvgIcon(15)}</span>
               <span>Skills</span>

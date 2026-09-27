@@ -8,3 +8,4 @@
 @import '../../shared/css/agent-observability.css';
 @import '../../shared/css/model-selector.css';
 @import '../../shared/css/chat-ui-cards.css';
+@import './mobile.css';

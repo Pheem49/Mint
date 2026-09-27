@@ -1,0 +1,678 @@
+/* Web-only phone layout. Keep the conversation as the primary surface. */
+.web-mobile-nav-btn {
+  display: none;
+}
+
+.workspace-sidebar .sidebar-mobile-close {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .app-body .workspace-sidebar {
+    max-width: calc(100vw - 24px);
+    max-height: var(--mint-viewport-height, 100dvh);
+    overflow-x: hidden;
+  }
+
+  .workspace-sidebar .sidebar-resize-handle {
+    display: none;
+  }
+
+  .workspace-sidebar .sidebar-brand {
+    min-width: 0;
+    padding-right: 48px;
+  }
+
+  .workspace-sidebar .sidebar-mobile-close {
+    display: grid;
+    place-items: center;
+    position: absolute;
+    top: calc(14px + env(safe-area-inset-top));
+    right: 12px;
+    z-index: 1;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid var(--border-default);
+    border-radius: 12px;
+    background: var(--bg-surface-raised);
+    color: var(--text-primary);
+  }
+
+  .workspace-sidebar .sidebar-more-popover {
+    position: static;
+    width: 100%;
+    min-width: 0 !important;
+    max-width: 100%;
+    margin: 6px 0 0;
+    padding: 6px !important;
+    box-shadow: none;
+  }
+
+  .workspace-sidebar .sidebar-more-popover .popover-item {
+    min-height: 42px;
+    height: auto;
+    white-space: normal;
+  }
+
+  .workspace-sidebar .sidebar-more-popover .popover-item > span:last-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 760px) {
+  html, body, #root,
+  .app-container {
+    width: 100%;
+    height: var(--mint-viewport-height, 100dvh);
+  }
+
+  #root {
+    position: fixed;
+    top: var(--mint-viewport-top, 0px);
+    left: 0;
+    overflow: hidden;
+  }
+
+  :root.mint-keyboard-open .input-disclaimer {
+    display: none;
+  }
+
+  :root.mint-keyboard-open .empty-chat-prompt-wrap {
+    display: none;
+  }
+
+  :root.mint-keyboard-open .assistant-workspace.model-hidden .conversation-panel.is-empty .input-area {
+    margin: auto 0 0;
+  }
+
+  :root.mint-keyboard-open .assistant-workspace.model-hidden .input-area {
+    padding-bottom: 6px;
+  }
+
+  .app-container {
+    border: 0;
+  }
+
+  .sidebar-backdrop {
+    border: 0;
+    padding: 0;
+  }
+
+  .web-mobile-nav-btn {
+    display: grid;
+    place-items: center;
+    position: fixed;
+    top: calc(8px + env(safe-area-inset-top));
+    left: 12px;
+    z-index: 50;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-strong);
+    color: var(--text-main);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .web-mobile-nav-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .app-body .img-studio,
+  .app-body .veo-studio {
+    left: 0 !important;
+  }
+
+  .app-body .img-studio-header,
+  .app-body .veo-studio-header {
+    padding: calc(64px + env(safe-area-inset-top)) 16px 14px;
+  }
+
+  .app-body .img-studio-header-title,
+  .app-body .veo-studio-header-title {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .app-body .img-studio-header-title h1,
+  .app-body .veo-studio-header-title h1 {
+    font-size: 1.1rem;
+  }
+
+  .app-body .img-studio-content,
+  .app-body .veo-studio-content {
+    display: block;
+    min-width: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .app-body .img-studio-controls,
+  .app-body .veo-studio-controls {
+    max-height: none;
+    padding: 18px 16px 22px;
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .app-body .img-studio-results,
+  .app-body .veo-studio-results {
+    overflow: visible;
+  }
+
+  .app-body .img-studio-results {
+    padding: 20px 16px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .app-body .veo-studio-active-workspace {
+    min-height: 220px;
+    padding: 20px 16px;
+  }
+
+  .app-body .veo-studio-content--single {
+    display: block;
+    padding: 20px 16px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .app-body .img-studio-label,
+  .app-body .veo-studio-label {
+    flex-wrap: wrap;
+  }
+
+  .app-body .img-studio-textarea,
+  .app-body .veo-studio-textarea {
+    min-width: 0;
+    font-size: 16px;
+  }
+
+  .app-body .management-container,
+  .app-body .code-sessions-container {
+    padding: calc(64px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .app-body .management-header,
+  .app-body .code-sessions-header {
+    align-items: flex-start;
+  }
+
+  .app-body .management-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .management-modal-overlay {
+    padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .management-modal {
+    display: flex;
+    flex-direction: column;
+    max-height: 100%;
+    min-width: 0;
+  }
+
+  .management-modal-header,
+  .management-modal-body,
+  .management-modal-footer {
+    padding: 16px;
+  }
+
+  .management-modal-body {
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mgmt-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-body,
+  .assistant-workspace,
+  .chat-panel-split-wrapper.no-preview,
+  .chat-panel-split-wrapper.has-preview {
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+  }
+
+  .chat-panel-split-wrapper.no-preview {
+    display: flex;
+    flex: 1 1 auto;
+  }
+
+  .assistant-workspace.model-hidden .chat-panel-split-wrapper.no-preview .conversation-panel {
+    height: 100%;
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  .chat-header {
+    height: calc(56px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 10px 0;
+    gap: 6px;
+  }
+
+  .chat-header-title-text {
+    max-width: min(38vw, 180px);
+  }
+
+  .chat-header-actions {
+    gap: 4px;
+  }
+
+  .mobile-menu-btn,
+  .chat-header-action-btn,
+  .chat-header-clear-btn,
+  .chat-header-back-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .assistant-workspace.model-hidden .chat-container {
+    min-height: 0;
+    padding: calc(64px + env(safe-area-inset-top)) 12px 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .assistant-workspace.model-hidden .input-area {
+    min-width: 0;
+    margin: 0;
+    padding: 8px 10px calc(6px + env(safe-area-inset-bottom));
+    background: var(--chrome-bg);
+    border-top: 1px solid var(--border);
+  }
+
+  .assistant-workspace.model-hidden .conversation-panel.is-empty .input-area {
+    margin: auto 0 0;
+    transform: none;
+  }
+
+  #chat-form,
+  #chat-form.has-live-btn {
+    gap: 4px;
+    padding: 8px;
+  }
+
+  #chat-form {
+    grid-template-columns: 40px 40px minmax(0, 1fr) 40px 40px;
+    grid-template-rows: auto minmax(48px, auto) 40px;
+  }
+
+  #chat-form.has-live-btn {
+    grid-template-columns: 40px 40px minmax(0, 1fr) 40px 40px 40px;
+  }
+
+  #chat-form:not(:has(.mint-attachment)) {
+    grid-template-rows: minmax(48px, auto) 40px;
+  }
+
+  #send-btn,
+  #mic-btn,
+  #chat-tool-btn,
+  #screen-capture-btn,
+  #chat-form.has-live-btn #gemini-live-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .chat-provider-select {
+    min-width: 0;
+    min-height: 40px;
+  }
+
+  #chat-input {
+    font-size: 16px;
+  }
+
+  /* Preview replaces the chat on a phone; its own toolbar returns to chat. */
+  .chat-panel-split-wrapper.has-preview .conversation-panel,
+  .chat-panel-split-wrapper.has-preview .preview-split-resizer {
+    display: none;
+  }
+
+  .chat-panel-split-wrapper.has-preview .artifact-preview-panel,
+  .chat-panel-split-wrapper.has-preview .code-review-page {
+    position: absolute !important;
+    inset: 0;
+    display: flex;
+    flex: 1 1 auto;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    height: 100% !important;
+  }
+
+  .chat-panel-split-wrapper.has-preview .artifact-preview-panel > header {
+    flex-wrap: wrap;
+    padding-top: calc(10px + env(safe-area-inset-top));
+  }
+
+  .chat-panel-split-wrapper.has-preview .code-review-back {
+    min-height: 44px;
+  }
+
+  .settings-modal-overlay {
+    align-items: flex-start;
+    padding: 0;
+  }
+
+  .settings-modal {
+    width: 100%;
+    height: var(--mint-viewport-height, 100dvh);
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 430px) {
+  .chat-header-project-pill {
+    display: none;
+  }
+
+  .app-body .img-studio-field[style],
+  .app-body .veo-studio-field[style] {
+    flex-direction: column;
+  }
+}
+
+/* Mobile surface contract: frosted chrome, solid reading and decision surfaces. */
+@media (max-width: 760px) {
+  :root {
+    --mobile-chrome-bg: var(--bg-overlay);
+    --mobile-chrome-filter: none;
+    --mobile-reading-bg: var(--bg-overlay);
+  }
+
+  :root[data-surface="glass"] {
+    --mobile-chrome-bg: color-mix(in srgb, var(--bg-overlay) 84%, transparent);
+    --mobile-chrome-filter: var(--glass-blur) saturate(1.25);
+  }
+
+  :root[data-theme="light"][data-surface="glass"] {
+    --mobile-chrome-bg: color-mix(in srgb, var(--bg-overlay) 91%, transparent);
+  }
+
+  :root .chat-header {
+    position: absolute;
+    top: calc(8px + env(safe-area-inset-top));
+    right: 8px;
+    left: 8px;
+    width: auto;
+    height: 52px;
+    padding: 0 8px;
+    border: 1px solid var(--border-default);
+    border-radius: 18px;
+    background: var(--mobile-chrome-bg);
+    backdrop-filter: var(--mobile-chrome-filter);
+    -webkit-backdrop-filter: var(--mobile-chrome-filter);
+    box-shadow: var(--shadow-sm);
+  }
+
+  :root .chat-header:hover {
+    box-shadow: var(--shadow-sm);
+  }
+
+  .mobile-menu-btn,
+  .chat-header-action-btn,
+  .chat-header-clear-btn,
+  .chat-header-back-btn,
+  .web-mobile-nav-btn {
+    border-radius: 14px;
+  }
+
+  .web-mobile-nav-btn,
+  .app-body .workspace-sidebar,
+  .app-body .img-studio-header,
+  .app-body .veo-studio-header,
+  .pictures-header {
+    background: var(--mobile-chrome-bg);
+    backdrop-filter: var(--mobile-chrome-filter);
+    -webkit-backdrop-filter: var(--mobile-chrome-filter);
+  }
+
+  :root .chat-header .mobile-menu-btn {
+    display: grid;
+    place-items: center;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--mobile-chrome-bg);
+    color: var(--text-main);
+    backdrop-filter: var(--mobile-chrome-filter);
+    -webkit-backdrop-filter: var(--mobile-chrome-filter);
+    box-shadow: var(--shadow-sm);
+  }
+
+  :root .chat-header .mobile-menu-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .app-body .workspace-sidebar {
+    width: min(280px, calc(100vw - 24px)) !important;
+    padding-top: calc(20px + env(safe-area-inset-top)) !important;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+    border-radius: 0 22px 22px 0;
+    border-right: 1px solid var(--border-default);
+  }
+
+  .assistant-workspace.model-hidden .input-area {
+    background: var(--mobile-chrome-bg);
+    backdrop-filter: var(--mobile-chrome-filter);
+    -webkit-backdrop-filter: var(--mobile-chrome-filter);
+    border: 1px solid var(--border-subtle);
+    border-bottom: 0;
+    border-radius: 22px 22px 0 0;
+  }
+
+  #chat-form,
+  .smart-context-bar,
+  .user-message .message-bubble,
+  .app-body .img-studio-controls,
+  .app-body .img-studio-results,
+  .app-body .veo-studio-controls,
+  .app-body .veo-studio-results,
+  .app-body .veo-studio-active-workspace,
+  .app-body .management-card,
+  :root .picture-card,
+  .app-body .img-studio-textarea,
+  .app-body .veo-studio-textarea,
+  :root .management-modal,
+  :root .picture-delete-modal,
+  .slash-suggestions-popup {
+    background: var(--mobile-reading-bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  #chat-form,
+  .smart-context-bar {
+    border-color: var(--border-default);
+  }
+
+  #chat-form {
+    border-radius: 20px;
+  }
+
+  .user-message .message-bubble {
+    background: color-mix(in srgb, var(--accent) 10%, var(--mobile-reading-bg));
+    border-radius: 20px 20px 6px 20px;
+  }
+
+  .app-body .img-studio,
+  .app-body .veo-studio {
+    background: var(--bg-canvas);
+  }
+
+  .app-body .img-studio-controls,
+  .app-body .veo-studio-controls {
+    border-radius: 20px 20px 0 0;
+  }
+
+  .app-body .management-card,
+  .picture-card,
+  .img-studio-dropzone {
+    border-radius: 20px;
+  }
+
+  .pictures-header {
+    border: 1px solid var(--border-default);
+    border-radius: 18px;
+    padding: 12px;
+  }
+
+  :root .management-modal-overlay,
+  :root .picture-delete-modal-overlay,
+  :root .settings-modal-overlay {
+    background: rgba(0, 0, 0, 0.68);
+  }
+
+  :root[data-surface="opaque"] .management-modal-overlay,
+  :root[data-surface="opaque"] .picture-delete-modal-overlay,
+  :root[data-surface="opaque"] .settings-modal-overlay {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (max-width: 760px) and (prefers-reduced-transparency: reduce) {
+  :root[data-surface="glass"] {
+    --mobile-chrome-bg: var(--bg-overlay);
+    --mobile-chrome-filter: none;
+  }
+}
+
+.model-spotlight-mobile-tabs {
+  display: none;
+}
+
+/* Composer controls use separate rows so the model name never competes with icons. */
+@media (max-width: 760px) {
+  #chat-form {
+    grid-template-rows: auto minmax(48px, auto) 40px 40px;
+    column-gap: 6px;
+    row-gap: 8px;
+  }
+
+  #chat-form:not(:has(.mint-attachment)) {
+    grid-template-rows: minmax(48px, auto) 40px 40px;
+  }
+
+  #chat-form .model-selector-container {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    height: 40px;
+  }
+
+  #chat-form:not(:has(.mint-attachment)) .model-selector-container {
+    grid-row: 2;
+  }
+
+  #chat-form .model-selector-trigger {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    height: 40px;
+    padding-inline: 10px;
+  }
+
+  #chat-form .model-selector-trigger-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: left;
+  }
+
+  #chat-form .chat-tool-menu-wrap,
+  #chat-form #screen-capture-btn,
+  #chat-form #mic-btn,
+  #chat-form #send-btn,
+  #chat-form.has-live-btn #gemini-live-btn {
+    grid-row: 4;
+  }
+
+  #chat-form:not(:has(.mint-attachment)) .chat-tool-menu-wrap,
+  #chat-form:not(:has(.mint-attachment)) #screen-capture-btn,
+  #chat-form:not(:has(.mint-attachment)) #mic-btn,
+  #chat-form:not(:has(.mint-attachment)) #send-btn,
+  #chat-form.has-live-btn:not(:has(.mint-attachment)) #gemini-live-btn {
+    grid-row: 3;
+  }
+
+  #chat-form .chat-tool-menu-wrap {
+    width: 40px;
+    height: 40px;
+  }
+
+  #chat-form .model-spotlight-popover {
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    height: min(60dvh, 420px);
+    max-height: calc(var(--mint-viewport-height, 100dvh) - 160px);
+    flex-direction: column;
+    border-radius: 20px;
+    background: var(--bg-overlay);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .model-spotlight-mobile-tabs {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .model-spotlight-mobile-tabs button {
+    flex: 1;
+    min-height: 40px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text-soft);
+  }
+
+  .model-spotlight-mobile-tabs button[aria-selected="true"] {
+    background: color-mix(in srgb, var(--accent) 15%, var(--bg-overlay));
+    color: var(--text-main);
+  }
+
+  .model-spotlight-popover .model-spotlight-left-pane,
+  .model-spotlight-popover .model-spotlight-right-pane {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    border-right: 0;
+    background: transparent;
+  }
+
+  .model-spotlight-popover.mobile-pane-models .model-spotlight-right-pane,
+  .model-spotlight-popover.mobile-pane-options .model-spotlight-left-pane {
+    display: none;
+  }
+
+  .model-spotlight-input {
+    font-size: 16px;
+  }
+
+  .model-item-left > div:first-child,
+  .model-item-name {
+    min-width: 0;
+  }
+}
