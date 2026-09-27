@@ -125,7 +125,12 @@ pub(crate) fn log_api_err(context: &str, error: &dyn std::fmt::Display) {
 mod routes;
 
 pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    start_api_server_on(SocketAddr::from(([0, 0, 0, 0], port))).await
+}
+
+/// Serve the API on a caller-selected interface. Tailnet web mode uses
+/// loopback so only its local web proxy can reach the API directly.
+pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error> {
     let listener = TcpListener::bind(addr).await?;
     // API server banner removed to prevent duplicate output
 

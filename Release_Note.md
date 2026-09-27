@@ -1,5 +1,12 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Private Mobile Web Access with Tailscale
+
+- Added opt-in `mint web --tailscale` to serve the production Web UI over a private Tailscale HTTPS URL suitable for installing the existing PWA on a phone.
+- Bound the Web UI and API to localhost in this mode, checked for an existing Serve configuration before starting, and tied the Serve session to the Mint command. Normal `mint web` behavior is unchanged.
+- Documented Tailscale, HTTPS, production build, and mobile installation requirements.
+- Added a separate English setup and usage guide in `docs/MOBILE_PWA_TAILSCALE.md`.
+
 ## Interactive CLI Mode Switching
 
 - Added a clickable "↓ Back to bottom" button to the full-screen TUI transcript. It appears only while the transcript is scrolled above the latest message, disappears at the bottom, and keeps `End` available for the same action while typing or waiting for an agent turn.

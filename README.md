@@ -348,6 +348,36 @@ This appears once per new version until the builds are signed.
   </tr>
 </table>
 
+#### Install the Web UI on a phone (Tailscale)
+
+`mint web --tailscale` is an optional mode for using Mint as a private PWA. It
+does not change the normal `mint web` command or require every Mint user to
+install Tailscale.
+
+For detailed setup and usage instructions, see [Mint Web on mobile with Tailscale](docs/MOBILE_PWA_TAILSCALE.md).
+
+1. Install Tailscale on the computer running Mint and on your phone, sign in
+   to the same tailnet, and enable MagicDNS and HTTPS certificates in the
+   [Tailscale DNS settings](https://tailscale.com/docs/how-to/set-up-https-certificates).
+   On Linux, allow your regular account to manage Serve with
+   `sudo tailscale set --operator="$(whoami)"` after signing in; Mint does not
+   run Tailscale as root.
+2. In the Mint project, build the production Web UI with `npm run build:web`.
+   Start `mint web --tailscale` and keep the command running. HTTPS port 443
+   must be free in Tailscale Serve; Mint will not replace an existing route
+   on that port.
+3. Open the printed `https://<machine>.<tailnet>.ts.net` URL on your phone.
+   Use the browser's **Add to Home Screen** action to install the PWA. Mint's
+   backend continues running on the computer, so the phone needs an active
+   Tailscale connection and the computer must stay awake.
+
+This mode binds both local ports (`9000` for the Web UI and `3000` for the API)
+to `127.0.0.1`; Tailscale Serve forwards the private HTTPS URL to the Web UI.
+Press Ctrl+C to stop Mint and the Serve session. Do not use Tailscale Funnel for
+this setup: Funnel publishes the service to the public internet. If Tailscale
+is missing, disconnected, or Serve/HTTPS is unavailable, follow the error
+shown by `mint web --tailscale` and try again.
+
 ### CLI
 <table width="100%">
   <tr>
@@ -398,6 +428,7 @@ mint setup
 mint plugins
 mint status
 mint web
+mint web --tailscale
 mint api
 mint auto
 mint chat "<message>"
@@ -413,6 +444,7 @@ mint chat "<message>"
 | `mint setup` | Interactively manage enabled agent tools |
 | `mint plugins` | Centralized interactive management for built-in ecosystem plugins & skills |
 | `mint web` | Launch the web UI and local API server |
+| `mint web --tailscale` | Serve the built web UI privately over Tailscale HTTPS for mobile/PWA use |
 | `mint api` | Start only the local API server |
 | `mint gateway start` | Run headless: bridges + cron, no TUI — for VPS/systemd use |
 | `mint gateway start --api-port <N>` | Same, plus the local API/WebUI on port `<N>` |

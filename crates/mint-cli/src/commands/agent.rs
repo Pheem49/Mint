@@ -442,7 +442,10 @@ pub async fn handle_auto() -> Result<()> {
     Ok(())
 }
 
-pub async fn handle_web(dev: bool) -> Result<()> {
+pub async fn handle_web(dev: bool, tailscale: bool) -> Result<()> {
+    if tailscale {
+        return super::tailnet_web::run().await;
+    }
     launch_mint_target("web".into(), dev).await
 }
 
