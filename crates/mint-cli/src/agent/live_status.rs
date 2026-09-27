@@ -707,6 +707,11 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
         true,
         tick,
         status.active_tool_started,
+        // The full-screen TUI shows only the last eight live rows. A shell
+        // output preview can otherwise push the activity header and command
+        // labels out of view while the model is composing its next answer.
+        // Keep the preview in `status.tasks` for the committed transcript.
+        status.tui.is_none(),
     ));
     // Built here (not inline below) so both destinations for it — the old
     // trailing-line spot in `lines`, and the queue box's own pinned row —
@@ -895,6 +900,16 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
 /// actually committed anything — callers that print their own leading blank
 /// line right after (e.g. the final answer) use this to skip it when this
 /// already ended on one, instead of stacking two.
+pub(super) fn commit_activity_snapshot_if_idle(
+    status: &mut LiveStatus,
+    active_tools: usize,
+) -> bool {
+    if active_tools > 0 {
+        return false;
+    }
+    commit_activity_snapshot(status)
+}
+
 pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
     let explored_start = status.committed_explored.min(status.explored.len());
     let activities_start = status.committed_activities.min(status.activities.len());
@@ -907,6 +922,7 @@ pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
         false,
         0,
         None,
+        true,
     );
     if lines.is_empty() {
         return false;
@@ -921,6 +937,76 @@ pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
     status.committed_activities = status.activities.len();
     status.committed_tasks = status.tasks.len();
     true
+}
+
+#[cfg(test)]
+mod concurrent_activity_tests {
+    use super::*;
+
+    #[test]
+    fn unrelated_thought_keeps_in_flight_shell_activity_live() {
+        let mut status = LiveStatus::default();
+        status.tasks.push(TaskEntry {
+            label: "[run_shell] Running command: `sleep 1`...".to_owned(),
+            output: Vec::new(),
+        });
+
+        assert!(!commit_activity_snapshot_if_idle(&mut status, 1));
+        assert_eq!(status.committed_tasks, 0);
+        let live_lines = activity_block_lines(
+            &status.tasks[status.committed_tasks..],
+            &[],
+            &[],
+            true,
+            0,
+            Some(Instant::now()),
+            true,
+        );
+        assert!(
+            live_lines
+                .iter()
+                .any(|line| line.contains("Running 1 shell command"))
+        );
+        assert!(live_lines.iter().any(|line| line.contains("sleep 1")));
+    }
+}
+
+#[cfg(test)]
+mod compact_tui_status_tests {
+    use super::*;
+
+    #[test]
+    fn completed_shell_output_does_not_push_command_labels_out_of_live_view() {
+        let tasks = vec![
+            TaskEntry {
+                label: "[run_shell] Running command: `time sleep 10`...".into(),
+                output: Vec::new(),
+            },
+            TaskEntry {
+                label: "Finished command: `time sleep 10`".into(),
+                output: vec![
+                    "stdout:".into(),
+                    "stderr:".into(),
+                    "real 0m10.002s".into(),
+                    "user 0m0.002s".into(),
+                    "sys 0m0.002s".into(),
+                ],
+            },
+        ];
+        let mut lines = activity_block_lines(&tasks, &[], &[], true, 0, None, false);
+        lines.push("  Herding...".into());
+        let visible = &lines[lines.len().saturating_sub(8)..];
+        assert!(
+            visible
+                .iter()
+                .any(|line| line.contains("Running 1 shell command"))
+        );
+        assert!(visible.iter().any(|line| line.contains("[run_shell]")));
+        assert!(visible.iter().any(|line| line.contains("Finished command")));
+        assert!(!visible.iter().any(|line| line.contains("real 0m10.002s")));
+        let committed = activity_block_lines(&tasks, &[], &[], false, 0, None, true);
+        assert!(committed.iter().any(|line| line.contains("real 0m10.002s")));
+    }
 }
 
 pub(super) fn is_internal_cot(text: &str) -> bool {
@@ -1265,6 +1351,8 @@ pub(super) fn activity_block_lines(
     animate: bool,
     tick: usize,
     active_tool_started: Option<Instant>,
+    // Whether to render stored command-output preview lines.
+    include_output: bool,
 ) -> Vec<String> {
     if tasks.is_empty() && activities.is_empty() && explored.is_empty() {
         return Vec::new();
@@ -1306,13 +1394,13 @@ pub(super) fn activity_block_lines(
                 "{prefix} {CYAN}{spinner}{RESET} {WHITE}{label}{RESET}{DIM}{timer_suffix}{RESET}"
             ));
         } else {
-            lines.push(format!(
-                "{prefix} {MINT}✓{RESET} {WHITE}{label}{RESET}"
-            ));
+            lines.push(format!("{prefix} {MINT}✓{RESET} {WHITE}{label}{RESET}"));
         }
 
-        for out_line in &output {
-            lines.push(format!("{DIM}       │ {}{RESET}", out_line));
+        if include_output {
+            for out_line in &output {
+                lines.push(format!("{DIM}       │ {}{RESET}", out_line));
+            }
         }
     }
 

@@ -519,6 +519,7 @@ pub fn read_line_interactive(
         return Ok(Some(InteractiveInput {
             text: trimmed,
             pasted_image: None,
+            switch_mode: false,
         }));
     }
 
@@ -741,6 +742,19 @@ pub fn read_line_interactive(
                 }
 
                 match key_event.code {
+                    KeyCode::F(6) => {
+                        disable_raw_mode()?;
+                        clear_input_box(cursor_row);
+                        let mut text: String = input_chars.iter().collect();
+                        for (placeholder, content) in &paste_contents {
+                            text = text.replace(placeholder, content);
+                        }
+                        break Some(InteractiveInput {
+                            text,
+                            pasted_image,
+                            switch_mode: true,
+                        });
+                    }
                     KeyCode::Char('c') if ctrl => {
                         if input_chars.is_empty() {
                             if ctrl_c_pressed || ctrl_d_pressed {
@@ -750,6 +764,7 @@ pub fn read_line_interactive(
                                 break Some(InteractiveInput {
                                     text: "/exit".to_string(),
                                     pasted_image: None,
+                                    switch_mode: false,
                                 });
                             } else {
                                 ctrl_c_pressed = true;
@@ -795,6 +810,7 @@ pub fn read_line_interactive(
                             break Some(InteractiveInput {
                                 text: "/exit".to_string(),
                                 pasted_image: None,
+                                switch_mode: false,
                             });
                         } else {
                             ctrl_d_pressed = true;
@@ -1514,6 +1530,7 @@ pub fn read_line_interactive(
                         break Some(InteractiveInput {
                             text: expanded_str,
                             pasted_image,
+                            switch_mode: false,
                         });
                     }
                     KeyCode::Esc => {

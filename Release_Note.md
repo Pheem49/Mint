@@ -1,5 +1,15 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Interactive CLI Mode Switching
+
+- Added a clickable "↓ Back to bottom" button to the full-screen TUI transcript. It appears only while the transcript is scrolled above the latest message, disappears at the bottom, and keeps `End` available for the same action while typing or waiting for an agent turn.
+- Added `$` skill and `@` mention suggestions to the full-screen TUI composer. Up/Down selects a match and Tab completes it; `@` completion replaces only the word at the cursor, including mentions within a sentence. The existing Enter submission behavior remains available.
+- Press F6 at the prompt to choose whether to switch between the full-screen TUI and Classic CLI without ending the current session. The default choice keeps the current interface; an unfinished prompt is preserved whether the switch is confirmed or cancelled.
+- Fixed TUI choice dialogs clipping the last option when their description spans several lines. Dialogs now use the available terminal height to show every choice that fits, including three-option approvals and lists longer than eight choices.
+- Choice dialogs now measure wrapped command text at the current terminal width and reserve a footer row below the options, so approval choices remain visible in narrower terminal windows.
+- Kept live `run_shell` activity visible while parallel tools are active: a thought from another tool no longer commits the in-flight status, and TUI tool-start events are retained during approval dialogs.
+- Kept completed shell-command labels visible while Mint prepares its reply: the eight-row TUI live-status area now omits long stdout/stderr previews, which remain available in the completed turn's transcript.
+
 ## Full-Screen Interactive Chat TUI (Complete Default Interface)
 
 - **Native-Feeling TUI Mouse Selection**: Added Mint-managed click-drag selection across the entire rendered TUI while preserving mouse-wheel transcript scrolling and physical `Up`/`Down` prompt-history navigation. Selected screen cells stay highlighted after mouse release and are copied with right-click, using the native system clipboard first with OSC52 fallback for terminal/remote sessions.

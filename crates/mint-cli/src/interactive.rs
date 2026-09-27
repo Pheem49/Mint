@@ -64,6 +64,7 @@ pub struct InteractiveSession {
 pub struct InteractiveInput {
     pub text: String,
     pub pasted_image: Option<String>,
+    pub switch_mode: bool,
 }
 
 /// What the slash-command router wants the loop to do next.
@@ -134,7 +135,6 @@ fn report_interactive_turn_error(tui: &Option<FullScreenUi>, error: &anyhow::Err
         print_turn_error(error);
     }
 }
-
 
 fn apply_welcome_gradient(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
@@ -441,7 +441,7 @@ pub async fn run_interactive_chat_with_session(
             }
         }
 
-        println!("Type naturally or /help for commands. Ctrl+V pastes images. Ctrl+D exits.\n");
+        println!("Type naturally or /help for commands. F6: TUI. Ctrl+D exits.\n");
     }
 
     if prompt_resume_at_start {
@@ -567,6 +567,48 @@ pub async fn run_interactive_chat_with_session(
                     session.pending_image = Some(uri);
                 }
             }
+            if input.switch_mode {
+                let target = if tui.is_some() { "Classic CLI" } else { "TUI" };
+                let choices = [
+                    ChoiceItem::new("Stay in current mode", "stay"),
+                    ChoiceItem::new(format!("Switch to {target}"), "switch"),
+                ];
+                let mut ui: Box<dyn CommandUi> = match tui.as_mut() {
+                    Some((terminal, state, handle)) => {
+                        Box::new(FullScreenCommandUi::new(terminal, state, handle))
+                    }
+                    None => Box::new(ClassicCommandUi::new()),
+                };
+                let confirmed = ui.prompt_choice(
+                    "Switch CLI interface?",
+                    &format!("Change to {target}?"),
+                    &choices,
+                )? == Some(1);
+                drop(ui);
+                if !confirmed {
+                    if tui.is_none() {
+                        pending_draft = Some(input.text);
+                    }
+                    continue;
+                }
+                pending_draft = Some(input.text);
+                if let Some((mut terminal, _, _)) = tui.take() {
+                    terminal.suspend();
+                    println!("{MINT}Switched to Classic CLI. Press F6 for TUI.{RESET}");
+                } else {
+                    match chat_tui::ChatTui::enter() {
+                        Ok(terminal) => {
+                            let mut state = chat_tui::ChatViewState::from_session(&session);
+                            state.set_draft(pending_draft.take().unwrap_or_default());
+                            let state = Arc::new(Mutex::new(state));
+                            let handle = chat_tui::ChatTui::handle(Arc::clone(&state));
+                            tui = Some((terminal, state, handle));
+                        }
+                        Err(error) => println!("{WARN}Could not start TUI: {error}.{RESET}"),
+                    }
+                }
+                continue;
+            }
             let text = input.text.trim().to_owned();
             if text.is_empty() {
                 continue;
@@ -608,7 +650,10 @@ pub async fn run_interactive_chat_with_session(
 
             let skill_name = skill_word.trim_start_matches('$').to_lowercase();
             let skills = load_all_available_skills(&session.current_dir);
-            let skill_opt = skills.iter().find(|s| s.name.to_lowercase() == skill_name).cloned();
+            let skill_opt = skills
+                .iter()
+                .find(|s| s.name.to_lowercase() == skill_name)
+                .cloned();
 
             if let Some(skill) = skill_opt {
                 let mut ui: Box<dyn CommandUi> = match tui.as_mut() {

@@ -31,6 +31,7 @@ use unicode_width::UnicodeWidthStr;
 const MIN_WIDTH: u16 = 60;
 const MIN_HEIGHT: u16 = 12;
 const COPY_LIMIT: usize = 100 * 1024;
+const BACK_TO_BOTTOM_LABEL: &str = " ↓ Back to bottom · End ";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TranscriptRole {
@@ -117,6 +118,7 @@ pub(crate) struct ChatViewState {
     model: String,
     provider: String,
     workspace: String,
+    current_dir: std::path::PathBuf,
     plan_mode: bool,
     scroll_from_bottom: u16,
     selection_mode: bool,
@@ -490,12 +492,17 @@ impl ChatViewState {
             model: active_model(&session.config.ai_provider, &session.config).to_owned(),
             provider: format_provider_display_name(&session.config.ai_provider, &session.config),
             workspace: format_workspace_with_branch(&session.current_dir),
+            current_dir: session.current_dir.clone(),
             plan_mode: session.plan_mode,
             history: session.history.clone(),
             ..Self::default()
         };
         state.reload_transcript(&session.chat_id, &session.current_dir);
         state
+    }
+    pub fn set_draft(&mut self, draft: String) {
+        self.composer = draft.chars().collect();
+        self.cursor = self.composer.len();
     }
     pub fn reload_transcript(&mut self, chat_id: &str, workspace: &Path) {
         self.transcript.clear();
@@ -525,6 +532,7 @@ impl ChatViewState {
         self.model = active_model(&session.config.ai_provider, &session.config).to_owned();
         self.provider = format_provider_display_name(&session.config.ai_provider, &session.config);
         self.workspace = format_workspace_with_branch(&session.current_dir);
+        self.current_dir = session.current_dir.clone();
         self.plan_mode = session.plan_mode;
         self.history = session.history.clone();
     }
@@ -557,25 +565,69 @@ impl ChatViewState {
         }
         self.cursor = self.composer.len();
     }
-    fn slash_suggestions(&self) -> Vec<(String, String)> {
-        let input: String = self.composer.iter().collect();
-        if !input.starts_with('/') || input.contains(char::is_whitespace) {
-            return Vec::new();
+    fn suggestions(&self) -> Vec<(String, String)> {
+        let cursor = self.cursor.min(self.composer.len());
+        let before: String = self.composer[..cursor].iter().collect();
+        if before.starts_with('/') && !before.contains(char::is_whitespace) {
+            return super::SLASH_COMMANDS
+                .iter()
+                .filter(|command| command.token.starts_with(&before))
+                .map(|command| (command.token.clone(), command.description.clone()))
+                .collect();
         }
-        super::SLASH_COMMANDS
+        if before.starts_with('$') && !before.contains(char::is_whitespace) {
+            let prefix = before[1..].to_lowercase();
+            return super::load_all_available_skills(&self.current_dir)
+                .into_iter()
+                .filter(|skill| skill.name.to_lowercase().starts_with(&prefix))
+                .map(|skill| {
+                    (
+                        format!("${}", skill.name),
+                        skill.description.unwrap_or_default(),
+                    )
+                })
+                .collect();
+        }
+        let start = self.composer[..cursor]
             .iter()
-            .filter(|command| command.token.starts_with(&input))
-            .map(|command| (command.token.clone(), command.description.clone()))
-            .collect()
+            .rposition(|c| c.is_whitespace())
+            .map_or(0, |index| index + 1);
+        if self.composer.get(start) == Some(&'@') {
+            let query: String = self.composer[start..cursor].iter().collect();
+            return super::collect_mention_candidates(&query, &self.current_dir)
+                .into_iter()
+                .map(|candidate| (candidate.label, candidate.description))
+                .collect();
+        }
+        Vec::new()
     }
-    fn apply_selected_slash(&mut self) -> bool {
-        let suggestions = self.slash_suggestions();
+    fn apply_selected_suggestion(&mut self) -> bool {
+        let suggestions = self.suggestions();
         let Some((token, _)) = suggestions.get(self.slash_selected % suggestions.len().max(1))
         else {
             return false;
         };
-        self.composer = format!("{token} ").chars().collect();
-        self.cursor = self.composer.len();
+        let cursor = self.cursor.min(self.composer.len());
+        let start = if token.starts_with('@') {
+            self.composer[..cursor]
+                .iter()
+                .rposition(|c| c.is_whitespace())
+                .map_or(0, |index| index + 1)
+        } else {
+            0
+        };
+        let end = self.composer[cursor..]
+            .iter()
+            .position(|c| c.is_whitespace())
+            .map_or(self.composer.len(), |offset| cursor + offset);
+        let needs_space = end == self.composer.len();
+        let replacement = if needs_space {
+            format!("{token} ")
+        } else {
+            token.clone()
+        };
+        self.composer.splice(start..end, replacement.chars());
+        self.cursor = start + token.chars().count() + 1;
         self.slash_selected = 0;
         true
     }
@@ -703,12 +755,12 @@ impl ChatViewState {
             .min(lines.len() - 1);
         lines[start..=end].join("\n")
     }
-    fn render(&self, frame: &mut ratatui::Frame<'_>) {
-        let slash_suggestions = self.slash_suggestions();
-        let suggestion_height = if slash_suggestions.is_empty() {
+    fn render(&self, frame: &mut ratatui::Frame<'_>) -> Option<Rect> {
+        let suggestions = self.suggestions();
+        let suggestion_height = if suggestions.is_empty() {
             0
         } else {
-            (slash_suggestions.len().min(5) as u16) + 1
+            (suggestions.len().min(5) as u16) + 1
         };
         let status_height = if self.status.is_empty() {
             0
@@ -950,19 +1002,27 @@ impl ChatViewState {
             let body_lines = if dialog.body.is_empty() {
                 0
             } else {
-                dialog.body.lines().count()
+                dialog
+                    .body
+                    .lines()
+                    .map(|line| {
+                        Paragraph::new(format!(" {line}"))
+                            .wrap(Wrap { trim: false })
+                            .line_count(main_area.width.max(1))
+                    })
+                    .sum()
             };
             let filter_lines = if dialog.filter.is_empty() { 0 } else { 1 };
             let content_lines = if dialog.input.is_some() {
                 3
             } else {
-                let visible = filtered_len.clamp(1, 8);
-                let scroll_lines = if filtered_len > 8 { 1 } else { 0 };
-                visible + scroll_lines + 2
+                filtered_len.max(1) + 3
             };
-            let total = 1 + body_lines + filter_lines + 1 + content_lines;
-            let max_allowed = main_area.height.saturating_sub(9).min(18).max(6);
-            (total as u16).clamp(6, max_allowed)
+            // The top border consumes a row in addition to the title, body,
+            // spacer, options, and footer counted above.
+            let total = 1 + 1 + body_lines + filter_lines + 1 + content_lines;
+            let max_allowed = main_area.height.saturating_sub(7);
+            (total as u16).min(max_allowed)
         } else {
             0
         };
@@ -979,12 +1039,14 @@ impl ChatViewState {
             super::wrap_input_into_rows(&self.composer, composer_width, self.cursor);
         let composer_height = (composer_rows.len().max(1) as u16 + 2).clamp(3, 8);
         let rows = if dialog_height > 0 {
+            let dialog_status_height =
+                status_height.min(main_area.height.saturating_sub(6 + 1 + dialog_height));
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Length(6),
-                    Constraint::Min(3),
-                    Constraint::Length(status_height),
+                    Constraint::Min(1),
+                    Constraint::Length(dialog_status_height),
                     Constraint::Length(dialog_height),
                 ])
                 .split(main_area)
@@ -1089,9 +1151,7 @@ impl ChatViewState {
             ..rows[0]
         };
         frame.render_widget(
-            Paragraph::new(
-                "Type naturally or /help for commands. Ctrl+V pastes images. Ctrl+D exits.",
-            ),
+            Paragraph::new("Type naturally or /help for commands. F6: Classic CLI. Ctrl+D exits."),
             help_area,
         );
 
@@ -1115,6 +1175,32 @@ impl ChatViewState {
                 &mut bar,
             );
         }
+        let back_to_bottom_area = if self.dialog.is_none()
+            && self.thought_modal.is_none()
+            && self.scroll_from_bottom.min(max_scroll) > 0
+            && rows[1].height > 0
+            && rows[1].width >= UnicodeWidthStr::width(BACK_TO_BOTTOM_LABEL) as u16 + 2
+        {
+            let width = UnicodeWidthStr::width(BACK_TO_BOTTOM_LABEL) as u16;
+            let area = Rect::new(
+                rows[1].x + (rows[1].width - width) / 2,
+                rows[1].bottom() - 1,
+                width,
+                1,
+            );
+            frame.render_widget(
+                Paragraph::new(BACK_TO_BOTTOM_LABEL).style(
+                    Style::default()
+                        .fg(Color::Rgb(105, 230, 166))
+                        .bg(Color::Rgb(38, 48, 45))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                area,
+            );
+            Some(area)
+        } else {
+            None
+        };
         if status_height > 0 {
             // Derive a tick counter from wall-clock time (ms / 80) so the
             // shimmer animation advances at ~12 fps regardless of the 30 ms
@@ -1184,7 +1270,7 @@ impl ChatViewState {
                     }
                 })
                 .collect();
-            let skip = status_lines.len().saturating_sub(status_height as usize);
+            let skip = status_lines.len().saturating_sub(rows[2].height as usize);
             let visible_lines: Vec<Line> = status_lines.into_iter().skip(skip).collect();
             frame.render_widget(Paragraph::new(visible_lines), rows[2]);
         }
@@ -1270,11 +1356,19 @@ impl ChatViewState {
                 let visual_col = crate::markdown::unicode_width(&input_text);
                 input_cursor = Some((visual_col, input_row_idx));
             } else {
-                let header_height = lines.len();
-                let footer_height = 2; // blank + hint
+                let header_height = Paragraph::new(lines.clone())
+                    .wrap(Wrap { trim: false })
+                    .line_count(rows[3].width.max(1));
+                let footer_height = 3; // blank + hint + bottom padding
                 let inner_height = (rows[3].height as usize).saturating_sub(1);
                 let available_rows = inner_height.saturating_sub(header_height + footer_height);
-                let visible_rows = available_rows.clamp(2, 8);
+                // Show every choice when it fits. Reserve space for both
+                // scroll indicators only when the list exceeds the viewport.
+                let visible_rows = if total_options > available_rows {
+                    available_rows.saturating_sub(2).max(1)
+                } else {
+                    available_rows.max(1)
+                };
 
                 let scroll_offset = if dialog.selected < dialog.scroll_offset {
                     dialog.selected
@@ -1403,6 +1497,7 @@ impl ChatViewState {
                     " ↑/↓ navigate · 1-9 pick · Type to filter · Enter select · Esc cancel"
                 };
                 lines.push(Line::styled(hint, Style::default().fg(Color::DarkGray)));
+                lines.push(Line::raw(""));
             }
 
             frame.render_widget(
@@ -1488,35 +1583,30 @@ impl ChatViewState {
             frame.render_widget(paragraph, panel_area);
         } else {
             if suggestion_height > 0 {
-                let selected = self.slash_selected.min(slash_suggestions.len() - 1);
+                let selected = self.slash_selected.min(suggestions.len() - 1);
                 let page_start = (selected / 5) * 5;
                 let lines = std::iter::once(Line::styled(
-                    "Commands · ↑/↓ select · Tab complete · Enter run",
+                    "Suggestions · ↑/↓ select · Tab complete · Enter send",
                     Style::default().fg(Color::DarkGray),
                 ))
-                .chain(
-                    slash_suggestions
-                        .iter()
-                        .enumerate()
-                        .skip(page_start)
-                        .take(5)
-                        .map(|(index, (token, description))| {
-                            Line::styled(
-                                format!(
-                                    "{} {:<18} {description}",
-                                    if index == selected { "›" } else { " " },
-                                    token
-                                ),
-                                if index == selected {
-                                    Style::default()
-                                        .fg(Color::Green)
-                                        .add_modifier(Modifier::BOLD | Modifier::REVERSED)
-                                } else {
-                                    Style::default().fg(Color::DarkGray)
-                                },
-                            )
-                        }),
-                )
+                .chain(suggestions.iter().enumerate().skip(page_start).take(5).map(
+                    |(index, (token, description))| {
+                        Line::styled(
+                            format!(
+                                "{} {:<18} {description}",
+                                if index == selected { "›" } else { " " },
+                                token
+                            ),
+                            if index == selected {
+                                Style::default()
+                                    .fg(Color::Green)
+                                    .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                            } else {
+                                Style::default().fg(Color::DarkGray)
+                            },
+                        )
+                    },
+                ))
                 .collect::<Vec<_>>();
                 frame.render_widget(Paragraph::new(lines), rows[3]);
             }
@@ -1620,6 +1710,7 @@ impl ChatViewState {
                 ));
             }
         }
+        back_to_bottom_area
     }
 }
 
@@ -1628,6 +1719,7 @@ pub(crate) struct ChatTui {
     active: bool,
     mouse_selection: MouseSelection,
     last_frame: Option<Buffer>,
+    back_to_bottom_area: Option<Rect>,
     clipboard: TextClipboard,
 }
 
@@ -1852,6 +1944,22 @@ fn route_mouse_wheel(state: &mut ChatViewState, kind: event::MouseEventKind) {
     }
 }
 
+fn activate_back_to_bottom(
+    state: &mut ChatViewState,
+    area: Option<Rect>,
+    kind: event::MouseEventKind,
+    point: ScreenPoint,
+) -> bool {
+    if kind == event::MouseEventKind::Down(event::MouseButton::Left)
+        && area.is_some_and(|area| area.contains(Position::new(point.column, point.row)))
+    {
+        state.scroll_from_bottom = 0;
+        true
+    } else {
+        false
+    }
+}
+
 fn setup_terminal_output<W: Write>(stdout: &mut W) -> io::Result<()> {
     crossterm::execute!(
         stdout,
@@ -1893,6 +2001,7 @@ impl ChatTui {
                 active: true,
                 mouse_selection: MouseSelection::default(),
                 last_frame: None,
+                back_to_bottom_area: None,
                 clipboard: TextClipboard::default(),
             }),
             Err(error) => {
@@ -1905,8 +2014,9 @@ impl ChatTui {
         let selection = self.mouse_selection;
         let previous = self.last_frame.as_ref();
         let mut invalidated = false;
+        let mut back_to_bottom_area = None;
         let completed = self.terminal.draw(|frame| {
-            state.render(frame);
+            back_to_bottom_area = state.render(frame);
             if selection.range().is_some() {
                 let area = frame.area();
                 let hint_area = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
@@ -1928,6 +2038,7 @@ impl ChatTui {
             }
         })?;
         self.last_frame = Some(completed.buffer.clone());
+        self.back_to_bottom_area = back_to_bottom_area;
         if invalidated {
             self.mouse_selection.clear();
         }
@@ -1942,6 +2053,10 @@ impl ChatTui {
         use event::{MouseButton, MouseEventKind};
 
         let point = ScreenPoint::from_mouse(mouse);
+        if activate_back_to_bottom(state, self.back_to_bottom_area, mouse.kind, point) {
+            self.mouse_selection.clear();
+            return Ok(true);
+        }
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 let inside_frame = self
@@ -2076,6 +2191,15 @@ impl ChatTui {
                     use event::{KeyCode, KeyModifiers};
                     self.clear_mouse_selection();
 
+                    if key.code == KeyCode::F(6) {
+                        let text: String = state.composer.iter().collect();
+                        return Ok(Some(InteractiveInput {
+                            text,
+                            pasted_image,
+                            switch_mode: true,
+                        }));
+                    }
+
                     if let Some(modal) = state.thought_modal.as_mut() {
                         match key.code {
                             KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
@@ -2120,7 +2244,7 @@ impl ChatTui {
 
                     if state.selection_mode {
                         match key.code {
-                            KeyCode::Esc | KeyCode::F(6) => state.selection_mode = false,
+                            KeyCode::Esc => state.selection_mode = false,
                             KeyCode::Char('c') | KeyCode::Char('d')
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
@@ -2214,13 +2338,6 @@ impl ChatTui {
                                 state.set_notice("No image found in clipboard");
                             }
                         }
-                        KeyCode::F(6) => {
-                            state.selection_mode = true;
-                            state.clear_notice();
-                            let last = state.plain_transcript_lines().len().saturating_sub(1);
-                            state.selection_anchor = last;
-                            state.selection_head = last;
-                        }
                         KeyCode::PageUp => {
                             state.scroll_from_bottom = state.scroll_from_bottom.saturating_add(10)
                         }
@@ -2231,15 +2348,15 @@ impl ChatTui {
                             state.scroll_from_bottom = u16::MAX
                         }
                         KeyCode::End => state.scroll_from_bottom = 0,
-                        KeyCode::Up if !state.slash_suggestions().is_empty() => {
+                        KeyCode::Up if !state.suggestions().is_empty() => {
                             state.slash_selected = state.slash_selected.saturating_sub(1)
                         }
-                        KeyCode::Down if !state.slash_suggestions().is_empty() => {
-                            let last = state.slash_suggestions().len().saturating_sub(1);
+                        KeyCode::Down if !state.suggestions().is_empty() => {
+                            let last = state.suggestions().len().saturating_sub(1);
                             state.slash_selected = (state.slash_selected + 1).min(last);
                         }
-                        KeyCode::Tab if !state.slash_suggestions().is_empty() => {
-                            state.apply_selected_slash();
+                        KeyCode::Tab if !state.suggestions().is_empty() => {
+                            state.apply_selected_suggestion();
                         }
                         KeyCode::Up if !state.composer.contains(&'\n') => state.history_previous(),
                         KeyCode::Down if !state.composer.contains(&'\n') => state.history_next(),
@@ -2263,12 +2380,13 @@ impl ChatTui {
                             state.cursor += 1;
                         }
                         KeyCode::Enter => {
-                            let suggestions = state.slash_suggestions();
+                            let suggestions = state.suggestions();
                             let input: String = state.composer.iter().collect();
-                            if !suggestions.is_empty()
+                            if input.starts_with('/')
+                                && !suggestions.is_empty()
                                 && !suggestions.iter().any(|(token, _)| token == input.trim())
                             {
-                                state.apply_selected_slash();
+                                state.apply_selected_suggestion();
                             }
                             let text: String = state.composer.drain(..).collect();
                             state.cursor = 0;
@@ -2276,7 +2394,11 @@ impl ChatTui {
                             state.draft_before_history.clear();
                             state.clear_notice();
                             if !text.trim().is_empty() {
-                                return Ok(Some(InteractiveInput { text, pasted_image }));
+                                return Ok(Some(InteractiveInput {
+                                    text,
+                                    pasted_image,
+                                    switch_mode: false,
+                                }));
                             }
                         }
                         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -2507,6 +2629,7 @@ impl ChatTui {
                         }
                         if let Ok(mut state) = handle.state.lock() {
                             match key.code {
+                                KeyCode::End => state.scroll_from_bottom = 0,
                                 KeyCode::Enter => {
                                     if !state.composer.is_empty() {
                                         let text: String = state.composer.drain(..).collect();
@@ -2581,6 +2704,7 @@ impl Drop for ChatTui {
 mod dialog_tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
 
     fn make_key(code: KeyCode) -> KeyEvent {
@@ -2590,6 +2714,197 @@ mod dialog_tests {
             kind: KeyEventKind::Press,
             state: KeyEventState::empty(),
         }
+    }
+
+    #[test]
+    fn skill_suggestion_completes_name_before_task() {
+        let workspace = std::env::temp_dir().join(format!(
+            "mint-tui-skill-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let skill_dir = workspace.join("skills").join("tui-check-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\ndescription: Test skill\n---\n",
+        )
+        .unwrap();
+        let mut state = ChatViewState {
+            current_dir: workspace.clone(),
+            ..ChatViewState::default()
+        };
+        state.set_draft("$tui-check".to_owned());
+        assert!(
+            state
+                .suggestions()
+                .iter()
+                .any(|(name, _)| name == "$tui-check-skill")
+        );
+        assert!(state.apply_selected_suggestion());
+        assert_eq!(
+            state.composer.iter().collect::<String>(),
+            "$tui-check-skill "
+        );
+        std::fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn mention_suggestion_replaces_only_the_word_at_cursor() {
+        let mut state = ChatViewState {
+            current_dir: std::env::current_dir().unwrap(),
+            ..ChatViewState::default()
+        };
+        state.set_draft("Please check @work today".to_owned());
+        state.cursor = "Please check @work".chars().count();
+        assert!(
+            state
+                .suggestions()
+                .iter()
+                .any(|(name, _)| name == "@workspace")
+        );
+        assert!(state.apply_selected_suggestion());
+        assert_eq!(
+            state.composer.iter().collect::<String>(),
+            "Please check @workspace today"
+        );
+        assert_eq!(state.cursor, "Please check @workspace ".chars().count());
+    }
+
+    #[test]
+    fn three_choice_dialog_shows_every_option_with_three_body_lines() {
+        let (reply, _) = mpsc::channel();
+        let mut state = ChatViewState::default();
+        state.dialog = Some(DialogState::new_choice(
+            "Local shell command",
+            "Command: uname -r && uname -a\nMode: mutating\nBackground: no",
+            vec![
+                "Yes".to_owned(),
+                "Yes, allow for this session".to_owned(),
+                "No".to_owned(),
+            ],
+            None,
+            reply,
+        ));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("3. No"));
+        assert!(!rendered.contains("more below"));
+    }
+
+    #[test]
+    fn choice_dialog_uses_available_height_for_more_than_eight_options() {
+        let (reply, _) = mpsc::channel();
+        let mut state = ChatViewState::default();
+        state.dialog = Some(DialogState::new_choice(
+            "Choose one",
+            "",
+            (1..=9).map(|index| format!("Option {index}")).collect(),
+            None,
+            reply,
+        ));
+        let mut terminal = Terminal::new(TestBackend::new(80, 32)).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Option 9"));
+        assert!(!rendered.contains("more below"));
+    }
+
+    #[test]
+    fn long_approval_command_keeps_choices_and_hint_visible_in_narrow_terminal() {
+        let (reply, _) = mpsc::channel();
+        let mut state = ChatViewState::default();
+        state.status = vec!["Running shell command".to_owned(); 6];
+        state.dialog = Some(DialogState::new_choice(
+            "Local shell command",
+            concat!(
+                "Command: who -a; echo '--- LOGINCTL ---'; loginctl list-sessions 2>&1; ",
+                "echo '--- SEATS/USERS ---'; loginctl list-users 2>&1; ",
+                "echo '--- UPTIME ---'; uptime -p; uptime -s; ",
+                "echo '--- SESSION ENV ---'; echo TYPE=$XDG_SESSION_TYPE ",
+                "DESKTOP=$XDG_CURRENT_DESKTOP SESSION=$DESKTOP_SESSION ",
+                "WAYLAND=$WAYLAND_DISPLAY DISPLAY=$DISPLAY; ",
+                "echo '--- TTY/USER PROCS (top 25 by count) ---'; ",
+                "ps -u $USER -o comm= | sort | uniq -c | sort -rn | head -25\n",
+                "Mode: mutating\nBackground: no",
+            ),
+            vec![
+                "Yes".to_owned(),
+                "Yes, allow for this session".to_owned(),
+                "No".to_owned(),
+            ],
+            None,
+            reply,
+        ));
+        let mut terminal = Terminal::new(TestBackend::new(94, 30)).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("3. No"));
+        assert!(rendered.contains("Enter select"));
+        assert!(!rendered.contains("more below"));
+    }
+
+    #[test]
+    fn live_shell_status_remains_visible_above_a_long_transcript() {
+        let mut state = ChatViewState::default();
+        state.transcript.push(TranscriptEntry::new(
+            TranscriptRole::Assistant,
+            "Earlier output\n".repeat(80),
+        ));
+        state.status = vec![
+            "  ● Running 1 shell command…".to_owned(),
+            "    └ ⠋ [run_shell] Running command: sleep 1".to_owned(),
+            "  Unpacking…".to_owned(),
+        ];
+        let mut terminal = Terminal::new(TestBackend::new(94, 30)).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Running 1 shell command"));
+        assert!(rendered.contains("[run_shell] Running command"));
     }
 
     fn point(column: u16, row: u16) -> ScreenPoint {
@@ -2764,6 +3079,55 @@ mod dialog_tests {
         assert_eq!(state.thought_modal.as_ref().unwrap().scroll, 1);
         route_mouse_wheel(&mut state, event::MouseEventKind::ScrollDown);
         assert_eq!(state.thought_modal.as_ref().unwrap().scroll, 4);
+    }
+
+    #[test]
+    fn back_to_bottom_appears_only_while_scrolled_up_and_click_returns_to_latest() {
+        let mut state = ChatViewState::default();
+        state.push_user(
+            (0..60)
+                .map(|n| format!("line {n}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let mut button = None;
+        terminal.draw(|frame| button = state.render(frame)).unwrap();
+        assert!(button.is_none());
+
+        state.scroll_from_bottom = 10;
+        terminal.draw(|frame| button = state.render(frame)).unwrap();
+        let area = button.expect("button should appear above the composer");
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Back to bottom"));
+        assert!(!activate_back_to_bottom(
+            &mut state,
+            button,
+            event::MouseEventKind::Down(event::MouseButton::Left),
+            ScreenPoint {
+                row: area.y,
+                column: area.x.saturating_sub(1)
+            },
+        ));
+        assert_eq!(state.scroll_from_bottom, 10);
+        assert!(activate_back_to_bottom(
+            &mut state,
+            button,
+            event::MouseEventKind::Down(event::MouseButton::Left),
+            ScreenPoint {
+                row: area.y,
+                column: area.x
+            },
+        ));
+        assert_eq!(state.scroll_from_bottom, 0);
+        terminal.draw(|frame| button = state.render(frame)).unwrap();
+        assert!(button.is_none());
     }
 
     #[test]

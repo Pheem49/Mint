@@ -384,6 +384,7 @@ mint
 # Or fallback: npm run cli
 ```
 This opens the Mint interactive shell, where you can type prompts naturally or use `/commands` (like `/help`, `/cd`, `/clear`, `/exit`).
+Press F6 at the prompt to confirm a switch between the full-screen TUI and Classic CLI without leaving the current conversation. You can also start directly in Classic mode with `mint --classic`.
 
 ---
 

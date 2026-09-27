@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use std::time::{Duration, Instant};
 
@@ -530,12 +530,11 @@ pub async fn run_code_agent_with_options(
     let thinking_verb = random_thinking_verb();
     let approval_active = Arc::new(AtomicBool::new(false));
     let agent_done = Arc::new(AtomicBool::new(false));
-    // True between a tool starting and finishing — tells the periodic timer
+    // Number of tools between start and finish — tells the periodic timer
     // below not to overwrite the live status with "Thinking (Xs)…" text
-    // while a tool (e.g. a shell command) is actually the thing in flight,
-    // without stopping it from still re-rendering (so the bullets keep
-    // pulsing) while that's happening.
-    let tool_running = Arc::new(AtomicBool::new(false));
+    // while any tool (e.g. a shell command) is still in flight. A count is
+    // needed because parallel tools may finish at different times.
+    let tool_running = Arc::new(AtomicUsize::new(0));
     let live_status = Arc::new(Mutex::new(LiveStatus::default()));
     {
         use crossterm::tty::IsTty;
@@ -798,7 +797,7 @@ pub async fn run_code_agent_with_options(
                     if timer_agent_done.load(Ordering::Relaxed) {
                         break;
                     }
-                    if !timer_tool_running.load(Ordering::Relaxed) {
+                    if timer_tool_running.load(Ordering::Relaxed) == 0 {
                         status.thinking = Some(
                             if let Some((attempt, max_attempts)) = status.waiting_for_network {
                                 waiting_for_network_label(attempt, max_attempts)
@@ -846,6 +845,7 @@ pub async fn run_code_agent_with_options(
             } => {
                 if !options.fast_mode
                     && !progress_approval_active.load(Ordering::Relaxed)
+                    && progress_tool_running.load(Ordering::Relaxed) == 0
                     && let Ok(mut status) = progress_live_status.lock()
                 {
                     status.context_pct = context_pct;
@@ -894,6 +894,7 @@ pub async fn run_code_agent_with_options(
             } => {
                 if !options.fast_mode
                     && !progress_approval_active.load(Ordering::Relaxed)
+                    && progress_tool_running.load(Ordering::Relaxed) == 0
                     && let Ok(mut status) = progress_live_status.lock()
                 {
                     status.waiting_for_network = Some((attempt, max_attempts));
@@ -906,7 +907,10 @@ pub async fn run_code_agent_with_options(
                     && !progress_approval_active.load(Ordering::Relaxed)
                     && let Ok(mut status) = progress_live_status.lock()
                 {
-                    commit_activity_snapshot(&mut status);
+                    commit_activity_snapshot_if_idle(
+                        &mut status,
+                        progress_tool_running.load(Ordering::Relaxed),
+                    );
                     let elapsed = started_at.elapsed();
                     print_timeline_note(&mut status, &thought, elapsed, None);
                     status.thinking = None;
@@ -934,7 +938,10 @@ pub async fn run_code_agent_with_options(
                     && !progress_approval_active.load(Ordering::Relaxed)
                     && let Ok(mut status) = progress_live_status.lock()
                 {
-                    commit_activity_snapshot(&mut status);
+                    commit_activity_snapshot_if_idle(
+                        &mut status,
+                        progress_tool_running.load(Ordering::Relaxed),
+                    );
                     let elapsed = elapsed_ms
                         .map(Duration::from_millis)
                         .unwrap_or_else(|| started_at.elapsed());
@@ -953,8 +960,10 @@ pub async fn run_code_agent_with_options(
                 input,
                 subagent,
             } => {
-                progress_tool_running.store(true, Ordering::Relaxed);
-                if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
+                progress_tool_running.fetch_add(1, Ordering::Relaxed);
+                if !options.fast_mode
+                    && (options.tui.is_some() || !progress_approval_active.load(Ordering::Relaxed))
+                {
                     if let Ok(mut status) = progress_live_status.lock() {
                         status.active_tool_started = Some(std::time::Instant::now());
                     }
@@ -1031,9 +1040,18 @@ pub async fn run_code_agent_with_options(
                 result,
                 subagent,
             } => {
-                progress_tool_running.store(false, Ordering::Relaxed);
-                if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
-                    if let Ok(mut status) = progress_live_status.lock() {
+                let remaining = progress_tool_running
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |running| {
+                        Some(running.saturating_sub(1))
+                    })
+                    .unwrap_or(0)
+                    .saturating_sub(1);
+                if !options.fast_mode
+                    && (options.tui.is_some() || !progress_approval_active.load(Ordering::Relaxed))
+                {
+                    if remaining == 0
+                        && let Ok(mut status) = progress_live_status.lock()
+                    {
                         status.active_tool_started = None;
                     }
                     if subagent.is_some() {
