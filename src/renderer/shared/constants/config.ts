@@ -5,6 +5,7 @@
 
 export const DEFAULT_CONFIG = {
   theme: 'dark',
+  tuiTheme: 'dark' as 'system' | 'dark' | 'light',
   accentColor: '#10b981',
   systemTextColor: '#f8fafc',
   chatTextColor: '#f8fafc',
@@ -164,6 +165,12 @@ export const DEFAULT_CONFIG = {
 
   // Custom Model Selections per Provider
   customModelSelections: {} as Record<string, string>,
+}
+
+export const migrateTuiTheme = <T extends Record<string, any>>(config: T): T & { tuiTheme: 'system' | 'dark' | 'light' } => {
+  const legacyTheme = config.tuiTheme || config.theme
+  const tuiTheme = legacyTheme === 'system' || legacyTheme === 'light' ? legacyTheme : 'dark'
+  return { ...config, tuiTheme }
 }
 
 /**

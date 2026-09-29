@@ -99,6 +99,11 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
   ]
 
   const currentAccent = (config.accentColor || '').toLowerCase()
+  const TUI_MODES = [
+    { id: 'system', name: 'Auto', description: 'Use terminal colors' },
+    { id: 'dark', name: 'Dark', description: 'Dark terminal palette' },
+    { id: 'light', name: 'Light', description: 'Light terminal palette' },
+  ] as const
 
   return (
     <div className="tab-pane active">
@@ -367,6 +372,50 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
             </div>
           )}
         </div>
+      </section>
+
+      <section className="setting-section">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Terminal</p>
+            <h2 className="section-title">TUI theme</h2>
+            <p className="section-subtitle">Choose the appearance of Mint Agent in your terminal independently of Web and Desktop.</p>
+          </div>
+        </div>
+        <div className="tui-theme-grid" role="radiogroup" aria-label="TUI theme">
+          {TUI_MODES.map((mode) => {
+            const selected = config.tuiTheme === mode.id
+            return (
+              <button
+                key={mode.id}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                className={`tui-theme-card ${selected ? 'active' : ''}`}
+                onClick={() => updateField('tuiTheme', mode.id)}
+              >
+                <span className="tui-theme-preview" data-tui-theme={mode.id} aria-hidden="true">
+                  <span className="tui-theme-code-row">
+                    <span className="tui-theme-code-gutter">1&nbsp;&nbsp;</span>
+                    <span className="tui-theme-code-keyword">fn</span>{' greet() {'}
+                  </span>
+                  <span className="tui-theme-code-row tui-theme-code-removed">
+                    <span className="tui-theme-code-gutter">2 -</span>{' println!("Hello, World!");'}
+                  </span>
+                  <span className="tui-theme-code-row tui-theme-code-added">
+                    <span className="tui-theme-code-gutter">2 +</span>{' println!("Hello, Mint!");'}
+                  </span>
+                  <span className="tui-theme-code-row">
+                    <span className="tui-theme-code-gutter">3&nbsp;&nbsp;</span>{'}'}
+                  </span>
+                </span>
+                <span className="tui-theme-card-label">{mode.name}{selected && <span aria-hidden="true"> ✓</span>}</span>
+                <span className="tui-theme-card-description">{mode.description}</span>
+              </button>
+            )
+          })}
+        </div>
+        <p className="tui-theme-hint">A new TUI session uses this setting. In an open session, use /theme to change it immediately.</p>
       </section>
 
       {/* ── Section 3: Typography & Scale ── */}

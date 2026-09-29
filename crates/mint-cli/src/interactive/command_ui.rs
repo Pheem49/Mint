@@ -49,6 +49,18 @@ pub trait CommandUi {
         body: &str,
         options: &[ChoiceItem],
     ) -> Result<Option<usize>>;
+    fn prompt_theme(&mut self, _current: usize) -> Result<Option<usize>> {
+        self.prompt_choice(
+            "Theme",
+            "Choose the text style that looks best with your terminal",
+            &[
+                ChoiceItem::new("Auto (match terminal)", "system"),
+                ChoiceItem::new("Dark mode", "dark"),
+                ChoiceItem::new("Light mode", "light"),
+            ],
+        )
+    }
+    fn set_theme(&mut self, _theme: crate::terminal_theme::TuiTheme) {}
     fn prompt_resume_picker(
         &mut self,
         sessions: Vec<mint_core::ChatSession>,
@@ -119,6 +131,16 @@ impl<'a> FullScreenCommandUi<'a> {
 }
 
 impl CommandUi for FullScreenCommandUi<'_> {
+    fn prompt_theme(&mut self, current: usize) -> Result<Option<usize>> {
+        self.terminal.prompt_theme(self.handle, current)
+    }
+
+    fn set_theme(&mut self, theme: crate::terminal_theme::TuiTheme) {
+        if let Ok(mut state) = self.state.lock() {
+            state.theme = theme;
+        }
+    }
+
     fn push_notice_str(&mut self, text: &str) {
         self.handle.push_notice(text);
     }

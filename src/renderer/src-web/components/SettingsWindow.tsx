@@ -42,7 +42,7 @@ export type {
   CustomProviderConfig,
 } from '../../shared/types'
 
-import { DEFAULT_CONFIG } from '../../shared/constants/config'
+import { DEFAULT_CONFIG, migrateTuiTheme } from '../../shared/constants/config'
 export { DEFAULT_CONFIG }
 import { applyThemeStyles } from '../../shared/utils/ui'
 import { APP_VERSION } from '../../shared/version'
@@ -269,7 +269,7 @@ export default function SettingsWindow() {
         }
         
         if (loadedConfig) {
-          const merged = { ...DEFAULT_CONFIG, ...loadedConfig }
+          const merged = { ...DEFAULT_CONFIG, ...migrateTuiTheme(loadedConfig) }
           setConfig(merged)
           
           // sync helper custom models

@@ -351,6 +351,7 @@ pub async fn handle_slash_command(
             | "/jobs"
             | "/shells"
             | "/palette"
+            | "/theme"
             | "/image"
             | "/paste"
             | "/avatar"
@@ -556,6 +557,29 @@ pub async fn handle_slash_command(
                 }
                 Some(SlashResult::Handled)
             }
+        }
+
+        "/theme" => {
+            let current = crate::terminal_theme::TuiTheme::from_config(&session.config.tui_theme);
+            match ui.prompt_theme(current.index()) {
+                Ok(Some(index)) => {
+                    let selected = crate::terminal_theme::TuiTheme::from_index(index);
+                    let previous = std::mem::replace(
+                        &mut session.config.tui_theme,
+                        selected.config_value().to_owned(),
+                    );
+                    if let Err(error) = mint_core::save_config(&session.config) {
+                        session.config.tui_theme = previous;
+                        ui.report_error(&error.into());
+                    } else {
+                        ui.set_theme(selected);
+                        ui.push_notice(format!("Theme: {}", selected.label()));
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => ui.report_error(&error),
+            }
+            Some(SlashResult::Handled)
         }
 
         "/palette" => {

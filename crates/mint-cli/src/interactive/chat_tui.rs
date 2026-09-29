@@ -149,6 +149,88 @@ fn mint_m_watermark(frame: Option<u8>, height: usize) -> Text<'static> {
     Text::from(lines)
 }
 
+fn theme_picker_lines(dialog: &DialogState, height: u16) -> Vec<Line<'static>> {
+    let selected = crate::terminal_theme::TuiTheme::from_index(dialog.selected);
+    let colors = crate::terminal_theme::preview_colors(selected);
+    let mut lines = vec![
+        Line::styled(
+            " Theme",
+            Style::default()
+                .fg(crate::terminal_theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(format!(" {}", dialog.body)),
+        Line::raw(""),
+    ];
+    for (index, label) in dialog.options.iter().enumerate() {
+        let focused = index == dialog.selected;
+        let active = dialog.theme_picker == Some(index);
+        let style = Style::default()
+            .fg(if focused {
+                crate::terminal_theme::ACCENT
+            } else {
+                crate::terminal_theme::TEXT
+            })
+            .add_modifier(if focused {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            });
+        lines.push(Line::from(vec![
+            Span::styled(if focused { " › " } else { "   " }, style),
+            Span::styled(format!("{}. {label}", index + 1), style),
+            Span::styled(
+                if active { "  ✓" } else { "" },
+                Style::default().fg(crate::terminal_theme::ACCENT),
+            ),
+        ]));
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        format!(" Preview · {}", selected.label()),
+        Style::default().fg(crate::terminal_theme::MUTED),
+    ));
+    let sample = Style::default()
+        .fg(colors.text)
+        .bg(colors.background);
+    lines.push(Line::from(vec![
+        Span::styled(" 1  ", sample.fg(colors.muted)),
+        Span::styled("fn", sample.fg(colors.keyword)),
+        Span::styled(" greet() {", sample),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled(
+            " 2 -",
+            sample.fg(colors.removed).bg(colors.removed_background),
+        ),
+        Span::styled(
+            " println!(\"Hello, World!\");",
+            sample.fg(colors.removed).bg(colors.removed_background),
+        ),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled(
+            " 2 +",
+            sample.fg(colors.added).bg(colors.added_background),
+        ),
+        Span::styled(
+            " println!(\"Hello, Mint!\");",
+            sample.fg(colors.added).bg(colors.added_background),
+        ),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled(" 3  ", sample.fg(colors.muted)),
+        Span::styled("}", sample),
+    ]));
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        " ↑/↓ preview · 1-3 select · Enter apply · Esc cancel",
+        Style::default().fg(crate::terminal_theme::MUTED),
+    ));
+    lines.truncate(height.saturating_sub(1) as usize);
+    lines
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TranscriptRole {
     User,
@@ -245,6 +327,7 @@ pub(crate) struct ChatViewState {
     thought_modal: Option<ThoughtModalState>,
     watermark_frame: u8,
     watermark_animating: bool,
+    pub(crate) theme: crate::terminal_theme::TuiTheme,
 }
 
 #[derive(Debug)]
@@ -258,6 +341,7 @@ pub(crate) struct DialogState {
     pub checked: Option<Vec<bool>>,
     pub input: Option<Vec<char>>,
     pub resume_picker: Option<ResumePickerDialog>,
+    pub theme_picker: Option<usize>,
     pub reply: mpsc::Sender<DialogAnswer>,
 }
 
@@ -298,6 +382,7 @@ impl DialogState {
             checked,
             input: None,
             resume_picker: None,
+            theme_picker: None,
             reply,
         }
     }
@@ -317,6 +402,7 @@ impl DialogState {
             checked: None,
             input: Some(Vec::new()),
             resume_picker: None,
+            theme_picker: None,
             reply,
         }
     }
@@ -353,6 +439,26 @@ impl DialogState {
                 only_current_branch: false,
                 sort_by_created: false,
             }),
+            theme_picker: None,
+            reply,
+        }
+    }
+
+    pub fn new_theme_picker(active: usize, reply: mpsc::Sender<DialogAnswer>) -> Self {
+        Self {
+            title: "Theme".to_owned(),
+            body: "Choose the text style that looks best with your terminal".to_owned(),
+            options: ["Auto (match terminal)", "Dark mode", "Light mode"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            filter: Vec::new(),
+            selected: active.min(2),
+            scroll_offset: 0,
+            checked: None,
+            input: None,
+            resume_picker: None,
+            theme_picker: Some(active.min(2)),
             reply,
         }
     }
@@ -553,6 +659,9 @@ impl DialogState {
                         .modifiers
                         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
                 {
+                    if self.theme_picker.is_some() {
+                        return None;
+                    }
                     self.filter.push(c);
                     self.selected = 0;
                     self.scroll_offset = 0;
@@ -935,6 +1044,7 @@ impl ChatViewState {
             provider: format_provider_display_name(&session.config.ai_provider, &session.config),
             workspace: format_workspace_with_branch(&session.current_dir),
             current_dir: session.current_dir.clone(),
+            theme: crate::terminal_theme::TuiTheme::from_config(&session.config.tui_theme),
             plan_mode: session.plan_mode,
             history: session.history.clone(),
             ..Self::default()
@@ -1401,7 +1511,9 @@ impl ChatViewState {
         let dialog_height = if let Some(dialog) = &self.dialog {
             let filtered_len = dialog.filtered_indices().len();
             let max_allowed = main_area.height.saturating_sub(7);
-            if dialog.resume_picker.is_some() {
+            if dialog.theme_picker.is_some() {
+                15.min(max_allowed)
+            } else if dialog.resume_picker.is_some() {
                 let visible_rows = filtered_len.clamp(1, 24);
                 (8 + visible_rows as u16).min(max_allowed)
             } else {
@@ -1715,7 +1827,16 @@ impl ChatViewState {
             frame.render_widget(Paragraph::new(visible_lines), rows[2]);
         }
         if let Some(dialog) = &self.dialog {
-            if dialog.resume_picker.is_some() {
+            if dialog.theme_picker.is_some() {
+                frame.render_widget(
+                    Paragraph::new(theme_picker_lines(dialog, rows[3].height)).block(
+                        Block::default()
+                            .borders(Borders::TOP)
+                            .border_style(Style::default().fg(crate::terminal_theme::MUTED)),
+                    ),
+                    rows[3],
+                );
+            } else if dialog.resume_picker.is_some() {
                 let lines = resume_picker_lines(dialog, rows[3].width, rows[3].height);
                 frame.render_widget(
                     Paragraph::new(lines).block(
@@ -2676,6 +2797,7 @@ impl ChatTui {
             if !invalidated {
                 apply_mouse_selection(frame.buffer_mut(), selection);
             }
+            crate::terminal_theme::apply_tui_theme(frame.buffer_mut(), state.theme);
         })?;
         self.last_frame = Some(completed.buffer.clone());
         self.back_to_bottom_area = areas.back_to_bottom;
@@ -3223,6 +3345,29 @@ impl ChatTui {
         let (reply, response) = mpsc::channel();
         if let Ok(mut state) = handle.state.lock() {
             state.dialog = Some(DialogState::new_choice(title, body, options, None, reply));
+        }
+        loop {
+            if let Ok(state) = handle.state.lock() {
+                self.draw_state(&state)?;
+            }
+            if let Ok(answer) = response.try_recv() {
+                return Ok(match answer {
+                    DialogAnswer::Choice(index) => Some(index),
+                    _ => None,
+                });
+            }
+            if event::poll(std::time::Duration::from_millis(50))?
+                && let Ok(mut state) = handle.state.lock()
+            {
+                self.handle_dialog_event(event::read()?, &mut state)?;
+            }
+        }
+    }
+
+    pub fn prompt_theme(&mut self, handle: &TuiHandle, current: usize) -> Result<Option<usize>> {
+        let (reply, response) = mpsc::channel();
+        if let Ok(mut state) = handle.state.lock() {
+            state.dialog = Some(DialogState::new_theme_picker(current, reply));
         }
         loop {
             if let Ok(state) = handle.state.lock() {

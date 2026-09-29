@@ -436,6 +436,9 @@ Overhauled session management in the CLI to give every conversation its own isol
   - Integrated `/resume` dispatch in `slashCommandProcessor.ts` and `MintDashboard.tsx` to hot-swap active conversations seamlessly on Desktop and Web.
 # Unreleased
 
+- Matched the Web/Desktop TUI theme cards' previews to the `/theme` code sample, including syntax colors and added/removed diff rows.
+- Separated the TUI color choice into `tuiTheme`, preserving the previous terminal choice when loading older configs. Web and Desktop Theme & UI now offer Auto, Dark, and Light TUI previews without changing their own appearance.
+- Added `/theme` to the Full-Screen TUI with Auto, Dark, and Light choices, a changing color preview, and saved theme selection.
 - Fixed the Mint watermark's front M by making the emblem face opaque to its rear leaf pattern, so the two symbols no longer overlap.
 - Set the terminal tab/window title to `Mint Agent | <workspace>` while the Full-Screen TUI is active.
 - Replaced the empty CLI chat wordmark with a layered dotted Mint emblem: an M on the front, a leaf on the back, and a shaded circular rim. Clicking rotates it once in 3D; clicking during the turn restarts it.

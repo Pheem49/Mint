@@ -37,10 +37,16 @@ pub enum ConfigError {
     },
 }
 
+fn missing_tui_theme() -> String {
+    String::new()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct MintConfig {
     pub theme: String,
+    #[serde(default = "missing_tui_theme")]
+    pub tui_theme: String,
     pub accent_color: String,
     pub language: String,
     pub assistant_mode: String,
@@ -375,6 +381,7 @@ impl Default for MintConfig {
         ];
         Self {
             theme: "dark".into(),
+            tui_theme: "dark".into(),
             accent_color: "#10b981".into(),
             language: "th-TH".into(),
             assistant_mode: "chat".into(),
@@ -1078,6 +1085,12 @@ fn load_config_from(path: &Path) -> Result<MintConfig, ConfigError> {
             path: path.to_path_buf(),
             source,
         })?;
+    if config.tui_theme.is_empty() {
+        config.tui_theme = match config.theme.as_str() {
+            "system" | "light" => config.theme.clone(),
+            _ => "dark".to_owned(),
+        };
+    }
     for (key, value) in runtime_extra_defaults() {
         config.extra.entry(key).or_insert(value);
     }

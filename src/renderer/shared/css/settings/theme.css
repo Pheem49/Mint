@@ -1,5 +1,128 @@
 /* settings/theme.css — split from settings.css, rules kept in original order */
 
+.tui-theme-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.tui-theme-card {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--input-bg);
+    color: var(--text-main);
+    text-align: left;
+    cursor: pointer;
+}
+
+.tui-theme-card:hover,
+.tui-theme-card:focus-visible {
+    border-color: var(--border-light);
+}
+
+.tui-theme-card.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.tui-theme-preview {
+    display: block;
+    min-height: 80px;
+    padding: 7px 4px;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(128, 128, 128, 0.28);
+    font: 10px/1.55 monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    background: var(--tui-preview-bg);
+    color: var(--tui-preview-text);
+}
+
+.tui-theme-preview[data-tui-theme="system"],
+.tui-theme-preview[data-tui-theme="dark"] {
+    --tui-preview-bg: #1d2221;
+    --tui-preview-text: #e2eae4;
+    --tui-preview-muted: #86948b;
+    --tui-preview-keyword: #7eb0f5;
+    --tui-preview-added: #69e6a6;
+    --tui-preview-added-bg: #183725;
+    --tui-preview-removed: #ee7e7e;
+    --tui-preview-removed-bg: #391e1e;
+}
+
+.tui-theme-preview[data-tui-theme="light"] {
+    --tui-preview-bg: #f4f7f4;
+    --tui-preview-text: #232f2a;
+    --tui-preview-muted: #69746d;
+    --tui-preview-keyword: #18639f;
+    --tui-preview-added: #156f3e;
+    --tui-preview-added-bg: #ddefe1;
+    --tui-preview-removed: #ab3737;
+    --tui-preview-removed-bg: #f8e5e5;
+}
+
+.tui-theme-code-row {
+    display: block;
+    overflow: hidden;
+    text-overflow: clip;
+}
+
+.tui-theme-code-gutter {
+    color: var(--tui-preview-muted);
+}
+
+.tui-theme-code-keyword {
+    color: var(--tui-preview-keyword);
+}
+
+.tui-theme-code-removed {
+    background: var(--tui-preview-removed-bg);
+    color: var(--tui-preview-removed);
+}
+
+.tui-theme-code-added {
+    background: var(--tui-preview-added-bg);
+    color: var(--tui-preview-added);
+}
+
+.tui-theme-code-removed .tui-theme-code-gutter {
+    color: var(--tui-preview-removed);
+}
+
+.tui-theme-code-added .tui-theme-code-gutter {
+    color: var(--tui-preview-added);
+}
+
+.tui-theme-card-label {
+    font-size: 0.86rem;
+    font-weight: 700;
+}
+
+.tui-theme-card-label span {
+    color: var(--accent);
+}
+
+.tui-theme-card-description,
+.tui-theme-hint {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+}
+
+.tui-theme-hint {
+    margin: 10px 0 0;
+}
+
+@media (max-width: 680px) {
+    .tui-theme-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 .theme-segmented {
     display: inline-flex;
     justify-self: end;
