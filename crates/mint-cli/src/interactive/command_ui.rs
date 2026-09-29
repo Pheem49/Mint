@@ -148,7 +148,8 @@ impl CommandUi for FullScreenCommandUi<'_> {
                 None => opt.label.clone(),
             })
             .collect::<Vec<_>>();
-        self.terminal.prompt_choice(self.handle, title, body, labels)
+        self.terminal
+            .prompt_choice(self.handle, title, body, labels)
     }
 
     fn prompt_resume_picker(
@@ -195,10 +196,7 @@ impl CommandUi for FullScreenCommandUi<'_> {
     }
 
     fn prompt_confirm(&mut self, question: &str, default: bool) -> Result<bool> {
-        let options = vec![
-            ChoiceItem::new("Yes", "yes"),
-            ChoiceItem::new("No", "no"),
-        ];
+        let options = vec![ChoiceItem::new("Yes", "yes"), ChoiceItem::new("No", "no")];
         let default_idx = if default { 0 } else { 1 };
         match self.prompt_choice(question, "", &options)? {
             Some(idx) => Ok(idx == 0),
@@ -284,7 +282,11 @@ impl CommandUi for ClassicCommandUi {
         if options.is_empty() {
             return Ok(Some(Vec::new()));
         }
-        println!("\n\x1b[38;2;78;201;216m{title}\x1b[0m");
+        println!(
+            "\n{}{title}{}",
+            crate::terminal_theme::ANSI_ACCENT,
+            crate::terminal_theme::ANSI_RESET
+        );
         for (i, opt) in options.iter().enumerate() {
             if let Some(desc) = &opt.description {
                 println!("  [{}] {} — \x1b[90m{desc}\x1b[0m", i + 1, opt.label);

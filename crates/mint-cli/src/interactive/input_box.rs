@@ -1,3 +1,4 @@
+
 use super::*;
 use ansi_to_tui::IntoText;
 
@@ -105,7 +106,7 @@ pub enum MentionKind {
 impl MentionKind {
     pub fn badge(&self) -> (&'static str, &'static str) {
         match self {
-            MentionKind::Context => ("[Context]", "\x1b[36m"),
+            MentionKind::Context => ("[Context]", crate::terminal_theme::ANSI_BLUE),
             MentionKind::Plugin => ("[Plugin]", "\x1b[32m"),
             MentionKind::File => ("[File]", "\x1b[33m"),
             MentionKind::Folder => ("[Folder]", "\x1b[34m"),

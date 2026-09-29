@@ -21,6 +21,7 @@ mod plugins_cli;
 mod setup;
 mod skills;
 mod subagent_wizard;
+pub(crate) mod terminal_theme;
 mod updater;
 
 pub use commands::Command;
@@ -29,13 +30,13 @@ pub use interactive::{
     run_interactive_chat, run_interactive_chat_with_options,
 };
 
-pub const RESET: &str = "\x1b[0m";
-pub const BOLD: &str = "\x1b[1m";
-pub const MINT: &str = "\x1b[32m";
-pub const BLUE: &str = "\x1b[38;2;78;201;216m";
-pub const DIM: &str = "\x1b[90m";
-pub const ERROR: &str = "\x1b[31m";
-pub const WARN: &str = "\x1b[33m";
+pub const RESET: &str = terminal_theme::ANSI_RESET;
+pub const BOLD: &str = terminal_theme::ANSI_BOLD;
+pub const MINT: &str = terminal_theme::ANSI_ACCENT;
+pub const BLUE: &str = terminal_theme::ANSI_BLUE;
+pub const DIM: &str = terminal_theme::ANSI_MUTED;
+pub const ERROR: &str = terminal_theme::ANSI_ERROR;
+pub const WARN: &str = terminal_theme::ANSI_WARNING;
 
 pub(crate) async fn run_code_agent_with_saved_image(
     task: &str,

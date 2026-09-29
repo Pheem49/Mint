@@ -1,3 +1,5 @@
+const ANSI_BLUE: &str = crate::terminal_theme::ANSI_BLUE;
+
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -599,7 +601,7 @@ fn print_options(options: &[ToolOption], cursor: usize) {
         };
         if i == cursor {
             println!(
-                "  \x1b[36m❯\x1b[0m {} \x1b[36m{}\x1b[0m",
+                "  {ANSI_BLUE}❯\x1b[0m {} {ANSI_BLUE}{}\x1b[0m",
                 checkbox, opt.name
             );
         } else {
@@ -612,7 +614,7 @@ fn print_options(options: &[ToolOption], cursor: usize) {
 fn print_run_options(options: &[ToolOption], cursor: usize) {
     for (i, opt) in options.iter().enumerate() {
         if i == cursor {
-            println!("  \x1b[36m❯\x1b[0m \x1b[36m{}\x1b[0m", opt.name);
+            println!("  {ANSI_BLUE}❯\x1b[0m {ANSI_BLUE}{}\x1b[0m", opt.name);
         } else {
             println!("    {}", opt.name);
         }
@@ -622,9 +624,9 @@ fn print_run_options(options: &[ToolOption], cursor: usize) {
 
 fn redraw_phase_1(options: &[ToolOption], cursor: usize) {
     print!("\x1b[2J\x1b[1;1H");
-    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("{ANSI_BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("\x1b[32m       Mint CLI Tool Manager Wizard\x1b[0m");
-    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("{ANSI_BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("Configure which agent tools are enabled or disabled:");
     println!(
         "  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Space: Toggle | a: All | i: Invert | Enter: Confirm]\x1b[0m"
@@ -635,9 +637,9 @@ fn redraw_phase_1(options: &[ToolOption], cursor: usize) {
 
 fn redraw_phase_2(options: &[ToolOption], cursor: usize) {
     print!("\x1b[2J\x1b[1;1H");
-    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("{ANSI_BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("\x1b[32m       Configure Native Plugins Access\x1b[0m");
-    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("{ANSI_BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("Select which native plugins are allowed to run:");
     println!(
         "  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Space: Toggle | a: All | i: Invert | Enter: Confirm]\x1b[0m"
@@ -648,9 +650,9 @@ fn redraw_phase_2(options: &[ToolOption], cursor: usize) {
 
 fn redraw_phase_3(options: &[ToolOption], cursor: usize) {
     print!("\x1b[2J\x1b[1;1H");
-    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("{ANSI_BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("\x1b[32m       Choose where to run Mint AI Agent\x1b[0m");
-    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("{ANSI_BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("Select the environment you want to launch:");
     println!("  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Enter: Confirm]\x1b[0m");
     println!();

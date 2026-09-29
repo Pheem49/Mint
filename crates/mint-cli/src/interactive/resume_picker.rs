@@ -1,7 +1,7 @@
 use super::*;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::tty::IsTty;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use std::path::Path;
@@ -273,24 +273,24 @@ pub fn prompt_resume_session_picker(
                 lines.push(Line::from(vec![Span::styled(
                     "Rename session title:",
                     Style::default()
-                        .fg(Color::White)
+                        .fg(crate::terminal_theme::TEXT)
                         .add_modifier(Modifier::BOLD),
                 )]));
                 lines.push(Line::from(vec![
-                    Span::styled("> ", Style::default().fg(Color::Gray)),
+                    Span::styled("> ", Style::default().fg(crate::terminal_theme::SUBTLE)),
                     Span::raw(&rename_query_clone),
-                    Span::styled("█", Style::default().fg(Color::White)),
+                    Span::styled("█", Style::default().fg(crate::terminal_theme::TEXT)),
                 ]));
                 lines.push(Line::from(vec![Span::styled(
                     "(Press Enter to save, Esc to cancel)",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(crate::terminal_theme::MUTED),
                 )]));
 
                 let block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .title(" Rename Session ")
-                    .border_style(Style::default().fg(Color::Gray));
+                    .border_style(Style::default().fg(crate::terminal_theme::SUBTLE));
                 let p = Paragraph::new(lines).block(block);
                 frame.render_widget(p, area);
                 return;
@@ -301,16 +301,19 @@ pub fn prompt_resume_session_picker(
                 let target_session = filtered[selected_idx];
                 let mut lines = Vec::new();
                 lines.push(Line::from(vec![
-                    Span::styled("Session: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        "Session: ",
+                        Style::default().fg(crate::terminal_theme::MUTED),
+                    ),
                     Span::styled(
                         &target_session.title,
                         Style::default()
-                            .fg(Color::White)
+                            .fg(crate::terminal_theme::TEXT)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         format!(" ({})", target_session.id),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(crate::terminal_theme::MUTED),
                     ),
                 ]));
                 lines.push(Line::from(""));
@@ -319,7 +322,7 @@ pub fn prompt_resume_session_picker(
                     if recent.is_empty() {
                         lines.push(Line::from(Span::styled(
                             "  (No messages recorded in this session)",
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(crate::terminal_theme::MUTED),
                         )));
                     } else {
                         for item in recent.iter().rev() {
@@ -329,16 +332,19 @@ pub fn prompt_resume_session_picker(
                                 Span::styled(
                                     "  User › ",
                                     Style::default()
-                                        .fg(Color::Gray)
+                                        .fg(crate::terminal_theme::SUBTLE)
                                         .add_modifier(Modifier::BOLD),
                                 ),
                                 Span::raw(u_snippet.replace('\n', " ")),
                             ]));
                             lines.push(Line::from(vec![
-                                Span::styled("  Assistant › ", Style::default().fg(Color::Gray)),
+                                Span::styled(
+                                    "  Assistant › ",
+                                    Style::default().fg(crate::terminal_theme::SUBTLE),
+                                ),
                                 Span::styled(
                                     a_snippet.replace('\n', " "),
-                                    Style::default().fg(Color::White),
+                                    Style::default().fg(crate::terminal_theme::TEXT),
                                 ),
                             ]));
                             lines.push(Line::from(""));
@@ -348,14 +354,14 @@ pub fn prompt_resume_session_picker(
 
                 lines.push(Line::from(Span::styled(
                     "Press Space or Esc to close preview · Enter to resume",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(crate::terminal_theme::MUTED),
                 )));
 
                 let block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .title(" Session Preview ")
-                    .border_style(Style::default().fg(Color::Gray));
+                    .border_style(Style::default().fg(crate::terminal_theme::SUBTLE));
                 let p = Paragraph::new(lines).block(block);
                 frame.render_widget(p, area);
                 return;
@@ -366,15 +372,15 @@ pub fn prompt_resume_session_picker(
             lines.push(Line::styled(
                 "Resume a previous session",
                 Style::default()
-                    .fg(Color::White)
+                    .fg(crate::terminal_theme::TEXT)
                     .add_modifier(Modifier::BOLD),
             ));
 
             let active_filter_style = Style::default()
-                .fg(Color::Black)
-                .bg(Color::Gray)
+                .fg(crate::terminal_theme::SELECTION_TEXT)
+                .bg(crate::terminal_theme::SELECTION_BACKGROUND)
                 .add_modifier(Modifier::BOLD);
-            let muted_style = Style::default().fg(Color::DarkGray);
+            let muted_style = Style::default().fg(crate::terminal_theme::MUTED);
             let mut filter_line = vec![
                 Span::styled("Project: ", muted_style),
                 Span::styled(
@@ -439,19 +445,19 @@ pub fn prompt_resume_session_picker(
                 search_query_clone.clone()
             };
             lines.push(Line::from(vec![
-                Span::styled("⌕  ", Style::default().fg(Color::Gray)),
+                Span::styled("⌕  ", Style::default().fg(crate::terminal_theme::SUBTLE)),
                 Span::styled(
                     search_text,
                     if search_query_clone.is_empty() {
                         muted_style
                     } else {
-                        Style::default().fg(Color::White)
+                        Style::default().fg(crate::terminal_theme::TEXT)
                     },
                 ),
                 if search_query_clone.is_empty() {
                     Span::raw("")
                 } else {
-                    Span::styled("█", Style::default().fg(Color::White))
+                    Span::styled("█", Style::default().fg(crate::terminal_theme::TEXT))
                 },
             ]));
 
@@ -471,7 +477,7 @@ pub fn prompt_resume_session_picker(
             ));
             lines.push(Line::styled(
                 "─".repeat(area.width as usize),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(crate::terminal_theme::MUTED),
             ));
 
             // One compact row per session keeps long titles from colliding with metadata.
@@ -504,11 +510,11 @@ pub fn prompt_resume_session_picker(
                         lines.push(Line::styled(format!("›{}", &row[1..]), active_filter_style));
                     } else {
                         lines.push(Line::from(vec![
-                            Span::styled("  ", Style::default().fg(Color::Gray)),
+                            Span::styled("  ", Style::default().fg(crate::terminal_theme::SUBTLE)),
                             Span::styled(format!("{time:>10}  "), muted_style),
                             Span::styled(
                                 format!("{title}{current_tag}"),
-                                Style::default().fg(Color::White),
+                                Style::default().fg(crate::terminal_theme::TEXT),
                             ),
                             Span::styled(format!("  {count}"), muted_style),
                             Span::raw(" ".repeat((area.width as usize).saturating_sub(row_width))),

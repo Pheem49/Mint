@@ -1,5 +1,13 @@
 use super::*;
 
+const ANSI_ACCENT: &str = crate::terminal_theme::ANSI_ACCENT;
+const ANSI_BLUE: &str = crate::terminal_theme::ANSI_BLUE;
+const ANSI_ACCENT_BOLD: &str = crate::terminal_theme::ANSI_ACCENT_BOLD;
+const ANSI_MUTED: &str = crate::terminal_theme::ANSI_MUTED;
+const ANSI_WARNING: &str = crate::terminal_theme::ANSI_WARNING;
+const ANSI_ERROR: &str = crate::terminal_theme::ANSI_ERROR;
+const ANSI_BOLD: &str = crate::terminal_theme::ANSI_BOLD;
+
 /// Kept deliberately short (not spanning the full terminal width): the
 /// already-ANSI-colored line gets re-wrapped by `textwrap` in
 /// `render_live_summary`, which counts escape-code bytes toward width, so a
@@ -40,7 +48,7 @@ pub(super) fn start_code_highlighter(lang: &str) -> Option<HighlightLines<'stati
         return None;
     }
     let syntax = SYNTAX_SET.find_syntax_by_token(lang)?;
-    let theme = &THEME_SET.themes["base16-ocean.dark"];
+    let theme = &THEME_SET.themes[crate::terminal_theme::SYNTAX_THEME];
     Some(HighlightLines::new(syntax, theme))
 }
 
@@ -80,15 +88,15 @@ fn render_cli_ui_grid(json_str: &str, term_width: usize) -> Option<Vec<String>> 
         .unwrap_or("OPTIONS");
     let mut lines = Vec::new();
     lines.push(format!(
-        "\x1b[38;2;56;189;248m┌─ {title} {}\x1b[0m",
+            "{ANSI_BLUE}┌─ {title} {}{RESET}",
         "─".repeat(dashes)
     ));
 
     if let Some(subtitle) = val.get("subtitle").and_then(|v| v.as_str()) {
         lines.push(format!(
-            "\x1b[38;2;56;189;248m│\x1b[0m \x1b[90m{subtitle}\x1b[0m"
+            "{ANSI_BLUE}│{RESET} {ANSI_MUTED}{subtitle}{RESET}"
         ));
-        lines.push(format!("\x1b[38;2;56;189;248m│\x1b[0m"));
+        lines.push(format!("{ANSI_BLUE}│{RESET}"));
     }
 
     for (idx, item) in items.iter().enumerate() {
@@ -97,28 +105,25 @@ fn render_cli_ui_grid(json_str: &str, term_width: usize) -> Option<Vec<String>> 
         let item_badge = item.get("badge").and_then(|v| v.as_str());
 
         let badge_str = if let Some(b) = item_badge {
-            format!(" \x1b[1;38;2;52;211;153m[{b}]\x1b[0m")
+            format!(" {ANSI_ACCENT_BOLD}[{b}]{RESET}")
         } else {
             String::new()
         };
 
         lines.push(format!(
-            "\x1b[38;2;56;189;248m│\x1b[0m \x1b[38;2;56;189;248m[◆]\x1b[0m \x1b[1m{item_title}\x1b[0m{badge_str}"
+            "{ANSI_BLUE}│{RESET} {ANSI_BLUE}[◆]{RESET} {ANSI_BOLD}{item_title}{RESET}{badge_str}"
         ));
         if !item_desc.is_empty() {
             lines.push(format!(
-                "\x1b[38;2;56;189;248m│\x1b[0m     \x1b[90m{item_desc}\x1b[0m"
+                "{ANSI_BLUE}│{RESET}     {ANSI_MUTED}{item_desc}{RESET}"
             ));
         }
         if idx < items.len() - 1 {
-            lines.push(format!("\x1b[38;2;56;189;248m│\x1b[0m"));
+            lines.push(format!("{ANSI_BLUE}│{RESET}"));
         }
     }
 
-    lines.push(format!(
-        "\x1b[38;2;56;189;248m└{}\x1b[0m",
-        "─".repeat(dashes + 4)
-    ));
+    lines.push(format!("{ANSI_BLUE}└{}{RESET}", "─".repeat(dashes + 4)));
     Some(lines)
 }
 
@@ -147,33 +152,30 @@ fn render_cli_ui_card(json_str: &str, term_width: usize) -> Option<Vec<String>> 
         let badge = item.get("badge").and_then(|v| v.as_str());
 
         let badge_str = if let Some(b) = badge {
-            format!(" \x1b[1;38;2;52;211;153m[{b}]\x1b[0m")
+            format!(" {ANSI_ACCENT_BOLD}[{b}]{RESET}")
         } else {
             String::new()
         };
 
         lines.push(format!(
-            "\x1b[38;2;52;211;153m┌─ \x1b[1m{title}\x1b[0m{badge_str} {}\x1b[0m",
+            "{ANSI_ACCENT}┌─ {ANSI_BOLD}{title}{RESET}{badge_str} {}{RESET}",
             "─".repeat(dashes.saturating_sub(title.len() + 2))
         ));
 
         if let Some(sub) = subtitle {
-            lines.push(format!("\x1b[38;2;52;211;153m│\x1b[0m {sub}"));
+            lines.push(format!("{ANSI_ACCENT}│{RESET} {sub}"));
         }
 
         if let Some(details) = item.get("details").and_then(|v| v.as_object()) {
             for (k, v) in details {
                 let val_str = v.as_str().unwrap_or("");
                 lines.push(format!(
-                    "\x1b[38;2;52;211;153m│\x1b[0m   \x1b[1m{k}:\x1b[0m {val_str}"
+                    "{ANSI_ACCENT}│{RESET}   {ANSI_BOLD}{k}:{RESET} {val_str}"
                 ));
             }
         }
 
-        lines.push(format!(
-            "\x1b[38;2;52;211;153m└{}\x1b[0m",
-            "─".repeat(dashes + 4)
-        ));
+        lines.push(format!("{ANSI_ACCENT}└{}{RESET}", "─".repeat(dashes + 4)));
         if idx < items.len() - 1 {
             lines.push(String::new());
         }
@@ -202,40 +204,35 @@ fn render_cli_ui_mockup(json_str: &str, term_width: usize) -> Option<Vec<String>
     let mut lines = Vec::new();
 
     lines.push(format!(
-        "\x1b[38;2;192;132;252m┌─ [MOCKUP] \x1b[1m{title}\x1b[0m {}\x1b[0m",
+        "{ANSI_BLUE}┌─ [MOCKUP] {ANSI_BOLD}{title}{RESET} {}{RESET}",
         "─".repeat(dashes.saturating_sub(title.len() + 10))
     ));
 
     if let Some(sub) = subtitle {
-        lines.push(format!(
-            "\x1b[38;2;192;132;252m│\x1b[0m \x1b[90m{sub}\x1b[0m"
-        ));
+        lines.push(format!("{ANSI_BLUE}│{RESET} {ANSI_MUTED}{sub}{RESET}"));
     }
 
     lines.push(format!(
-        "\x1b[38;2;192;132;252m│\x1b[0m  \x1b[90m┌─ Dropzone ────────────────────────┐\x1b[0m"
+        "{ANSI_BLUE}│{RESET}  {ANSI_MUTED}┌─ Dropzone ────────────────────────┐{RESET}"
     ));
-    lines.push(format!("\x1b[38;2;192;132;252m│\x1b[0m  \x1b[90m│\x1b[0m \x1b[38;2;56;189;248m[↑]\x1b[0m {dropzone_text}         \x1b[90m│\x1b[0m"));
+    lines.push(format!("{ANSI_BLUE}│{RESET}  {ANSI_MUTED}│{RESET} {ANSI_BLUE}[↑]{RESET} {dropzone_text}         {ANSI_MUTED}│{RESET}"));
     lines.push(format!(
-        "\x1b[38;2;192;132;252m│\x1b[0m  \x1b[90m└───────────────────────────────────┘\x1b[0m"
+        "{ANSI_BLUE}│{RESET}  {ANSI_MUTED}└───────────────────────────────────┘{RESET}"
     ));
 
     if let Some(metrics) = val.get("metrics").and_then(|v| v.as_object()) {
         for (k, v) in metrics {
             let val_str = v.as_str().unwrap_or("");
             lines.push(format!(
-                "\x1b[38;2;192;132;252m│\x1b[0m   \x1b[90m{k}:\x1b[0m \x1b[1m{val_str}\x1b[0m"
+                "{ANSI_BLUE}│{RESET}   {ANSI_MUTED}{k}:{RESET} {ANSI_BOLD}{val_str}{RESET}"
             ));
         }
     }
 
     lines.push(format!(
-        "\x1b[38;2;192;132;252m│\x1b[0m  \x1b[90mℹ {disclaimer}\x1b[0m"
+        "{ANSI_BLUE}│{RESET}  {ANSI_MUTED}ℹ {disclaimer}{RESET}"
     ));
-    lines.push(format!(
-        "\x1b[38;2;192;132;252m└{}\x1b[0m",
-        "─".repeat(dashes + 4)
-    ));
+    lines.push(format!("{ANSI_BLUE}└{}{RESET}", "─".repeat(dashes + 4)));
 
     Some(lines)
 }
@@ -412,7 +409,7 @@ pub(crate) fn format_markdown_bold(text: &str) -> String {
         if is_hr && trimmed.len() >= 3 {
             active_alert_color = None;
             let hr_width = term_width.clamp(20, 50);
-            formatted_lines.push(format!("\x1b[38;2;75;85;99m{}\x1b[0m", "─".repeat(hr_width)));
+            formatted_lines.push(format!("{ANSI_MUTED}{}{RESET}", "─".repeat(hr_width)));
             continue;
         }
 
@@ -427,61 +424,62 @@ pub(crate) fn format_markdown_bold(text: &str) -> String {
             };
             let upper = quote_content.to_uppercase();
             if upper.starts_with("[!NOTE]") {
-                active_alert_color = Some("\x1b[38;2;56;189;248m");
+                active_alert_color = Some(crate::terminal_theme::ANSI_BLUE);
                 let body = quote_content[7..].trim();
                 if body.is_empty() {
-                    formatted_lines.push("\x1b[38;2;56;189;248m│ NOTE:\x1b[0m".to_string());
+                    formatted_lines.push(format!("{}│ NOTE:{RESET}", crate::terminal_theme::ANSI_BLUE));
                 } else {
                     formatted_lines.push(format!(
-                        "\x1b[38;2;56;189;248m│ NOTE:\x1b[0m {}",
+                        "{}│ NOTE:{RESET} {}",
+                        crate::terminal_theme::ANSI_BLUE,
                         process_inline_bold(body)
                     ));
                 }
                 continue;
             } else if upper.starts_with("[!TIP]") {
-                active_alert_color = Some("\x1b[38;2;52;211;153m");
+                active_alert_color = Some(ANSI_ACCENT);
                 let body = quote_content[6..].trim();
                 if body.is_empty() {
-                    formatted_lines.push("\x1b[38;2;52;211;153m│ TIP:\x1b[0m".to_string());
+                    formatted_lines.push(format!("{ANSI_ACCENT}│ TIP:{RESET}"));
                 } else {
                     formatted_lines.push(format!(
-                        "\x1b[38;2;52;211;153m│ TIP:\x1b[0m {}",
+                        "{ANSI_ACCENT}│ TIP:{RESET} {}",
                         process_inline_bold(body)
                     ));
                 }
                 continue;
             } else if upper.starts_with("[!IMPORTANT]") {
-                active_alert_color = Some("\x1b[38;2;192;132;252m");
+                active_alert_color = Some(ANSI_ACCENT);
                 let body = quote_content[12..].trim();
                 if body.is_empty() {
-                    formatted_lines.push("\x1b[38;2;192;132;252m│ IMPORTANT:\x1b[0m".to_string());
+                    formatted_lines.push(format!("{ANSI_ACCENT}│ IMPORTANT:{RESET}"));
                 } else {
                     formatted_lines.push(format!(
-                        "\x1b[38;2;192;132;252m│ IMPORTANT:\x1b[0m {}",
+                        "{ANSI_ACCENT}│ IMPORTANT:{RESET} {}",
                         process_inline_bold(body)
                     ));
                 }
                 continue;
             } else if upper.starts_with("[!WARNING]") {
-                active_alert_color = Some("\x1b[38;2;251;191;36m");
+                active_alert_color = Some(ANSI_WARNING);
                 let body = quote_content[10..].trim();
                 if body.is_empty() {
-                    formatted_lines.push("\x1b[38;2;251;191;36m│ WARNING:\x1b[0m".to_string());
+                    formatted_lines.push(format!("{ANSI_WARNING}│ WARNING:{RESET}"));
                 } else {
                     formatted_lines.push(format!(
-                        "\x1b[38;2;251;191;36m│ WARNING:\x1b[0m {}",
+                        "{ANSI_WARNING}│ WARNING:{RESET} {}",
                         process_inline_bold(body)
                     ));
                 }
                 continue;
             } else if upper.starts_with("[!CAUTION]") {
-                active_alert_color = Some("\x1b[38;2;248;113;113m");
+                active_alert_color = Some(ANSI_ERROR);
                 let body = quote_content[10..].trim();
                 if body.is_empty() {
-                    formatted_lines.push("\x1b[38;2;248;113;113m│ CAUTION:\x1b[0m".to_string());
+                    formatted_lines.push(format!("{ANSI_ERROR}│ CAUTION:{RESET}"));
                 } else {
                     formatted_lines.push(format!(
-                        "\x1b[38;2;248;113;113m│ CAUTION:\x1b[0m {}",
+                        "{ANSI_ERROR}│ CAUTION:{RESET} {}",
                         process_inline_bold(body)
                     ));
                 }
@@ -489,12 +487,12 @@ pub(crate) fn format_markdown_bold(text: &str) -> String {
             } else if is_quote {
                 if let Some(color) = active_alert_color {
                     formatted_lines.push(format!(
-                        "{color}│\x1b[0m {}",
+                        "{color}│{RESET} {}",
                         process_inline_bold(quote_content)
                     ));
                 } else {
                     formatted_lines.push(format!(
-                        "\x1b[38;2;100;116;139m│\x1b[0m \x1b[3m{}\x1b[0m",
+                        "{ANSI_MUTED}│{RESET} \x1b[3m{}{RESET}",
                         process_inline_bold(quote_content)
                     ));
                 }
@@ -527,7 +525,7 @@ pub(crate) fn format_markdown_bold(text: &str) -> String {
             let marker_len = marker_char.len_utf8();
             let mut new_line = String::new();
             new_line.push_str(&line[..leading_spaces]);
-            new_line.push_str("\x1b[38;2;56;189;248m•\x1b[0m");
+            new_line.push_str(&format!("{ANSI_BLUE}•{RESET}"));
             new_line.push_str(&line[leading_spaces + marker_len..]);
             formatted_line = process_inline_bold(&new_line);
         } else {
@@ -539,8 +537,8 @@ pub(crate) fn format_markdown_bold(text: &str) -> String {
                 let leading_spaces_str = &line[..leading_len];
                 let heading_text = trimmed[hash_count + 1..].trim_end();
                 let (style_start, style_end) = match hash_count {
-                    1 => ("\x1b[1m\x1b[4m\x1b[38;2;56;189;248m", RESET),
-                    2 => ("\x1b[1m\x1b[38;2;56;189;248m", RESET),
+                    1 => (crate::terminal_theme::ANSI_BLUE_BOLD, RESET),
+                    2 => (crate::terminal_theme::ANSI_BLUE_BOLD, RESET),
                     _ => (BRIGHT, RESET),
                 };
                 formatted_line = format!(
@@ -589,11 +587,11 @@ fn process_inline_badges(text: &str) -> String {
                 };
 
                 let fg = match color {
-                    "blue" => "\x1b[1;38;2;56;189;248m",
-                    "purple" => "\x1b[1;38;2;192;132;252m",
-                    "amber" | "yellow" => "\x1b[1;38;2;251;191;36m",
-                    "red" => "\x1b[1;38;2;248;113;113m",
-                    _ => "\x1b[1;38;2;52;211;153m",
+                    "blue" | "purple" => crate::terminal_theme::ANSI_BLUE_BOLD,
+
+                    "amber" | "yellow" => crate::terminal_theme::ANSI_WARNING_BOLD,
+                    "red" => crate::terminal_theme::ANSI_ERROR_BOLD,
+                    _ => ANSI_ACCENT_BOLD,
                 };
 
                 out.push_str(&format!("{fg}{label}{RESET}"));

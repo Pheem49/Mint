@@ -1,7 +1,7 @@
 use super::*;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::tty::IsTty;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use std::sync::Mutex;
@@ -116,13 +116,23 @@ pub fn show_thought_viewer(thought: &str, elapsed_str: &str) -> Result<()> {
     if !io::stdout().is_tty() || !io::stdin().is_tty() || thought.trim().is_empty() {
         println!();
         println!(
-            "\x1b[38;2;148;163;184m╭─ Thought Process ({elapsed_str}) ─────────────────────\x1b[0m"
+            "{}╭─ Thought Process ({elapsed_str}) ─────────────────────{}",
+            crate::terminal_theme::ANSI_MUTED,
+            crate::terminal_theme::ANSI_RESET
         );
         for line in thought.trim().lines() {
-            println!("\x1b[38;2;148;163;184m│\x1b[0m \x1b[38;2;203;213;225m{line}\x1b[0m");
+            println!(
+                "{}│{} {}{line}{}",
+                crate::terminal_theme::ANSI_MUTED,
+                crate::terminal_theme::ANSI_RESET,
+                crate::terminal_theme::ANSI_TEXT,
+                crate::terminal_theme::ANSI_RESET
+            );
         }
         println!(
-            "\x1b[38;2;148;163;184m╰──────────────────────────────────────────────────\x1b[0m"
+            "{}╰──────────────────────────────────────────────────{}",
+            crate::terminal_theme::ANSI_MUTED,
+            crate::terminal_theme::ANSI_RESET
         );
         println!();
         return Ok(());
@@ -189,16 +199,16 @@ pub fn show_thought_viewer(thought: &str, elapsed_str: &str) -> Result<()> {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Rgb(168, 85, 247)))
+            .border_style(Style::default().fg(crate::terminal_theme::ACCENT))
             .title(Span::styled(
                 format!(" Thought Process ({elapsed_str}) "),
                 Style::default()
-                    .fg(Color::Rgb(192, 132, 252))
+                    .fg(crate::terminal_theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ))
             .title_bottom(Span::styled(
                 scroll_hint,
-                Style::default().fg(Color::Rgb(148, 163, 184)),
+                Style::default().fg(crate::terminal_theme::MUTED),
             ));
 
         let visible = &wrapped_lines[scroll..(scroll + inner_height).min(wrapped_lines.len())];
@@ -206,7 +216,7 @@ pub fn show_thought_viewer(thought: &str, elapsed_str: &str) -> Result<()> {
         for l in visible {
             paragraph_lines.push(Line::from(vec![
                 Span::raw(" "),
-                Span::styled(l.clone(), Style::default().fg(Color::Rgb(203, 213, 225))),
+                Span::styled(l.clone(), Style::default().fg(crate::terminal_theme::TEXT)),
             ]));
         }
         for _ in visible.len()..inner_height {

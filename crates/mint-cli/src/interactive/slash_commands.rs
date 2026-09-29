@@ -1,3 +1,5 @@
+const ANSI_BLUE: &str = crate::terminal_theme::ANSI_BLUE;
+
 use super::*;
 
 fn is_reachable(host: &str, port: u16) -> bool {
@@ -2575,7 +2577,7 @@ pub async fn handle_slash_command(
                             } else if e.is_oauth {
                                 format!("{DIM}{:<22}{RESET}", plain_status)
                             } else {
-                                format!("\x1b[36m{:<22}\x1b[0m", plain_status)
+                                format!("{ANSI_BLUE}{:<22}\x1b[0m", plain_status)
                             };
                             println!(
                                 "  {BLUE}❯ {:<18}{RESET}{}  {DIM}{short_desc}{RESET}",

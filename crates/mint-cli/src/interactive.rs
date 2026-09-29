@@ -138,50 +138,17 @@ fn report_interactive_turn_error(tui: &Option<FullScreenUi>, error: &anyhow::Err
 
 fn apply_welcome_gradient(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
-    let count = chars.len();
-    if count == 0 {
-        return String::new();
-    }
-
-    // Gradient stops: Mint (105, 230, 166) -> Sky Blue (72, 202, 228) -> Deep Blue (0, 119, 182)
-    let stops = [
-        (105.0, 230.0, 166.0), // Mint Green
-        (72.0, 202.0, 228.0),  // Sky Blue
-        (0.0, 119.0, 182.0),   // Deep Blue
-    ];
-
     let mut result = String::new();
-    for (i, &c) in chars.iter().enumerate() {
+    for &c in &chars {
         if c == ' ' {
             result.push(c);
             continue;
         }
-        let t = if count > 1 {
-            i as f32 / (count - 1) as f32
-        } else {
-            0.0
-        };
-
-        let (r, g, b) = if t <= 0.5 {
-            let local_t = t * 2.0;
-            let r = stops[0].0 + (stops[1].0 - stops[0].0) * local_t;
-            let g = stops[0].1 + (stops[1].1 - stops[0].1) * local_t;
-            let b = stops[0].2 + (stops[1].2 - stops[0].2) * local_t;
-            (r, g, b)
-        } else {
-            let local_t = (t - 0.5) * 2.0;
-            let r = stops[1].0 + (stops[2].0 - stops[1].0) * local_t;
-            let g = stops[1].1 + (stops[2].1 - stops[1].1) * local_t;
-            let b = stops[1].2 + (stops[2].2 - stops[1].2) * local_t;
-            (r, g, b)
-        };
-
         result.push_str(&format!(
-            "\x1b[38;2;{};{};{}m{}\x1b[0m",
-            r.round() as u8,
-            g.round() as u8,
-            b.round() as u8,
-            c
+            "{}{}{}",
+            crate::terminal_theme::ANSI_ACCENT,
+            c,
+            crate::terminal_theme::ANSI_RESET
         ));
     }
     result

@@ -29,19 +29,19 @@ use diff_render::*;
 pub(crate) use live_status::*;
 pub(crate) use markdown_render::*;
 
-const RESET: &str = "\x1b[0m";
-const MINT: &str = "\x1b[32m";
-const GREEN: &str = "\x1b[32m";
-const RED: &str = "\x1b[31m";
-const YELLOW: &str = "\x1b[33m";
-const BLUE: &str = "\x1b[38;2;78;201;216m";
-const CYAN: &str = "\x1b[38;2;56;189;248m";
-const DIM: &str = "\x1b[90m";
-const BRIGHT: &str = "\x1b[1;97m";
-const WHITE: &str = "\x1b[97m";
-const BOLD: &str = "\x1b[1m";
-const BG_ADD: &str = "\x1b[48;2;20;53;32m\x1b[38;2;166;226;46m";
-const BG_DEL: &str = "\x1b[48;2;61;23;23m\x1b[38;2;255;121;121m";
+const RESET: &str = crate::terminal_theme::ANSI_RESET;
+const MINT: &str = crate::terminal_theme::ANSI_ACCENT;
+const GREEN: &str = crate::terminal_theme::ANSI_ACCENT;
+const RED: &str = crate::terminal_theme::ANSI_ERROR;
+const YELLOW: &str = crate::terminal_theme::ANSI_WARNING;
+const BLUE: &str = crate::terminal_theme::ANSI_BLUE;
+const CYAN: &str = crate::terminal_theme::ANSI_BLUE;
+const DIM: &str = crate::terminal_theme::ANSI_MUTED;
+const BRIGHT: &str = crate::terminal_theme::ANSI_BRIGHT_TEXT;
+const WHITE: &str = crate::terminal_theme::ANSI_TEXT;
+const BOLD: &str = crate::terminal_theme::ANSI_BOLD;
+const BG_ADD: &str = crate::terminal_theme::ANSI_ADD;
+const BG_DEL: &str = crate::terminal_theme::ANSI_DELETE;
 
 #[derive(Debug, Clone, Default)]
 pub struct AgentOptions {
@@ -1148,7 +1148,12 @@ pub async fn run_code_agent_with_options(
                 if let Ok(mut status) = progress_live_status.lock() {
                     status.thinking = None;
                     status.waiting_for_network = None;
-                    let mut card = format!("\x1b[1;36m┌─ Plan: {} \x1b[0m\n", plan.objective);
+                    let mut card = format!(
+                        "{}┌─ Plan: {} {}\n",
+                        crate::terminal_theme::ANSI_ACCENT_BOLD,
+                        plan.objective,
+                        crate::terminal_theme::ANSI_RESET
+                    );
                     for task in &plan.tasks {
                         let mark = match task.status.as_str() {
                             "completed" => "\x1b[32m[✓]\x1b[0m",
@@ -1158,7 +1163,11 @@ pub async fn run_code_agent_with_options(
                         };
                         card.push_str(&format!("│  {} {}\n", mark, task.title));
                     }
-                    card.push_str("\x1b[1;36m└────────────────────────────────────────\x1b[0m");
+                    card.push_str(&format!(
+                        "{}└────────────────────────────────────────{}",
+                        crate::terminal_theme::ANSI_ACCENT_BOLD,
+                        crate::terminal_theme::ANSI_RESET
+                    ));
                     status.tasks.push(card.into());
                     render_live_status(&mut status);
                 }

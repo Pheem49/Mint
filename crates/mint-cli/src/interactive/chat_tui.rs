@@ -12,7 +12,7 @@ use ratatui::{
     backend::CrosstermBackend,
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Position, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
         Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
@@ -210,7 +210,10 @@ impl DialogState {
         active_chat_id: String,
         reply: mpsc::Sender<DialogAnswer>,
     ) -> Self {
-        let options = sessions.iter().map(|session| session.title.clone()).collect();
+        let options = sessions
+            .iter()
+            .map(|session| session.title.clone())
+            .collect();
         let show_all_projects = !sessions
             .iter()
             .any(|session| session.workspace_path.as_deref() == Some(&current_workspace));
@@ -489,10 +492,10 @@ fn resume_picker_lines(dialog: &DialogState, width: u16, height: u16) -> Vec<Lin
     let filtered = dialog.filtered_indices();
     let count = filtered.len();
     let total = picker.sessions.len();
-    let muted = Style::default().fg(Color::DarkGray);
+    let muted = Style::default().fg(crate::terminal_theme::MUTED);
     let selected_chip = Style::default()
-        .fg(Color::Black)
-        .bg(Color::Gray)
+        .fg(crate::terminal_theme::SELECTION_TEXT)
+        .bg(crate::terminal_theme::SELECTION_BACKGROUND)
         .add_modifier(Modifier::BOLD);
     let selected_position = if count == 0 {
         0
@@ -504,7 +507,7 @@ fn resume_picker_lines(dialog: &DialogState, width: u16, height: u16) -> Vec<Lin
         Span::styled(
             "Resume Session",
             Style::default()
-                .fg(Color::White)
+                .fg(crate::terminal_theme::TEXT)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(format!(" ({selected_position}/{count})"), muted),
@@ -514,29 +517,53 @@ fn resume_picker_lines(dialog: &DialogState, width: u16, height: u16) -> Vec<Lin
         Span::styled("Project: ", muted),
         Span::styled(
             " Cwd ",
-            if picker.show_all_projects { muted } else { selected_chip },
+            if picker.show_all_projects {
+                muted
+            } else {
+                selected_chip
+            },
         ),
         Span::styled(
             " All ",
-            if picker.show_all_projects { selected_chip } else { muted },
+            if picker.show_all_projects {
+                selected_chip
+            } else {
+                muted
+            },
         ),
         Span::styled("  ·  Branch: ", muted),
         Span::styled(
             " All ",
-            if picker.only_current_branch { muted } else { selected_chip },
+            if picker.only_current_branch {
+                muted
+            } else {
+                selected_chip
+            },
         ),
         Span::styled(
             " Current ",
-            if picker.only_current_branch { selected_chip } else { muted },
+            if picker.only_current_branch {
+                selected_chip
+            } else {
+                muted
+            },
         ),
         Span::styled("  ·  Sort: ", muted),
         Span::styled(
             " Updated ",
-            if picker.sort_by_created { muted } else { selected_chip },
+            if picker.sort_by_created {
+                muted
+            } else {
+                selected_chip
+            },
         ),
         Span::styled(
             " Created ",
-            if picker.sort_by_created { selected_chip } else { muted },
+            if picker.sort_by_created {
+                selected_chip
+            } else {
+                muted
+            },
         ),
     ];
     if picker.only_current_branch && picker.current_branch.is_none() {
@@ -546,7 +573,7 @@ fn resume_picker_lines(dialog: &DialogState, width: u16, height: u16) -> Vec<Lin
 
     let query: String = dialog.filter.iter().collect();
     lines.push(Line::from(vec![
-        Span::styled("⌕  ", Style::default().fg(Color::Gray)),
+        Span::styled("⌕  ", Style::default().fg(crate::terminal_theme::SUBTLE)),
         Span::styled(
             if query.is_empty() {
                 "Type to search".to_string()
@@ -556,13 +583,13 @@ fn resume_picker_lines(dialog: &DialogState, width: u16, height: u16) -> Vec<Lin
             if query.is_empty() {
                 muted
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(crate::terminal_theme::TEXT)
             },
         ),
         if query.is_empty() {
             Span::raw("")
         } else {
-            Span::styled("█", Style::default().fg(Color::White))
+            Span::styled("█", Style::default().fg(crate::terminal_theme::TEXT))
         },
     ]));
 
@@ -582,7 +609,7 @@ fn resume_picker_lines(dialog: &DialogState, width: u16, height: u16) -> Vec<Lin
     ));
     lines.push(Line::styled(
         "─".repeat(width as usize),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(crate::terminal_theme::MUTED),
     ));
 
     let available_rows = (height as usize).saturating_sub(8).max(1);
@@ -632,11 +659,11 @@ fn resume_picker_lines(dialog: &DialogState, width: u16, height: u16) -> Vec<Lin
                 let row = format!("  {time:>10}  {title}{current_tag}  {message_count}");
                 let row_width = UnicodeWidthStr::width(row.as_str());
                 lines.push(Line::from(vec![
-                    Span::styled("  ", Style::default().fg(Color::Gray)),
+                    Span::styled("  ", Style::default().fg(crate::terminal_theme::SUBTLE)),
                     Span::styled(format!("{time:>10}  "), muted),
                     Span::styled(
                         format!("{title}{current_tag}"),
-                        Style::default().fg(Color::White),
+                        Style::default().fg(crate::terminal_theme::TEXT),
                     ),
                     Span::styled(format!("  {message_count}"), muted),
                     Span::raw(" ".repeat((width as usize).saturating_sub(row_width))),
@@ -952,11 +979,11 @@ impl ChatViewState {
         let mut line_index = 0usize;
         for entry in &self.transcript {
             let role_header = match entry.role {
-                TranscriptRole::User => Some(("You", Color::Cyan)),
-                TranscriptRole::Assistant => Some(("Mint", Color::Green)),
+                TranscriptRole::User => Some(("You", crate::terminal_theme::BLUE)),
+                TranscriptRole::Assistant => Some(("Mint", crate::terminal_theme::ACCENT)),
                 TranscriptRole::Notice => None,
-                TranscriptRole::Command => Some(("Command", Color::Magenta)),
-                TranscriptRole::System => Some(("System", Color::Yellow)),
+                TranscriptRole::Command => Some(("Command", crate::terminal_theme::ACCENT)),
+                TranscriptRole::System => Some(("System", crate::terminal_theme::WARNING)),
             };
             if let Some((label, color)) = role_header {
                 let selected =
@@ -981,7 +1008,7 @@ impl ChatViewState {
                 if entry.role == TranscriptRole::Notice {
                     for span in &mut sel_line.spans {
                         if span.style.fg.is_none() {
-                            span.style = span.style.fg(Color::White);
+                            span.style = span.style.fg(crate::terminal_theme::TEXT);
                         }
                     }
                 }
@@ -991,7 +1018,7 @@ impl ChatViewState {
                 if entry.role == TranscriptRole::Assistant {
                     for span in &mut sel_line.spans {
                         if span.style.fg.is_none() {
-                            span.style = span.style.fg(Color::White);
+                            span.style = span.style.fg(crate::terminal_theme::TEXT);
                         }
                     }
                 }
@@ -1061,61 +1088,16 @@ impl ChatViewState {
         } else {
             (self.status.len() as u16).min(8)
         };
-        fn gradient_logo_line(text: &str) -> Line<'static> {
-            let chars: Vec<char> = text.chars().collect();
-            let count = chars.len();
-            if count == 0 {
-                return Line::default();
-            }
-            // Gradient stops: Mint Green (105, 230, 166) -> Sky Blue (72, 202, 228) -> Deep Blue (0, 119, 182)
-            let stops = [
-                (105.0, 230.0, 166.0),
-                (72.0, 202.0, 228.0),
-                (0.0, 119.0, 182.0),
-            ];
-            let spans: Vec<Span<'static>> = chars
-                .iter()
-                .enumerate()
-                .map(|(i, &c)| {
-                    if c == ' ' {
-                        Span::raw(" ")
-                    } else {
-                        let t = if count > 1 {
-                            i as f32 / (count - 1) as f32
-                        } else {
-                            0.0
-                        };
-                        let (r, g, b) = if t <= 0.5 {
-                            let local_t = t * 2.0;
-                            let r = stops[0].0 + (stops[1].0 - stops[0].0) * local_t;
-                            let g = stops[0].1 + (stops[1].1 - stops[0].1) * local_t;
-                            let b = stops[0].2 + (stops[1].2 - stops[0].2) * local_t;
-                            (r, g, b)
-                        } else {
-                            let local_t = (t - 0.5) * 2.0;
-                            let r = stops[1].0 + (stops[2].0 - stops[1].0) * local_t;
-                            let g = stops[1].1 + (stops[2].1 - stops[1].1) * local_t;
-                            let b = stops[1].2 + (stops[2].2 - stops[1].2) * local_t;
-                            (r, g, b)
-                        };
-                        Span::styled(
-                            c.to_string(),
-                            Style::default().fg(Color::Rgb(
-                                r.round() as u8,
-                                g.round() as u8,
-                                b.round() as u8,
-                            )),
-                        )
-                    }
-                })
-                .collect();
-            Line::from(spans)
+        fn accent_logo_line(text: &str) -> Line<'static> {
+            Line::styled(
+                text.to_owned(),
+                Style::default().fg(crate::terminal_theme::ACCENT),
+            )
         }
-        /// Animated shimmer for the “Thinking (5s · …)” status line.
-        ///
-        /// The bright spot travels left-to-right across the text: the character at
-        /// `spot` (modulo text length) is rendered at full bright white, characters
-        /// nearby fade in/out using a cosine envelope, and the rest are a dim gray.
+
+
+
+        /// Animate emphasis with bold while keeping every character on the same accent color.
         fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
             // Split at the first " (" to isolate the verb from the timer suffix.
             let (verb, suffix) = if let Some(idx) = line.find(" (") {
@@ -1126,9 +1108,6 @@ impl ChatViewState {
 
             let chars: Vec<char> = verb.chars().collect();
             let count = chars.len();
-
-            // Bright spot position — full cycle every ~(count * 2) ticks so the
-            // shimmer takes a moment to complete a pass rather than zipping by.
             let period = (count * 2).max(16);
             let spot = (tick % period) as f32 / period as f32 * count as f32;
 
@@ -1136,17 +1115,13 @@ impl ChatViewState {
                 .iter()
                 .enumerate()
                 .map(|(i, &c)| {
-                    // Distance from the shimmer spot, normalised.
                     let dist = ((i as f32 - spot).abs() / (count as f32 * 0.35)).min(1.0);
-                    // Cosine envelope: 1.0 at centre of spot, 0.0 at edges.
-                    let brightness = ((1.0 - dist) * std::f32::consts::PI * 0.5).cos().powi(2);
-                    // Interpolate: dim gray (100, 100, 110) -> bright white (255, 255, 255).
-                    let r = (100.0 + 155.0 * brightness).round() as u8;
-                    let g = (100.0 + 155.0 * brightness).round() as u8;
-                    let b = (110.0 + 145.0 * brightness).round() as u8;
-                    let style = Style::default()
-                        .fg(Color::Rgb(r, g, b))
-                        .add_modifier(Modifier::BOLD);
+                    let style = Style::default().fg(crate::terminal_theme::ACCENT);
+                    let style = if dist < 0.35 {
+                        style.add_modifier(Modifier::BOLD)
+                    } else {
+                        style
+                    };
                     Span::styled(c.to_string(), style)
                 })
                 .collect();
@@ -1154,7 +1129,7 @@ impl ChatViewState {
             if !suffix.is_empty() {
                 spans.push(Span::styled(
                     suffix.to_string(),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(crate::terminal_theme::MUTED),
                 ));
             }
 
@@ -1163,7 +1138,10 @@ impl ChatViewState {
 
         fn format_tool_status_line(line: &str) -> Line<'static> {
             if line.trim_start().starts_with('│') {
-                return Line::styled(line.to_string(), Style::default().fg(Color::DarkGray));
+                return Line::styled(
+                    line.to_string(),
+                    Style::default().fg(crate::terminal_theme::MUTED),
+                );
             }
 
             let (prefix, rest) = if let Some(branch_pos) = line.find('└') {
@@ -1183,7 +1161,7 @@ impl ChatViewState {
                     } else {
                         "      ".to_string()
                     },
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(crate::terminal_theme::MUTED),
                 ));
             }
 
@@ -1192,7 +1170,7 @@ impl ChatViewState {
             let (icon_span, after_icon) = if first_char == Some('✓') {
                 let span = Span::styled(
                     "✓ ".to_string(),
-                    Style::default().fg(Color::Rgb(105, 230, 166)),
+                    Style::default().fg(crate::terminal_theme::ACCENT),
                 );
                 (Some(span), rest['✓'.len_utf8()..].trim_start())
             } else if let Some(c) = first_char
@@ -1201,7 +1179,7 @@ impl ChatViewState {
                 let span = Span::styled(
                     format!("{} ", c),
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(crate::terminal_theme::BLUE)
                         .add_modifier(Modifier::BOLD),
                 );
                 (Some(span), rest[c.len_utf8()..].trim_start())
@@ -1218,16 +1196,16 @@ impl ChatViewState {
                 let timer = &after_icon[timer_pos..];
                 spans.push(Span::styled(
                     text.to_string(),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(crate::terminal_theme::TEXT),
                 ));
                 spans.push(Span::styled(
                     timer.to_string(),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(crate::terminal_theme::MUTED),
                 ));
             } else {
                 spans.push(Span::styled(
                     after_icon.to_string(),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(crate::terminal_theme::TEXT),
                 ));
             }
 
@@ -1253,7 +1231,7 @@ impl ChatViewState {
                             spans.push(Span::styled(
                                 badge.to_string(),
                                 Style::default()
-                                    .fg(Color::Cyan)
+                                    .fg(crate::terminal_theme::BLUE)
                                     .add_modifier(Modifier::BOLD),
                             ));
                             i += end + 1;
@@ -1298,29 +1276,29 @@ impl ChatViewState {
                 let visible_rows = filtered_len.clamp(1, 24);
                 (8 + visible_rows as u16).min(max_allowed)
             } else {
-            let body_lines = if dialog.body.is_empty() {
-                0
-            } else {
-                dialog
-                    .body
-                    .lines()
-                    .map(|line| {
-                        Paragraph::new(format!(" {line}"))
-                            .wrap(Wrap { trim: false })
-                            .line_count(main_area.width.max(1))
-                    })
-                    .sum()
-            };
-            let filter_lines = if dialog.filter.is_empty() { 0 } else { 1 };
-            let content_lines = if dialog.input.is_some() {
-                3
-            } else {
-                filtered_len.max(1) + 3
-            };
-            // The top border consumes a row in addition to the title, body,
-            // spacer, options, and footer counted above.
-            let total = 1 + 1 + body_lines + filter_lines + 1 + content_lines;
-            (total as u16).min(max_allowed)
+                let body_lines = if dialog.body.is_empty() {
+                    0
+                } else {
+                    dialog
+                        .body
+                        .lines()
+                        .map(|line| {
+                            Paragraph::new(format!(" {line}"))
+                                .wrap(Wrap { trim: false })
+                                .line_count(main_area.width.max(1))
+                        })
+                        .sum()
+                };
+                let filter_lines = if dialog.filter.is_empty() { 0 } else { 1 };
+                let content_lines = if dialog.input.is_some() {
+                    3
+                } else {
+                    filtered_len.max(1) + 3
+                };
+                // The top border consumes a row in addition to the title, body,
+                // spacer, options, and footer counted above.
+                let total = 1 + 1 + body_lines + filter_lines + 1 + content_lines;
+                (total as u16).min(max_allowed)
             }
         } else {
             0
@@ -1405,10 +1383,10 @@ impl ChatViewState {
             ])
             .split(rows[0]);
         let logo = Text::from(vec![
-            gradient_logo_line(" __  __ _       _    ___ _    ___ "),
-            gradient_logo_line(r"|  \/  (_)_ __ | |_ / __| |  |_ _|"),
-            gradient_logo_line(r"| |\/| | | '_ \|  _| (__| |__ | | "),
-            gradient_logo_line(r"|_|  |_|_|_| |_|\__|\___|\___|___|"),
+            accent_logo_line(" __  __ _       _    ___ _    ___"),
+            accent_logo_line(r"|  \/  (_)_ __ | |_ / __| |  |_ _|"),
+            accent_logo_line(r"| |\/| | | '_ \|  _| (__| |__ | |"),
+            accent_logo_line(r"|_|  |_|_|_| |_|\___|\___|\___|___|"),
         ]);
         frame.render_widget(Paragraph::new(logo), header_columns[0]);
 
@@ -1418,7 +1396,7 @@ impl ChatViewState {
                 Span::styled(
                     "[Mint] ",
                     Style::default()
-                        .fg(Color::Rgb(105, 230, 166))
+                        .fg(crate::terminal_theme::ACCENT)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -1432,10 +1410,14 @@ impl ChatViewState {
             ]),
             Line::from(vec![
                 Span::raw(" "),
-                Span::styled(line2_text, Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    line2_text,
+                    Style::default().fg(crate::terminal_theme::MUTED),
+                ),
             ]),
         ]);
         let details_area = ratatui::layout::Rect {
+            y: rows[0].y,
             height: 4,
             ..header_columns[1]
         };
@@ -1444,7 +1426,7 @@ impl ChatViewState {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(Color::DarkGray)),
+                    .border_style(Style::default().fg(crate::terminal_theme::MUTED)),
             ),
             details_area,
         );
@@ -1470,6 +1452,28 @@ impl ChatViewState {
                 .scroll((scroll, 0)),
             rows[1],
         );
+        if self.transcript.is_empty() && self.dialog.is_none() && self.thought_modal.is_none() {
+            let watermark_height = 4u16;
+            let watermark_area = Rect::new(
+                rows[1].x,
+                rows[1].y + rows[1].height.saturating_sub(watermark_height) / 2,
+                rows[1].width,
+                watermark_height.min(rows[1].height),
+            );
+            let watermark_style = Style::default()
+                .fg(crate::terminal_theme::MUTED)
+                .add_modifier(Modifier::DIM);
+            let watermark = Text::from(vec![
+                Line::styled(" __  __ _       _    ___ _    ___ ", watermark_style),
+                Line::styled(r"|  \/  (_)_ __ | |_ / __| |  |_ _|", watermark_style),
+                Line::styled(r"| |\/| | | '_ \|  _| (__| |__ | | ", watermark_style),
+                Line::styled(r"|_|  |_|_|_| |_|\___|\___|\___|___|", watermark_style),
+            ]);
+            frame.render_widget(
+                Paragraph::new(watermark).alignment(ratatui::layout::Alignment::Center),
+                watermark_area,
+            );
+        }
         if max_scroll > 0 {
             let mut bar = ScrollbarState::new(total).position(scroll as usize);
             frame.render_stateful_widget(
@@ -1494,8 +1498,8 @@ impl ChatViewState {
             frame.render_widget(
                 Paragraph::new(BACK_TO_BOTTOM_LABEL).style(
                     Style::default()
-                        .fg(Color::Rgb(105, 230, 166))
-                        .bg(Color::Rgb(38, 48, 45))
+                        .fg(crate::terminal_theme::ACCENT)
+                        .bg(crate::terminal_theme::PANEL_BACKGROUND)
                         .add_modifier(Modifier::BOLD),
                 ),
                 area,
@@ -1543,13 +1547,13 @@ impl ChatViewState {
                                 Span::styled(
                                     bullet_char.to_string(),
                                     Style::default()
-                                        .fg(Color::Cyan)
+                                        .fg(crate::terminal_theme::BLUE)
                                         .add_modifier(Modifier::BOLD),
                                 ),
                                 Span::styled(
                                     text.to_string(),
                                     Style::default()
-                                        .fg(Color::White)
+                                        .fg(crate::terminal_theme::TEXT)
                                         .add_modifier(Modifier::BOLD),
                                 ),
                             ])
@@ -1557,7 +1561,7 @@ impl ChatViewState {
                             Line::styled(
                                 line.to_string(),
                                 Style::default()
-                                    .fg(Color::White)
+                                    .fg(crate::terminal_theme::TEXT)
                                     .add_modifier(Modifier::BOLD),
                             )
                         }
@@ -1567,7 +1571,7 @@ impl ChatViewState {
                         Line::styled(
                             line.to_string(),
                             Style::default()
-                                .fg(Color::White)
+                                .fg(crate::terminal_theme::TEXT)
                                 .add_modifier(Modifier::BOLD),
                         )
                     }
@@ -1584,256 +1588,285 @@ impl ChatViewState {
                     Paragraph::new(lines).block(
                         Block::default()
                             .borders(Borders::TOP)
-                            .border_style(Style::default().fg(Color::DarkGray)),
+                            .border_style(Style::default().fg(crate::terminal_theme::MUTED)),
                     ),
                     rows[3],
                 );
             } else {
-            let mut lines = Vec::new();
-            let filtered = dialog.filtered_indices();
-            let total_options = filtered.len();
-            let monochrome_picker = dialog.title == "Resume Session";
+                let mut lines = Vec::new();
+                let filtered = dialog.filtered_indices();
+                let total_options = filtered.len();
+                let monochrome_picker = dialog.title == "Resume Session";
 
-            let title_suffix = if dialog.input.is_none() && !dialog.options.is_empty() {
-                format!(
-                    " ({}/{})",
-                    (dialog.selected + 1).min(total_options),
-                    total_options
-                )
-            } else {
-                String::new()
-            };
+                let title_suffix = if dialog.input.is_none() && !dialog.options.is_empty() {
+                    format!(
+                        " ({}/{})",
+                        (dialog.selected + 1).min(total_options),
+                        total_options
+                    )
+                } else {
+                    String::new()
+                };
 
-            lines.push(Line::from(vec![
-                Span::raw(" "),
-                Span::styled(
-                    &dialog.title,
-                    Style::default()
-                        .fg(if monochrome_picker { Color::White } else { Color::Cyan })
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(title_suffix, Style::default().fg(Color::DarkGray)),
-            ]));
-
-            if !dialog.body.is_empty() {
-                for line in dialog.body.lines() {
-                    lines.push(Line::from(vec![
-                        Span::raw(" "),
-                        Span::styled(line.to_owned(), Style::default().fg(Color::DarkGray)),
-                    ]));
-                }
-            }
-
-            let mut filter_row_idx = None;
-            if !dialog.filter.is_empty() {
-                filter_row_idx = Some(lines.len());
-                let filter_str: String = dialog.filter.iter().collect();
-                lines.push(Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled("Filter: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        filter_str,
-                        Style::default()
-                            .fg(if monochrome_picker { Color::White } else { Color::Yellow })
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!(" ({total_options}/{})", dialog.options.len()),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                ]));
-            }
-
-            lines.push(Line::raw(""));
-
-            let mut input_cursor = None;
-            if let Some(input) = &dialog.input {
-                let input_text: String = input.iter().collect();
-                let input_row_idx = lines.len();
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        " › ",
-                        Style::default()
-                            .fg(Color::Rgb(105, 230, 166))
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(input_text.clone()),
-                    Span::styled("█", Style::default().fg(Color::Rgb(105, 230, 166))),
-                ]));
-                lines.push(Line::raw(""));
                 lines.push(Line::from(vec![
                     Span::raw(" "),
                     Span::styled(
-                        "Enter submit · Esc cancel",
-                        Style::default().fg(Color::DarkGray),
+                        &dialog.title,
+                        Style::default()
+                            .fg(if monochrome_picker {
+                                crate::terminal_theme::TEXT
+                            } else {
+                                crate::terminal_theme::BLUE
+                            })
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        title_suffix,
+                        Style::default().fg(crate::terminal_theme::MUTED),
                     ),
                 ]));
-                let visual_col = crate::markdown::unicode_width(&input_text);
-                input_cursor = Some((visual_col, input_row_idx));
-            } else {
-                let header_height = Paragraph::new(lines.clone())
-                    .wrap(Wrap { trim: false })
-                    .line_count(rows[3].width.max(1));
-                let footer_height = 3; // blank + hint + bottom padding
-                let inner_height = (rows[3].height as usize).saturating_sub(1);
-                let available_rows = inner_height.saturating_sub(header_height + footer_height);
-                // Show every choice when it fits. Reserve space for both
-                // scroll indicators only when the list exceeds the viewport.
-                let visible_rows = if total_options > available_rows {
-                    available_rows.saturating_sub(2).max(1)
-                } else {
-                    available_rows.max(1)
-                };
 
-                let scroll_offset = if dialog.selected < dialog.scroll_offset {
-                    dialog.selected
-                } else if dialog.selected >= dialog.scroll_offset + visible_rows {
-                    dialog.selected + 1 - visible_rows
-                } else {
-                    dialog.scroll_offset
-                };
-                let max_scroll = total_options.saturating_sub(visible_rows);
-                let scroll_offset = scroll_offset.min(max_scroll);
-
-                if total_options == 0 {
-                    lines.push(Line::from(vec![
-                        Span::raw("   "),
-                        Span::styled(
-                            "(No matching options)",
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                    ]));
-                } else {
-                    if scroll_offset > 0 {
+                if !dialog.body.is_empty() {
+                    for line in dialog.body.lines() {
                         lines.push(Line::from(vec![
-                            Span::raw("   "),
+                            Span::raw(" "),
                             Span::styled(
-                                format!("▲ {scroll_offset} more above"),
-                                Style::default().fg(Color::DarkGray),
+                                line.to_owned(),
+                                Style::default().fg(crate::terminal_theme::MUTED),
                             ),
                         ]));
                     }
+                }
 
-                    let end_idx = (scroll_offset + visible_rows).min(total_options);
-                    for idx in scroll_offset..end_idx {
-                        let original_idx = filtered[idx];
-                        let option_text = &dialog.options[original_idx];
-                        let is_selected = idx == dialog.selected;
+                let mut filter_row_idx = None;
+                if !dialog.filter.is_empty() {
+                    filter_row_idx = Some(lines.len());
+                    let filter_str: String = dialog.filter.iter().collect();
+                    lines.push(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(
+                            "Filter: ",
+                            Style::default().fg(crate::terminal_theme::MUTED),
+                        ),
+                        Span::styled(
+                            filter_str,
+                            Style::default()
+                                .fg(if monochrome_picker {
+                                    crate::terminal_theme::TEXT
+                                } else {
+                                    crate::terminal_theme::WARNING
+                                })
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!(" ({total_options}/{})", dialog.options.len()),
+                            Style::default().fg(crate::terminal_theme::MUTED),
+                        ),
+                    ]));
+                }
 
-                        let shortcut = if dialog.filter.is_empty() && idx < 9 {
-                            format!("{}. ", idx + 1)
-                        } else {
-                            "   ".to_string()
-                        };
+                lines.push(Line::raw(""));
 
-                        let marker = match &dialog.checked {
-                            Some(checked)
-                                if checked.get(original_idx).copied().unwrap_or(false) =>
-                            {
-                                "[✓] "
-                            }
-                            Some(_) => "[ ] ",
-                            None => "",
-                        };
+                let mut input_cursor = None;
+                if let Some(input) = &dialog.input {
+                    let input_text: String = input.iter().collect();
+                    let input_row_idx = lines.len();
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            " › ",
+                            Style::default()
+                                .fg(crate::terminal_theme::ACCENT)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(input_text.clone()),
+                        Span::styled("█", Style::default().fg(crate::terminal_theme::ACCENT)),
+                    ]));
+                    lines.push(Line::raw(""));
+                    lines.push(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(
+                            "Enter submit · Esc cancel",
+                            Style::default().fg(crate::terminal_theme::MUTED),
+                        ),
+                    ]));
+                    let visual_col = crate::markdown::unicode_width(&input_text);
+                    input_cursor = Some((visual_col, input_row_idx));
+                } else {
+                    let header_height = Paragraph::new(lines.clone())
+                        .wrap(Wrap { trim: false })
+                        .line_count(rows[3].width.max(1));
+                    let footer_height = 3; // blank + hint + bottom padding
+                    let inner_height = (rows[3].height as usize).saturating_sub(1);
+                    let available_rows = inner_height.saturating_sub(header_height + footer_height);
+                    // Show every choice when it fits. Reserve space for both
+                    // scroll indicators only when the list exceeds the viewport.
+                    let visible_rows = if total_options > available_rows {
+                        available_rows.saturating_sub(2).max(1)
+                    } else {
+                        available_rows.max(1)
+                    };
 
-                        let (label, desc) = if let Some((l, d)) = option_text.split_once(" — ") {
-                            (l, Some(d))
-                        } else if let Some((l, d)) = option_text.split_once('\t') {
-                            (l, Some(d))
-                        } else {
-                            (option_text.as_str(), None)
-                        };
+                    let scroll_offset = if dialog.selected < dialog.scroll_offset {
+                        dialog.selected
+                    } else if dialog.selected >= dialog.scroll_offset + visible_rows {
+                        dialog.selected + 1 - visible_rows
+                    } else {
+                        dialog.scroll_offset
+                    };
+                    let max_scroll = total_options.saturating_sub(visible_rows);
+                    let scroll_offset = scroll_offset.min(max_scroll);
 
-                        if is_selected {
-                            let selected_color = if monochrome_picker {
-                                Color::Black
-                            } else {
-                                Color::Rgb(105, 230, 166)
-                            };
-                            let selected_style = if monochrome_picker {
-                                Style::default()
-                                    .fg(Color::Black)
-                                    .bg(Color::Gray)
-                                    .add_modifier(Modifier::BOLD)
-                            } else {
-                                Style::default()
-                                    .fg(selected_color)
-                                    .add_modifier(Modifier::BOLD)
-                            };
-                            let mut spans = vec![
-                                Span::styled(
-                                    " › ",
-                                    selected_style,
-                                ),
-                                Span::styled(shortcut, selected_style),
-                                Span::styled(marker, selected_style),
-                                Span::styled(label, selected_style),
-                            ];
-                            if let Some(desc) = desc {
-                                spans.push(Span::styled("   ", selected_style));
-                                spans.push(Span::styled(desc, selected_style));
-                            }
-                            lines.push(Line::from(spans));
-                        } else {
-                            let mut spans = vec![
+                    if total_options == 0 {
+                        lines.push(Line::from(vec![
+                            Span::raw("   "),
+                            Span::styled(
+                                "(No matching options)",
+                                Style::default().fg(crate::terminal_theme::MUTED),
+                            ),
+                        ]));
+                    } else {
+                        if scroll_offset > 0 {
+                            lines.push(Line::from(vec![
                                 Span::raw("   "),
-                                Span::styled(shortcut, Style::default().fg(Color::DarkGray)),
-                                Span::styled(marker, Style::default().fg(Color::DarkGray)),
-                                Span::styled(label, Style::default().fg(Color::White)),
-                            ];
-                            if let Some(desc) = desc {
-                                spans.push(Span::styled("   ", Style::default()));
-                                spans
-                                    .push(Span::styled(desc, Style::default().fg(Color::DarkGray)));
+                                Span::styled(
+                                    format!("▲ {scroll_offset} more above"),
+                                    Style::default().fg(crate::terminal_theme::MUTED),
+                                ),
+                            ]));
+                        }
+
+                        let end_idx = (scroll_offset + visible_rows).min(total_options);
+                        for idx in scroll_offset..end_idx {
+                            let original_idx = filtered[idx];
+                            let option_text = &dialog.options[original_idx];
+                            let is_selected = idx == dialog.selected;
+
+                            let shortcut = if dialog.filter.is_empty() && idx < 9 {
+                                format!("{}. ", idx + 1)
+                            } else {
+                                "   ".to_string()
+                            };
+
+                            let marker = match &dialog.checked {
+                                Some(checked)
+                                    if checked.get(original_idx).copied().unwrap_or(false) =>
+                                {
+                                    "[✓] "
+                                }
+                                Some(_) => "[ ] ",
+                                None => "",
+                            };
+
+                            let (label, desc) = if let Some((l, d)) = option_text.split_once(" — ")
+                            {
+                                (l, Some(d))
+                            } else if let Some((l, d)) = option_text.split_once('\t') {
+                                (l, Some(d))
+                            } else {
+                                (option_text.as_str(), None)
+                            };
+
+                            if is_selected {
+                                let selected_color = if monochrome_picker {
+                                    crate::terminal_theme::SELECTION_TEXT
+                                } else {
+                                    crate::terminal_theme::ACCENT
+                                };
+                                let selected_style = if monochrome_picker {
+                                    Style::default()
+                                        .fg(crate::terminal_theme::SELECTION_TEXT)
+                                        .bg(crate::terminal_theme::SELECTION_BACKGROUND)
+                                        .add_modifier(Modifier::BOLD)
+                                } else {
+                                    Style::default()
+                                        .fg(selected_color)
+                                        .add_modifier(Modifier::BOLD)
+                                };
+                                let mut spans = vec![
+                                    Span::styled(" › ", selected_style),
+                                    Span::styled(shortcut, selected_style),
+                                    Span::styled(marker, selected_style),
+                                    Span::styled(label, selected_style),
+                                ];
+                                if let Some(desc) = desc {
+                                    spans.push(Span::styled("   ", selected_style));
+                                    spans.push(Span::styled(desc, selected_style));
+                                }
+                                lines.push(Line::from(spans));
+                            } else {
+                                let mut spans = vec![
+                                    Span::raw("   "),
+                                    Span::styled(
+                                        shortcut,
+                                        Style::default().fg(crate::terminal_theme::MUTED),
+                                    ),
+                                    Span::styled(
+                                        marker,
+                                        Style::default().fg(crate::terminal_theme::MUTED),
+                                    ),
+                                    Span::styled(
+                                        label,
+                                        Style::default().fg(crate::terminal_theme::TEXT),
+                                    ),
+                                ];
+                                if let Some(desc) = desc {
+                                    spans.push(Span::styled("   ", Style::default()));
+                                    spans.push(Span::styled(
+                                        desc,
+                                        Style::default().fg(crate::terminal_theme::MUTED),
+                                    ));
+                                }
+                                lines.push(Line::from(spans));
                             }
-                            lines.push(Line::from(spans));
+                        }
+
+                        let remaining = total_options.saturating_sub(end_idx);
+                        if remaining > 0 {
+                            lines.push(Line::from(vec![
+                                Span::raw("   "),
+                                Span::styled(
+                                    format!("▼ {remaining} more below"),
+                                    Style::default().fg(crate::terminal_theme::MUTED),
+                                ),
+                            ]));
                         }
                     }
 
-                    let remaining = total_options.saturating_sub(end_idx);
-                    if remaining > 0 {
-                        lines.push(Line::from(vec![
-                            Span::raw("   "),
-                            Span::styled(
-                                format!("▼ {remaining} more below"),
-                                Style::default().fg(Color::DarkGray),
-                            ),
-                        ]));
-                    }
+                    lines.push(Line::raw(""));
+                    let hint = if dialog.checked.is_some() {
+                        " Space toggle · Enter confirm · 1-9 pick · Type to filter · Esc cancel"
+                    } else {
+                        " ↑/↓ navigate · 1-9 pick · Type to filter · Enter select · Esc cancel"
+                    };
+                    lines.push(Line::styled(
+                        hint,
+                        Style::default().fg(crate::terminal_theme::MUTED),
+                    ));
+                    lines.push(Line::raw(""));
                 }
 
-                lines.push(Line::raw(""));
-                let hint = if dialog.checked.is_some() {
-                    " Space toggle · Enter confirm · 1-9 pick · Type to filter · Esc cancel"
-                } else {
-                    " ↑/↓ navigate · 1-9 pick · Type to filter · Enter select · Esc cancel"
-                };
-                lines.push(Line::styled(hint, Style::default().fg(Color::DarkGray)));
-                lines.push(Line::raw(""));
-            }
+                frame.render_widget(
+                    Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+                        Block::default()
+                            .borders(Borders::TOP)
+                            .border_style(Style::default().fg(crate::terminal_theme::MUTED)),
+                    ),
+                    rows[3],
+                );
 
-            frame.render_widget(
-                Paragraph::new(lines).wrap(Wrap { trim: false }).block(
-                    Block::default()
-                        .borders(Borders::TOP)
-                        .border_style(Style::default().fg(Color::DarkGray)),
-                ),
-                rows[3],
-            );
-
-            if let Some((visual_col, row_idx)) = input_cursor {
-                frame.set_cursor_position(Position::new(
-                    rows[3].x + 3 + visual_col as u16,
-                    rows[3].y + 1 + row_idx as u16,
-                ));
-            } else if let Some(row_idx) = filter_row_idx {
-                let filter_str: String = dialog.filter.iter().collect();
-                let visual_col = crate::markdown::unicode_width(&filter_str);
-                frame.set_cursor_position(Position::new(
-                    rows[3].x + 1 + 8 + visual_col as u16,
-                    rows[3].y + 1 + row_idx as u16,
-                ));
-            }
+                if let Some((visual_col, row_idx)) = input_cursor {
+                    frame.set_cursor_position(Position::new(
+                        rows[3].x + 3 + visual_col as u16,
+                        rows[3].y + 1 + row_idx as u16,
+                    ));
+                } else if let Some(row_idx) = filter_row_idx {
+                    let filter_str: String = dialog.filter.iter().collect();
+                    let visual_col = crate::markdown::unicode_width(&filter_str);
+                    frame.set_cursor_position(Position::new(
+                        rows[3].x + 1 + 8 + visual_col as u16,
+                        rows[3].y + 1 + row_idx as u16,
+                    ));
+                }
             }
         } else if let Some(modal) = &self.thought_modal {
             let panel_area = rows[3];
@@ -1868,16 +1901,16 @@ impl ChatViewState {
 
             let block = Block::default()
                 .borders(Borders::TOP)
-                .border_style(Style::default().fg(Color::Rgb(168, 85, 247)))
+                .border_style(Style::default().fg(crate::terminal_theme::BLUE))
                 .title(Span::styled(
                     format!(" Thought Process ({}) ", modal.elapsed_str),
                     Style::default()
-                        .fg(Color::Rgb(192, 132, 252))
+                        .fg(crate::terminal_theme::BLUE)
                         .add_modifier(Modifier::BOLD),
                 ))
                 .title_bottom(Span::styled(
                     scroll_hint,
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(crate::terminal_theme::MUTED),
                 ));
 
             let visible = &wrapped_lines[scroll..(scroll + inner_height).min(wrapped_lines.len())];
@@ -1885,7 +1918,7 @@ impl ChatViewState {
             for l in visible {
                 p_lines.push(Line::from(vec![
                     Span::raw(" "),
-                    Span::styled(l.clone(), Style::default().fg(Color::Rgb(226, 232, 240))),
+                    Span::styled(l.clone(), Style::default().fg(crate::terminal_theme::TEXT)),
                 ]));
             }
             for _ in visible.len()..inner_height {
@@ -1900,7 +1933,7 @@ impl ChatViewState {
                 let page_start = (selected / 5) * 5;
                 let lines = std::iter::once(Line::styled(
                     "Suggestions · ↑/↓ select · Tab complete · Enter send",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(crate::terminal_theme::MUTED),
                 ))
                 .chain(suggestions.iter().enumerate().skip(page_start).take(5).map(
                     |(index, (token, description))| {
@@ -1912,10 +1945,10 @@ impl ChatViewState {
                             ),
                             if index == selected {
                                 Style::default()
-                                    .fg(Color::Green)
+                        .fg(crate::terminal_theme::BLUE)
                                     .add_modifier(Modifier::BOLD | Modifier::REVERSED)
                             } else {
-                                Style::default().fg(Color::DarkGray)
+                                Style::default().fg(crate::terminal_theme::MUTED)
                             },
                         )
                     },
@@ -1928,10 +1961,13 @@ impl ChatViewState {
                     Span::styled(
                         " › ",
                         Style::default()
-                            .fg(Color::Rgb(105, 230, 166))
+                            .fg(crate::terminal_theme::ACCENT)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled("Ask anything...", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        "Ask anything...",
+                        Style::default().fg(crate::terminal_theme::MUTED),
+                    ),
                 ]))
             } else {
                 Text::from(
@@ -1942,7 +1978,7 @@ impl ChatViewState {
                             let mut spans = vec![Span::styled(
                                 if index == 0 { " › " } else { "   " },
                                 Style::default()
-                                    .fg(Color::Rgb(105, 230, 166))
+                                    .fg(crate::terminal_theme::ACCENT)
                                     .add_modifier(Modifier::BOLD),
                             )];
                             spans.extend(format_composer_row_spans(row));
@@ -1958,7 +1994,7 @@ impl ChatViewState {
                     .block(
                         Block::default()
                             .borders(Borders::TOP | Borders::BOTTOM)
-                            .border_style(Style::default().fg(Color::DarkGray)),
+                            .border_style(Style::default().fg(crate::terminal_theme::MUTED)),
                     ),
                 rows[4],
             );
@@ -1987,26 +2023,32 @@ impl ChatViewState {
                 Line::styled(
                     format!(" {notice}"),
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(crate::terminal_theme::WARNING)
                         .add_modifier(Modifier::BOLD),
                 )
             } else if self.selection_mode {
                 Line::styled(
                     " Selection mode · ↑/↓ scroll · Enter/y copy · Esc cancel",
-                    Style::default().fg(Color::Yellow),
+                    Style::default().fg(crate::terminal_theme::WARNING),
                 )
             } else {
                 Line::from(vec![
-                    Span::styled(mode_label, Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        mode_label,
+                        Style::default().fg(crate::terminal_theme::MUTED),
+                    ),
                     Span::styled(
                         &self.model,
                         Style::default()
-                            .fg(Color::Rgb(105, 230, 166))
+                            .fg(crate::terminal_theme::ACCENT)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" ".repeat(gap)),
-                    Span::styled(jobs_prefix, Style::default().fg(Color::Blue)),
-                    Span::styled(path_text, Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        jobs_prefix,
+                        Style::default().fg(crate::terminal_theme::BLUE),
+                    ),
+                    Span::styled(path_text, Style::default().fg(crate::terminal_theme::MUTED)),
                 ])
             };
             frame.render_widget(Paragraph::new(footer), rows[5]);
@@ -2025,7 +2067,8 @@ impl ChatViewState {
                         + 1
                         + cursor_row
                             .saturating_sub(composer_scroll)
-                            .min(visible_composer_rows.saturating_sub(1)) as u16,
+                            .min(visible_composer_rows.saturating_sub(1))
+                            as u16,
                 ));
             }
         }
@@ -2139,9 +2182,7 @@ fn input_index_at(
     }
 
     let (rows, cursor_row, _) = wrap_input_visual_into_rows(chars, row_width, cursor_pos);
-    let scroll = cursor_row
-        .saturating_add(1)
-        .saturating_sub(visible_rows);
+    let scroll = cursor_row.saturating_add(1).saturating_sub(visible_rows);
     let row_index = visible_row + scroll;
     let row = rows.get(row_index)?;
     let mut start = 0usize;
@@ -2196,10 +2237,7 @@ fn wrap_input_visual_into_rows(
         visual_width += character_width;
     }
 
-    if row_start < input_chars.len()
-        || input_chars.last() == Some(&'\n')
-        || rows.is_empty()
-    {
+    if row_start < input_chars.len() || input_chars.last() == Some(&'\n') || rows.is_empty() {
         rows.push(input_chars[row_start..].iter().collect());
         row_starts.push(row_start);
     }
@@ -2456,7 +2494,7 @@ impl ChatTui {
                 frame.render_widget(
                     Paragraph::new(Line::styled(
                         " Ctrl+C / right-click copy · Delete input · Esc clear",
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(crate::terminal_theme::MUTED),
                     )),
                     hint_area,
                 );
@@ -3531,7 +3569,12 @@ mod dialog_tests {
     #[test]
     fn selection_overlay_changes_style_without_changing_symbols() {
         let mut buffer = Buffer::empty(Rect::new(0, 0, 5, 1));
-        buffer.set_string(0, 0, "Mint", Style::default().fg(Color::Green));
+        buffer.set_string(
+            0,
+            0,
+            "Mint",
+            Style::default().fg(crate::terminal_theme::ACCENT),
+        );
         let before = buffer
             .content
             .iter()

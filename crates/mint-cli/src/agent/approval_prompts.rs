@@ -784,6 +784,5 @@ pub(super) fn confirm_pausing_interrupt(prompt: &str, approval_active: &AtomicBo
     approved
 }
 
-/// Dim-cyan used for the code block gutter/border — same hue as `CYAN` but
-/// at reduced intensity so it doesn't compete with actual code content.
-pub(super) const CODE_BORDER: &str = "\x1b[2m\x1b[38;2;56;189;248m";
+/// Shared accent used for the code block gutter and border.
+pub(super) const CODE_BORDER: &str = crate::terminal_theme::ANSI_ACCENT;

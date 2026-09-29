@@ -574,33 +574,10 @@ pub(super) fn apply_wave_effect(text: &str, tick: usize) -> String {
         let x = (i as f32 * 0.4) - phase;
         let t = (x.sin() + 1.0) / 2.0; // Oscillates in [0.0, 1.0]
 
-        // Stop colors: Dim Gray (70, 70, 70) -> Mint Green (105, 230, 166) -> Cyan (78, 201, 216)
-        let (r, g, b) = if t < 0.3 {
-            let local_t = t / 0.3;
-            let r = 70.0 + (105.0 - 70.0) * local_t;
-            let g = 70.0 + (230.0 - 70.0) * local_t;
-            let b = 70.0 + (166.0 - 70.0) * local_t;
-            (r, g, b)
-        } else if t < 0.7 {
-            let local_t = (t - 0.3) / 0.4;
-            let r = 105.0 + (78.0 - 105.0) * local_t;
-            let g = 230.0 + (201.0 - 230.0) * local_t;
-            let b = 166.0 + (216.0 - 166.0) * local_t;
-            (r, g, b)
-        } else {
-            let local_t = (t - 0.7) / 0.3;
-            let r = 78.0 + (70.0 - 78.0) * local_t;
-            let g = 201.0 + (70.0 - 201.0) * local_t;
-            let b = 216.0 + (70.0 - 216.0) * local_t;
-            (r, g, b)
-        };
-
+        let emphasis = if t > 0.72 { BOLD } else { "" };
         animated_label.push_str(&format!(
-            "\x1b[1m\x1b[38;2;{};{};{}m{}\x1b[0m",
-            r.round() as u8,
-            g.round() as u8,
-            b.round() as u8,
-            c
+            "{emphasis}{}{c}{RESET}",
+            crate::terminal_theme::ANSI_ACCENT
         ));
     }
 
@@ -1028,7 +1005,9 @@ pub(super) fn print_timeline_note(
 
     if is_internal_cot(thought) {
         let summary = format!(
-            "\x1b[38;2;148;163;184m  • Thought for {elapsed_str}\x1b[0m \x1b[38;2;100;116;139m(Ctrl+T to view)\x1b[0m"
+            "{muted}  • Thought for {elapsed_str}{reset} {muted}(Ctrl+T to view){reset}",
+            muted = crate::terminal_theme::ANSI_MUTED,
+            reset = crate::terminal_theme::ANSI_RESET
         );
         insert_permanent_lines(status, &[summary]);
     } else {

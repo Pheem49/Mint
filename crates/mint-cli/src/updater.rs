@@ -242,48 +242,49 @@ pub fn print_update_notice(current: &str, latest: &str) {
         + 1; // plus 1 for trailing space before right border
 
     let border = "─".repeat(max_len);
-    println!("\x1b[33m╭{}╮\x1b[0m", border);
+    let warning = crate::terminal_theme::ANSI_WARNING;
+    let reset = crate::terminal_theme::ANSI_RESET;
+    println!("{warning}╭{border}╮{reset}");
 
-    // Line 1: Title
     let title_display = format!(
-        " ✨ Update available! \x1b[1;32m{}\x1b[0;33m -> \x1b[1;32m{}\x1b[0;33m",
-        current, latest
+        " ✨ Update available! {}{}{} -> {}{}{}",
+        crate::terminal_theme::ANSI_ACCENT_BOLD,
+        current,
+        warning,
+        crate::terminal_theme::ANSI_ACCENT_BOLD,
+        latest,
+        warning
     );
     let padding1 = max_len - title_clean_len;
     println!(
-        "\x1b[33m│\x1b[0m{}{}\x1b[33m│\x1b[0m",
-        title_display,
+        "{warning}│{title_display}{}{warning}│{reset}",
         " ".repeat(padding1)
     );
 
-    // Line 2: Command
     let padding2 = max_len - command_msg_len;
     println!(
-        "\x1b[33m│\x1b[0m \x1b[37m{}\x1b[0m{}\x1b[33m│\x1b[0m",
-        command_msg,
-        " ".repeat(padding2)
+        "{warning}│ {text}{reset}{}{warning}│{reset}",
+        " ".repeat(padding2),
+        text = command_msg
     );
 
-    // Line 3: Empty separator
-    println!("\x1b[33m│\x1b[0m{}\x1b[33m│\x1b[0m", " ".repeat(max_len));
+    println!("{warning}│{}{warning}│{reset}", " ".repeat(max_len));
 
-    // Line 4: Notes label
     let padding4 = max_len - notes_label_len;
     println!(
-        "\x1b[33m│\x1b[0m \x1b[90m{}\x1b[0m{}\x1b[33m│\x1b[0m",
-        notes_label,
-        " ".repeat(padding4)
+        "{warning}│ {muted}{notes_label}{reset}{}{warning}│{reset}",
+        " ".repeat(padding4),
+        muted = crate::terminal_theme::ANSI_MUTED
     );
 
-    // Line 5: Notes URL
     let padding5 = max_len - notes_url_len;
     println!(
-        "\x1b[33m│\x1b[0m \x1b[36m{}\x1b[0m{}\x1b[33m│\x1b[0m",
-        notes_url,
-        " ".repeat(padding5)
+        "{warning}│ {accent}{notes_url}{reset}{}{warning}│{reset}",
+        " ".repeat(padding5),
+        accent = crate::terminal_theme::ANSI_ACCENT
     );
 
-    println!("\x1b[33m╰{}╯\x1b[0m\n", border);
+    println!("{warning}╰{border}╯{reset}\n");
 }
 
 /// Formats a persistent update card for the full-screen CLI transcript.
@@ -300,20 +301,22 @@ pub fn format_tui_update_notice(current: &str, latest: &str) -> String {
         .max()
         .unwrap_or(0);
     let border = "─".repeat(inner_width + 2);
-    let mut card = format!("\x1b[33m╭{border}╮\x1b[0m\n");
+    let warning = crate::terminal_theme::ANSI_WARNING;
+    let reset = crate::terminal_theme::ANSI_RESET;
+    let mut card = format!("{warning}╭{border}╮{reset}\n");
     for (index, row) in rows.iter().enumerate() {
         let padding = inner_width.saturating_sub(UnicodeWidthStr::width(row.as_str()));
         let content = if index == 0 {
-            format!("\x1b[1;36m{row}\x1b[0m")
+            format!("{}{row}{reset}", crate::terminal_theme::ANSI_ACCENT_BOLD)
         } else {
             row.clone()
         };
         card.push_str(&format!(
-            "\x1b[33m│\x1b[0m {content}{} \x1b[33m│\x1b[0m\n",
+            "{warning}│ {content}{} {warning}│{reset}\n",
             " ".repeat(padding)
         ));
     }
-    card.push_str(&format!("\x1b[33m╰{border}╯\x1b[0m"));
+    card.push_str(&format!("{warning}╰{border}╯{reset}"));
     card
 }
 

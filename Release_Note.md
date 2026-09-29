@@ -1,5 +1,11 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Shared Terminal Color Palette
+
+- Centralized terminal and TUI colors in `terminal_theme.rs` and consolidated similar accent colors into Mint green, with shared blue, text, muted, warning, error, selection, and panel tokens.
+- Kept code syntax highlighting on its dedicated theme so language tokens remain distinguishable.
+- Restored the original four-line `Mint` ASCII wordmark in the Full-Screen TUI header, styled with the shared palette.
+
 ## Private Mobile Web Access with Tailscale
 
 - Added opt-in `mint web --tailscale` to serve the production Web UI over a private Tailscale HTTPS URL suitable for installing the existing PWA on a phone.
