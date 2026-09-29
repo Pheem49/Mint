@@ -472,10 +472,8 @@ pub async fn run_interactive_chat_with_session(
 
     let mut printed_update = false;
     if let Some((current, latest)) = crate::updater::get_cached_update_notice() {
-        if let Some((_, state, _)) = tui.as_mut() {
-            if let Ok(mut state) = state.lock() {
-                state.notice(format!("Mint {latest} is available (current: {current})"));
-            }
+        if let Some((_, _, handle)) = tui.as_mut() {
+            handle.push_notice(crate::updater::format_tui_update_notice(&current, &latest));
         } else {
             crate::updater::print_update_notice(&current, &latest);
         }
@@ -509,11 +507,10 @@ pub async fn run_interactive_chat_with_session(
                 if let Ok(Some((current, latest))) = handle.await
                     && !printed_update
                 {
-                    if let Some((_, state, _)) = tui.as_mut() {
-                        if let Ok(mut state) = state.lock() {
-                            state
-                                .notice(format!("Mint {latest} is available (current: {current})"));
-                        }
+                    if let Some((_, _, handle)) = tui.as_mut() {
+                        handle.push_notice(crate::updater::format_tui_update_notice(
+                            &current, &latest,
+                        ));
                     } else {
                         crate::updater::print_update_notice(&current, &latest);
                     }

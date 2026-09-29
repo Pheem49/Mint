@@ -139,7 +139,19 @@ pub(crate) struct DialogState {
     pub scroll_offset: usize,
     pub checked: Option<Vec<bool>>,
     pub input: Option<Vec<char>>,
+    pub resume_picker: Option<ResumePickerDialog>,
     pub reply: mpsc::Sender<DialogAnswer>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ResumePickerDialog {
+    pub sessions: Vec<mint_core::ChatSession>,
+    pub current_workspace: String,
+    pub current_branch: Option<String>,
+    pub active_chat_id: String,
+    pub show_all_projects: bool,
+    pub only_current_branch: bool,
+    pub sort_by_created: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -167,6 +179,7 @@ impl DialogState {
             scroll_offset: 0,
             checked,
             input: None,
+            resume_picker: None,
             reply,
         }
     }
@@ -185,11 +198,92 @@ impl DialogState {
             scroll_offset: 0,
             checked: None,
             input: Some(Vec::new()),
+            resume_picker: None,
+            reply,
+        }
+    }
+
+    pub fn new_resume_picker(
+        sessions: Vec<mint_core::ChatSession>,
+        current_workspace: String,
+        current_branch: Option<String>,
+        active_chat_id: String,
+        reply: mpsc::Sender<DialogAnswer>,
+    ) -> Self {
+        let options = sessions.iter().map(|session| session.title.clone()).collect();
+        let show_all_projects = !sessions
+            .iter()
+            .any(|session| session.workspace_path.as_deref() == Some(&current_workspace));
+        Self {
+            title: "Resume Session".to_string(),
+            body: String::new(),
+            options,
+            filter: Vec::new(),
+            selected: 0,
+            scroll_offset: 0,
+            checked: None,
+            input: None,
+            resume_picker: Some(ResumePickerDialog {
+                sessions,
+                current_workspace,
+                current_branch,
+                active_chat_id,
+                show_all_projects,
+                only_current_branch: false,
+                sort_by_created: false,
+            }),
             reply,
         }
     }
 
     pub fn filtered_indices(&self) -> Vec<usize> {
+        if let Some(picker) = &self.resume_picker {
+            let query: String = self.filter.iter().collect::<String>().to_lowercase();
+            let mut indices: Vec<usize> = picker
+                .sessions
+                .iter()
+                .enumerate()
+                .filter(|(_, session)| {
+                    if !picker.show_all_projects
+                        && session.workspace_path.as_deref() != Some(&picker.current_workspace)
+                    {
+                        return false;
+                    }
+                    if picker.only_current_branch {
+                        match picker.current_branch.as_deref() {
+                            Some(branch) if session.git_branch.as_deref() == Some(branch) => {}
+                            _ => return false,
+                        }
+                    }
+                    if !query.is_empty() {
+                        let searchable = [
+                            session.title.as_str(),
+                            session.id.as_str(),
+                            session.git_branch.as_deref().unwrap_or_default(),
+                            session.main_language.as_deref().unwrap_or_default(),
+                        ]
+                        .join(" ")
+                        .to_lowercase();
+                        if !searchable.contains(&query) {
+                            return false;
+                        }
+                    }
+                    true
+                })
+                .map(|(index, _)| index)
+                .collect();
+            indices.sort_by(|left, right| {
+                let left = &picker.sessions[*left];
+                let right = &picker.sessions[*right];
+                let (left_time, right_time) = if picker.sort_by_created {
+                    (&left.created_at, &right.created_at)
+                } else {
+                    (&left.updated_at, &right.updated_at)
+                };
+                right_time.cmp(left_time)
+            });
+            return indices;
+        }
         if self.filter.is_empty() {
             (0..self.options.len()).collect()
         } else {
@@ -270,6 +364,32 @@ impl DialogState {
             }
         } else {
             // Choice / multi-choice mode
+            if let Some(picker) = self.resume_picker.as_mut() {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    match key.code {
+                        KeyCode::Char('a') => {
+                            picker.show_all_projects = !picker.show_all_projects;
+                            self.selected = 0;
+                            self.scroll_offset = 0;
+                            return None;
+                        }
+                        KeyCode::Char('b') => {
+                            picker.only_current_branch = !picker.only_current_branch;
+                            self.selected = 0;
+                            self.scroll_offset = 0;
+                            return None;
+                        }
+                        KeyCode::Char('c' | 'd') => return Some(DialogAnswer::Cancel),
+                        _ => {}
+                    }
+                }
+                if key.code == KeyCode::Tab {
+                    picker.sort_by_created = !picker.sort_by_created;
+                    self.selected = 0;
+                    self.scroll_offset = 0;
+                    return None;
+                }
+            }
             match key.code {
                 KeyCode::Up => {
                     self.select_up();
@@ -360,6 +480,183 @@ impl DialogState {
             }
         }
     }
+}
+
+fn resume_picker_lines(dialog: &DialogState, width: u16, height: u16) -> Vec<Line<'static>> {
+    let Some(picker) = &dialog.resume_picker else {
+        return Vec::new();
+    };
+    let filtered = dialog.filtered_indices();
+    let count = filtered.len();
+    let total = picker.sessions.len();
+    let muted = Style::default().fg(Color::DarkGray);
+    let selected_chip = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Gray)
+        .add_modifier(Modifier::BOLD);
+    let selected_position = if count == 0 {
+        0
+    } else {
+        (dialog.selected + 1).min(count)
+    };
+
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            "Resume Session",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!(" ({selected_position}/{count})"), muted),
+    ])];
+
+    let mut filters = vec![
+        Span::styled("Project: ", muted),
+        Span::styled(
+            " Cwd ",
+            if picker.show_all_projects { muted } else { selected_chip },
+        ),
+        Span::styled(
+            " All ",
+            if picker.show_all_projects { selected_chip } else { muted },
+        ),
+        Span::styled("  ·  Branch: ", muted),
+        Span::styled(
+            " All ",
+            if picker.only_current_branch { muted } else { selected_chip },
+        ),
+        Span::styled(
+            " Current ",
+            if picker.only_current_branch { selected_chip } else { muted },
+        ),
+        Span::styled("  ·  Sort: ", muted),
+        Span::styled(
+            " Updated ",
+            if picker.sort_by_created { muted } else { selected_chip },
+        ),
+        Span::styled(
+            " Created ",
+            if picker.sort_by_created { selected_chip } else { muted },
+        ),
+    ];
+    if picker.only_current_branch && picker.current_branch.is_none() {
+        filters.push(Span::styled(" (no branch)", muted));
+    }
+    lines.push(Line::from(filters));
+
+    let query: String = dialog.filter.iter().collect();
+    lines.push(Line::from(vec![
+        Span::styled("⌕  ", Style::default().fg(Color::Gray)),
+        Span::styled(
+            if query.is_empty() {
+                "Type to search".to_string()
+            } else {
+                query.clone()
+            },
+            if query.is_empty() {
+                muted
+            } else {
+                Style::default().fg(Color::White)
+            },
+        ),
+        if query.is_empty() {
+            Span::raw("")
+        } else {
+            Span::styled("█", Style::default().fg(Color::White))
+        },
+    ]));
+
+    let project_name = std::path::Path::new(&picker.current_workspace)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| picker.current_workspace.clone());
+    let project_label = if picker.show_all_projects {
+        "All projects"
+    } else {
+        &project_name
+    };
+    let session_word = if count == 1 { "session" } else { "sessions" };
+    lines.push(Line::styled(
+        format!("{project_label} · {count} of {total} {session_word}"),
+        muted,
+    ));
+    lines.push(Line::styled(
+        "─".repeat(width as usize),
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    let available_rows = (height as usize).saturating_sub(8).max(1);
+    let scroll_offset = if dialog.selected < dialog.scroll_offset {
+        dialog.selected
+    } else if dialog.selected >= dialog.scroll_offset + available_rows {
+        dialog.selected + 1 - available_rows
+    } else {
+        dialog.scroll_offset
+    }
+    .min(count.saturating_sub(available_rows));
+    let end = (scroll_offset + available_rows).min(count);
+
+    if count == 0 {
+        lines.push(Line::styled("No matching sessions", muted));
+    } else {
+        for position in scroll_offset..end {
+            let session = &picker.sessions[filtered[position]];
+            let time = super::resume_picker::truncate_to_width(
+                &super::resume_picker::format_relative_time(&session.updated_at),
+                10,
+            );
+            let message_count = format!("{} msgs", session.message_count);
+            let current_tag = if session.id == picker.active_chat_id {
+                " (current)"
+            } else {
+                ""
+            };
+            let fixed_width = 2
+                + 10
+                + 2
+                + UnicodeWidthStr::width(message_count.as_str())
+                + 2
+                + UnicodeWidthStr::width(current_tag);
+            let title_width = (width as usize).saturating_sub(fixed_width);
+            let title = super::resume_picker::truncate_to_width(&session.title, title_width);
+            let is_selected = position == dialog.selected;
+            if is_selected {
+                let text = format!("› {time:>10}  {title}{current_tag}  {message_count}");
+                let text_width = UnicodeWidthStr::width(text.as_str());
+                let padded = format!(
+                    "{text}{}",
+                    " ".repeat((width as usize).saturating_sub(text_width))
+                );
+                lines.push(Line::styled(padded, selected_chip));
+            } else {
+                let row = format!("  {time:>10}  {title}{current_tag}  {message_count}");
+                let row_width = UnicodeWidthStr::width(row.as_str());
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default().fg(Color::Gray)),
+                    Span::styled(format!("{time:>10}  "), muted),
+                    Span::styled(
+                        format!("{title}{current_tag}"),
+                        Style::default().fg(Color::White),
+                    ),
+                    Span::styled(format!("  {message_count}"), muted),
+                    Span::raw(" ".repeat((width as usize).saturating_sub(row_width))),
+                ]));
+            }
+        }
+    }
+
+    while lines.len() + 2 < height.saturating_sub(1) as usize {
+        lines.push(Line::raw(""));
+    }
+    lines.push(Line::styled(
+        "Enter resume · ↑/↓ navigate · Esc cancel",
+        muted,
+    ));
+    lines.push(Line::styled(
+        "Ctrl+A project · Ctrl+B branch · Tab sort · Type to search",
+        muted,
+    ));
+    lines
 }
 
 #[derive(Clone, Debug)]
@@ -648,9 +945,6 @@ impl ChatViewState {
             }
         })
     }
-    pub fn notice(&mut self, text: impl Into<String>) {
-        self.set_notice(text);
-    }
     fn transcript_text(&self) -> Text<'static> {
         let mut lines = Vec::new();
         let selected_start = self.selection_anchor.min(self.selection_head);
@@ -755,7 +1049,7 @@ impl ChatViewState {
             .min(lines.len() - 1);
         lines[start..=end].join("\n")
     }
-    fn render(&self, frame: &mut ratatui::Frame<'_>) -> Option<Rect> {
+    fn render(&self, frame: &mut ratatui::Frame<'_>) -> RenderAreas {
         let suggestions = self.suggestions();
         let suggestion_height = if suggestions.is_empty() {
             0
@@ -999,6 +1293,11 @@ impl ChatViewState {
 
         let dialog_height = if let Some(dialog) = &self.dialog {
             let filtered_len = dialog.filtered_indices().len();
+            let max_allowed = main_area.height.saturating_sub(7);
+            if dialog.resume_picker.is_some() {
+                let visible_rows = filtered_len.clamp(1, 24);
+                (8 + visible_rows as u16).min(max_allowed)
+            } else {
             let body_lines = if dialog.body.is_empty() {
                 0
             } else {
@@ -1021,8 +1320,8 @@ impl ChatViewState {
             // The top border consumes a row in addition to the title, body,
             // spacer, options, and footer counted above.
             let total = 1 + 1 + body_lines + filter_lines + 1 + content_lines;
-            let max_allowed = main_area.height.saturating_sub(7);
             (total as u16).min(max_allowed)
+            }
         } else {
             0
         };
@@ -1034,10 +1333,14 @@ impl ChatViewState {
             0
         };
 
-        let composer_width = main_area.width.saturating_sub(6).max(1) as usize;
+        let composer_width = main_area.width.saturating_sub(4).max(1) as usize;
         let (composer_rows, cursor_row, cursor_col) =
-            super::wrap_input_into_rows(&self.composer, composer_width, self.cursor);
-        let composer_height = (composer_rows.len().max(1) as u16 + 2).clamp(3, 8);
+            wrap_input_visual_into_rows(&self.composer, composer_width, self.cursor);
+        let visible_composer_rows = composer_rows.len().clamp(1, 6);
+        let composer_height = visible_composer_rows as u16 + 2;
+        let composer_scroll = cursor_row
+            .saturating_add(1)
+            .saturating_sub(visible_composer_rows);
         let rows = if dialog_height > 0 {
             let dialog_status_height =
                 status_height.min(main_area.height.saturating_sub(6 + 1 + dialog_height));
@@ -1275,9 +1578,21 @@ impl ChatViewState {
             frame.render_widget(Paragraph::new(visible_lines), rows[2]);
         }
         if let Some(dialog) = &self.dialog {
+            if dialog.resume_picker.is_some() {
+                let lines = resume_picker_lines(dialog, rows[3].width, rows[3].height);
+                frame.render_widget(
+                    Paragraph::new(lines).block(
+                        Block::default()
+                            .borders(Borders::TOP)
+                            .border_style(Style::default().fg(Color::DarkGray)),
+                    ),
+                    rows[3],
+                );
+            } else {
             let mut lines = Vec::new();
             let filtered = dialog.filtered_indices();
             let total_options = filtered.len();
+            let monochrome_picker = dialog.title == "Resume Session";
 
             let title_suffix = if dialog.input.is_none() && !dialog.options.is_empty() {
                 format!(
@@ -1294,7 +1609,7 @@ impl ChatViewState {
                 Span::styled(
                     &dialog.title,
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(if monochrome_picker { Color::White } else { Color::Cyan })
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(title_suffix, Style::default().fg(Color::DarkGray)),
@@ -1319,7 +1634,7 @@ impl ChatViewState {
                     Span::styled(
                         filter_str,
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(if monochrome_picker { Color::White } else { Color::Yellow })
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
@@ -1430,36 +1745,33 @@ impl ChatViewState {
                         };
 
                         if is_selected {
+                            let selected_color = if monochrome_picker {
+                                Color::Black
+                            } else {
+                                Color::Rgb(105, 230, 166)
+                            };
+                            let selected_style = if monochrome_picker {
+                                Style::default()
+                                    .fg(Color::Black)
+                                    .bg(Color::Gray)
+                                    .add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default()
+                                    .fg(selected_color)
+                                    .add_modifier(Modifier::BOLD)
+                            };
                             let mut spans = vec![
                                 Span::styled(
                                     " › ",
-                                    Style::default()
-                                        .fg(Color::Rgb(105, 230, 166))
-                                        .add_modifier(Modifier::BOLD),
+                                    selected_style,
                                 ),
-                                Span::styled(
-                                    shortcut,
-                                    Style::default()
-                                        .fg(Color::Rgb(105, 230, 166))
-                                        .add_modifier(Modifier::BOLD),
-                                ),
-                                Span::styled(
-                                    marker,
-                                    Style::default()
-                                        .fg(Color::Rgb(105, 230, 166))
-                                        .add_modifier(Modifier::BOLD),
-                                ),
-                                Span::styled(
-                                    label,
-                                    Style::default()
-                                        .fg(Color::Rgb(105, 230, 166))
-                                        .add_modifier(Modifier::BOLD),
-                                ),
+                                Span::styled(shortcut, selected_style),
+                                Span::styled(marker, selected_style),
+                                Span::styled(label, selected_style),
                             ];
                             if let Some(desc) = desc {
-                                spans.push(Span::styled("   ", Style::default()));
-                                spans
-                                    .push(Span::styled(desc, Style::default().fg(Color::DarkGray)));
+                                spans.push(Span::styled("   ", selected_style));
+                                spans.push(Span::styled(desc, selected_style));
                             }
                             lines.push(Line::from(spans));
                         } else {
@@ -1521,6 +1833,7 @@ impl ChatViewState {
                     rows[3].x + 1 + 8 + visual_col as u16,
                     rows[3].y + 1 + row_idx as u16,
                 ));
+            }
             }
         } else if let Some(modal) = &self.thought_modal {
             let panel_area = rows[3];
@@ -1639,11 +1952,14 @@ impl ChatViewState {
                 )
             };
             frame.render_widget(
-                Paragraph::new(input).wrap(Wrap { trim: false }).block(
-                    Block::default()
-                        .borders(Borders::TOP | Borders::BOTTOM)
-                        .border_style(Style::default().fg(Color::DarkGray)),
-                ),
+                Paragraph::new(input)
+                    .wrap(Wrap { trim: false })
+                    .scroll((composer_scroll as u16, 0))
+                    .block(
+                        Block::default()
+                            .borders(Borders::TOP | Borders::BOTTOM)
+                            .border_style(Style::default().fg(Color::DarkGray)),
+                    ),
                 rows[4],
             );
 
@@ -1697,21 +2013,33 @@ impl ChatViewState {
 
             if !self.selection_mode {
                 let row_start = self.cursor.saturating_sub(cursor_col);
-                let visual_col = crate::markdown::unicode_width(
-                    &self.composer[row_start..self.cursor]
+                let visual_col = UnicodeWidthStr::width(
+                    self.composer[row_start..self.cursor]
                         .iter()
-                        .collect::<String>(),
+                        .collect::<String>()
+                        .as_str(),
                 );
                 frame.set_cursor_position(Position::new(
                     rows[4].x + 3 + visual_col as u16,
                     rows[4].y
                         + 1
-                        + cursor_row.min(composer_height.saturating_sub(3) as usize) as u16,
+                        + cursor_row
+                            .saturating_sub(composer_scroll)
+                            .min(visible_composer_rows.saturating_sub(1)) as u16,
                 ));
             }
         }
-        back_to_bottom_area
+        RenderAreas {
+            back_to_bottom: back_to_bottom_area,
+            composer: rows.get(4).copied(),
+        }
     }
+}
+
+#[derive(Default)]
+struct RenderAreas {
+    back_to_bottom: Option<Rect>,
+    composer: Option<Rect>,
 }
 
 pub(crate) struct ChatTui {
@@ -1720,6 +2048,7 @@ pub(crate) struct ChatTui {
     mouse_selection: MouseSelection,
     last_frame: Option<Buffer>,
     back_to_bottom_area: Option<Rect>,
+    composer_area: Option<Rect>,
     clipboard: TextClipboard,
 }
 
@@ -1788,6 +2117,109 @@ impl MouseSelection {
             (head, anchor)
         })
     }
+
+    fn endpoints(&self) -> Option<(ScreenPoint, ScreenPoint)> {
+        Some((self.anchor?, self.head?))
+    }
+}
+
+fn input_index_at(
+    point: ScreenPoint,
+    area: Rect,
+    chars: &[char],
+    row_width: usize,
+    cursor_pos: usize,
+    end_after_character: bool,
+) -> Option<usize> {
+    let first_text_row = area.y + 1;
+    let visible_row = point.row.checked_sub(first_text_row)? as usize;
+    let visible_rows = ((area.height as usize).saturating_sub(2)).min(6);
+    if visible_row >= visible_rows {
+        return None;
+    }
+
+    let (rows, cursor_row, _) = wrap_input_visual_into_rows(chars, row_width, cursor_pos);
+    let scroll = cursor_row
+        .saturating_add(1)
+        .saturating_sub(visible_rows);
+    let row_index = visible_row + scroll;
+    let row = rows.get(row_index)?;
+    let mut start = 0usize;
+    for prior_row in rows.iter().take(row_index) {
+        start += prior_row.chars().count();
+        if chars.get(start) == Some(&'\n') {
+            start += 1;
+        }
+    }
+
+    let text_x = area.x.saturating_add(3);
+    let target_column = point.column.saturating_sub(text_x) as usize;
+    let row_chars: Vec<char> = row.chars().collect();
+    let mut visual_column = 0usize;
+    for (index, character) in row_chars.iter().enumerate() {
+        let width = UnicodeWidthStr::width(character.to_string().as_str()).max(1);
+        if target_column < visual_column + width {
+            return Some(start + index + usize::from(end_after_character));
+        }
+        visual_column += width;
+    }
+    Some(start + row_chars.len())
+}
+
+fn wrap_input_visual_into_rows(
+    input_chars: &[char],
+    row_width: usize,
+    cursor_pos: usize,
+) -> (Vec<String>, usize, usize) {
+    let row_width = row_width.max(1);
+    let mut rows: Vec<String> = Vec::new();
+    let mut row_starts = Vec::new();
+    let mut row_start = 0usize;
+    let mut visual_width = 0usize;
+
+    for (index, character) in input_chars.iter().copied().enumerate() {
+        if character == '\n' {
+            rows.push(input_chars[row_start..index].iter().collect());
+            row_starts.push(row_start);
+            row_start = index + 1;
+            visual_width = 0;
+            continue;
+        }
+
+        let character_width = UnicodeWidthStr::width(character.to_string().as_str());
+        if visual_width > 0 && visual_width + character_width > row_width {
+            rows.push(input_chars[row_start..index].iter().collect());
+            row_starts.push(row_start);
+            row_start = index;
+            visual_width = 0;
+        }
+        visual_width += character_width;
+    }
+
+    if row_start < input_chars.len()
+        || input_chars.last() == Some(&'\n')
+        || rows.is_empty()
+    {
+        rows.push(input_chars[row_start..].iter().collect());
+        row_starts.push(row_start);
+    }
+
+    let cursor_pos = cursor_pos.min(input_chars.len());
+    let mut cursor_row = rows.len().saturating_sub(1);
+    for (index, start) in row_starts.iter().copied().enumerate() {
+        let end = start + rows[index].chars().count();
+        let next_starts_here = row_starts.get(index + 1) == Some(&cursor_pos);
+        if cursor_pos < end || (cursor_pos == end && !next_starts_here) {
+            cursor_row = index;
+            break;
+        }
+        if cursor_pos == start {
+            cursor_row = index;
+            break;
+        }
+    }
+    let cursor_col = cursor_pos.saturating_sub(row_starts[cursor_row]);
+    (rows, cursor_row, cursor_col)
 }
 
 #[derive(Default)]
@@ -2002,6 +2434,7 @@ impl ChatTui {
                 mouse_selection: MouseSelection::default(),
                 last_frame: None,
                 back_to_bottom_area: None,
+                composer_area: None,
                 clipboard: TextClipboard::default(),
             }),
             Err(error) => {
@@ -2014,15 +2447,15 @@ impl ChatTui {
         let selection = self.mouse_selection;
         let previous = self.last_frame.as_ref();
         let mut invalidated = false;
-        let mut back_to_bottom_area = None;
+        let mut areas = RenderAreas::default();
         let completed = self.terminal.draw(|frame| {
-            back_to_bottom_area = state.render(frame);
-            if selection.range().is_some() {
+            areas = state.render(frame);
+            if selection.range().is_some() && state.active_notice().is_none() {
                 let area = frame.area();
                 let hint_area = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
                 frame.render_widget(
                     Paragraph::new(Line::styled(
-                        " Right-click copy · Esc clear",
+                        " Ctrl+C / right-click copy · Delete input · Esc clear",
                         Style::default().fg(Color::DarkGray),
                     )),
                     hint_area,
@@ -2038,7 +2471,8 @@ impl ChatTui {
             }
         })?;
         self.last_frame = Some(completed.buffer.clone());
-        self.back_to_bottom_area = back_to_bottom_area;
+        self.back_to_bottom_area = areas.back_to_bottom;
+        self.composer_area = areas.composer;
         if invalidated {
             self.mouse_selection.clear();
         }
@@ -2131,6 +2565,53 @@ impl ChatTui {
     fn clear_mouse_selection(&mut self) {
         self.mouse_selection.clear();
     }
+
+    fn composer_selection_range(&self, state: &ChatViewState) -> Option<(usize, usize)> {
+        let area = self.composer_area?;
+        let (anchor, head) = self.mouse_selection.endpoints()?;
+        let (start, end) = if anchor <= head {
+            (anchor, head)
+        } else {
+            (head, anchor)
+        };
+        let chars = &state.composer;
+        let row_width = (area.width as usize).saturating_sub(4).max(1);
+        let start = input_index_at(start, area, chars, row_width, state.cursor, false)?;
+        let end = input_index_at(end, area, chars, row_width, state.cursor, true)?;
+        (start < end).then_some((start.min(chars.len()), end.min(chars.len())))
+    }
+
+    fn copy_mouse_selection(&mut self, state: &mut ChatViewState) -> bool {
+        if self.mouse_selection.range().is_none() {
+            return false;
+        }
+        let text = if let Some((start, end)) = self.composer_selection_range(state) {
+            state.composer[start..end].iter().collect::<String>()
+        } else {
+            self.last_frame
+                .as_ref()
+                .map(|buffer| selected_screen_text(buffer, self.mouse_selection))
+                .unwrap_or_default()
+        };
+        if text.trim().is_empty() {
+            self.clear_mouse_selection();
+            state.set_notice("Nothing to copy from this selection");
+            return true;
+        }
+        if text.len() > COPY_LIMIT {
+            state.set_notice("Selection exceeds the 100 KiB copy limit");
+        } else {
+            let character_count = text.chars().count();
+            match self.clipboard.copy(&text, &mut io::stdout()) {
+                Ok(CopyMethod::Native | CopyMethod::Osc52) => {
+                    state.set_notice(format!("Copied {character_count} chars to clipboard"))
+                }
+                Err(error) => state.set_notice(format!("Could not copy selection: {error}")),
+            }
+        }
+        true
+    }
+
     pub fn read_input(
         &mut self,
         shared_state: &Arc<Mutex<ChatViewState>>,
@@ -2189,6 +2670,26 @@ impl ChatTui {
                 }
                 event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
                     use event::{KeyCode, KeyModifiers};
+
+                    let is_ctrl_c = key.code == KeyCode::Char('c')
+                        && key.modifiers.contains(KeyModifiers::CONTROL);
+                    if is_ctrl_c && self.copy_mouse_selection(&mut state) {
+                        continue;
+                    }
+
+                    if self.mouse_selection.range().is_some() {
+                        if matches!(key.code, KeyCode::Delete | KeyCode::Backspace) {
+                            if let Some((start, end)) = self.composer_selection_range(&state) {
+                                state.composer.drain(start..end);
+                                state.cursor = start;
+                                state.slash_selected = 0;
+                                state.clear_notice();
+                            }
+                            self.clear_mouse_selection();
+                            continue;
+                        }
+                    }
+
                     self.clear_mouse_selection();
 
                     if key.code == KeyCode::F(6) {
@@ -2506,6 +3007,43 @@ impl ChatTui {
             }
         }
     }
+
+    pub fn prompt_resume_picker(
+        &mut self,
+        handle: &TuiHandle,
+        sessions: Vec<mint_core::ChatSession>,
+        current_dir: &std::path::Path,
+        current_branch: Option<String>,
+        active_chat_id: &str,
+    ) -> Result<Option<usize>> {
+        let (reply, response) = mpsc::channel();
+        if let Ok(mut state) = handle.state.lock() {
+            state.dialog = Some(DialogState::new_resume_picker(
+                sessions,
+                current_dir.to_string_lossy().to_string(),
+                current_branch,
+                active_chat_id.to_string(),
+                reply,
+            ));
+        }
+        loop {
+            if let Ok(state) = handle.state.lock() {
+                self.draw_state(&state)?;
+            }
+            if let Ok(answer) = response.try_recv() {
+                return Ok(match answer {
+                    DialogAnswer::Choice(index) => Some(index),
+                    _ => None,
+                });
+            }
+            if event::poll(std::time::Duration::from_millis(50))?
+                && let Ok(mut state) = handle.state.lock()
+            {
+                self.handle_dialog_event(event::read()?, &mut state)?;
+            }
+        }
+    }
+
     #[allow(dead_code)]
     pub fn prompt_multi_choice(
         &mut self,
@@ -2609,17 +3147,36 @@ impl ChatTui {
                         }
                     }
                     event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
-                        self.clear_mouse_selection();
-                        if let Ok(mut state) = handle.state.lock()
-                            && let Some(dialog) = state.dialog.as_mut()
-                        {
-                            if let Some(answer) = dialog.handle_key(key) {
-                                if let Some(dialog) = state.dialog.take() {
-                                    let _ = dialog.reply.send(answer);
+                        let mut selection_handled = false;
+                        if let Ok(mut state) = handle.state.lock() {
+                            if let Some(dialog) = state.dialog.as_mut() {
+                                if let Some(answer) = dialog.handle_key(key) {
+                                    if let Some(dialog) = state.dialog.take() {
+                                        let _ = dialog.reply.send(answer);
+                                    }
                                 }
+                                selection_handled = true;
+                            } else if key.code == KeyCode::Char('c')
+                                && key.modifiers.contains(KeyModifiers::CONTROL)
+                                && self.copy_mouse_selection(&mut state)
+                            {
+                                selection_handled = true;
+                            } else if self.mouse_selection.range().is_some()
+                                && matches!(key.code, KeyCode::Delete | KeyCode::Backspace)
+                            {
+                                if let Some((start, end)) = self.composer_selection_range(&state) {
+                                    state.composer.drain(start..end);
+                                    state.cursor = start;
+                                    state.slash_selected = 0;
+                                }
+                                self.clear_mouse_selection();
+                                selection_handled = true;
                             }
+                        }
+                        if selection_handled {
                             continue;
                         }
+                        self.clear_mouse_selection();
                         if key.code == KeyCode::Esc
                             || (key.code == KeyCode::Char('c')
                                 && key.modifiers.contains(KeyModifiers::CONTROL))
@@ -2641,6 +3198,10 @@ impl ChatTui {
                                 }
                                 KeyCode::Backspace if state.cursor > 0 => {
                                     state.cursor -= 1;
+                                    let cursor = state.cursor;
+                                    state.composer.remove(cursor);
+                                }
+                                KeyCode::Delete if state.cursor < state.composer.len() => {
                                     let cursor = state.cursor;
                                     state.composer.remove(cursor);
                                 }

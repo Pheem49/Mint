@@ -9,6 +9,7 @@
 
 ## Interactive CLI Mode Switching
 
+- Refreshed `/resume` in Classic CLI and Full-Screen TUI with compact one-line session rows, search, project/branch filters, Updated/Created sorting, and a restrained monochrome palette. Both views mark the current session.
 - Added a clickable "↓ Back to bottom" button to the full-screen TUI transcript. It appears only while the transcript is scrolled above the latest message, disappears at the bottom, and keeps `End` available for the same action while typing or waiting for an agent turn.
 - Added `$` skill and `@` mention suggestions to the full-screen TUI composer. Up/Down selects a match and Tab completes it; `@` completion replaces only the word at the cursor, including mentions within a sentence. The existing Enter submission behavior remains available.
 - Press F6 at the prompt to choose whether to switch between the full-screen TUI and Classic CLI without ending the current session. The default choice keeps the current interface; an unfinished prompt is preserved whether the switch is confirmed or cancelled.
@@ -427,6 +428,10 @@ Overhauled session management in the CLI to give every conversation its own isol
   - Integrated `/resume` dispatch in `slashCommandProcessor.ts` and `MintDashboard.tsx` to hot-swap active conversations seamlessly on Desktop and Web.
 # Unreleased
 
+- Fixed CLI TUI mouse selection so Ctrl+C copies selected text, while Delete/Backspace remove selected characters from the input composer.
+- Fixed the TUI mouse-selection hint overlapping the copy confirmation; the hint now names Ctrl+C and yields the footer to copy status messages.
+- Fixed long pasted input wrapping at the wrong positions for Thai and wide Unicode text; the composer now wraps by terminal display width and scrolls to keep the cursor visible.
+- Changed CLI TUI update alerts from a brief footer message to a persistent bordered card with the current and latest versions, `mint update --approve`, and the release notes link.
 - Kept the mobile chat header anchored inside the chat panel during iPhone keyboard panning, and made keyboard detection use the pre-focus viewport height so the empty prompt and footer make room for typing.
 - Fixed the iPhone keyboard layout by keeping Mint Web aligned with the visual viewport as Safari pans it, while reclaiming chat space from the footer during typing.
 - Fixed the mobile sidebar's More menu to expand inside the drawer instead of beyond the screen, and added a visible close button and roomier menu targets.

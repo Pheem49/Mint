@@ -36,6 +36,9 @@ impl ChoiceItem {
 }
 
 pub trait CommandUi {
+    fn uses_inline_resume_picker(&self) -> bool {
+        false
+    }
     fn push_notice_str(&mut self, text: &str);
     fn push_command_output_str(&mut self, text: &str);
     fn set_status(&mut self, lines: Vec<String>);
@@ -46,6 +49,22 @@ pub trait CommandUi {
         body: &str,
         options: &[ChoiceItem],
     ) -> Result<Option<usize>>;
+    fn prompt_resume_picker(
+        &mut self,
+        sessions: Vec<mint_core::ChatSession>,
+        _current_dir: &std::path::Path,
+        _current_branch: Option<String>,
+        _active_chat_id: &str,
+    ) -> Result<Option<String>> {
+        let options: Vec<ChoiceItem> = sessions
+            .iter()
+            .map(|session| ChoiceItem::new(session.title.clone(), session.id.clone()))
+            .collect();
+        match self.prompt_choice("Resume Session", "Type to search", &options)? {
+            Some(index) => Ok(options.get(index).map(|item| item.value.clone())),
+            None => Ok(None),
+        }
+    }
     #[allow(dead_code)]
     fn prompt_multi_choice(
         &mut self,
@@ -132,6 +151,23 @@ impl CommandUi for FullScreenCommandUi<'_> {
         self.terminal.prompt_choice(self.handle, title, body, labels)
     }
 
+    fn prompt_resume_picker(
+        &mut self,
+        sessions: Vec<mint_core::ChatSession>,
+        current_dir: &std::path::Path,
+        current_branch: Option<String>,
+        active_chat_id: &str,
+    ) -> Result<Option<String>> {
+        let selected = self.terminal.prompt_resume_picker(
+            self.handle,
+            sessions.clone(),
+            current_dir,
+            current_branch,
+            active_chat_id,
+        )?;
+        Ok(selected.and_then(|index| sessions.get(index).map(|session| session.id.clone())))
+    }
+
     fn prompt_multi_choice(
         &mut self,
         title: &str,
@@ -197,6 +233,10 @@ impl ClassicCommandUi {
 }
 
 impl CommandUi for ClassicCommandUi {
+    fn uses_inline_resume_picker(&self) -> bool {
+        true
+    }
+
     fn push_notice_str(&mut self, text: &str) {
         println!("{DIM}{text}{RESET}");
     }
@@ -411,4 +451,3 @@ mod tests {
         assert!(!confirmed);
     }
 }
-

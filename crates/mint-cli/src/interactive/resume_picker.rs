@@ -5,8 +5,30 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use std::path::Path;
+use unicode_width::UnicodeWidthStr;
 
-fn format_relative_time(timestamp_str: &str) -> String {
+pub(super) fn truncate_to_width(text: &str, max_width: usize) -> String {
+    if UnicodeWidthStr::width(text) <= max_width {
+        return text.to_owned();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    let mut result = String::new();
+    let mut width = 0usize;
+    for character in text.chars() {
+        let character_width = UnicodeWidthStr::width(character.to_string().as_str());
+        if width + character_width > max_width.saturating_sub(1) {
+            break;
+        }
+        result.push(character);
+        width += character_width;
+    }
+    result.push('…');
+    result
+}
+
+pub(super) fn format_relative_time(timestamp_str: &str) -> String {
     let parse_res = chrono::DateTime::parse_from_rfc3339(timestamp_str)
         .map(|dt| dt.with_timezone(&chrono::Utc))
         .or_else(|_| {
@@ -61,21 +83,15 @@ fn format_relative_time(timestamp_str: &str) -> String {
     format!("{years} years ago")
 }
 
-fn format_bytes(bytes: usize) -> String {
-    if bytes < 1024 {
-        format!("{bytes}B")
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1}KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
-    }
-}
-
 pub fn prompt_resume_session_picker_with_ui(
     ui: &mut dyn CommandUi,
-    _current_dir: &Path,
+    current_dir: &Path,
     active_chat_id: &str,
 ) -> Result<Option<String>> {
+    if ui.uses_inline_resume_picker() {
+        return prompt_resume_session_picker(current_dir, active_chat_id);
+    }
+
     let memory = match mint_core::MemoryStore::open_default() {
         Ok(m) => m,
         Err(err) => {
@@ -95,24 +111,8 @@ pub fn prompt_resume_session_picker_with_ui(
         return Ok(None);
     }
 
-    let items: Vec<ChoiceItem> = sessions
-        .iter()
-        .map(|s| {
-            let time_str = format_relative_time(&s.updated_at);
-            let desc = format!("{time_str} · {} msgs", s.message_count);
-            let label = if s.id == active_chat_id {
-                format!("* {} (current)", s.title)
-            } else {
-                s.title.clone()
-            };
-            ChoiceItem::with_description(label, desc, s.id.clone())
-        })
-        .collect();
-
-    match ui.prompt_choice("Resume Session", "Select a conversation to resume", &items)? {
-        Some(idx) => Ok(Some(items[idx].value.clone())),
-        None => Ok(None),
-    }
+    let current_branch = mint_core::git::get_current_branch(current_dir);
+    ui.prompt_resume_picker(sessions, current_dir, current_branch, active_chat_id)
 }
 
 pub fn prompt_resume_session_picker(
@@ -154,6 +154,7 @@ pub fn prompt_resume_session_picker(
     let mut search_query = String::new();
     let mut show_all_projects = false;
     let mut only_current_branch = false;
+    let mut sort_by_created = false;
     let mut selected_idx: usize = 0;
     let mut scroll_offset: usize = 0;
     let mut showing_preview = false;
@@ -192,7 +193,7 @@ pub fn prompt_resume_session_picker(
 
     let result = loop {
         // 1. Filter sessions
-        let filtered: Vec<&mint_core::ChatSession> = sessions
+        let mut filtered: Vec<&mint_core::ChatSession> = sessions
             .iter()
             .filter(|s| {
                 if !show_all_projects
@@ -201,11 +202,11 @@ pub fn prompt_resume_session_picker(
                 {
                     return false;
                 }
-                if only_current_branch
-                    && let Some(ref cb) = current_branch
-                    && s.git_branch.as_deref() != Some(cb.as_str())
-                {
-                    return false;
+                if only_current_branch {
+                    match current_branch.as_deref() {
+                        Some(branch) if s.git_branch.as_deref() == Some(branch) => {}
+                        _ => return false,
+                    }
                 }
                 if !search_query.is_empty() {
                     let q = search_query.to_lowercase();
@@ -228,6 +229,19 @@ pub fn prompt_resume_session_picker(
                 true
             })
             .collect();
+        filtered.sort_by(|left, right| {
+            let left_time = if sort_by_created {
+                &left.created_at
+            } else {
+                &left.updated_at
+            };
+            let right_time = if sort_by_created {
+                &right.created_at
+            } else {
+                &right.updated_at
+            };
+            right_time.cmp(left_time)
+        });
 
         let total_count = sessions.len();
         let filtered_count = filtered.len();
@@ -236,9 +250,8 @@ pub fn prompt_resume_session_picker(
             selected_idx = filtered_count.saturating_sub(1);
         }
 
-        // Available items visible in the list:
-        // Height 16: title (1), search (3), project header (1), list (~9), hints (1)
-        let visible_items = ((height as usize).saturating_sub(7) / 2).max(2);
+        // Header, filters, search, count, divider, and two-line footer use seven rows.
+        let visible_items = (height as usize).saturating_sub(7).max(1);
         if selected_idx < scroll_offset {
             scroll_offset = selected_idx;
         } else if selected_idx >= scroll_offset + visible_items {
@@ -257,23 +270,27 @@ pub fn prompt_resume_session_picker(
             if renaming {
                 // Render rename popup
                 let mut lines = Vec::new();
+                lines.push(Line::from(vec![Span::styled(
+                    "Rename session title:",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                )]));
                 lines.push(Line::from(vec![
-                    Span::styled("Rename session title:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::styled("> ", Style::default().fg(Color::Green)),
+                    Span::styled("> ", Style::default().fg(Color::Gray)),
                     Span::raw(&rename_query_clone),
-                    Span::styled("█", Style::default().fg(Color::Cyan)),
+                    Span::styled("█", Style::default().fg(Color::White)),
                 ]));
-                lines.push(Line::from(vec![
-                    Span::styled("(Press Enter to save, Esc to cancel)", Style::default().fg(Color::DarkGray)),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    "(Press Enter to save, Esc to cancel)",
+                    Style::default().fg(Color::DarkGray),
+                )]));
 
                 let block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .title(" Rename Session ")
-                    .border_style(Style::default().fg(Color::Cyan));
+                    .border_style(Style::default().fg(Color::Gray));
                 let p = Paragraph::new(lines).block(block);
                 frame.render_widget(p, area);
                 return;
@@ -285,25 +302,44 @@ pub fn prompt_resume_session_picker(
                 let mut lines = Vec::new();
                 lines.push(Line::from(vec![
                     Span::styled("Session: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(&target_session.title, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!(" ({})", target_session.id), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        &target_session.title,
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" ({})", target_session.id),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                 ]));
                 lines.push(Line::from(""));
 
                 if let Ok(recent) = memory.get_session_preview(&target_session.id, 2) {
                     if recent.is_empty() {
-                        lines.push(Line::from(Span::styled("  (No messages recorded in this session)", Style::default().fg(Color::DarkGray))));
+                        lines.push(Line::from(Span::styled(
+                            "  (No messages recorded in this session)",
+                            Style::default().fg(Color::DarkGray),
+                        )));
                     } else {
                         for item in recent.iter().rev() {
                             let u_snippet = crate::interactive::truncate_utf8(&item.user_text, 100);
                             let a_snippet = crate::interactive::truncate_utf8(&item.ai_text, 140);
                             lines.push(Line::from(vec![
-                                Span::styled("  User › ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                                Span::styled(
+                                    "  User › ",
+                                    Style::default()
+                                        .fg(Color::Gray)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
                                 Span::raw(u_snippet.replace('\n', " ")),
                             ]));
                             lines.push(Line::from(vec![
-                                Span::styled("  Assistant › ", Style::default().fg(Color::Green)),
-                                Span::styled(a_snippet.replace('\n', " "), Style::default().fg(Color::Gray)),
+                                Span::styled("  Assistant › ", Style::default().fg(Color::Gray)),
+                                Span::styled(
+                                    a_snippet.replace('\n', " "),
+                                    Style::default().fg(Color::White),
+                                ),
                             ]));
                             lines.push(Line::from(""));
                         }
@@ -319,7 +355,7 @@ pub fn prompt_resume_session_picker(
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .title(" Session Preview ")
-                    .border_style(Style::default().fg(Color::Cyan));
+                    .border_style(Style::default().fg(Color::Gray));
                 let p = Paragraph::new(lines).block(block);
                 frame.render_widget(p, area);
                 return;
@@ -327,84 +363,173 @@ pub fn prompt_resume_session_picker(
 
             // Normal Picker View
             let mut lines = Vec::new();
+            lines.push(Line::styled(
+                "Resume a previous session",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ));
 
-            // 1. Header: Resume session (14 of 49)
-            let header_text = format!("Resume session ({} of {})", if filtered_count > 0 { selected_idx + 1 } else { 0 }, total_count);
-            lines.push(Line::from(vec![
-                Span::styled(header_text, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            ]));
+            let active_filter_style = Style::default()
+                .fg(Color::Black)
+                .bg(Color::Gray)
+                .add_modifier(Modifier::BOLD);
+            let muted_style = Style::default().fg(Color::DarkGray);
+            let mut filter_line = vec![
+                Span::styled("Project: ", muted_style),
+                Span::styled(
+                    " Cwd ",
+                    if !show_all_projects {
+                        active_filter_style
+                    } else {
+                        muted_style
+                    },
+                ),
+                Span::styled(
+                    " All ",
+                    if show_all_projects {
+                        active_filter_style
+                    } else {
+                        muted_style
+                    },
+                ),
+                Span::styled("  ·  Branch: ", muted_style),
+                Span::styled(
+                    " All ",
+                    if !only_current_branch {
+                        active_filter_style
+                    } else {
+                        muted_style
+                    },
+                ),
+                Span::styled(
+                    " Current ",
+                    if only_current_branch {
+                        active_filter_style
+                    } else {
+                        muted_style
+                    },
+                ),
+                Span::styled("  ·  Sort: ", muted_style),
+                Span::styled(
+                    " Updated ",
+                    if !sort_by_created {
+                        active_filter_style
+                    } else {
+                        muted_style
+                    },
+                ),
+                Span::styled(
+                    " Created ",
+                    if sort_by_created {
+                        active_filter_style
+                    } else {
+                        muted_style
+                    },
+                ),
+            ];
+            if only_current_branch && current_branch.is_none() {
+                filter_line.push(Span::styled(" (no branch)", muted_style));
+            }
+            lines.push(Line::from(filter_line));
 
-            // 2. Search box with border
-            let search_display = if search_query_clone.is_empty() {
-                Span::styled("⌕ Search...", Style::default().fg(Color::DarkGray))
+            let search_text = if search_query_clone.is_empty() {
+                "Type to search".to_owned()
             } else {
-                Span::styled(format!("⌕ {search_query_clone}█"), Style::default().fg(Color::White))
+                search_query_clone.clone()
             };
-
-            let search_width = area.width.saturating_sub(4).max(10) as usize;
-            let bar_top = format!("┌{}┐", "─".repeat(search_width));
-            let bar_bot = format!("└{}┘", "─".repeat(search_width));
-            lines.push(Line::from(Span::styled(bar_top, Style::default().fg(Color::DarkGray))));
             lines.push(Line::from(vec![
-                Span::styled("│ ", Style::default().fg(Color::DarkGray)),
-                search_display,
+                Span::styled("⌕  ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    search_text,
+                    if search_query_clone.is_empty() {
+                        muted_style
+                    } else {
+                        Style::default().fg(Color::White)
+                    },
+                ),
+                if search_query_clone.is_empty() {
+                    Span::raw("")
+                } else {
+                    Span::styled("█", Style::default().fg(Color::White))
+                },
             ]));
-            lines.push(Line::from(Span::styled(bar_bot, Style::default().fg(Color::DarkGray))));
 
-            // 3. Project Header
             let project_label = if show_all_projects {
-                "  All Projects".to_string()
+                "All projects".to_owned()
             } else {
-                format!("  {project_name_clone}")
+                project_name_clone.clone()
             };
-            lines.push(Line::from(Span::styled(project_label, Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD))));
+            let result_label = if filtered_count == 1 {
+                "session"
+            } else {
+                "sessions"
+            };
+            lines.push(Line::styled(
+                format!("{project_label} · {filtered_count} of {total_count} {result_label}"),
+                muted_style,
+            ));
+            lines.push(Line::styled(
+                "─".repeat(area.width as usize),
+                Style::default().fg(Color::DarkGray),
+            ));
 
-            // 4. List Items
+            // One compact row per session keeps long titles from colliding with metadata.
             if filtered_count == 0 {
-                lines.push(Line::from(Span::styled("    No matching sessions found", Style::default().fg(Color::DarkGray))));
+                lines.push(Line::styled("No matching sessions", muted_style));
             } else {
                 let end_idx = (scroll_offset + visible_items).min(filtered_count);
                 for i in scroll_offset..end_idx {
                     let s = filtered[i];
                     let is_sel = i == selected_idx;
-                    let is_active = s.id == active_chat_id;
-
-                    let prefix = if is_sel { "> " } else { "  " };
-                    let active_tag = if is_active { " (current)" } else { "" };
-                    let title_span = if is_sel {
-                        Span::styled(format!("{prefix}{}{active_tag}", s.title), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-                    } else {
-                        Span::styled(format!("{prefix}{}{active_tag}", s.title), Style::default().fg(Color::White))
-                    };
-
                     let rel_time = format_relative_time(&s.updated_at);
-                    let lang = s.main_language.clone().unwrap_or_else(|| "Project".to_string());
-                    let size_str = format_bytes(s.total_bytes);
-                    let branch_str = s.git_branch.as_deref().unwrap_or("");
-                    let branch_part = if !branch_str.is_empty() {
-                        format!(" · {branch_str}")
+                    let time = truncate_to_width(&rel_time, 10);
+                    let count = format!("{} msgs", s.message_count);
+                    let current_tag = if s.id == active_chat_id {
+                        " (current)"
                     } else {
-                        String::new()
+                        ""
                     };
-
-                    let subtitle = format!("    {rel_time} · {lang}{branch_part} · {size_str}");
-                    let sub_span = Span::styled(subtitle, Style::default().fg(Color::DarkGray));
-
-                    lines.push(Line::from(title_span));
-                    lines.push(Line::from(sub_span));
+                    let title_width = (area.width as usize)
+                        .saturating_sub(2 + 10 + 2 + UnicodeWidthStr::width(count.as_str()) + 2)
+                        .saturating_sub(UnicodeWidthStr::width(current_tag));
+                    let title = truncate_to_width(&s.title, title_width);
+                    let row = format!("  {time:>10}  {title}{current_tag}  {count}");
+                    let row_width = UnicodeWidthStr::width(row.as_str());
+                    let row = format!(
+                        "{row}{}",
+                        " ".repeat((area.width as usize).saturating_sub(row_width))
+                    );
+                    if is_sel {
+                        lines.push(Line::styled(format!("›{}", &row[1..]), active_filter_style));
+                    } else {
+                        lines.push(Line::from(vec![
+                            Span::styled("  ", Style::default().fg(Color::Gray)),
+                            Span::styled(format!("{time:>10}  "), muted_style),
+                            Span::styled(
+                                format!("{title}{current_tag}"),
+                                Style::default().fg(Color::White),
+                            ),
+                            Span::styled(format!("  {count}"), muted_style),
+                            Span::raw(" ".repeat((area.width as usize).saturating_sub(row_width))),
+                        ]));
+                    }
                 }
             }
 
-            // Fill remaining empty lines up to height - 1
-            while lines.len() + 1 < height as usize {
+            // Fill empty list rows so the footer stays anchored.
+            while lines.len() + 2 < height as usize {
                 lines.push(Line::from(""));
             }
 
-            // 5. Footer Shortcuts
-            let all_proj_hint = if show_all_projects { "Ctrl+A current project" } else { "Ctrl+A all projects" };
-            let branch_hint = if only_current_branch { "Ctrl+B all branches" } else { "Ctrl+B current branch" };
-            let footer_str = format!("{all_proj_hint} · {branch_hint} · Space to preview · Ctrl+R to rename · Esc to cancel");
-            lines.push(Line::from(Span::styled(footer_str, Style::default().fg(Color::DarkGray))));
+            lines.push(Line::styled(
+                "Enter resume · Space preview · Ctrl+R rename · Esc cancel",
+                muted_style,
+            ));
+            lines.push(Line::styled(
+                "Ctrl+A project · Ctrl+B branch · Tab sort · Type to search",
+                muted_style,
+            ));
 
             let p = Paragraph::new(lines);
             frame.render_widget(p, area);
@@ -513,6 +638,11 @@ pub fn prompt_resume_session_picker(
                                 selected_idx =
                                     (selected_idx + visible_items).min(filtered_count - 1);
                             }
+                        }
+                        KeyCode::Tab => {
+                            sort_by_created = !sort_by_created;
+                            selected_idx = 0;
+                            scroll_offset = 0;
                         }
                         KeyCode::Char(' ')
                             if search_query.is_empty() && selected_idx < filtered_count =>

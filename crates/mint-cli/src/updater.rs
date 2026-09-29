@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+use unicode_width::UnicodeWidthStr;
 
 use anyhow::{Result, bail};
 
@@ -283,6 +284,37 @@ pub fn print_update_notice(current: &str, latest: &str) {
     );
 
     println!("\x1b[33m╰{}╯\x1b[0m\n", border);
+}
+
+/// Formats a persistent update card for the full-screen CLI transcript.
+pub fn format_tui_update_notice(current: &str, latest: &str) -> String {
+    let title = format!("✨ Update available! {current} -> {latest}");
+    let rows = [
+        title,
+        "Run `mint update --approve` to update.".to_owned(),
+        "Release notes: https://github.com/Pheem49/Mint/releases/latest".to_owned(),
+    ];
+    let inner_width = rows
+        .iter()
+        .map(|row| UnicodeWidthStr::width(row.as_str()))
+        .max()
+        .unwrap_or(0);
+    let border = "─".repeat(inner_width + 2);
+    let mut card = format!("\x1b[33m╭{border}╮\x1b[0m\n");
+    for (index, row) in rows.iter().enumerate() {
+        let padding = inner_width.saturating_sub(UnicodeWidthStr::width(row.as_str()));
+        let content = if index == 0 {
+            format!("\x1b[1;36m{row}\x1b[0m")
+        } else {
+            row.clone()
+        };
+        card.push_str(&format!(
+            "\x1b[33m│\x1b[0m {content}{} \x1b[33m│\x1b[0m\n",
+            " ".repeat(padding)
+        ));
+    }
+    card.push_str(&format!("\x1b[33m╰{border}╯\x1b[0m"));
+    card
 }
 
 fn compare_versions(left: &str, right: &str) -> i8 {
