@@ -436,6 +436,9 @@ Overhauled session management in the CLI to give every conversation its own isol
   - Integrated `/resume` dispatch in `slashCommandProcessor.ts` and `MintDashboard.tsx` to hot-swap active conversations seamlessly on Desktop and Web.
 # Unreleased
 
+- Fixed the Mint watermark's front M by making the emblem face opaque to its rear leaf pattern, so the two symbols no longer overlap.
+- Set the terminal tab/window title to `Mint Agent | <workspace>` while the Full-Screen TUI is active.
+- Replaced the empty CLI chat wordmark with a layered dotted Mint emblem: an M on the front, a leaf on the back, and a shaded circular rim. Clicking rotates it once in 3D; clicking during the turn restarts it.
 - Fixed CLI TUI mouse selection so Ctrl+C copies selected text, while Delete/Backspace remove selected characters from the input composer.
 - Fixed the TUI mouse-selection hint overlapping the copy confirmation; the hint now names Ctrl+C and yields the footer to copy status messages.
 - Fixed long pasted input wrapping at the wrong positions for Thai and wide Unicode text; the composer now wraps by terminal display width and scrolls to keep the cursor visible.

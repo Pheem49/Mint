@@ -370,7 +370,7 @@ pub async fn run_interactive_chat_with_session(
     };
 
     let mut tui = if use_tui {
-        match chat_tui::ChatTui::enter() {
+        match chat_tui::ChatTui::enter(&session.current_dir) {
             Ok(terminal) => {
                 let state = chat_tui::ChatViewState::from_session(&session);
                 let state = Arc::new(Mutex::new(state));
@@ -560,7 +560,7 @@ pub async fn run_interactive_chat_with_session(
                     terminal.suspend();
                     println!("{MINT}Switched to Classic CLI. Press F6 for TUI.{RESET}");
                 } else {
-                    match chat_tui::ChatTui::enter() {
+                    match chat_tui::ChatTui::enter(&session.current_dir) {
                         Ok(terminal) => {
                             let mut state = chat_tui::ChatViewState::from_session(&session);
                             state.set_draft(pending_draft.take().unwrap_or_default());

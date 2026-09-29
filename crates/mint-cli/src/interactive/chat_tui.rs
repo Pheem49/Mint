@@ -32,6 +32,122 @@ const MIN_WIDTH: u16 = 60;
 const MIN_HEIGHT: u16 = 12;
 const COPY_LIMIT: usize = 100 * 1024;
 const BACK_TO_BOTTOM_LABEL: &str = " ↓ Back to bottom · End ";
+const WATERMARK_FRAME_COUNT: u8 = 24;
+const WATERMARK_TICK: std::time::Duration = std::time::Duration::from_millis(120);
+const WATERMARK_WIDTH: u16 = 39;
+const WATERMARK_HEIGHT: u16 = 17;
+
+fn mint_m_watermark(frame: Option<u8>, height: usize) -> Text<'static> {
+    const WIDTH: usize = WATERMARK_WIDTH as usize;
+    const DESIGN_HEIGHT: usize = WATERMARK_HEIGHT as usize;
+    #[derive(Clone, Copy)]
+    enum Part {
+        Void,
+        Rim,
+        Band,
+        Orbit,
+        Mark,
+    }
+
+    let height = height.clamp(1, DESIGN_HEIGHT);
+    let angle = frame.unwrap_or(0) as f32 * std::f32::consts::TAU
+        / WATERMARK_FRAME_COUNT as f32;
+    let (sin, cos) = angle.sin_cos();
+    let mut pixels = vec![vec![None::<(f32, Part)>; WIDTH]; height];
+
+    // A dotted medallion with an M on its front and a leaf on its back. The
+    // two faces and the rim share one depth buffer as they turn in 3D.
+    for y in 0..DESIGN_HEIGHT {
+        let world_y = y as f32 - 8.0;
+        let projected_y = y * height.saturating_sub(1) / (DESIGN_HEIGHT - 1);
+        for source_x in 0..WIDTH {
+            let world_x = (source_x as f32 - 19.0) / 2.0;
+            let radius = world_x.hypot(world_y);
+            if radius > 8.15 {
+                continue;
+            }
+
+            let stem = (world_x.abs() - 3.7).abs() < 0.5 && world_y.abs() <= 4.2;
+            let diagonal_y = world_y + 4.2;
+            let diagonal = (-4.2..=2.2).contains(&world_y)
+                && [
+                    -3.7 + diagonal_y * 3.7 / 6.4,
+                    3.7 - diagonal_y * 3.7 / 6.4,
+                ]
+                .into_iter()
+                .any(|line_x| (world_x - line_x).abs() < 0.5);
+            let front_mark = stem || diagonal;
+
+            let leaf_x = world_x * 0.8 + world_y * 0.6;
+            let leaf_y = -world_x * 0.6 + world_y * 0.8;
+            let leaf_radius = (leaf_x / 4.2).powi(2) + (leaf_y / 2.5).powi(2);
+            let back_mark = (leaf_radius - 1.0).abs() < 0.22
+                || (leaf_y.abs() < 0.32 && leaf_x.abs() < 3.8);
+
+            for (z, mark) in [(-1.2, back_mark), (0.0, false), (1.2, front_mark)] {
+                let part = if radius > 7.25 {
+                    Part::Rim
+                } else if radius > 6.2 {
+                    Part::Band
+                } else if mark {
+                    Part::Mark
+                } else if radius > 5.75 && radius < 6.05 && (source_x + y) % 3 != 0 {
+                    Part::Orbit
+                } else {
+                    Part::Void
+                };
+                let projected_x = (19.0 + (world_x * cos + z * sin) * 2.0).round() as isize;
+                if !(0..WIDTH as isize).contains(&projected_x) {
+                    continue;
+                }
+                let depth = -world_x * sin + z * cos;
+                let cell = &mut pixels[projected_y][projected_x as usize];
+                if cell.is_none_or(|(existing_depth, _)| depth > existing_depth) {
+                    *cell = Some((depth, part));
+                }
+            }
+        }
+    }
+
+    let lines = pixels
+        .into_iter()
+        .map(|row| {
+            let spans = row
+                .into_iter()
+                .map(|pixel| match pixel {
+                    Some((_, Part::Void)) | None => Span::raw(" "),
+                    Some((depth, part)) => {
+                        let lit = frame.is_some() && depth > 0.5;
+                        let (glyph, color) = match part {
+                            Part::Mark => (
+                                "⣿",
+                                if lit {
+                                    crate::terminal_theme::ACCENT
+                                } else {
+                                    crate::terminal_theme::WATERMARK_MARK
+                                },
+                            ),
+                            Part::Rim => (
+                                "⠿",
+                                if lit {
+                                    crate::terminal_theme::BLUE
+                                } else {
+                                    crate::terminal_theme::WATERMARK_RIM
+                                },
+                            ),
+                            Part::Band => ("⠿", crate::terminal_theme::WATERMARK_BAND),
+                            Part::Orbit => ("⠂", crate::terminal_theme::WATERMARK_ORBIT),
+                            Part::Void => unreachable!(),
+                        };
+                        Span::styled(glyph, Style::default().fg(color))
+                    }
+                })
+                .collect::<Vec<_>>();
+            Line::from(spans)
+        })
+        .collect::<Vec<_>>();
+    Text::from(lines)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TranscriptRole {
@@ -127,6 +243,8 @@ pub(crate) struct ChatViewState {
     notice: Option<(String, std::time::Instant)>,
     dialog: Option<DialogState>,
     thought_modal: Option<ThoughtModalState>,
+    watermark_frame: u8,
+    watermark_animating: bool,
 }
 
 #[derive(Debug)]
@@ -1464,22 +1582,18 @@ impl ChatViewState {
             rows[1],
         );
         if self.transcript.is_empty() && self.dialog.is_none() && self.thought_modal.is_none() {
-            let watermark_height = 4u16;
+            let watermark_height = WATERMARK_HEIGHT.min(rows[1].height);
+            let watermark_width = WATERMARK_WIDTH.min(rows[1].width);
             let watermark_area = Rect::new(
-                rows[1].x,
-                rows[1].y + rows[1].height.saturating_sub(watermark_height) / 2,
-                rows[1].width,
-                watermark_height.min(rows[1].height),
+                rows[1].x + rows[1].width.saturating_sub(watermark_width) / 2,
+                rows[1].y + rows[1].height.saturating_sub(WATERMARK_HEIGHT) / 2,
+                watermark_width,
+                watermark_height,
             );
-            let watermark_style = Style::default()
-                .fg(crate::terminal_theme::MUTED)
-                .add_modifier(Modifier::DIM);
-            let watermark = Text::from(vec![
-                Line::styled(" __  __ _       _    ___ _    ___ ", watermark_style),
-                Line::styled(r"|  \/  (_)_ __ | |_ / __| |  |_ _|", watermark_style),
-                Line::styled(r"| |\/| | | '_ \|  _| (__| |__ | | ", watermark_style),
-                Line::styled(r"|_|  |_|_|_| |_|\___|\___|\___|___|", watermark_style),
-            ]);
+            let watermark = mint_m_watermark(
+                self.watermark_animating.then_some(self.watermark_frame),
+                watermark_height as usize,
+            );
             frame.render_widget(
                 Paragraph::new(watermark).alignment(ratatui::layout::Alignment::Center),
                 watermark_area,
@@ -2094,6 +2208,23 @@ impl ChatViewState {
         RenderAreas {
             back_to_bottom: back_to_bottom_area,
             composer: rows.get(4).copied(),
+            watermark: if self.transcript.is_empty()
+                && self.dialog.is_none()
+                && self.thought_modal.is_none()
+            {
+                Some(Rect::new(
+                    rows[1].x
+                        + rows[1]
+                            .width
+                            .saturating_sub(WATERMARK_WIDTH.min(rows[1].width))
+                            / 2,
+                    rows[1].y + rows[1].height.saturating_sub(WATERMARK_HEIGHT) / 2,
+                    WATERMARK_WIDTH.min(rows[1].width),
+                    WATERMARK_HEIGHT.min(rows[1].height),
+                ))
+            } else {
+                None
+            },
         }
     }
 }
@@ -2102,6 +2233,7 @@ impl ChatViewState {
 struct RenderAreas {
     back_to_bottom: Option<Rect>,
     composer: Option<Rect>,
+    watermark: Option<Rect>,
 }
 
 pub(crate) struct ChatTui {
@@ -2111,6 +2243,7 @@ pub(crate) struct ChatTui {
     last_frame: Option<Buffer>,
     back_to_bottom_area: Option<Rect>,
     composer_area: Option<Rect>,
+    watermark_area: Option<Rect>,
     clipboard: TextClipboard,
 }
 
@@ -2468,7 +2601,7 @@ pub(crate) fn restore_terminal() {
     let _ = terminal::disable_raw_mode();
 }
 impl ChatTui {
-    pub fn enter() -> Result<Self> {
+    pub fn enter(workspace: &Path) -> Result<Self> {
         use crossterm::tty::IsTty;
         if !io::stdin().is_tty() || !io::stdout().is_tty() {
             bail!("stdin/stdout is not a TTY");
@@ -2479,21 +2612,38 @@ impl ChatTui {
         }
         terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
+        let workspace_name = workspace
+            .file_name()
+            .unwrap_or_else(|| workspace.as_os_str())
+            .to_string_lossy();
+        let workspace_name: String = workspace_name
+            .chars()
+            .map(|character| if character.is_control() { ' ' } else { character })
+            .collect();
+        let title = if workspace_name.trim().is_empty() {
+            "Mint Agent | workspace".to_owned()
+        } else {
+            format!("Mint Agent | {}", workspace_name.trim())
+        };
         let setup = setup_terminal_output(&mut stdout);
         if let Err(error) = setup {
             restore_terminal();
             return Err(error.into());
         }
         match Terminal::new(CrosstermBackend::new(stdout)) {
-            Ok(terminal) => Ok(Self {
-                terminal,
-                active: true,
-                mouse_selection: MouseSelection::default(),
-                last_frame: None,
-                back_to_bottom_area: None,
-                composer_area: None,
-                clipboard: TextClipboard::default(),
-            }),
+            Ok(terminal) => {
+                let _ = io::stdout().execute(terminal::SetTitle(title));
+                Ok(Self {
+                    terminal,
+                    active: true,
+                    mouse_selection: MouseSelection::default(),
+                    last_frame: None,
+                    back_to_bottom_area: None,
+                    composer_area: None,
+                    watermark_area: None,
+                    clipboard: TextClipboard::default(),
+                })
+            }
             Err(error) => {
                 restore_terminal();
                 Err(error.into())
@@ -2530,6 +2680,7 @@ impl ChatTui {
         self.last_frame = Some(completed.buffer.clone());
         self.back_to_bottom_area = areas.back_to_bottom;
         self.composer_area = areas.composer;
+        self.watermark_area = areas.watermark;
         if invalidated {
             self.mouse_selection.clear();
         }
@@ -2692,8 +2843,24 @@ impl ChatTui {
 
             self.draw_state(&state)?;
 
-            if last_ctrl_d.is_some() || state.active_notice().is_some() {
-                if !event::poll(std::time::Duration::from_millis(50))? {
+            let watermark_animating = state.watermark_animating
+                && state.transcript.is_empty()
+                && state.dialog.is_none()
+                && state.thought_modal.is_none();
+            if last_ctrl_d.is_some() || state.active_notice().is_some() || watermark_animating {
+                let poll_interval = if watermark_animating {
+                    WATERMARK_TICK
+                } else {
+                    std::time::Duration::from_millis(50)
+                };
+                if !event::poll(poll_interval)? {
+                    if watermark_animating {
+                        state.watermark_frame += 1;
+                        if state.watermark_frame >= WATERMARK_FRAME_COUNT {
+                            state.watermark_frame = 0;
+                            state.watermark_animating = false;
+                        }
+                    }
                     continue;
                 }
             }
@@ -2712,6 +2879,16 @@ impl ChatTui {
                     }
                 }
                 event::Event::Mouse(m) => {
+                    if m.kind == event::MouseEventKind::Down(event::MouseButton::Left)
+                        && self.watermark_area.is_some_and(|area| {
+                            area.contains(Position::new(m.column, m.row))
+                        })
+                    {
+                        self.clear_mouse_selection();
+                        state.watermark_frame = 0;
+                        state.watermark_animating = true;
+                        continue;
+                    }
                     if self.handle_selection_mouse(m, &mut state)? {
                         continue;
                     }
@@ -3325,6 +3502,31 @@ mod dialog_tests {
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
 
+    #[test]
+    fn mint_watermark_frames_fit_available_terminal_height() {
+        for height in [3, 7, WATERMARK_HEIGHT as usize] {
+            for frame in 0..WATERMARK_FRAME_COUNT {
+                let text = mint_m_watermark(Some(frame), height);
+                assert_eq!(text.lines.len(), height);
+                assert!(text.lines.iter().all(|line| {
+                    line.spans
+                        .iter()
+                        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+                        .sum::<usize>()
+                        == WATERMARK_WIDTH as usize
+                }));
+            }
+        }
+        assert_ne!(
+            mint_m_watermark(Some(0), WATERMARK_HEIGHT as usize),
+            mint_m_watermark(Some(6), WATERMARK_HEIGHT as usize)
+        );
+        let front = mint_m_watermark(None, WATERMARK_HEIGHT as usize);
+        assert_eq!(front.lines[8].spans[19].content.as_ref(), " ");
+        let back = mint_m_watermark(Some(WATERMARK_FRAME_COUNT / 2), WATERMARK_HEIGHT as usize);
+        assert_eq!(back.lines[8].spans[19].content.as_ref(), "⣿");
+    }
+
     fn make_key(code: KeyCode) -> KeyEvent {
         KeyEvent {
             code,
@@ -3715,11 +3917,11 @@ mod dialog_tests {
         );
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         let mut button = None;
-        terminal.draw(|frame| button = state.render(frame)).unwrap();
+        terminal.draw(|frame| button = state.render(frame).back_to_bottom).unwrap();
         assert!(button.is_none());
 
         state.scroll_from_bottom = 10;
-        terminal.draw(|frame| button = state.render(frame)).unwrap();
+        terminal.draw(|frame| button = state.render(frame).back_to_bottom).unwrap();
         let area = button.expect("button should appear above the composer");
         let rendered: String = terminal
             .backend()
@@ -3749,7 +3951,7 @@ mod dialog_tests {
             },
         ));
         assert_eq!(state.scroll_from_bottom, 0);
-        terminal.draw(|frame| button = state.render(frame)).unwrap();
+        terminal.draw(|frame| button = state.render(frame).back_to_bottom).unwrap();
         assert!(button.is_none());
     }
 
