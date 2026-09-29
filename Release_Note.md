@@ -5,6 +5,8 @@
 - Centralized terminal and TUI colors in `terminal_theme.rs` and consolidated similar accent colors into Mint green, with shared blue, text, muted, warning, error, selection, and panel tokens.
 - Kept code syntax highlighting on its dedicated theme so language tokens remain distinguishable.
 - Restored the original four-line `Mint` ASCII wordmark in the Full-Screen TUI header, styled with the shared palette.
+- Restored the animated white shimmer on the TUI thinking status, with its dim and bright endpoints defined in the shared palette.
+- Corrected transcript scrollbar position mapping so the thumb reaches both ends of its track.
 
 ## Private Mobile Web Access with Tailscale
 

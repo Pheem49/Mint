@@ -14,6 +14,9 @@ pub const WARNING: Color = Color::Yellow;
 pub const SELECTION_TEXT: Color = Color::Black;
 pub const SELECTION_BACKGROUND: Color = Color::Gray;
 pub const PANEL_BACKGROUND: Color = Color::Rgb(38, 48, 45); // #26302D
+/// Endpoints for the animated white glow used by the TUI thinking status.
+pub const THINKING_GLOW_DIM: (u8, u8, u8) = (100, 100, 110);
+pub const THINKING_GLOW_BRIGHT: (u8, u8, u8) = (255, 255, 255);
 
 pub const ANSI_RESET: &str = "\x1b[0m";
 pub const ANSI_BOLD: &str = "\x1b[1m";

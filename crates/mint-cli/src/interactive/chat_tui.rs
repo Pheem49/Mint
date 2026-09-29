@@ -12,7 +12,7 @@ use ratatui::{
     backend::CrosstermBackend,
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Position, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
         Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
@@ -1097,7 +1097,7 @@ impl ChatViewState {
 
 
 
-        /// Animate emphasis with bold while keeping every character on the same accent color.
+        /// Sweep a white glow across the thinking text, fading to dim gray at the edges.
         fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
             // Split at the first " (" to isolate the verb from the timer suffix.
             let (verb, suffix) = if let Some(idx) = line.find(" (") {
@@ -1111,17 +1111,28 @@ impl ChatViewState {
             let period = (count * 2).max(16);
             let spot = (tick % period) as f32 / period as f32 * count as f32;
 
+            let (dim_r, dim_g, dim_b) = crate::terminal_theme::THINKING_GLOW_DIM;
+            let (bright_r, bright_g, bright_b) = crate::terminal_theme::THINKING_GLOW_BRIGHT;
             let mut spans: Vec<Span<'static>> = chars
                 .iter()
                 .enumerate()
                 .map(|(i, &c)| {
                     let dist = ((i as f32 - spot).abs() / (count as f32 * 0.35)).min(1.0);
-                    let style = Style::default().fg(crate::terminal_theme::ACCENT);
-                    let style = if dist < 0.35 {
-                        style.add_modifier(Modifier::BOLD)
-                    } else {
-                        style
-                    };
+                    let brightness = ((1.0 - dist) * std::f32::consts::FRAC_PI_2)
+                        .sin()
+                        .powi(2);
+                    let r = (dim_r as f32
+                        + (bright_r as f32 - dim_r as f32) * brightness)
+                        .round() as u8;
+                    let g = (dim_g as f32
+                        + (bright_g as f32 - dim_g as f32) * brightness)
+                        .round() as u8;
+                    let b = (dim_b as f32
+                        + (bright_b as f32 - dim_b as f32) * brightness)
+                        .round() as u8;
+                    let style = Style::default()
+                        .fg(Color::Rgb(r, g, b))
+                        .add_modifier(Modifier::BOLD);
                     Span::styled(c.to_string(), style)
                 })
                 .collect();
@@ -1475,7 +1486,15 @@ impl ChatViewState {
             );
         }
         if max_scroll > 0 {
-            let mut bar = ScrollbarState::new(total).position(scroll as usize);
+            // Paragraph scroll ranges from 0 to content - viewport, while
+            // Ratatui's scrollbar position ranges from 0 to content - 1.
+            // Map between those ranges so both endpoints align with the track.
+            let scrollbar_position = ((scroll as f64 / max_scroll as f64)
+                * total.saturating_sub(1) as f64)
+                .round() as usize;
+            let mut bar = ScrollbarState::new(total)
+                .viewport_content_length(rows[1].height as usize)
+                .position(scrollbar_position);
             frame.render_stateful_widget(
                 Scrollbar::new(ScrollbarOrientation::VerticalRight),
                 rows[1],
