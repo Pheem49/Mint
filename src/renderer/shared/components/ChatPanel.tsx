@@ -96,7 +96,6 @@ interface ChatPanelContract {
   videoAttachments: Array<{ dataUri: string; name: string }>
   documentName: string
   pendingApproval: any | null
-  smartContext: boolean
   agentMode: boolean
   /** Desktop only — plan-mode-approval UI isn't available on web. */
   planMode?: boolean
@@ -118,7 +117,6 @@ interface ChatPanelContract {
   onRemoveDocument: () => void
   onStartWebSearch: () => void
   onCaptureScreen: () => void
-  onSetSmartContext: (enabled: boolean) => void
   onSetAgentMode: (enabled: boolean) => void
   /** Desktop only — see `planMode`. */
   onSetPlanMode?: (enabled: boolean) => void
@@ -149,7 +147,7 @@ export type ConversationViewModel = Pick<ChatPanelContract,
   | 'interactions' | 'sending' | 'sendingMessage' | 'sendingImageCount' | 'sendingVideoCount'
   | 'streamedReply' | 'streamedResponse' | 'agentProgress' | 'agentActivitySnapshots'
   | 'thinkingExpanded' | 'message' | 'imageAttachments' | 'videoAttachments' | 'documentName'
-  | 'pendingApproval' | 'smartContext' | 'agentMode' | 'planMode' | 'status' | 'workspacePath' | 'chatId' | 'recentWorkspacePaths'
+  | 'pendingApproval' | 'agentMode' | 'planMode' | 'status' | 'workspacePath' | 'chatId' | 'recentWorkspacePaths'
   | 'chatEnd' | 'welcomeInteraction' | 'settingsConfig' | 'isCliSession' | 'cliSessionId'
   | 'conversationTitle'
   | 'hasOlder'
@@ -186,7 +184,6 @@ export default function ChatPanel({
   videoAttachments,
   documentName,
   pendingApproval,
-  smartContext,
   agentMode,
   planMode,
   status,
@@ -207,7 +204,6 @@ export default function ChatPanel({
   onRemoveDocument,
   onStartWebSearch,
   onCaptureScreen,
-  onSetSmartContext,
   onSetAgentMode,
   onSetPlanMode,
   onSetProvider,
@@ -1795,16 +1791,6 @@ export default function ChatPanel({
           </div>
         )}
         <div className="smart-context-bar">
-          <label className={`smart-context-option ${smartContext ? 'is-active' : ''}`}>
-            <span className="toggle-switch">
-              <input type="checkbox" checked={smartContext} onChange={(event) => onSetSmartContext(event.target.checked)} />
-              <span className="slider round" />
-            </span>
-            <span className="smart-context-copy">
-              <span className="smart-context-title">Smart context</span>
-              <span className="smart-context-detail">Auto-Screen</span>
-            </span>
-          </label>
           <label className={`smart-context-option ${agentMode ? 'is-active' : ''}`}>
             <span className="toggle-switch">
               <input type="checkbox" checked={agentMode} onChange={(event) => onSetAgentMode(event.target.checked)} />
@@ -2029,7 +2015,10 @@ export default function ChatPanel({
           <input id="video-file-input" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" onChange={onSelectVideo} style={{ display: 'none' }} />
           <input id="document-file-input" type="file" accept={SUPPORTED_DOCUMENT_ACCEPT} onChange={onSelectDocument} style={{ display: 'none' }} />
           <button id="screen-capture-btn" type="button" onClick={onCaptureScreen} aria-label="Capture screen">
-            <span className="screen-capture-eye" aria-hidden="true" />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="2" y="3" width="20" height="15" rx="2" />
+              <path d="M8 22h8M12 18v4M7 10h10M12 5v10" />
+            </svg>
           </button>
           <ModelSelectorPopover
             activeProvider={status?.activeProvider ?? ''}

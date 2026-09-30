@@ -23,6 +23,7 @@ const {
 } = catalogPlatform
 
 import ChatPanel, { type ConversationActions, type ConversationViewModel } from './ChatPanel'
+import ScreenCaptureDialog from './ScreenCaptureDialog'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import DesktopTitlebar from './DesktopTitlebar'
 import type { ModelInteraction } from '@/components/ModelPanel'
@@ -37,6 +38,7 @@ import {
   parseUtcDate,
 } from '../utils/ui'
 import { executeSlashCommand } from '../utils/slashCommandProcessor'
+import { captureScreenForChat } from '../utils/screenCapture'
 import { useConversationCoordinator } from '../conversation/useConversationCoordinator'
 import { matchesActiveRun, matchesActiveSession } from '../conversation/syncView'
 
@@ -400,6 +402,7 @@ export default function MintDashboard() {
   // so nothing ever sets this true there) — declared unconditionally so
   // `changeView` can close it on every navigation without branching.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [screenCaptureOpen, setScreenCaptureOpen] = useState(false)
 
   useEffect(() => {
     if (!mobileSidebarOpen) return
@@ -538,7 +541,6 @@ export default function MintDashboard() {
     documentAttachment?.filename || '',
   ]
 
-  const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
   const [planMode, setPlanMode] = useState(() => window.localStorage.getItem('mint:plan-mode') === 'true')
   const [toastMessage, setToastMessage] = useState('')
@@ -1164,11 +1166,6 @@ export default function MintDashboard() {
     window.localStorage.setItem('mint:sidebar-width', String(clamped))
   }
 
-  const updateSmartContext = (enabled: boolean) => {
-    window.localStorage.setItem('mint:smart-context', String(enabled))
-    setSmartContext(enabled)
-  }
-
   const updateAgentMode = (enabled: boolean) => {
     window.localStorage.setItem('mint:agent-mode', String(enabled))
     setAgentMode(enabled)
@@ -1654,12 +1651,27 @@ export default function MintDashboard() {
     }
   }
 
-  async function captureScreen() {
+  function captureScreen() {
+    setScreenCaptureOpen(true)
+  }
+
+  async function startLiveTranslation() {
+    setScreenCaptureOpen(false)
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
     try {
       await window.api.startVision()
     } catch (reason) {
       setError(errorMessage(reason))
     }
+  }
+
+  function attachScreenCapture(image: string) {
+    void createTrimmedImagePreview(image)
+      .catch(() => image)
+      .then((previewDataUri) => {
+        conversationActions.attachImage({ dataUri: image, previewDataUri, name: 'Screen capture' })
+        setScreenCaptureOpen(false)
+      })
   }
 
   async function clearHistory(action: 'New chat' | 'Clear history', targetWorkspacePath?: string | null) {
@@ -2146,7 +2158,6 @@ export default function MintDashboard() {
     videoAttachments,
     documentName: documentAttachment?.filename ?? '',
     pendingApproval: pendingApprovals[conversationId] ?? null,
-    smartContext,
     agentMode,
     planMode,
     status,
@@ -2175,7 +2186,6 @@ export default function MintDashboard() {
     onRemoveDocument: () => conversationActions.attachDocument(null),
     onStartWebSearch: startWebSearch,
     onCaptureScreen: captureScreen,
-    onSetSmartContext: updateSmartContext,
     onSetAgentMode: updateAgentMode,
     onSetPlanMode: isDesktopApp ? updatePlanMode : undefined,
     onSetProvider: changeProvider,
@@ -2196,6 +2206,14 @@ export default function MintDashboard() {
 
   return (
     <div className={`app-container ${startupReady ? '' : 'is-loading'}`}>
+      {screenCaptureOpen && (
+        <ScreenCaptureDialog
+          onClose={() => setScreenCaptureOpen(false)}
+          onAttach={attachScreenCapture}
+          capture={() => captureScreenForChat(isDesktopApp)}
+          onLiveTranslate={isDesktopApp ? () => { void startLiveTranslation() } : undefined}
+        />
+      )}
       {isDesktopApp && (
         <DesktopTitlebar
           sidebarCollapsed={sidebarCollapsed}

@@ -1,579 +1,224 @@
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { hasMeaningfulFrameChange, sampleFrame } from './liveTranslateFrames'
+import './ScreenPicker.css'
 
-interface Rect {
-  startX: number
-  startY: number
-  currentX: number
-  currentY: number
-  width: number
-  height: number
+type Region = { x: number; y: number; width: number; height: number }
+type Point = { x: number; y: number }
+type Phase = 'selecting' | 'live' | 'paused'
+type Status = 'waiting' | 'watching' | 'translating' | 'unchanged' | 'error'
+
+const LANGUAGE_KEY = 'mint:live-translate-language'
+const LANGUAGES = ['Thai', 'English', 'Japanese', 'Chinese', 'Korean', 'Spanish', 'French', 'German', 'Portuguese', 'Vietnamese', 'Indonesian', 'Arabic', 'Hindi']
+const nextPaint = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+
+function point(event: PointerEvent<HTMLElement>): Point {
+  return { x: Math.max(0, Math.min(window.innerWidth, event.clientX)), y: Math.max(0, Math.min(window.innerHeight, event.clientY)) }
 }
 
-interface NormalRect {
-  x: number
-  y: number
-  width: number
-  height: number
+function regionBetween(start: Point, end: Point): Region {
+  return { x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) }
+}
+
+function captureRect(region: Region, image: { width: number; height: number }): Region {
+  const scaleX = image.width / window.innerWidth
+  const scaleY = image.height / window.innerHeight
+  return {
+    x: Math.round(region.x * scaleX),
+    y: Math.round(region.y * scaleY),
+    width: Math.max(1, Math.round(region.width * scaleX)),
+    height: Math.max(1, Math.round(region.height * scaleY)),
+  }
 }
 
 export default function ScreenPicker() {
-  const bgCanvasRef = useRef<HTMLCanvasElement>(null)
-  const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
-  const translationBoxRef = useRef<HTMLDivElement>(null)
-  
-  const [isDrawing, setIsDrawing] = useState(false)
-  const [coords, setCoords] = useState<Rect>({ startX: 0, startY: 0, currentX: 0, currentY: 0, width: 0, height: 0 })
-  const [baseImage, setBaseImage] = useState<HTMLImageElement | null>(null)
-  const [selectedRect, setSelectedRect] = useState<NormalRect | null>(null)
-  
-  const [isTranslateMode, setIsTranslateMode] = useState(false)
-  const [isContinuousTranslateActive, setIsContinuousTranslateActive] = useState(false)
-  const [translationText, setTranslationText] = useState('')
-  const [translationPos, setTranslationPos] = useState({ left: 0, top: 0, maxWidth: 400 })
+  const [snapshot, setSnapshot] = useState('')
+  const [sourceSize, setSourceSize] = useState<{ width: number; height: number } | null>(null)
+  const [phase, setPhase] = useState<Phase>('selecting')
+  const [selection, setSelection] = useState<Region | null>(null)
+  const [status, setStatus] = useState<Status>('waiting')
+  const [translation, setTranslation] = useState('')
+  const [error, setError] = useState('')
+  const [sampling, setSampling] = useState(false)
+  const [savedLanguage] = useState(() => window.localStorage.getItem(LANGUAGE_KEY) || 'Thai')
+  const [languageChoice, setLanguageChoice] = useState(() => LANGUAGES.includes(savedLanguage) ? savedLanguage : 'custom')
+  const [customLanguage, setCustomLanguage] = useState(() => LANGUAGES.includes(savedLanguage) ? '' : savedLanguage)
+  const dragStart = useRef<Point | null>(null)
+  const session = useRef(0)
+  const previewRequest = useRef<Promise<string | null> | null>(null)
+  const targetLanguage = languageChoice === 'custom' ? customLanguage.trim() : languageChoice
+  const selectedPixels = selection && sourceSize ? captureRect(selection, sourceSize) : null
 
-  const baseImageRef = useRef<HTMLImageElement | null>(null)
-  const isOverlayInteractableRef = useRef(true)
-  const screenshotRequestedRef = useRef(false)
-
-  // Initialize canvases and listen to screenshots
   useEffect(() => {
-    const loadScreenshot = (base64Data: string) => {
-      const img = new Image()
-      img.onload = () => {
-        baseImageRef.current = img
-        setBaseImage(img)
-        const bg = bgCanvasRef.current
-        if (bg) {
-          bg.width = window.innerWidth
-          bg.height = window.innerHeight
-          const bgCtx = bg.getContext('2d')
-          bgCtx?.drawImage(img, 0, 0, bg.width, bg.height)
-          drawDarkOverlay()
-        }
-      }
-      img.src = base64Data
-    }
-
-    const handleResize = () => {
-      const bg = bgCanvasRef.current
-      const overlay = overlayCanvasRef.current
-      if (bg && overlay) {
-        bg.width = window.innerWidth
-        bg.height = window.innerHeight
-        overlay.width = window.innerWidth
-        overlay.height = window.innerHeight
-        if (baseImageRef.current) {
-          const bgCtx = bg.getContext('2d')
-          bgCtx?.drawImage(baseImageRef.current, 0, 0, bg.width, bg.height)
-        }
-        drawDarkOverlay()
-      }
-    }
-
-    if (window.screenPickerApi) {
-      const pendingCapture = window.localStorage.getItem('mint:pending-screen-capture')
-      if (pendingCapture) {
-        window.localStorage.removeItem('mint:pending-screen-capture')
-        screenshotRequestedRef.current = true
-        loadScreenshot(pendingCapture)
-      } else if (!screenshotRequestedRef.current) {
-        screenshotRequestedRef.current = true
-        window.screenPickerApi.onScreenshot(loadScreenshot)
-      }
-
-      window.screenPickerApi.onTranslationResult((thaiText) => {
-        setTranslationText(thaiText)
-      })
-    }
-
-    window.addEventListener('resize', handleResize)
-    handleResize()
-
-    return () => {
-      window.removeEventListener('resize', handleResize)
-    }
+    let active = true
+    previewRequest.current ||= invoke<string | null>('take_screen_capture_preview')
+    void previewRequest.current.then((image) => {
+      if (!active) return
+      if (image) setSnapshot(image)
+      else setError('Screen preview is unavailable. Close and try again.')
+    }).catch((reason) => {
+      if (active) setError(reason instanceof Error ? reason.message : String(reason))
+    })
+    return () => { active = false }
   }, [])
 
-  const drawDarkOverlay = () => {
-    const overlay = overlayCanvasRef.current
-    if (!overlay) return
-    const overlayCtx = overlay.getContext('2d')
-    if (!overlayCtx) return
-    overlayCtx.clearRect(0, 0, overlay.width, overlay.height)
-    overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.5)'
-    overlayCtx.fillRect(0, 0, overlay.width, overlay.height)
-  }
-
-  const normalizeRect = (r: Rect): NormalRect => {
-    return {
-      x: Math.min(r.startX, r.currentX),
-      y: Math.min(r.startY, r.currentY),
-      width: Math.abs(r.width),
-      height: Math.abs(r.height)
-    }
-  }
-
-  const drawSelectionOutline = (rect: NormalRect) => {
-    const overlay = overlayCanvasRef.current
-    if (!overlay || !rect || rect.width === 0 || rect.height === 0) return
-    const overlayCtx = overlay.getContext('2d')
-    if (!overlayCtx) return
-    overlayCtx.clearRect(0, 0, overlay.width, overlay.height)
-    overlayCtx.strokeStyle = isTranslateMode ? '#10b981' : '#00ff88'
-    overlayCtx.lineWidth = 3
-    overlayCtx.strokeRect(rect.x, rect.y, rect.width, rect.height)
-  }
-
-  const drawSelection = (currentCoords: Rect) => {
-    const overlay = overlayCanvasRef.current
-    if (!overlay) return
-    const overlayCtx = overlay.getContext('2d')
-    if (!overlayCtx) return
-
-    drawDarkOverlay()
-
-    const rect = normalizeRect(currentCoords)
-    overlayCtx.clearRect(rect.x, rect.y, rect.width, rect.height)
-    overlayCtx.strokeStyle = isTranslateMode ? '#10b981' : '#00ff88'
-    overlayCtx.lineWidth = 2
-    overlayCtx.strokeRect(rect.x, rect.y, rect.width, rect.height)
-  }
-
-  const resetSelectionOverlay = () => {
-    setSelectedRect(null)
-    const overlay = overlayCanvasRef.current
-    if (overlay) overlay.style.pointerEvents = 'auto'
-    isOverlayInteractableRef.current = true
-    drawDarkOverlay()
-  }
-
-  const setOverlayInteractable = (isInteractable: boolean) => {
-    if (isOverlayInteractableRef.current === isInteractable) return
-    isOverlayInteractableRef.current = isInteractable
-    window.screenPickerApi?.setOverlayInteractable(isInteractable)
-  }
-
-  const stopTranslationMode = () => {
-    setIsContinuousTranslateActive(false)
-    const overlay = overlayCanvasRef.current
-    if (overlay) overlay.style.pointerEvents = 'auto'
-    window.screenPickerApi?.stopContinuousTranslation()
-    setOverlayInteractable(true)
-
-    const bg = bgCanvasRef.current
-    if (bg && baseImage) {
-      const bgCtx = bg.getContext('2d')
-      bgCtx?.clearRect(0, 0, bg.width, bg.height)
-      bgCtx?.drawImage(baseImage, 0, 0, bg.width, bg.height)
-    }
-
-    resetSelectionOverlay()
-  }
-
-  const setTranslationBoxPosition = (rect: NormalRect) => {
-    const margin = 10
-    const boxWidth = Math.min(400, Math.max(240, rect.width))
-    const left = Math.max(margin, Math.min(rect.x, window.innerWidth - boxWidth - margin))
-
-    // Estimate translation box height
-    const boxHeight = translationBoxRef.current?.offsetHeight || 80
-    const preferredTop = rect.y + rect.height + margin
-    const fallbackTop = Math.max(margin, rect.y - margin - boxHeight)
-    const top = preferredTop + boxHeight <= window.innerHeight ? preferredTop : fallbackTop
-
-    setTranslationPos({ left, top, maxWidth: boxWidth })
-  }
-
-  const cropAndSend = (rect: Rect) => {
-    if (rect.width === 0 || rect.height === 0 || !baseImage) return
-    const { x, y, width: w, height: h } = normalizeRect(rect)
-
-    const bg = bgCanvasRef.current
-    if (!bg) return
-
-    const scaleX = baseImage.width / bg.width
-    const scaleY = baseImage.height / bg.height
-
-    const cropX = x * scaleX
-    const cropY = y * scaleY
-    const cropW = w * scaleX
-    const cropH = h * scaleY
-
-    const cropCanvas = document.createElement('canvas')
-    cropCanvas.width = cropW
-    cropCanvas.height = cropH
-    const cropCtx = cropCanvas.getContext('2d')
-    if (!cropCtx) return
-
-    cropCtx.drawImage(baseImage, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
-    const croppedBase64 = cropCanvas.toDataURL('image/png')
-
-    if (isTranslateMode) {
-      setIsContinuousTranslateActive(true)
-      const normRect = { x, y, width: w, height: h }
-      setSelectedRect(normRect)
-
-      const bg = bgCanvasRef.current
-      if (bg) {
-        const bgCtx = bg.getContext('2d')
-        bgCtx?.clearRect(0, 0, bg.width, bg.height)
-      }
-      
-      const overlay = overlayCanvasRef.current
-      if (overlay) overlay.style.pointerEvents = 'none'
-      
-      drawSelectionOutline(normRect)
-      setTranslationText('Auto-Translating...')
-      setTranslationBoxPosition(normRect)
-      setOverlayInteractable(false)
-
-      window.screenPickerApi?.startContinuousTranslation(normRect)
-    } else {
-      window.screenPickerApi?.sendSelection(croppedBase64)
-    }
-  }
-
-  // Keyboard controls
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (isContinuousTranslateActive) {
-          e.preventDefault()
-          stopTranslationMode()
-        } else {
-          window.screenPickerApi?.closePicker()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') void window.screenPickerApi?.closePicker()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  useEffect(() => {
+    if (targetLanguage) window.localStorage.setItem(LANGUAGE_KEY, targetLanguage)
+  }, [targetLanguage])
+
+  useEffect(() => {
+    if (phase !== 'live' || !selectedPixels || !targetLanguage) return
+    const currentSession = ++session.current
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let translating = false
+    let queued: string | null = null
+    let previous: Uint8ClampedArray | null = null
+    let retryAt = 0
+    let stopped = false
+    const rect = selectedPixels
+
+    const translate = async (image: string) => {
+      if (translating) { queued = image; return }
+      translating = true
+      setStatus('translating')
+      let failed = false
+      try {
+        const result = await invoke<string>('translate_captured_frame', { image, targetLanguage })
+        if (!stopped && session.current === currentSession) {
+          setTranslation(result.trim())
+          setError('')
+        }
+      } catch (reason) {
+        failed = true
+        previous = null
+        queued = null
+        retryAt = Date.now() + 5000
+        if (!stopped && session.current === currentSession) {
+          setError(reason instanceof Error ? reason.message : String(reason))
+          setStatus('error')
+        }
+      } finally {
+        translating = false
+        if (!stopped && session.current === currentSession) {
+          if (queued) {
+            const latest = queued
+            queued = null
+            void translate(latest)
+          } else if (!failed) setStatus('watching')
         }
       }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isContinuousTranslateActive])
 
-  // Mouse move tracker for translation box interactivity
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isContinuousTranslateActive) return
-      const box = translationBoxRef.current
-      if (!box) return
-
-      const rect = box.getBoundingClientRect()
-      const isInsideBox =
-        e.clientX >= rect.left &&
-        e.clientX <= rect.right &&
-        e.clientY >= rect.top &&
-        e.clientY <= rect.bottom
-
-      setOverlayInteractable(isInsideBox)
-    }
-    window.addEventListener('mousemove', handleMouseMove)
-    return () => window.removeEventListener('mousemove', handleMouseMove)
-  }, [isContinuousTranslateActive])
-
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isContinuousTranslateActive) return
-    setIsDrawing(true)
-    const newCoords = {
-      startX: e.clientX,
-      startY: e.clientY,
-      currentX: e.clientX,
-      currentY: e.clientY,
-      width: 0,
-      height: 0
-    }
-    setCoords(newCoords)
-  }
-
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return
-    const newCoords = {
-      ...coords,
-      currentX: e.clientX,
-      currentY: e.clientY,
-      width: e.clientX - coords.startX,
-      height: e.clientY - coords.startY
-    }
-    setCoords(newCoords)
-    drawSelection(newCoords)
-  }
-
-  const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return
-    setIsDrawing(false)
-    const finalCoords = {
-      ...coords,
-      currentX: e.clientX,
-      currentY: e.clientY,
-      width: e.clientX - coords.startX,
-      height: e.clientY - coords.startY
-    }
-    setCoords(finalCoords)
-    cropAndSend(finalCoords)
-  }
-
-  const handleToggleTranslateMode = () => {
-    const nextMode = !isTranslateMode
-    setIsTranslateMode(nextMode)
-    if (nextMode) {
-      resetSelectionOverlay()
-    } else {
-      if (isContinuousTranslateActive) {
-        stopTranslationMode()
-      } else {
-        resetSelectionOverlay()
+    const poll = async () => {
+      if (stopped) return
+      setSampling(true)
+      try {
+        // Remove translated text from the compositor before native capture.
+        await nextPaint()
+        if (stopped) return
+        const image = await invoke<string>('capture_translation_frame', { rect })
+        if (stopped || session.current !== currentSession) return
+        const current = await sampleFrame(image)
+        if (stopped || session.current !== currentSession) return
+        if (Date.now() >= retryAt) {
+          const changed = hasMeaningfulFrameChange(previous, current)
+          previous = current
+          if (changed) void translate(image)
+          else if (!translating) setStatus('unchanged')
+        }
+      } catch (reason) {
+        if (!stopped && session.current === currentSession) {
+          setError(reason instanceof Error ? reason.message : String(reason))
+          setStatus('error')
+        }
+      } finally {
+        if (!stopped && session.current === currentSession) {
+          setSampling(false)
+          timer = window.setTimeout(poll, 1200)
+        }
       }
     }
-  }
 
-  const handleFullscreen = () => {
-    if (baseImage && !isTranslateMode) {
-      window.screenPickerApi?.sendSelection(baseImage.src)
+    void poll()
+    return () => {
+      stopped = true
+      session.current += 1
+      if (timer) window.clearTimeout(timer)
     }
+  }, [phase, selectedPixels?.x, selectedPixels?.y, selectedPixels?.width, selectedPixels?.height, targetLanguage])
+
+  const startSelection = (event: PointerEvent<HTMLDivElement>) => {
+    if (phase !== 'selecting' || !snapshot) return
+    dragStart.current = point(event)
+    setSelection(null)
+    event.currentTarget.setPointerCapture(event.pointerId)
   }
 
-  const handleCancel = () => {
-    window.screenPickerApi?.closePicker()
+  const moveSelection = (event: PointerEvent<HTMLDivElement>) => {
+    if (dragStart.current) setSelection(regionBetween(dragStart.current, point(event)))
+  }
+
+  const finishSelection = (event: PointerEvent<HTMLDivElement>) => {
+    if (!dragStart.current) return
+    const next = regionBetween(dragStart.current, point(event))
+    dragStart.current = null
+    setSelection(next.width >= 120 && next.height >= 72 ? next : null)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+
+  const begin = () => {
+    if (!selectedPixels || !targetLanguage) return
+    setTranslation('')
+    setError('')
+    setStatus('waiting')
+    setPhase('live')
   }
 
   return (
-    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', position: 'relative', background: 'transparent' }}>
-      <style>{`
-        .vision-glow {
-          position: absolute;
-          inset: 0;
-          pointer-events: none;
-          box-shadow: inset 0 0 70px rgba(16, 185, 129, 0.18);
-          z-index: 5;
-        }
-
-        #toolbar {
-          position: absolute;
-          top: 24px;
-          left: 50%;
-          transform: translateX(-50%);
-          z-index: 10;
-          background: rgba(15, 23, 42, 0.85);
-          backdrop-filter: blur(10px);
-          -webkit-backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          padding: 8px 20px;
-          border-radius: 999px;
-          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          color: #f8fafc;
-          font-family: 'Outfit', 'Inter', sans-serif;
-          animation: slide-down 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        @keyframes slide-down {
-          from { transform: translate(-50%, -20px); opacity: 0; }
-          to { transform: translate(-50%, 0); opacity: 1; }
-        }
-
-        .hint {
-          font-size: 0.82rem;
-          color: #94a3b8;
-          margin-right: 12px;
-          font-weight: 400;
-        }
-
-        .screen-picker-btn {
-          font-family: inherit;
-          font-size: 0.8rem;
-          font-weight: 500;
-          padding: 8px 16px;
-          border-radius: 999px;
-          border: 1px solid transparent;
-          cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-        }
-
-        .screen-picker-btn:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        }
-
-        .screen-picker-btn:active {
-          transform: translateY(0);
-        }
-
-        .btn-translate {
-          background: rgba(16, 185, 129, 0.15);
-          color: #a7f3d0;
-          border-color: rgba(16, 185, 129, 0.3);
-        }
-
-        .btn-translate:hover {
-          background: rgba(16, 185, 129, 0.3);
-          color: #ecfdf5;
-        }
-
-        .btn-translate.active {
-          background: #10b981;
-          color: #ffffff;
-          border-color: #059669;
-          box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
-        }
-
-        .btn-primary {
-          background: rgba(16, 185, 129, 0.15);
-          color: #a7f3d0;
-          border-color: rgba(16, 185, 129, 0.3);
-        }
-
-        .btn-primary:hover {
-          background: rgba(16, 185, 129, 0.3);
-          color: #ecfdf5;
-        }
-
-        .btn-danger {
-          background: rgba(239, 68, 68, 0.15);
-          color: #fecaca;
-          border-color: rgba(239, 68, 68, 0.3);
-        }
-
-        .btn-danger:hover {
-          background: rgba(239, 68, 68, 0.3);
-          color: #fef2f2;
-        }
-
-        .loading-spinner {
-          display: inline-block;
-          width: 14px;
-          height: 14px;
-          border: 2px solid rgba(255, 255, 255, 0.2);
-          border-radius: 50%;
-          border-top-color: #10b981;
-          animation: picker-spin 0.8s linear infinite;
-          margin-right: 8px;
-        }
-
-        @keyframes picker-spin {
-          to { transform: rotate(360deg); }
-        }
-
-        #translation-box {
-          position: absolute;
-          background: rgba(15, 23, 42, 0.9);
-          backdrop-filter: blur(10px);
-          -webkit-backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          color: #f8fafc;
-          padding: 14px 18px;
-          border-radius: 12px;
-          font-family: 'Inter', sans-serif;
-          font-size: 0.9rem;
-          line-height: 1.6;
-          box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
-          z-index: 100;
-          animation: fade-in 0.2s ease-out;
-        }
-
-        @keyframes fade-in {
-          from { opacity: 0; transform: scale(0.95); }
-          to { opacity: 1; transform: scale(1); }
-        }
-
-        .close-translate-btn {
-          position: absolute;
-          top: -10px;
-          right: -10px;
-          background: #ef4444;
-          color: white;
-          border: 2px solid rgba(15, 23, 42, 0.95);
-          border-radius: 999px;
-          min-width: 38px;
-          height: 22px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          font-size: 0.7rem;
-          font-weight: 700;
-          letter-spacing: 0.05em;
-          text-transform: none;
-          box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-          transition: all 0.2s;
-        }
-
-        .close-translate-btn:hover {
-          background: #dc2626;
-          transform: scale(1.05);
-        }
-      `}</style>
-
-      <div className="vision-glow"></div>
-      {!isContinuousTranslateActive && (
-        <div id="toolbar">
-          <span className="hint" id="hint-text">
-            {isTranslateMode ? 'Drag over text to translate to Thai' : 'Click and drag to select a region'}
-          </span>
-          <button
-            className={`screen-picker-btn btn-translate ${isTranslateMode ? 'active' : ''}`}
-            onClick={handleToggleTranslateMode}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-          >
-            {isTranslateMode ? (
-              'Stop Translate'
-            ) : (
-              <>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <line x1="2" y1="12" x2="22" y2="12"></line>
-                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                </svg>
-                <span>Live translate</span>
-              </>
-            )}
-          </button>
-          {!isTranslateMode && (
-            <button className="screen-picker-btn btn-primary" onClick={handleFullscreen}>
-              Full Screen
-            </button>
-          )}
-          <button className="screen-picker-btn btn-danger" onClick={handleCancel}>
-            Cancel
-          </button>
+    <div className={`live-translate ${sampling ? 'is-sampling' : ''} ${phase !== 'selecting' ? 'is-active' : ''}`}>
+      {phase === 'selecting' && (
+        <div className="live-translate-picker" onPointerDown={startSelection} onPointerMove={moveSelection} onPointerUp={finishSelection} onPointerCancel={finishSelection}>
+          {snapshot ? <img src={snapshot} alt="Screen preview for selecting a translation area" draggable={false} onLoad={(event) => setSourceSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} /> : <div className="live-translate-loading">{error || 'Preparing screen preview…'}</div>}
+          {selection && <div className="live-translate-selection" style={{ left: selection.x, top: selection.y, width: selection.width, height: selection.height }} />}
         </div>
       )}
 
-      <canvas ref={bgCanvasRef} id="bg-canvas" style={{ position: 'absolute', top: 0, left: 0, zIndex: 1 }} />
-      <canvas
-        ref={overlayCanvasRef}
-        id="overlay-canvas"
-        style={{ position: 'absolute', top: 0, left: 0, zIndex: 2, cursor: 'crosshair' }}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleCanvasMouseMove}
-        onMouseUp={handleMouseUp}
-      />
+      {phase !== 'selecting' && selection && (
+        <div className="live-translate-result" style={{ left: selection.x, top: selection.y, width: selection.width, height: selection.height }} aria-live="polite">
+          <div className="live-translate-result-label">{phase === 'paused' ? 'Paused' : status === 'translating' ? 'Translating…' : status === 'error' ? 'Capture error' : `Live · ${targetLanguage}`}</div>
+          <div className="live-translate-result-text">{translation || 'Waiting for text in this area…'}</div>
+        </div>
+      )}
 
-      <div
-        ref={translationBoxRef}
-        id="translation-box"
-        style={{
-          display: isContinuousTranslateActive ? 'block' : 'none',
-          position: 'absolute',
-          left: `${translationPos.left}px`,
-          top: `${translationPos.top}px`,
-          maxWidth: `${translationPos.maxWidth}px`,
-          zIndex: 100
-        }}
-      >
-        <div className="close-translate-btn" onClick={stopTranslationMode}>
-          Esc
-        </div>
-        <div id="translation-content">
-          {translationText === 'Auto-Translating...' && (
-            <span className="loading-spinner"></span>
-          )}
-          {translationText}
-        </div>
+      <div className="live-translate-toolbar">
+        <div className="live-translate-brand"><span aria-hidden="true">◈</span><div><strong>Live translate</strong><small>{phase === 'selecting' ? 'Draw a frame around the text' : phase === 'paused' ? 'Translation paused' : status === 'translating' ? 'Updating translation' : status === 'error' ? 'Waiting to retry' : 'Watching selected area'}</small></div></div>
+        <label className="live-translate-language">To
+          <select value={languageChoice} onChange={(event) => setLanguageChoice(event.target.value)} aria-label="Target language">
+            {LANGUAGES.map((language) => <option key={language} value={language}>{language}</option>)}
+            <option value="custom">Other language…</option>
+          </select>
+        </label>
+        {languageChoice === 'custom' && <input className="live-translate-custom-language" value={customLanguage} onChange={(event) => setCustomLanguage(event.target.value)} maxLength={64} placeholder="Language name" aria-label="Custom target language" />}
+        {phase === 'selecting' ? (
+          <button type="button" className="live-translate-primary" onClick={begin} disabled={!selectedPixels || !targetLanguage}>Start translation</button>
+        ) : (
+          <>
+            <button type="button" onClick={() => setPhase(phase === 'live' ? 'paused' : 'live')}>{phase === 'live' ? 'Pause' : 'Resume'}</button>
+            <button type="button" onClick={() => { setPhase('selecting'); setTranslation('') }}>Change area</button>
+          </>
+        )}
+        <button type="button" className="live-translate-close" onClick={() => void window.screenPickerApi?.closePicker()} aria-label="Close live translate">×</button>
       </div>
+      {phase === 'selecting' && <div className="live-translate-help">{selection ? `${Math.round(selection.width)} × ${Math.round(selection.height)} px selected` : 'Drag across the text to select an area (at least 120 × 72 px)'} · Only changed frames are sent for translation · Esc to close</div>}
+      {phase !== 'selecting' && status === 'error' && <div className="live-translate-error" role="alert">{error}</div>}
     </div>
   )
 }

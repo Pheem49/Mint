@@ -16,9 +16,9 @@ use mint_core::browser::{
 };
 
 use desktop::{
-    ActionResult, CaptureRect, DesktopAction, capture_screen, close_window, emit_to_main,
+    ActionResult, CaptureRect, DesktopAction, capture_screen, capture_translation_region, close_window, emit_to_main,
     execute_action, hide_window, integration_status, open_desktop_window, position_widget,
-    resize_window, translate_screen_region,
+    resize_window, translate_captured_region, translate_screen_region,
 };
 use events::start_system_events;
 use headless::{run_next_task, start_headless_queue};
@@ -262,6 +262,8 @@ const MINT_BROWSER_SHELL_HEIGHT: u32 = 92;
 const MINT_BROWSER_SUGGESTIONS_HEIGHT: u32 = 164;
 static MINT_BROWSER_SUGGESTION_QUERY: LazyLock<Mutex<String>> =
     LazyLock::new(|| Mutex::new(String::new()));
+static PENDING_TRANSLATION_PREVIEW: LazyLock<Mutex<Option<String>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 fn position_mint_browser_suggestions(app: &AppHandle) -> Result<(), String> {
     let browser = app
@@ -2076,7 +2078,14 @@ fn hide_desktop_window(app: AppHandle, label: String) -> Result<(), String> {
 
 #[tauri::command]
 fn close_desktop_window(app: AppHandle, label: String) -> Result<(), String> {
-    close_window(&app, &label)
+    close_window(&app, &label)?;
+    if label == "screen-picker" {
+        if let Some(main) = app.get_webview_window("main") {
+            main.show().map_err(|error| error.to_string())?;
+            main.set_focus().map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -2120,6 +2129,19 @@ fn capture_silent_screen() -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn capture_chat_screen(app: AppHandle) -> Result<String, String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is unavailable".to_string())?;
+    window.hide().map_err(|error| error.to_string())?;
+    tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+    let captured = tokio::task::spawn_blocking(capture_screen).await;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    captured.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn read_clipboard_image() -> Result<String, String> {
     desktop::read_clipboard_image()
 }
@@ -2128,6 +2150,19 @@ fn read_clipboard_image() -> Result<String, String> {
 async fn translate_capture_region(rect: CaptureRect) -> Result<String, String> {
     let config = load_config().map_err(|error| error.to_string())?;
     translate_screen_region(&config, rect).await
+}
+
+#[tauri::command]
+async fn capture_translation_frame(rect: CaptureRect) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || capture_translation_region(rect))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn translate_captured_frame(image: String, target_language: String) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    translate_captured_region(&config, &image, &target_language).await
 }
 
 #[tauri::command]
@@ -2168,14 +2203,36 @@ async fn type_in_browser(selector: String, text: String) -> Result<String, Strin
     .await
 }
 #[tauri::command]
-fn start_screen_capture(app: AppHandle) -> Result<(), String> {
-    open_desktop_window(&app, "screen-picker")
+fn start_screen_capture(app: AppHandle, image: String) -> Result<(), String> {
+    *PENDING_TRANSLATION_PREVIEW
+        .lock()
+        .map_err(|_| "translation preview is unavailable".to_string())? = Some(image);
+    let main = app.get_webview_window("main");
+    if let Some(window) = &main {
+        window.hide().map_err(|error| error.to_string())?;
+    }
+    if let Err(error) = open_desktop_window(&app, "screen-picker") {
+        if let Some(window) = main {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn take_screen_capture_preview() -> Result<Option<String>, String> {
+    Ok(PENDING_TRANSLATION_PREVIEW
+        .lock()
+        .map_err(|_| "translation preview is unavailable".to_string())?
+        .take())
 }
 
 #[tauri::command]
 fn submit_screen_selection(app: AppHandle, image: String) {
     emit_to_main(&app, "vision-ready", image);
-    let _ = close_window(&app, "screen-picker");
+    let _ = close_desktop_window(app, "screen-picker".into());
 }
 
 #[tauri::command]
@@ -2469,8 +2526,11 @@ pub fn run() {
             get_integration_inventory,
             run_native_plugin,
             capture_silent_screen,
+            capture_chat_screen,
             read_clipboard_image,
             translate_capture_region,
+            capture_translation_frame,
+            translate_captured_frame,
             get_smart_context,
             get_browser_tabs,
             navigate_browser,
@@ -2478,6 +2538,7 @@ pub fn run() {
             click_browser_selector,
             type_in_browser,
             start_screen_capture,
+            take_screen_capture_preview,
             submit_screen_selection,
             submit_spotlight,
             set_ai_state,

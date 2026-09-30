@@ -1827,15 +1827,10 @@ export function installTauriAdapters() {
     onSettingsChanged: settingsChanged,
     startVision: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
-      try {
-        const image = await captureSharedScreen()
-        window.localStorage.setItem('mint:pending-screen-capture', image)
-      } catch (reason) {
-        console.warn('Screen share capture failed before opening picker:', reason)
-        const image = await invoke<string>('capture_silent_screen')
-        window.localStorage.setItem('mint:pending-screen-capture', image)
-      }
-      return invoke('start_screen_capture')
+      const image = navigator.userAgent.toLowerCase().includes('linux')
+        ? await invoke<string>('capture_chat_screen')
+        : await captureSharedScreen()
+      return invoke('start_screen_capture', { image })
     },
     onVisionReady: async (callback) => {
       const { listen } = await import('@tauri-apps/api/event')

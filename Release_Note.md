@@ -1,5 +1,26 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Live Translate
+
+- Rebuilt the Desktop live translation picker as a transparent overlay: select a screen region, choose a target language (including a custom language), and read the translated text over the selected area.
+- Live translation now samples only the selected region, checks for meaningful visual changes, and sends a new request only when the region changes. Sampling pauses cleanly when the user pauses, changes area or language, or closes the picker.
+- The selected target language is remembered between sessions. Mint stays hidden while the live overlay is open so it does not cover the app being translated, then reappears when the overlay closes.
+- Passed the initial screen preview through Tauri's in-memory handoff instead of browser localStorage, avoiding storage limits for large screenshots.
+
+## Manual Screen Capture
+
+- Rebuilt the Desktop and Web manual screen capture flow around a shared review dialog: capture, select an area or full image, retake, and explicitly attach to chat.
+- Fixed the Web capture button, which previously called a no-op adapter. Web now requests browser screen sharing and shows capture errors in the dialog; Desktop uses native capture on Linux and browser screen sharing on other systems. Native capture briefly hides Mint to avoid capturing its own window.
+- Replaced the ambiguous eye button icon with a screen capture icon and kept captured images out of the conversation until the user attaches them.
+- Kept the existing Desktop live translation picker reachable from the new capture dialog.
+- Prevented native capture retries from reading a stale screenshot left by an earlier failed command.
+- Fixed screen capture button text contrast in the Dark Monochrome theme, including the disabled Attach to chat state.
+
+## Chat Composer Controls
+
+- Removed the inactive Smart Context Auto-Screen toggle from Desktop and Web chat. Manual screen capture and the Agent/Plan mode controls remain available.
+- Removed the dormant Proactive Assistant screen-capture interval and suggestion-cooldown controls from Desktop and Web Settings; existing saved config values remain intact.
+
 ## Mint Persona
 
 - Made Mint's female persona explicit in the shared system prompt used by chat and agent modes across CLI, Desktop, and Web. Mint now follows the user's current language or an explicitly requested language instead of defaulting to Thai; Thai feminine polite particles apply only to Thai replies.
