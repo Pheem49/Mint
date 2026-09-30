@@ -9,7 +9,8 @@ import { catalogPlatform, conversationPlatform, mediaPlatform, runtimePlatform, 
 import type { AgentProgress, ChatResponse, ChatSession, DocumentAttachment, PictureEntry, RuntimeStatus } from '../types'
 
 const {
-  clearChatHistory, deleteChatSession, renameChatSession, getRecentInteractions,
+  clearChatHistory, deleteChatSession, renameChatSession,
+  getConversationSnapshot, getConversationChanges,
   saveSystemInteraction, listChatSessions, updateChatSessionWorkspace, saveInteractionAgentActivity, streamChatMessage,
   cancelChatMessage, submitToolApproval, listen, readClipboardImage,
 } = conversationPlatform
@@ -37,6 +38,7 @@ import {
 } from '../utils/ui'
 import { executeSlashCommand } from '../utils/slashCommandProcessor'
 import { useConversationCoordinator } from '../conversation/useConversationCoordinator'
+import { matchesActiveRun, matchesActiveSession } from '../conversation/syncView'
 
 
 const EXPRESSIONS = [
@@ -326,8 +328,7 @@ export default function MintDashboard() {
   const [view, setViewState] = useState<DashboardView>(getInitialViewFromUrl)
   const [conversationId, setConversationId] = useState(activeConversationId)
   // Declared here (not further down with the rest of the workspace-related
-  // state) so the URL-change effect below can read it — that effect closes
-  // over `workspacePath` to scope its own `getRecentInteractions` call.
+  // state) so the URL-change effect below can read it.
   const { conversation, actions: conversationActions } = useConversationCoordinator(
     {
       workspacePath: window.localStorage.getItem(LAST_WORKSPACE_PATH_KEY) || '',
@@ -342,8 +343,59 @@ export default function MintDashboard() {
   const {
     workspacePath, message, imageAttachments, videoAttachments, documentAttachment,
     sending, sendingMessage, sendingImageCount, sendingVideoCount, streamedReply,
-    streamedResponse, agentProgress, pendingApproval,
+    streamedResponse, agentProgress,
   } = conversation
+  const activeConversationRef = useRef(conversationId)
+  const sessionGenerationRef = useRef(0)
+  const runGenerationRef = useRef(0)
+  const conversationCursorRef = useRef<{ chatId: string; cursor: number } | null>(null)
+  const historyLoadSerialRef = useRef(0)
+  const [pendingApprovals, setPendingApprovals] = useState<Record<string, { token: string; approval: any }>>({})
+  const autoApprovedChatIdRef = useRef<string | null>(null)
+  const isCurrentSession = (chatId: string, generation: number) => matchesActiveSession(
+    { chatId, generation },
+    { chatId: activeConversationRef.current, generation: sessionGenerationRef.current },
+  )
+  const activateConversation = (id: string) => {
+    if (activeConversationRef.current !== id) {
+      activeConversationRef.current = id
+      sessionGenerationRef.current += 1
+      runGenerationRef.current += 1
+      conversationCursorRef.current = null
+      setInteractions([])
+      setHasOlderInteractions(false)
+      setAgentActivitySnapshots({})
+      setStreamingConversationId(null)
+      setActiveTurnId(null)
+    }
+    setConversationId(id)
+  }
+  async function loadConversationHistory(chatId: string, generation: number) {
+    const serial = ++historyLoadSerialRef.current
+    const snapshot = await getConversationSnapshot(chatId, null, 50)
+    if (!isCurrentSession(chatId, generation) || serial !== historyLoadSerialRef.current) return
+    const currentCursor = conversationCursorRef.current
+    if (currentCursor?.chatId === chatId && currentCursor.cursor > snapshot.cursor) return
+    conversationCursorRef.current = { chatId, cursor: snapshot.cursor }
+    setInteractions((current) => {
+      if (!isCurrentSession(chatId, generation) || serial !== historyLoadSerialRef.current) return current
+      if (conversationCursorRef.current?.chatId === chatId
+        && conversationCursorRef.current.cursor > snapshot.cursor) return current
+      return snapshot.interactions
+    })
+    setHasOlderInteractions((current) => {
+      if (!isCurrentSession(chatId, generation) || serial !== historyLoadSerialRef.current) return current
+      if (conversationCursorRef.current?.chatId === chatId
+        && conversationCursorRef.current.cursor > snapshot.cursor) return current
+      return snapshot.hasOlder
+    })
+    setAgentActivitySnapshots((current) => {
+      if (!isCurrentSession(chatId, generation) || serial !== historyLoadSerialRef.current) return current
+      if (conversationCursorRef.current?.chatId === chatId
+        && conversationCursorRef.current.cursor > snapshot.cursor) return current
+      return mergeActivitySnapshots(current, snapshot.interactions)
+    })
+  }
   // Web only in practice (desktop's window has no mobile-width breakpoint,
   // so nothing ever sets this true there) — declared unconditionally so
   // `changeView` can close it on every navigation without branching.
@@ -410,15 +462,14 @@ export default function MintDashboard() {
       const urlSessionId = getConversationIdFromUrl()
       if (urlSessionId && urlSessionId !== conversationId) {
         window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, urlSessionId)
-        setConversationId(urlSessionId)
-        getRecentInteractions(50, urlSessionId, workspacePath || null).then((history) => {
-          const reversed = history.reverse()
-          setInteractions(reversed)
-          setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
+        activateConversation(urlSessionId)
+        const generation = sessionGenerationRef.current
+        loadConversationHistory(urlSessionId, generation).catch((error) => {
+          console.error('Failed to load conversation history:', error)
         })
       } else if (!urlSessionId && isRootOrNewChatRoute()) {
         const next = createConversationId()
-        setConversationId(next)
+        activateConversation(next)
         setInteractions([])
         setAgentActivitySnapshots({})
         conversationActions.switchSession()
@@ -450,8 +501,10 @@ export default function MintDashboard() {
   // this ref tells the persist effect to skip the render right after that swap,
   // so the outgoing chat's text is never written under the incoming chat's key.
   const [interactions, setInteractions] = useState<any[]>([])
+  const [hasOlderInteractions, setHasOlderInteractions] = useState(false)
   const [pictures, setPictures] = useState<PictureEntry[]>([])
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null)
+  const [activeTurnId, setActiveTurnId] = useState<number | null>(null)
   const [agentActivitySnapshots, setAgentActivitySnapshots] = useState<Record<string, AgentProgress[]>>({})
   const [thinkingExpanded, setThinkingExpanded] = useState<Record<string, boolean>>({})
   const liveThinkingOpenRef = useRef(true)
@@ -637,10 +690,13 @@ export default function MintDashboard() {
   // than the effect's own dependency array so a poll landing doesn't tear
   // down and recreate the interval on every tick.
   const interactionsRef = useRef(interactions)
-  const chatPollInFlightRef = useRef(false)
+  const chatPollInFlightRef = useRef<{ chatId: string; generation: number } | null>(null)
   useEffect(() => {
     interactionsRef.current = interactions
   }, [interactions])
+  useEffect(() => {
+    if (interactions.length === 0) setHasOlderInteractions(false)
+  }, [interactions.length])
 
   // Load the saved draft whenever the active conversation changes. Declared
   // before the persist effect so it runs first within the same commit. The
@@ -649,38 +705,69 @@ export default function MintDashboard() {
   useEffect(() => {
     if (view !== 'chat' || !conversationId) return
     let disposed = false
+    const generation = sessionGenerationRef.current
+    const isCurrent = () => !disposed && isCurrentSession(conversationId, generation)
     const syncHistory = async () => {
       // A shared SQLite database has no cross-process event bus. Refresh as
       // soon as the user returns, but avoid work while hidden or overlapping
       // a slow read with the next polling tick.
       if (
-        disposed ||
+        !isCurrent() ||
         document.visibilityState !== 'visible' ||
-        !document.hasFocus() ||
-        sending ||
-        chatPollInFlightRef.current
+        (chatPollInFlightRef.current?.chatId === conversationId
+          && chatPollInFlightRef.current.generation === generation)
       ) return
 
-      chatPollInFlightRef.current = true
+      const poll = { chatId: conversationId, generation }
+      chatPollInFlightRef.current = poll
       try {
-        const history = (await getRecentInteractions(50, conversationId, workspacePath || null)).reverse()
-        const current = interactionsRef.current
-        const currentLast = current[current.length - 1]
-        const nextLast = history[history.length - 1]
-        if (current.length === history.length && currentLast?.id === nextLast?.id) return
-        setInteractions(history)
-        setAgentActivitySnapshots((snapshots) => mergeActivitySnapshots(snapshots, history))
+        if (conversationCursorRef.current?.chatId !== conversationId) {
+          await loadConversationHistory(conversationId, generation)
+          return
+        }
+        let cursor = conversationCursorRef.current.cursor
+        let changed = false
+        for (let page = 0; page < 10; page++) {
+          const batch = await getConversationChanges(conversationId, cursor, 100)
+          if (!isCurrent()) return
+          if (conversationCursorRef.current?.chatId === conversationId
+            && conversationCursorRef.current.cursor > batch.cursor) return
+          cursor = batch.cursor
+          if (batch.changes.length > 0) {
+            changed = true
+            setInteractions((current) => {
+              if (!isCurrent()) return current
+              if (conversationCursorRef.current?.chatId === conversationId
+                && conversationCursorRef.current.cursor > batch.cursor) return current
+              const byId = new Map(current.map((interaction) => [interaction.id, interaction]))
+              for (const change of batch.changes) {
+                if (change.interaction) byId.set(change.interactionId, change.interaction)
+                else byId.delete(change.interactionId)
+              }
+              return Array.from(byId.values()).sort((a, b) => a.id - b.id)
+            })
+          }
+          if (!batch.hasMore) break
+        }
+        if (conversationCursorRef.current?.chatId === conversationId
+          && conversationCursorRef.current.cursor > cursor) return
+        conversationCursorRef.current = { chatId: conversationId, cursor }
+        if (changed) {
+          const sessions = await listChatSessions()
+          if (isCurrent()) setChatSessions(sessions)
+        }
       } catch {
         // Best-effort — a transient fetch failure just waits for the next tick.
       } finally {
-        chatPollInFlightRef.current = false
+        if (chatPollInFlightRef.current === poll) chatPollInFlightRef.current = null
       }
     }
 
     const syncWhenActive = () => { void syncHistory() }
+    syncWhenActive()
     window.addEventListener('focus', syncWhenActive)
     document.addEventListener('visibilitychange', syncWhenActive)
-    const interval = window.setInterval(syncWhenActive, 15000)
+    const interval = window.setInterval(syncWhenActive, 1500)
 
     return () => {
       disposed = true
@@ -688,7 +775,7 @@ export default function MintDashboard() {
       window.removeEventListener('focus', syncWhenActive)
       document.removeEventListener('visibilitychange', syncWhenActive)
     }
-  }, [view, conversationId, sending, workspacePath])
+  }, [view, conversationId, workspacePath])
 
   const filteredSessions = chatSessions.filter((session) => {
     if (session.kind === 'cli' || session.id === 'conversation-default') return false
@@ -742,10 +829,9 @@ export default function MintDashboard() {
 
 
   async function refreshHistory() {
-    const history = await getRecentInteractions(50, conversationId, workspacePath || null)
-    const reversed = history.reverse()
-    setInteractions(reversed)
-    setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
+    const chatId = conversationId
+    const generation = sessionGenerationRef.current
+    await loadConversationHistory(chatId, generation)
   }
 
   const refreshChatSessions = useCallback(async () => {
@@ -758,7 +844,9 @@ export default function MintDashboard() {
             (s, i) =>
               s.id === sessions[i]?.id &&
               s.updatedAt === sessions[i]?.updatedAt &&
-              s.title === sessions[i]?.title
+              s.title === sessions[i]?.title &&
+              s.messageCount === sessions[i]?.messageCount &&
+              s.totalBytes === sessions[i]?.totalBytes
           )
         ) {
           return prev
@@ -769,6 +857,35 @@ export default function MintDashboard() {
       console.error('Failed to refresh chat sessions:', e)
     }
   }, [])
+
+  useEffect(() => {
+    const refreshVisible = () => {
+      if (document.visibilityState === 'visible') void refreshChatSessions()
+    }
+    const interval = window.setInterval(refreshVisible, 5000)
+    window.addEventListener('focus', refreshVisible)
+    document.addEventListener('visibilitychange', refreshVisible)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refreshVisible)
+      document.removeEventListener('visibilitychange', refreshVisible)
+    }
+  }, [refreshChatSessions])
+
+  const loadOlderInteractions = useCallback(async () => {
+    const generation = sessionGenerationRef.current
+    const firstId = interactionsRef.current[0]?.id
+    if (firstId == null) return
+    const page = await getConversationSnapshot(conversationId, firstId, 50)
+    if (!isCurrentSession(conversationId, generation)) return
+    setHasOlderInteractions(page.hasOlder)
+    if (page.interactions.length === 0) return
+    setInteractions((current) => {
+      if (!isCurrentSession(conversationId, generation)) return current
+      const byId = new Map([...page.interactions, ...current].map((interaction) => [interaction.id, interaction]))
+      return Array.from(byId.values()).sort((a, b) => a.id - b.id)
+    })
+  }, [conversationId])
 
   const handleUpdateSessionWorkspace = useCallback(async (sessionId: string, targetPath: string | null) => {
     try {
@@ -847,12 +964,14 @@ export default function MintDashboard() {
     })
 
     const unlistenPromise = listen('tool-approval-requested', (event: { payload: any }) => {
-      if (sessionAutoApprovedRef.current) {
+      const chatId = event.payload.chatId as string | undefined
+      if (!chatId) return
+      if (sessionAutoApprovedRef.current && autoApprovedChatIdRef.current === chatId) {
         submitToolApproval(event.payload.token, true).catch((err) => {
           console.error("Auto approval failed:", err)
         })
       } else {
-        conversationActions.requestApproval(event.payload)
+        setPendingApprovals((current) => ({ ...current, [chatId]: event.payload }))
         notifyPendingApproval(event.payload)
       }
     })
@@ -1068,20 +1187,28 @@ export default function MintDashboard() {
   useEffect(() => {
     if (!sending) {
       sessionAutoApprovedRef.current = false
+      autoApprovedChatIdRef.current = null
       setSessionAutoApproved(false)
     }
   }, [sending])
 
   async function handleApproval(approved: boolean, autoApproveSession = false, answer?: string) {
+    const chatId = conversationId
+    const pendingApproval = pendingApprovals[chatId]
     if (!pendingApproval) return
     try {
       if (autoApproveSession) {
         sessionAutoApprovedRef.current = true
+        autoApprovedChatIdRef.current = chatId
         setSessionAutoApproved(true)
       }
-      await conversationActions.executeApproval(() =>
-        submitToolApproval(pendingApproval.token, approved, answer),
-      )
+      await submitToolApproval(pendingApproval.token, approved, answer)
+      setPendingApprovals((current) => {
+        if (current[chatId]?.token !== pendingApproval.token) return current
+        const next = { ...current }
+        delete next[chatId]
+        return next
+      })
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -1089,6 +1216,7 @@ export default function MintDashboard() {
 
   async function handleCancelMessage() {
     if (!sending || !streamingConversationId) return
+    runGenerationRef.current += 1
     try {
       await conversationActions.executeCancellation(() =>
         cancelChatMessage(streamingConversationId),
@@ -1096,7 +1224,13 @@ export default function MintDashboard() {
     } catch (e) {
       console.error("Failed to cancel message stream:", e)
     } finally {
+      setPendingApprovals((current) => {
+        const next = { ...current }
+        delete next[streamingConversationId]
+        return next
+      })
       setStreamingConversationId(null)
+      setActiveTurnId(null)
     }
   }
 
@@ -1114,6 +1248,17 @@ export default function MintDashboard() {
     } = {},
   ) {
     if (sending) return
+    const originChatId = conversationId
+    const originWorkspacePath = workspacePath || null
+    const sessionGeneration = sessionGenerationRef.current
+    const runGeneration = ++runGenerationRef.current
+    const originRun = { chatId: originChatId, sessionGeneration, runGeneration }
+    const isCurrentRun = () => matchesActiveRun(originRun, {
+      chatId: activeConversationRef.current,
+      sessionGeneration: sessionGenerationRef.current,
+      runGeneration: runGenerationRef.current,
+    })
+    let turnId: number | null = null
     const outgoingImages = options.imageAttachments ?? []
     const outgoingVideos = options.videoAttachments ?? []
     const outgoingDocument = options.documentAttachment ?? null
@@ -1123,6 +1268,7 @@ export default function MintDashboard() {
     const outgoingImageCount = outgoingImages.length
     conversationActions.startRun(promptText, outgoingImageCount, outgoingVideos.length)
     setStreamingConversationId(conversationId)
+    setActiveTurnId(null)
     setError('')
     liveThinkingOpenRef.current = true
     liveExtendedThinkingOpenRef.current = true
@@ -1138,7 +1284,7 @@ export default function MintDashboard() {
       if (pendingProgress.length === 0) return
       const batch = pendingProgress
       pendingProgress = []
-      conversationActions.receiveProgress(batch)
+      if (isCurrentRun()) conversationActions.receiveProgress(batch)
     }
     const queueProgress = (progress: AgentProgress) => {
       pendingProgress.push(progress)
@@ -1165,72 +1311,84 @@ export default function MintDashboard() {
           queueProgress(progress)
         },
         outgoingDocument,
-        workspacePath || null,
-        conversationId,
+        originWorkspacePath,
+        originChatId,
         undefined,
         shouldUseAgentMode ? planMode : false,
         options.pinnedMcpServer ?? null,
         (payload) => {
-          if (sessionAutoApprovedRef.current) {
+          if (sessionAutoApprovedRef.current && autoApprovedChatIdRef.current === originChatId) {
             submitToolApproval(payload.token, true).catch((err) => {
               console.error("Auto approval failed:", err)
             })
           } else {
-            conversationActions.requestApproval(payload)
+            setPendingApprovals((current) => ({ ...current, [originChatId]: payload }))
             notifyPendingApproval(payload)
           }
         },
-      ))
+        (id) => {
+          turnId = id
+          if (isCurrentRun()) setActiveTurnId(id)
+        },
+      ), isCurrentRun)
       flushPendingProgress()
       if (document.hidden || !document.hasFocus()) {
         window.api?.notifyAiResponse?.(truncateForNotification(response.text))
       }
-      const history = (await getRecentInteractions(50, conversationId, workspacePath || null)).reverse()
-      let enrichedHistory = history
       const persistedProgress = compactAgentProgressForPersistence(progressSnapshot)
       if (persistedProgress.length > 0) {
-        const newestInteraction = [...history]
-          .reverse()
-          .find((interaction) => interaction.aiText === response.text || interaction.userText === promptText) ?? history[history.length - 1]
-        if (newestInteraction?.id != null) {
-          const interactionKey = String(newestInteraction.id)
-          enrichedHistory = history.map((interaction) =>
-            interaction.id === newestInteraction.id
-              ? { ...interaction, agentActivity: persistedProgress }
-              : interaction,
-          )
-          setAgentActivitySnapshots((current) => ({
-            ...current,
-            [interactionKey]: persistedProgress.slice(),
-          }))
-          setThinkingExpanded((current) => ({
-            ...current,
-            ...(liveThinkingOpenRef.current ? { [interactionKey]: true } : {}),
-            ...(liveExtendedThinkingOpenRef.current ? { [`extended-${interactionKey}`]: true } : {}),
-          }))
-          await saveInteractionAgentActivity(newestInteraction.id, persistedProgress)
+        if (turnId != null) {
+          const interactionKey = String(turnId)
+          await saveInteractionAgentActivity(turnId, persistedProgress)
+          if (isCurrentRun()) {
+            setAgentActivitySnapshots((current) => ({
+              ...current,
+              [interactionKey]: persistedProgress.slice(),
+            }))
+            setThinkingExpanded((current) => ({
+              ...current,
+              ...(liveThinkingOpenRef.current ? { [interactionKey]: true } : {}),
+              ...(liveExtendedThinkingOpenRef.current ? { [`extended-${interactionKey}`]: true } : {}),
+            }))
+          }
+        } else {
+          console.warn('Agent activity was not saved because the stream did not provide a turn ID')
         }
       }
-      setInteractions(enrichedHistory)
-      setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, enrichedHistory))
+      if (isCurrentRun()) {
+        try {
+          await loadConversationHistory(originChatId, sessionGeneration)
+        } catch (error) {
+          console.error('Failed to refresh completed conversation:', error)
+        }
+      }
       await refreshChatSessions()
       await refreshPictures()
-      if (typeof window !== 'undefined') {
+      if (isCurrentRun() && typeof window !== 'undefined') {
         const pathname = (window.location.pathname || '').replace(/\/+$/, '')
         const hash = (window.location.hash || '').replace(/^#\/?/, '').replace(/\/+$/, '')
         const target = (pathname || hash).toLowerCase()
         if (!target || target === '' || target === '/chat' || target === 'chat' || target === '/index.html' || target === 'index.html') {
-          window.history.replaceState({}, '', `/chat/${encodeURIComponent(conversationId)}`)
+          window.history.replaceState({}, '', `/chat/${encodeURIComponent(originChatId)}`)
         }
       }
       getRuntimeStatus().then(setStatus).catch(() => {})
-      conversationActions.clearStream()
+      if (isCurrentRun()) conversationActions.clearStream()
     } catch (reason) {
-      setError(errorMessage(reason))
+      if (isCurrentRun()) setError(errorMessage(reason))
     } finally {
       flushPendingProgress()
-      conversationActions.finishRun()
-      setStreamingConversationId(null)
+      setPendingApprovals((current) => {
+        if (!current[originChatId]) return current
+        const next = { ...current }
+        delete next[originChatId]
+        return next
+      })
+      if (isCurrentRun()) {
+        conversationActions.finishRun()
+        setStreamingConversationId(null)
+        setActiveTurnId(null)
+      }
     }
   }
 
@@ -1280,7 +1438,7 @@ export default function MintDashboard() {
             ? chatSessions.find((s) => s.id.toLowerCase() === query || s.id.toLowerCase().includes(query) || s.title.toLowerCase().includes(query))
             : chatSessions.find((s) => s.id !== conversationId)
           if (target) {
-            setConversationId(target.id)
+            activateConversation(target.id)
             const targetPath = getCleanPathForView('chat', target.id)
             window.history.replaceState({}, '', targetPath)
             const systemMsg = {
@@ -1505,10 +1663,12 @@ export default function MintDashboard() {
   }
 
   async function clearHistory(action: 'New chat' | 'Clear history', targetWorkspacePath?: string | null) {
+    const originChatId = conversationId
+    const generation = sessionGenerationRef.current
     try {
       if (action === 'New chat') {
         const next = createConversationId()
-        setConversationId(next)
+        activateConversation(next)
         setInteractions([])
         setAgentActivitySnapshots({})
         conversationActions.switchSession()
@@ -1534,8 +1694,9 @@ export default function MintDashboard() {
         return
       } else {
         if (!window.confirm(`${action} will clear the current conversation history. Continue?`)) return
-        await clearChatHistory(conversationId)
+        await clearChatHistory(originChatId)
       }
+      if (!isCurrentSession(originChatId, generation)) return
       setInteractions([])
       setAgentActivitySnapshots({})
       conversationActions.switchSession()
@@ -1615,8 +1776,12 @@ export default function MintDashboard() {
           ])
         }
         if (resp.effects.some((e) => e.kind === 'history_cleared')) {
-          await clearChatHistory(conversationId).catch(() => {})
-          setInteractions([])
+          const chatId = conversationId
+          const generation = sessionGenerationRef.current
+          await clearChatHistory(chatId).catch(() => {})
+          if (isCurrentSession(chatId, generation)) {
+            setInteractions([])
+          }
         }
         if (resp.markdown) pushSystemMessage(userText, resp.markdown)
         if (resp.effects.some((e) => e.kind !== 'history_cleared' && e.kind !== 'workspace_changed')) {
@@ -1652,7 +1817,8 @@ export default function MintDashboard() {
   async function selectConversation(id: string) {
     window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, id)
     touchActiveTimestamp()
-    setConversationId(id)
+    activateConversation(id)
+    const generation = sessionGenerationRef.current
     changeView('chat', id)
     conversationActions.switchSession()
     const session = chatSessions.find((item) => item.id === id)
@@ -1667,10 +1833,11 @@ export default function MintDashboard() {
         }
       }
     }
-    const history = await getRecentInteractions(50, id, session?.workspacePath || workspacePath || null)
-    const reversed = history.reverse()
-    setInteractions(reversed)
-    setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
+    try {
+      await loadConversationHistory(id, generation)
+    } catch (reason) {
+      if (isCurrentSession(id, generation)) setError(errorMessage(reason))
+    }
   }
 
   const handleNewChatInProject = useCallback((targetPath: string) => {
@@ -1697,11 +1864,12 @@ export default function MintDashboard() {
     try {
       await deleteChatSession(id)
       const remaining = chatSessions.filter((item) => item.id !== id && item.kind !== 'cli' && !item.id.startsWith('cli') && item.id !== 'conversation-default')
-      const nextActive = id === conversationId
+      const currentChatId = activeConversationRef.current
+      const nextActive = id === currentChatId
         ? (remaining[0]?.id ?? createConversationId())
-        : conversationId
+        : currentChatId
 
-      if (nextActive !== conversationId) {
+      if (nextActive !== currentChatId) {
         if (remaining.length > 0 && remaining[0]?.id) {
           window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, nextActive)
           if (typeof window !== 'undefined') {
@@ -1713,16 +1881,15 @@ export default function MintDashboard() {
             window.history.replaceState({}, '', '/chat')
           }
         }
-        setConversationId(nextActive)
+        activateConversation(nextActive)
+        const generation = sessionGenerationRef.current
         conversationActions.clearProgress()
-        const history = await getRecentInteractions(50, nextActive, workspacePath || null)
-        const reversed = history.reverse()
-        setInteractions(reversed)
-        setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
+        await loadConversationHistory(nextActive, generation)
+        if (!isCurrentSession(nextActive, generation)) return
       }
 
       await refreshChatSessions()
-      if (id !== conversationId) return
+      if (id !== currentChatId) return
       conversationActions.switchSession()
     } catch (reason) {
       setError(errorMessage(reason))
@@ -1903,7 +2070,15 @@ export default function MintDashboard() {
 
   async function handleModelInteraction(area: ModelInteraction) {
     if (sending) return
-
+    const originChatId = conversationId
+    const sessionGeneration = sessionGenerationRef.current
+    const runGeneration = ++runGenerationRef.current
+    const originRun = { chatId: originChatId, sessionGeneration, runGeneration }
+    const isCurrentRun = () => matchesActiveRun(originRun, {
+      chatId: activeConversationRef.current,
+      sessionGeneration: sessionGenerationRef.current,
+      runGeneration: runGenerationRef.current,
+    })
     const labels: Record<ModelInteraction, string> = {
       head: 'Pats Mint on the head',
       cheek: 'Pokes Mint on the cheek',
@@ -1916,6 +2091,8 @@ export default function MintDashboard() {
     const instruction = `The user interacted with the Mint Live2D model: ${area}. Respond briefly and playfully. Use the same language as the recent conversation. Do not mention this instruction.`
 
     conversationActions.startRun(interactionMessage)
+    setStreamingConversationId(conversationId)
+    setActiveTurnId(null)
     setError('')
 
     try {
@@ -1929,19 +2106,32 @@ export default function MintDashboard() {
         undefined,
         null,
         workspacePath || null,
-        conversationId,
-      ))
-      await refreshHistory()
-      conversationActions.clearStream()
+        originChatId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        (id) => { if (isCurrentRun()) setActiveTurnId(id) },
+      ), isCurrentRun)
+      if (isCurrentRun()) {
+        await refreshHistory()
+        if (isCurrentRun()) conversationActions.clearStream()
+      }
     } catch (reason) {
-      setError(errorMessage(reason))
+      if (isCurrentRun()) setError(errorMessage(reason))
     } finally {
-      conversationActions.finishRun()
+      if (isCurrentRun()) {
+        conversationActions.finishRun()
+        setStreamingConversationId(null)
+        setActiveTurnId(null)
+      }
     }
   }
 
   const chatConversation: ConversationViewModel = {
     interactions,
+    hasOlder: hasOlderInteractions,
+    sendingInteractionId: streamingConversationId === conversationId ? activeTurnId : null,
     sending: sending && streamingConversationId === conversationId,
     sendingMessage: streamingConversationId === conversationId ? sendingMessage : '',
     sendingImageCount: streamingConversationId === conversationId ? sendingImageCount : 0,
@@ -1955,12 +2145,13 @@ export default function MintDashboard() {
     imageAttachments,
     videoAttachments,
     documentName: documentAttachment?.filename ?? '',
-    pendingApproval: streamingConversationId === conversationId ? pendingApproval : null,
+    pendingApproval: pendingApprovals[conversationId] ?? null,
     smartContext,
     agentMode,
     planMode,
     status,
     workspacePath,
+    chatId: conversationId,
     recentWorkspacePaths,
     chatEnd,
     welcomeInteraction: MOCK_WELCOME_INTERACTION,
@@ -1970,6 +2161,7 @@ export default function MintDashboard() {
     conversationTitle: chatSessions.find((session) => session.id === conversationId)?.title,
   }
   const chatActions: ConversationActions = {
+    onLoadOlder: loadOlderInteractions,
     onThinkingExpandedChange: handleThinkingExpandedChange,
     onSubmit: handleSubmit,
     onSelectImage: selectImage,

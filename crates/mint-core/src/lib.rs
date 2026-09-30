@@ -149,9 +149,9 @@ pub use mcp::{
     upsert_server_in,
 };
 pub use memory::{
-    CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, Fact, InteractionMemory, LearnedSkill,
-    MemoryError, MemoryStore, WorkspaceSession, generate_cli_session_id, is_cli_chat_id,
-    memory_path, scoped_chat_id, subagent_name,
+    CHAT_CLI_ID, ChatSession, ConversationChanges, ConversationSnapshot, DEFAULT_CONVERSATION_ID,
+    Fact, InteractionMemory, LearnedSkill, MemoryError, MemoryStore, WorkspaceSession,
+    generate_cli_session_id, is_cli_chat_id, memory_path, scoped_chat_id, subagent_name,
 };
 pub use mic_transcribe::{
     MicRecordingHandle, MicTranscribeError, start_recording, stop_recording, transcribe_recording,
@@ -161,6 +161,7 @@ pub use orchestration::{
     MCP_ALLOW_ALL_SENTINEL, OrchestrationError, PlanTaskItem, RunTelemetrySummary,
     ToolExecutionRecord, orchestrate_agent_loop, orchestrate_chat, orchestrate_chat_stream,
     orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    with_turn_start_listener,
 };
 pub use pictures::{
     PictureEntry, PictureError, delete_saved_picture, list_saved_pictures, parse_data_uri,

@@ -120,7 +120,7 @@ async fn restarting_loop() {
 /// the CLI's own prior history never gets replayed as a "live" notice.
 fn initialize_watermark(chat_id: &str) {
     if let Ok(memory) = MemoryStore::open_default()
-        && let Ok(latest) = memory.recent_interactions_for_chat(chat_id, 1)
+        && let Ok(latest) = memory.recent_completed_interactions_for_chat(chat_id, 1)
     {
         let start_id = latest.first().map(|row| row.id).unwrap_or(0);
         LAST_SEEN_ID.store(start_id, Ordering::SeqCst);
@@ -136,7 +136,7 @@ async fn tick(chat_id: &str) {
     let Ok(memory) = MemoryStore::open_default() else {
         return;
     };
-    let Ok(rows) = memory.recent_interactions_for_chat(chat_id, POLL_BATCH) else {
+    let Ok(rows) = memory.recent_completed_interactions_for_chat(chat_id, POLL_BATCH) else {
         return;
     };
     let last_seen = LAST_SEEN_ID.load(Ordering::SeqCst);
@@ -155,6 +155,10 @@ async fn tick(chat_id: &str) {
             preview(&row.user_text),
             preview(&row.ai_text)
         ));
+    }
+    if queue.len() > 100 {
+        let excess = queue.len() - 100;
+        queue.drain(..excess);
     }
     drop(queue);
     note_own_interaction(max_id);

@@ -36,13 +36,16 @@ export function useConversationCoordinator(
     switchSession: (draft = '') => dispatch({ type: 'session_switched', draft }),
     executeStream: async (
       execute: (onChunk: (chunk: string) => void) => Promise<ChatResponse>,
+      shouldApplyResponse: () => boolean = () => true,
     ) => {
       // Keep provider streaming internal and reveal only the authoritative
       // completed response. This avoids partial Markdown/card layouts and
       // keeps Desktop and Web behavior aligned with the CLI.
       const response = await execute(() => {})
-      dispatch({ type: 'chunk_received', chunk: response.text })
-      dispatch({ type: 'response_received', response })
+      if (shouldApplyResponse()) {
+        dispatch({ type: 'chunk_received', chunk: response.text })
+        dispatch({ type: 'response_received', response })
+      }
       return response
     },
     executeApproval: async (execute: () => Promise<void>) => {

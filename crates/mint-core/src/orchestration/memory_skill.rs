@@ -181,7 +181,9 @@ pub(crate) fn append_memory_context(
         *system_prompt = format!("{}\n\nRemembered facts:\n{}", system_prompt.trim(), facts);
     }
 
-    if let Ok(mut interactions) = memory.recent_interactions_for_chat(chat_id, CONTEXT_LIMIT) {
+    if let Ok(mut interactions) =
+        memory.recent_completed_interactions_for_chat(chat_id, CONTEXT_LIMIT)
+    {
         interactions.reverse();
         let transcript = interactions
             .into_iter()

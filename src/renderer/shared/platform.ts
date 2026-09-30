@@ -8,6 +8,8 @@ import type {
   ChatResponse,
   TtsUrl,
   InteractionMemory,
+  ConversationSnapshot,
+  ConversationChanges,
   ChatSession,
   PictureEntry,
   ImageGenRequest,
@@ -98,10 +100,13 @@ export interface MintPlatformApi {
     planMode?: boolean,
     pinnedMcpServer?: string | null,
     onApprovalRequested?: (payload: { token: string; approval: any }) => void,
+    onTurnStarted?: (interactionId: number) => void,
   ): Promise<ChatResponse>
   getTtsUrls(text: string): Promise<TtsUrl[]>
   cancelChatMessage(chatId: string): Promise<void>
   getRecentInteractions(limit?: number, chatId?: string | null, workspacePath?: string | null): Promise<InteractionMemory[]>
+  getConversationSnapshot(chatId: string, beforeId?: number | null, limit?: number): Promise<ConversationSnapshot>
+  getConversationChanges(chatId: string, after: number, limit?: number): Promise<ConversationChanges>
   saveSystemInteraction(
     chatId: string,
     userText: string,
@@ -230,6 +235,7 @@ export const authPlatform = {
 export const conversationPlatform = {
   clearChatHistory: operation('clearChatHistory'), deleteChatSession: operation('deleteChatSession'),
   renameChatSession: operation('renameChatSession'), getRecentInteractions: operation('getRecentInteractions'),
+  getConversationSnapshot: operation('getConversationSnapshot'), getConversationChanges: operation('getConversationChanges'),
   saveSystemInteraction: operation('saveSystemInteraction'), listChatSessions: operation('listChatSessions'),
   updateChatSessionWorkspace: operation('updateChatSessionWorkspace'),
   saveInteractionAgentActivity: operation('saveInteractionAgentActivity'), streamChatMessage: operation('streamChatMessage'),

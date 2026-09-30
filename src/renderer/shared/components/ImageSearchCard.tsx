@@ -25,13 +25,10 @@ function ImageTile({ image }: { image: ImageSearchHit }) {
   if (broken || !src) {
     return null
   }
+  const sourceUrl = /^https?:\/\//.test(image.sourceUrl) ? image.sourceUrl : image.imageUrl
 
   return (
-    <a
-      href={image.sourceUrl || image.imageUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      title={image.title}
+    <div
       style={{
         position: 'relative',
         display: 'block',
@@ -43,33 +40,30 @@ function ImageTile({ image }: { image: ImageSearchHit }) {
         textDecoration: 'none',
       }}
     >
-      <img
-        src={src}
-        alt={image.title}
-        loading="lazy"
-        referrerPolicy="no-referrer"
-        onError={() => {
-          const fallback = resolveMediaUrl(image.imageUrl)
-          if (src !== fallback && fallback) {
-            setSrc(fallback)
-          } else {
-            setBroken(true)
-          }
-        }}
-        style={{
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          display: 'block',
-        }}
-      />
+      <a href={sourceUrl} target="_blank" rel="noopener noreferrer" title={image.title} style={{ display: 'block', width: '100%', height: '100%' }}>
+        <img
+          src={src}
+          alt={image.title}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => {
+            const fallback = resolveMediaUrl(image.imageUrl)
+            if (src !== fallback && fallback) {
+              setSrc(fallback)
+            } else {
+              setBroken(true)
+            }
+          }}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      </a>
       {image.title && (
         <div
           style={{
             position: 'absolute',
             left: 0,
             right: 0,
-            bottom: 0,
+            bottom: 24,
             padding: '6px 8px',
             fontSize: '11px',
             lineHeight: 1.3,
@@ -78,12 +72,21 @@ function ImageTile({ image }: { image: ImageSearchHit }) {
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
+            pointerEvents: 'none',
           }}
         >
           {image.title}
         </div>
       )}
-    </a>
+      <a
+        href={resolveMediaUrl(image.imageUrl)}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ position: 'absolute', right: 6, bottom: 5, zIndex: 1, padding: '2px 5px', borderRadius: 4, background: 'var(--surface-strong)', color: 'var(--interactive-fg-hover)', fontSize: 10 }}
+      >
+        ดูรูปเต็ม
+      </a>
+    </div>
   )
 }
 

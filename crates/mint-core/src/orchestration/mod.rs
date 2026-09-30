@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Command;
 use std::time::Instant;
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::chat::{
@@ -41,6 +42,102 @@ const CONTEXT_LIMIT: usize = 3;
 /// interactions — this exists purely to nudge the model with recent
 /// continuity, not to re-litigate a whole previous answer.
 const MAX_CONTEXT_MESSAGE_CHARS: usize = 200;
+
+struct TurnStartListener {
+    chat_id: String,
+    callback: Arc<dyn Fn(i64) + Send + Sync>,
+}
+
+tokio::task_local! {
+    static TURN_START_LISTENER: TurnStartListener;
+}
+
+/// Reports the persisted turn ID to the initiating transport without changing
+/// the agent/chat interfaces used by CLI, jobs, and background integrations.
+pub async fn with_turn_start_listener<F, R>(
+    chat_id: String,
+    callback: impl Fn(i64) + Send + Sync + 'static,
+    future: F,
+) -> R
+where
+    F: Future<Output = R>,
+{
+    TURN_START_LISTENER.scope(TurnStartListener {
+        chat_id,
+        callback: Arc::new(callback),
+    }, future).await
+}
+
+/// Owns one persisted turn, including its cross-process queue lease. Dropping a
+/// cancelled task marks its prompt interrupted instead of leaving it running.
+struct TurnLease {
+    memory: MemoryStore,
+    id: i64,
+    heartbeat: tokio::task::JoinHandle<()>,
+    finished: bool,
+}
+
+impl TurnLease {
+    async fn start(memory: &MemoryStore, chat_id: &str, text: &str) -> Result<Self, MemoryError> {
+        let id = memory.start_turn(chat_id, text)?;
+        let _ = TURN_START_LISTENER.try_with(|listener| {
+            if listener.chat_id == chat_id {
+                (listener.callback)(id);
+            }
+        });
+        let heartbeat_memory = memory.clone();
+        let heartbeat = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                if heartbeat_memory.renew_turn(id).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut lease = Self {
+            memory: memory.clone(),
+            id,
+            heartbeat,
+            finished: false,
+        };
+        loop {
+            match memory.claim_turn(chat_id, id) {
+                Ok(true) => return Ok(lease),
+                Ok(false) => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
+                Err(error) => {
+                    lease.fail();
+                    return Err(error);
+                }
+            }
+        }
+    }
+
+    fn complete(&mut self, response: &ChatResponse) -> Result<(), MemoryError> {
+        self.memory.finish_turn(
+            self.id,
+            &response.text,
+            &response.provider,
+            &response.model,
+            response.fallback_provider.as_deref(),
+        )?;
+        self.finished = true;
+        Ok(())
+    }
+
+    fn fail(&mut self) {
+        let _ = self.memory.end_turn(self.id, "failed");
+        self.finished = true;
+    }
+}
+
+impl Drop for TurnLease {
+    fn drop(&mut self) {
+        self.heartbeat.abort();
+        if !self.finished {
+            let _ = self.memory.end_turn(self.id, "interrupted");
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum OrchestrationError {
@@ -106,25 +203,22 @@ pub async fn orchestrate_chat(
     config: &MintConfig,
     request: &ChatRequest,
 ) -> Result<ChatResponse, OrchestrationError> {
+    let memory = MemoryStore::open_default()?;
+    let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
-    let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(config, &memory, &resolved_request)?;
-    let response = send_chat(config, &enriched).await?;
-    memory.add_interaction_for_chat_with_fallback(
-        &request_chat_id(request),
-        &request.message,
-        &response.text,
-        &response.provider,
-        &response.model,
-        response.fallback_provider.as_deref(),
-    )?;
+    let response = match send_chat(config, &enriched).await {
+        Ok(response) => response,
+        Err(error) => {
+            turn.fail();
+            return Err(error.into());
+        }
+    };
+    turn.complete(&response)?;
     if let Some(ref ws) = request.workspace_path {
         if !ws.trim().is_empty() {
-            let _ = memory.set_chat_session_workspace(
-                &request_chat_id(request),
-                Some(ws.trim()),
-            );
+            let _ = memory.set_chat_session_workspace(&request_chat_id(request), Some(ws.trim()));
         }
     }
     spawn_auto_memory_update(
@@ -150,25 +244,22 @@ pub async fn orchestrate_chat_stream<F>(
 where
     F: FnMut(String),
 {
+    let memory = MemoryStore::open_default()?;
+    let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
-    let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(config, &memory, &resolved_request)?;
-    let response = stream_chat(config, &enriched, on_chunk).await?;
-    memory.add_interaction_for_chat_with_fallback(
-        &request_chat_id(request),
-        &request.message,
-        &response.text,
-        &response.provider,
-        &response.model,
-        response.fallback_provider.as_deref(),
-    )?;
+    let response = match stream_chat(config, &enriched, on_chunk).await {
+        Ok(response) => response,
+        Err(error) => {
+            turn.fail();
+            return Err(error.into());
+        }
+    };
+    turn.complete(&response)?;
     if let Some(ref ws) = request.workspace_path {
         if !ws.trim().is_empty() {
-            let _ = memory.set_chat_session_workspace(
-                &request_chat_id(request),
-                Some(ws.trim()),
-            );
+            let _ = memory.set_chat_session_workspace(&request_chat_id(request), Some(ws.trim()));
         }
     }
     spawn_auto_memory_update(
@@ -190,19 +281,19 @@ pub async fn orchestrate_chat_with_fallback(
     config: &MintConfig,
     request: &ChatRequest,
 ) -> Result<(ChatResponse, Option<String>), OrchestrationError> {
+    let memory = MemoryStore::open_default()?;
+    let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
-    let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(config, &memory, &resolved_request)?;
-    let (response, fallback) = send_chat_with_fallback(config, &enriched).await?;
-    memory.add_interaction_for_chat_with_fallback(
-        &request_chat_id(request),
-        &request.message,
-        &response.text,
-        &response.provider,
-        &response.model,
-        response.fallback_provider.as_deref(),
-    )?;
+    let (response, fallback) = match send_chat_with_fallback(config, &enriched).await {
+        Ok(result) => result,
+        Err(error) => {
+            turn.fail();
+            return Err(error.into());
+        }
+    };
+    turn.complete(&response)?;
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -226,25 +317,22 @@ pub async fn orchestrate_chat_stream_with_fallback<F>(
 where
     F: FnMut(String),
 {
+    let memory = MemoryStore::open_default()?;
+    let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
-    let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(config, &memory, &resolved_request)?;
-    let (response, fallback) = stream_chat_with_fallback(config, &enriched, on_chunk).await?;
-    memory.add_interaction_for_chat_with_fallback(
-        &request_chat_id(request),
-        &request.message,
-        &response.text,
-        &response.provider,
-        &response.model,
-        response.fallback_provider.as_deref(),
-    )?;
+    let (response, fallback) = match stream_chat_with_fallback(config, &enriched, on_chunk).await {
+        Ok(result) => result,
+        Err(error) => {
+            turn.fail();
+            return Err(error.into());
+        }
+    };
+    turn.complete(&response)?;
     if let Some(ref ws) = request.workspace_path {
         if !ws.trim().is_empty() {
-            let _ = memory.set_chat_session_workspace(
-                &request_chat_id(request),
-                Some(ws.trim()),
-            );
+            let _ = memory.set_chat_session_workspace(&request_chat_id(request), Some(ws.trim()));
         }
     }
     spawn_auto_memory_update(
@@ -280,7 +368,7 @@ fn enrich_request(
     request: &ChatRequest,
 ) -> Result<ChatRequest, MemoryError> {
     let mut interactions =
-        memory.recent_interactions_for_chat(&request_chat_id(request), CONTEXT_LIMIT)?;
+        memory.recent_completed_interactions_for_chat(&request_chat_id(request), CONTEXT_LIMIT)?;
     interactions.reverse();
     let transcript = interactions
         .into_iter()
@@ -1266,7 +1354,6 @@ where
                 e
             ))
         })?;
-        let resolved_task = resolve_github_links(task, config).await;
         let chat_id = chat_id
             .map(str::trim)
             .filter(|chat_id| !chat_id.is_empty())
@@ -1279,6 +1366,10 @@ where
         // are already scoped or aren't "cli" at all (see `scoped_chat_id`).
         let chat_id = crate::agent::memory::scoped_chat_id(chat_id, Some(&root.to_string_lossy()));
         let chat_id = chat_id.as_str();
+        let memory = MemoryStore::open_default()?;
+        let mut turn = TurnLease::start(&memory, chat_id, task).await?;
+        let resolved_task = resolve_github_links(task, config).await;
+        let agent_result = async {
         // Subagent runs use a synthetic `{parent_chat_id}::subagent::{name}` chat id
         // (see the `dispatch_subagent` arm in `execute_tool`) so their own memory
         // interaction doesn't leak into the parent conversation's history. That
@@ -1807,106 +1898,56 @@ where
 
                     if decision.action == "finish" {
                         let mut summary = decision.input.summary.trim().to_owned();
-                        let is_thai_task =
-                            task.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
-                        if let Some(err_line) = observation
-                            .lines()
-                            .find(|l| l.contains("Web search error:"))
-                        {
-                            let clean_err = err_line
-                                .replace("Web search error: ", "")
-                                .replace("Web search is currently unavailable.", "")
-                                .trim()
-                                .to_string();
-                            if summary.is_empty() {
-                                if is_thai_task {
-                                    summary = format!(
-                                        "การค้นหาข้อมูลจากเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {}\nมิ้นท์ขออภัยด้วยนะคะที่ไม่สามารถค้นหาข้อมูลเรียลไทม์ให้ได้ในขณะนี้ค่ะ",
-                                        clean_err
-                                    );
-                                } else {
-                                    summary = format!(
-                                        "Web search failed due to error: {}\nI apologize, but I cannot retrieve real-time information at the moment.",
-                                        clean_err
-                                    );
-                                }
-                            } else {
-                                let err_lower = clean_err.to_lowercase();
-                                let summary_lower = summary.to_lowercase();
-                                let already_mentions_error = if is_thai_task {
-                                    summary_lower.contains("ล้มเหลว")
-                                        || summary_lower.contains("ข้อผิดพลาด")
-                                        || summary_lower.contains(&err_lower)
-                                } else {
-                                    summary_lower.contains("fail")
-                                        || summary_lower.contains("error")
-                                        || summary_lower.contains(&err_lower)
-                                };
-                                if !already_mentions_error {
-                                    if is_thai_task {
-                                        summary.push_str(&format!(
-                                            "\n\n(การค้นหาเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {})",
-                                            clean_err
-                                        ));
-                                    } else {
-                                        summary.push_str(&format!(
-                                            "\n\n(Web search failed due to error: {})",
-                                            clean_err
-                                        ));
-                                    }
-                                }
-                            }
-                        } else {
-                            if summary.is_empty() {
-                                let err_msg = "Error: Your finish action summary was empty. \
+                        if summary.is_empty() {
+                            let err_msg = "Error: Your finish action summary was empty. \
                                        You MUST provide a final answer, explanation, or response to the user's query \
                                        in the 'summary' field of the 'finish' action input. Do not leave it empty.";
-                                trajectory.push(format_trajectory_step(
-                                    step,
-                                    &decision.thought,
-                                    &decision.action,
-                                    err_msg,
-                                ));
-                                rebuild_observation(task, &root, &trajectory, &mut observation);
-                                reject_native_finish(
-                                    tool_mode,
-                                    &mut native_messages,
-                                    &response.text,
-                                    err_msg,
-                                );
-                                continue 'steps;
-                            }
-                            if unverified_modification(
-                                last_modify_step,
-                                last_verify_step,
-                                &decision.input.verification,
-                            ) {
-                                let err_msg = "Error: You modified a file (apply_patch/write_file) in this \
+                            trajectory.push(format_trajectory_step(
+                                step,
+                                &decision.thought,
+                                &decision.action,
+                                err_msg,
+                            ));
+                            rebuild_observation(task, &root, &trajectory, &mut observation);
+                            reject_native_finish(
+                                tool_mode,
+                                &mut native_messages,
+                                &response.text,
+                                err_msg,
+                            );
+                            continue 'steps;
+                        }
+                        if unverified_modification(
+                            last_modify_step,
+                            last_verify_step,
+                            &decision.input.verification,
+                        ) {
+                            let err_msg = "Error: You modified a file (apply_patch/write_file) in this \
                                        run but finished without verifying it. Call the verify tool \
                                        with build/test/lint commands appropriate for this project \
                                        before finishing. If no check genuinely applies (e.g. no test \
                                        suite, documentation-only change), say so explicitly in the \
                                        finish action's 'verification' field and finish again.";
-                                trajectory.push(format_trajectory_step(
-                                    step,
-                                    &decision.thought,
-                                    &decision.action,
-                                    err_msg,
-                                ));
-                                rebuild_observation(task, &root, &trajectory, &mut observation);
-                                reject_native_finish(
-                                    tool_mode,
-                                    &mut native_messages,
-                                    &response.text,
-                                    err_msg,
-                                );
-                                continue 'steps;
-                            }
-                            if unacknowledged_verify_failure(
-                                last_verify_failed,
-                                &decision.input.verification,
-                            ) {
-                                let err_msg = "Error: Your last verify call reported a failure \
+                            trajectory.push(format_trajectory_step(
+                                step,
+                                &decision.thought,
+                                &decision.action,
+                                err_msg,
+                            ));
+                            rebuild_observation(task, &root, &trajectory, &mut observation);
+                            reject_native_finish(
+                                tool_mode,
+                                &mut native_messages,
+                                &response.text,
+                                err_msg,
+                            );
+                            continue 'steps;
+                        }
+                        if unacknowledged_verify_failure(
+                            last_verify_failed,
+                            &decision.input.verification,
+                        ) {
+                            let err_msg = "Error: Your last verify call reported a failure \
                                        (non-zero exit code), but you're finishing without \
                                        addressing it. Read the stdout/stderr from that verify \
                                        call, fix the actual problem, and run verify again until \
@@ -1915,49 +1956,21 @@ where
                                        unrelated to your change (e.g. pre-existing), say so \
                                        explicitly in the finish action's 'verification' field and \
                                        finish again.";
-                                trajectory.push(format_trajectory_step(
-                                    step,
-                                    &decision.thought,
-                                    &decision.action,
-                                    err_msg,
-                                ));
-                                rebuild_observation(task, &root, &trajectory, &mut observation);
-                                reject_native_finish(
-                                    tool_mode,
-                                    &mut native_messages,
-                                    &response.text,
-                                    err_msg,
-                                );
-                                continue 'steps;
-                            }
-                            let mut provider_used = None;
-                            for line in observation.lines() {
-                                if line.contains("Web search succeeded using Google Search") {
-                                    provider_used = Some("Google");
-                                } else if line.contains("Web search succeeded using Brave Search") {
-                                    provider_used = Some("Brave");
-                                }
-                            }
-                            if let Some(prov) = provider_used {
-                                let summary_lower = summary.to_lowercase();
-                                if !summary_lower.contains("google")
-                                    && !summary_lower.contains("brave")
-                                {
-                                    if is_thai_task {
-                                        summary.push_str(&format!(
-                                            "\n\n(มิ้นท์หาข้อมูลนี้มาจาก {} Search นะคะ 💖)",
-                                            prov
-                                        ));
-                                    } else {
-                                        summary.push_str(&format!(
-                                            "\n\n(Information retrieved via {} Search 💖)",
-                                            prov
-                                        ));
-                                    }
-                                }
-                            }
+                            trajectory.push(format_trajectory_step(
+                                step,
+                                &decision.thought,
+                                &decision.action,
+                                err_msg,
+                            ));
+                            rebuild_observation(task, &root, &trajectory, &mut observation);
+                            reject_native_finish(
+                                tool_mode,
+                                &mut native_messages,
+                                &response.text,
+                                err_msg,
+                            );
+                            continue 'steps;
                         }
-
                         // Auto-append generated media (image/video) and model feedback to summary if LLM omitted it
                         let mut media_blocks = Vec::new();
                         for step in trajectory.iter() {
@@ -1989,15 +2002,11 @@ where
                             on_chunk(remainder.to_owned());
                         }
 
-                        let memory = MemoryStore::open_default()?;
-                        memory.add_interaction_for_chat_with_fallback(
-                            chat_id,
-                            task,
-                            &summary,
-                            &final_provider,
-                            &final_model,
+                        memory.finish_turn(
+                            turn.id, &summary, &final_provider, &final_model,
                             final_fallback.as_deref(),
                         )?;
+                        turn.finished = true;
                         memory.save_workspace_session(
                             &root.to_string_lossy(),
                             &summary,
@@ -2483,10 +2492,16 @@ where
             summary: run_summary,
         });
 
+        turn.fail();
         Err(OrchestrationError::Agent(format!(
             "code agent reached the limit of {} steps",
             MAX_STEPS
         )))
+        }.await;
+        if agent_result.is_err() {
+            turn.fail();
+        }
+        agent_result
     })
 }
 
@@ -3236,6 +3251,28 @@ where
 mod tests {
     use super::*;
     use crate::config::AgentConfig;
+
+    #[tokio::test]
+    async fn turn_start_listener_reports_only_the_matching_chat() {
+        let memory = MemoryStore::open(std::env::temp_dir().join(format!(
+            "mint-turn-start-listener-{}.sqlite",
+            uuid::Uuid::new_v4()
+        )));
+        let reported = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let callback_reported = reported.clone();
+        with_turn_start_listener(
+            "cli::one".to_string(),
+            move |id| callback_reported.lock().unwrap().push(id),
+            async {
+                let first = TurnLease::start(&memory, "cli::one", "hello").await.unwrap();
+                let other = TurnLease::start(&memory, "cli::two", "other").await.unwrap();
+                assert_eq!(*reported.lock().unwrap(), vec![first.id]);
+                drop(first);
+                drop(other);
+            },
+        )
+        .await;
+    }
 
     #[test]
     fn extracts_a_summary_incrementally_without_matching_text_inside_other_strings() {

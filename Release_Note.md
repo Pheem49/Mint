@@ -1,5 +1,28 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Mint Persona
+
+- Made Mint's female persona explicit in the shared system prompt used by chat and agent modes across CLI, Desktop, and Web. Mint now follows the user's current language or an explicitly requested language instead of defaulting to Thai; Thai feminine polite particles apply only to Thai replies.
+- Removed Thai/English-only Web Search text appended after agent answers, so the model can explain search results and failures in the user's language without a mismatched-language suffix.
+- Identified Mint explicitly as an AI coding agent in both native-tool and JSON-action agent prompts, while keeping plain chat as a general AI assistant and allowing non-coding tasks in Agent mode.
+
+## Web Search Image Navigation
+
+- Linked Web Search thumbnails to their actual result pages using the image and page URLs paired in agent progress, with a separate “ดูรูปเต็ม” link for opening the image file. The same rendering applies to Desktop and Web, including live replies and chat history.
+- Added a separate “ดูรูปเต็ม” link to Image Search tiles while keeping a click on the thumbnail directed to its source page. CLI search results continue to show both URLs in text.
+- Made both “ดูรูปเต็ม” links use the theme's interactive text color; the Image Search link background also follows the active surface theme.
+
+## Shared Conversation Turns
+
+- Sent prompts now enter the shared session immediately; the same turn receives the complete reply when it finishes. TUI, Web, and Desktop show queued, running, failed, and interrupted turns.
+- Turns submitted to the same session run in order across processes. A short lease marks abandoned work interrupted and lets later turns continue.
+- Added a change feed and paged snapshots for cross-surface updates. The TUI redraws when shared content changes, while Web and Desktop refresh the active conversation and session list and can load older messages.
+- Web and Desktop receive the persisted turn ID as soon as a response starts, so their live reply is matched to the shared turn without showing a duplicate prompt or answer.
+- Kept late replies and history loads from an earlier session out of the currently open chat, attached agent activity by persisted turn ID, and preserved identical prompts from other surfaces while a local reply is pending.
+- Redrew the Full-Screen TUI once when a timed notice expires, so it disappears even while the terminal is idle.
+- Made the conversation snapshot and change cursor authoritative for Web/Desktop history loads, preventing an older request for the same session from replacing newer turns.
+- Kept tool approvals associated with their originating chat across session switches; returning to that chat restores its approval card, including for Desktop approval events.
+
 ## Shared Terminal Color Palette
 
 - Centralized terminal and TUI colors in `terminal_theme.rs` and consolidated similar accent colors into Mint green, with shared blue, text, muted, warning, error, selection, and panel tokens.
@@ -436,6 +459,8 @@ Overhauled session management in the CLI to give every conversation its own isol
   - Integrated `/resume` dispatch in `slashCommandProcessor.ts` and `MintDashboard.tsx` to hot-swap active conversations seamlessly on Desktop and Web.
 # Unreleased
 
+- Changed the Full-Screen TUI watermark to turn from M to the leaf in 0.75 seconds, pause there for two seconds, then turn back to M in 0.75 seconds.
+- Smoothed the Full-Screen TUI watermark rotation to about 33 frames per second and kept its timing steady while mouse or keyboard events arrive.
 - Matched the Web/Desktop TUI theme cards' previews to the `/theme` code sample, including syntax colors and added/removed diff rows.
 - Separated the TUI color choice into `tuiTheme`, preserving the previous terminal choice when loading older configs. Web and Desktop Theme & UI now offer Auto, Dark, and Light TUI previews without changing their own appearance.
 - Added `/theme` to the Full-Screen TUI with Auto, Dark, and Light choices, a changing color preview, and saved theme selection.

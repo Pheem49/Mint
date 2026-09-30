@@ -34,6 +34,8 @@ import type {
   DocumentAttachment,
   AgentProgress,
   InteractionMemory,
+  ConversationSnapshot,
+  ConversationChanges,
   ChatSession,
   PictureEntry,
   ImageGenRequest,
@@ -54,6 +56,7 @@ import type {
 
 
 type DesktopStreamEvent =
+  | { type: 'started'; interactionId: number }
   | { type: 'chunk'; chunk: string }
   | { type: 'progress'; progress: AgentProgress }
 
@@ -456,6 +459,7 @@ export async function streamChatMessage(
   // `listen('tool-approval-requested', ...)` event instead, independent of
   // this function, so it ignores this parameter entirely.
   onApprovalRequested?: (payload: { token: string; approval: any }) => void,
+  onTurnStarted?: (interactionId: number) => void,
 ): Promise<ChatResponse> {
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();
@@ -488,6 +492,8 @@ export async function streamChatMessage(
           const event = JSON.parse(line);
           if (event.type === 'chunk') {
             onChunk(event.chunk);
+          } else if (event.type === 'started') {
+            onTurnStarted?.(event.interactionId);
           } else if (event.type === 'progress') {
             onProgress?.(event.progress);
           } else if (event.type === 'done') {
@@ -508,6 +514,7 @@ export async function streamChatMessage(
   const onEvent = new Channel<DesktopStreamEvent>()
   onEvent.onmessage = (event) => {
     if (event.type === 'chunk') onChunk(event.chunk)
+    else if (event.type === 'started') onTurnStarted?.(event.interactionId)
     else onProgress?.(event.progress)
   }
   const response = await invoke<ChatResponse>('stream_chat_message', {
@@ -639,6 +646,29 @@ export async function getRecentInteractions(limit = 50, chatId?: string | null, 
   }
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<InteractionMemory[]>('get_recent_interactions', { limit, chatId, workspacePath })
+}
+
+export async function getConversationSnapshot(chatId: string, beforeId?: number | null, limit = 50): Promise<ConversationSnapshot> {
+  if (!isTauriRuntime()) {
+    const params = new URLSearchParams({ chatId, limit: String(limit) })
+    if (beforeId != null) params.set('beforeId', String(beforeId))
+    const response = await authFetch(`${getLocalApiBase()}/conversation-snapshot?${params}`)
+    if (!response.ok) throw new Error(`Conversation snapshot failed: ${response.status}`)
+    return response.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<ConversationSnapshot>('get_conversation_snapshot', { chatId, beforeId, limit })
+}
+
+export async function getConversationChanges(chatId: string, after: number, limit = 100): Promise<ConversationChanges> {
+  if (!isTauriRuntime()) {
+    const params = new URLSearchParams({ chatId, after: String(after), limit: String(limit) })
+    const response = await authFetch(`${getLocalApiBase()}/conversation-changes?${params}`)
+    if (!response.ok) throw new Error(`Conversation changes failed: ${response.status}`)
+    return response.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<ConversationChanges>('get_conversation_changes', { chatId, after, limit })
 }
 
 export async function saveSystemInteraction(
@@ -2347,6 +2377,8 @@ const _apiCheck: MintPlatformApi = {
   getTtsUrls,
   cancelChatMessage,
   getRecentInteractions,
+  getConversationSnapshot,
+  getConversationChanges,
   saveSystemInteraction,
   saveInteractionAgentActivity,
   listChatSessions,

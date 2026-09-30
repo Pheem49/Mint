@@ -32,10 +32,34 @@ const MIN_WIDTH: u16 = 60;
 const MIN_HEIGHT: u16 = 12;
 const COPY_LIMIT: usize = 100 * 1024;
 const BACK_TO_BOTTOM_LABEL: &str = " ↓ Back to bottom · End ";
-const WATERMARK_FRAME_COUNT: u8 = 24;
-const WATERMARK_TICK: std::time::Duration = std::time::Duration::from_millis(120);
+const WATERMARK_FRAME_COUNT: u8 = 50;
+const WATERMARK_TICK: std::time::Duration = std::time::Duration::from_millis(30);
+const WATERMARK_HOLD: std::time::Duration = std::time::Duration::from_secs(2);
 const WATERMARK_WIDTH: u16 = 39;
 const WATERMARK_HEIGHT: u16 = 17;
+
+fn watermark_animation_at(
+    elapsed: std::time::Duration,
+) -> (Option<u8>, Option<std::time::Duration>) {
+    let half_turn_frames = WATERMARK_FRAME_COUNT / 2;
+    let half_turn = WATERMARK_TICK * half_turn_frames as u32;
+    let hold_end = half_turn + WATERMARK_HOLD;
+    let reverse_end = hold_end + half_turn;
+    if elapsed < half_turn {
+        let step = (elapsed.as_millis() / WATERMARK_TICK.as_millis()) as u8;
+        (Some(step), Some(WATERMARK_TICK * (step as u32 + 1)))
+    } else if elapsed < hold_end {
+        (Some(half_turn_frames), Some(hold_end))
+    } else if elapsed < reverse_end {
+        let step = ((elapsed - hold_end).as_millis() / WATERMARK_TICK.as_millis()) as u8;
+        (
+            Some(half_turn_frames - step - 1),
+            Some(hold_end + WATERMARK_TICK * (step as u32 + 1)),
+        )
+    } else {
+        (None, None)
+    }
+}
 
 fn mint_m_watermark(frame: Option<u8>, height: usize) -> Text<'static> {
     const WIDTH: usize = WATERMARK_WIDTH as usize;
@@ -50,8 +74,7 @@ fn mint_m_watermark(frame: Option<u8>, height: usize) -> Text<'static> {
     }
 
     let height = height.clamp(1, DESIGN_HEIGHT);
-    let angle = frame.unwrap_or(0) as f32 * std::f32::consts::TAU
-        / WATERMARK_FRAME_COUNT as f32;
+    let angle = frame.unwrap_or(0) as f32 * std::f32::consts::TAU / WATERMARK_FRAME_COUNT as f32;
     let (sin, cos) = angle.sin_cos();
     let mut pixels = vec![vec![None::<(f32, Part)>; WIDTH]; height];
 
@@ -70,19 +93,16 @@ fn mint_m_watermark(frame: Option<u8>, height: usize) -> Text<'static> {
             let stem = (world_x.abs() - 3.7).abs() < 0.5 && world_y.abs() <= 4.2;
             let diagonal_y = world_y + 4.2;
             let diagonal = (-4.2..=2.2).contains(&world_y)
-                && [
-                    -3.7 + diagonal_y * 3.7 / 6.4,
-                    3.7 - diagonal_y * 3.7 / 6.4,
-                ]
-                .into_iter()
-                .any(|line_x| (world_x - line_x).abs() < 0.5);
+                && [-3.7 + diagonal_y * 3.7 / 6.4, 3.7 - diagonal_y * 3.7 / 6.4]
+                    .into_iter()
+                    .any(|line_x| (world_x - line_x).abs() < 0.5);
             let front_mark = stem || diagonal;
 
             let leaf_x = world_x * 0.8 + world_y * 0.6;
             let leaf_y = -world_x * 0.6 + world_y * 0.8;
             let leaf_radius = (leaf_x / 4.2).powi(2) + (leaf_y / 2.5).powi(2);
-            let back_mark = (leaf_radius - 1.0).abs() < 0.22
-                || (leaf_y.abs() < 0.32 && leaf_x.abs() < 3.8);
+            let back_mark =
+                (leaf_radius - 1.0).abs() < 0.22 || (leaf_y.abs() < 0.32 && leaf_x.abs() < 3.8);
 
             for (z, mark) in [(-1.2, back_mark), (0.0, false), (1.2, front_mark)] {
                 let part = if radius > 7.25 {
@@ -190,9 +210,7 @@ fn theme_picker_lines(dialog: &DialogState, height: u16) -> Vec<Line<'static>> {
         format!(" Preview · {}", selected.label()),
         Style::default().fg(crate::terminal_theme::MUTED),
     ));
-    let sample = Style::default()
-        .fg(colors.text)
-        .bg(colors.background);
+    let sample = Style::default().fg(colors.text).bg(colors.background);
     lines.push(Line::from(vec![
         Span::styled(" 1  ", sample.fg(colors.muted)),
         Span::styled("fn", sample.fg(colors.keyword)),
@@ -209,10 +227,7 @@ fn theme_picker_lines(dialog: &DialogState, height: u16) -> Vec<Line<'static>> {
         ),
     ]));
     lines.push(Line::from(vec![
-        Span::styled(
-            " 2 +",
-            sample.fg(colors.added).bg(colors.added_background),
-        ),
+        Span::styled(" 2 +", sample.fg(colors.added).bg(colors.added_background)),
         Span::styled(
             " println!(\"Hello, Mint!\");",
             sample.fg(colors.added).bg(colors.added_background),
@@ -306,6 +321,8 @@ pub(crate) struct ThoughtModalState {
 #[derive(Debug, Default)]
 pub(crate) struct ChatViewState {
     pub(crate) transcript: Vec<TranscriptEntry>,
+    chat_id: String,
+    sync_cursor: i64,
     composer: Vec<char>,
     cursor: usize,
     history: Vec<String>,
@@ -1057,18 +1074,76 @@ impl ChatViewState {
         self.cursor = self.composer.len();
     }
     pub fn reload_transcript(&mut self, chat_id: &str, workspace: &Path) {
+        self.chat_id = chat_id.to_owned();
         self.transcript.clear();
         let scoped = mint_core::scoped_chat_id(chat_id, Some(&workspace.to_string_lossy()));
-        if let Ok(memory) = mint_core::MemoryStore::open_default()
-            && let Ok(rows) = memory.interactions_for_chat(&scoped)
-        {
-            for row in rows {
-                self.transcript
-                    .push(TranscriptEntry::new(TranscriptRole::User, row.user_text));
-                self.transcript
-                    .push(TranscriptEntry::new(TranscriptRole::Assistant, row.ai_text));
+        if let Ok(memory) = mint_core::MemoryStore::open_default() {
+            self.sync_cursor = memory.latest_conversation_sequence(&scoped).unwrap_or(0);
+            if let Ok(rows) = memory.interactions_for_chat(&scoped) {
+                for row in rows {
+                    self.transcript
+                        .push(TranscriptEntry::new(TranscriptRole::User, row.user_text));
+                    match row.status.as_str() {
+                        "completed" => self
+                            .transcript
+                            .push(TranscriptEntry::new(TranscriptRole::Assistant, row.ai_text)),
+                        "queued" => self.transcript.push(TranscriptEntry::new(
+                            TranscriptRole::Notice,
+                            "Queued for this session…",
+                        )),
+                        "running" => self.transcript.push(TranscriptEntry::new(
+                            TranscriptRole::Notice,
+                            "Mint is responding…",
+                        )),
+                        "failed" => self.transcript.push(TranscriptEntry::new(
+                            TranscriptRole::Notice,
+                            "This turn failed. Send it again to retry.",
+                        )),
+                        _ => self.transcript.push(TranscriptEntry::new(
+                            TranscriptRole::Notice,
+                            "This turn was interrupted. Send it again to retry.",
+                        )),
+                    }
+                }
             }
         }
+    }
+
+    fn refresh_shared_transcript(&mut self) -> bool {
+        if self.chat_id.is_empty() {
+            return false;
+        }
+        let Ok(memory) = mint_core::MemoryStore::open_default() else {
+            return false;
+        };
+        let Ok(changes) = memory.conversation_changes(&self.chat_id, self.sync_cursor, 200) else {
+            return false;
+        };
+        if changes.changes.is_empty() {
+            return false;
+        }
+        let transient = self
+            .transcript
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.role,
+                    TranscriptRole::Notice | TranscriptRole::Command | TranscriptRole::System
+                )
+            })
+            .filter(|entry| {
+                !entry.text.starts_with("Queued for this session")
+                    && !entry.text.starts_with("Mint is responding")
+                    && !entry.text.starts_with("This turn failed")
+                    && !entry.text.starts_with("This turn was interrupted")
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let chat_id = self.chat_id.clone();
+        let workspace = self.current_dir.clone();
+        self.reload_transcript(&chat_id, &workspace);
+        self.transcript.extend(transient);
+        true
     }
     pub fn push_user(&mut self, text: String) {
         self.transcript
@@ -1200,6 +1275,9 @@ impl ChatViewState {
             }
         })
     }
+    fn notice_visibility_changed_since_draw(&self, painted_visible: bool) -> bool {
+        painted_visible != self.active_notice().is_some()
+    }
     fn transcript_text(&self) -> Text<'static> {
         let mut lines = Vec::new();
         let selected_start = self.selection_anchor.min(self.selection_head);
@@ -1323,8 +1401,6 @@ impl ChatViewState {
             )
         }
 
-
-
         /// Sweep a white glow across the thinking text, fading to dim gray at the edges.
         fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
             // Split at the first " (" to isolate the verb from the timer suffix.
@@ -1346,18 +1422,13 @@ impl ChatViewState {
                 .enumerate()
                 .map(|(i, &c)| {
                     let dist = ((i as f32 - spot).abs() / (count as f32 * 0.35)).min(1.0);
-                    let brightness = ((1.0 - dist) * std::f32::consts::FRAC_PI_2)
-                        .sin()
-                        .powi(2);
-                    let r = (dim_r as f32
-                        + (bright_r as f32 - dim_r as f32) * brightness)
-                        .round() as u8;
-                    let g = (dim_g as f32
-                        + (bright_g as f32 - dim_g as f32) * brightness)
-                        .round() as u8;
-                    let b = (dim_b as f32
-                        + (bright_b as f32 - dim_b as f32) * brightness)
-                        .round() as u8;
+                    let brightness = ((1.0 - dist) * std::f32::consts::FRAC_PI_2).sin().powi(2);
+                    let r = (dim_r as f32 + (bright_r as f32 - dim_r as f32) * brightness).round()
+                        as u8;
+                    let g = (dim_g as f32 + (bright_g as f32 - dim_g as f32) * brightness).round()
+                        as u8;
+                    let b = (dim_b as f32 + (bright_b as f32 - dim_b as f32) * brightness).round()
+                        as u8;
                     let style = Style::default()
                         .fg(Color::Rgb(r, g, b))
                         .add_modifier(Modifier::BOLD);
@@ -2199,7 +2270,7 @@ impl ChatViewState {
                             ),
                             if index == selected {
                                 Style::default()
-                        .fg(crate::terminal_theme::BLUE)
+                                    .fg(crate::terminal_theme::BLUE)
                                     .add_modifier(Modifier::BOLD | Modifier::REVERSED)
                             } else {
                                 Style::default().fg(crate::terminal_theme::MUTED)
@@ -2739,7 +2810,13 @@ impl ChatTui {
             .to_string_lossy();
         let workspace_name: String = workspace_name
             .chars()
-            .map(|character| if character.is_control() { ' ' } else { character })
+            .map(|character| {
+                if character.is_control() {
+                    ' '
+                } else {
+                    character
+                }
+            })
             .collect();
         let title = if workspace_name.trim().is_empty() {
             "Mint Agent | workspace".to_owned()
@@ -2951,9 +3028,35 @@ impl ChatTui {
             .map_err(|_| anyhow::anyhow!("TUI state lock poisoned"))?;
         let mut pasted_image: Option<String> = None;
         let mut last_ctrl_d: Option<std::time::Instant> = None;
+        let mut last_sync = std::time::Instant::now();
+        let mut redraw = true;
+        let mut painted_notice_visible = false;
+        let mut watermark_started: Option<std::time::Instant> = None;
         const DOUBLE_PRESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
         loop {
+            let watermark_visible = state.transcript.is_empty()
+                && state.dialog.is_none()
+                && state.thought_modal.is_none();
+            if state.watermark_animating && watermark_visible {
+                let started = *watermark_started.get_or_insert_with(std::time::Instant::now);
+                match watermark_animation_at(started.elapsed()).0 {
+                    Some(frame) if frame != state.watermark_frame => {
+                        state.watermark_frame = frame;
+                        redraw = true;
+                    }
+                    None => {
+                        state.watermark_frame = 0;
+                        state.watermark_animating = false;
+                        watermark_started = None;
+                        redraw = true;
+                    }
+                    _ => {}
+                }
+            } else {
+                watermark_started = None;
+            }
+
             if let Some(time) = last_ctrl_d {
                 if time.elapsed() >= DOUBLE_PRESS_TIMEOUT {
                     last_ctrl_d = None;
@@ -2963,31 +3066,52 @@ impl ChatTui {
                 }
             }
 
-            self.draw_state(&state)?;
+            redraw |= state.notice_visibility_changed_since_draw(painted_notice_visible);
 
-            let watermark_animating = state.watermark_animating
-                && state.transcript.is_empty()
-                && state.dialog.is_none()
-                && state.thought_modal.is_none();
-            if last_ctrl_d.is_some() || state.active_notice().is_some() || watermark_animating {
+            if redraw {
+                let notice_visible = state.active_notice().is_some();
+                self.draw_state(&state)?;
+                painted_notice_visible = notice_visible;
+                redraw = false;
+            }
+
+            let watermark_animating = state.watermark_animating && watermark_visible;
+            {
                 let poll_interval = if watermark_animating {
-                    WATERMARK_TICK
-                } else {
+                    let elapsed = watermark_started
+                        .expect("active watermark has a start time")
+                        .elapsed();
+                    watermark_animation_at(elapsed)
+                        .1
+                        .unwrap_or(elapsed)
+                        .saturating_sub(elapsed)
+                        .min(std::time::Duration::from_millis(250))
+                } else if last_ctrl_d.is_some() || state.active_notice().is_some() {
                     std::time::Duration::from_millis(50)
+                } else {
+                    std::time::Duration::from_millis(250)
                 };
                 if !event::poll(poll_interval)? {
-                    if watermark_animating {
-                        state.watermark_frame += 1;
-                        if state.watermark_frame >= WATERMARK_FRAME_COUNT {
-                            state.watermark_frame = 0;
-                            state.watermark_animating = false;
-                        }
+                    if last_sync.elapsed() >= std::time::Duration::from_millis(1500)
+                        && self.mouse_selection.range().is_none()
+                        && !state.selection_mode
+                    {
+                        redraw |= state.refresh_shared_transcript();
+                        last_sync = std::time::Instant::now();
                     }
                     continue;
                 }
             }
 
-            match event::read()? {
+            let input_event = event::read()?;
+            if matches!(
+                &input_event,
+                event::Event::Mouse(m) if m.kind == event::MouseEventKind::Moved
+            ) {
+                continue;
+            }
+            redraw = true;
+            match input_event {
                 event::Event::Resize(w, h) => {
                     self.clear_mouse_selection();
                     if w < MIN_WIDTH || h < MIN_HEIGHT {
@@ -3002,13 +3126,14 @@ impl ChatTui {
                 }
                 event::Event::Mouse(m) => {
                     if m.kind == event::MouseEventKind::Down(event::MouseButton::Left)
-                        && self.watermark_area.is_some_and(|area| {
-                            area.contains(Position::new(m.column, m.row))
-                        })
+                        && self
+                            .watermark_area
+                            .is_some_and(|area| area.contains(Position::new(m.column, m.row)))
                     {
                         self.clear_mouse_selection();
                         state.watermark_frame = 0;
                         state.watermark_animating = true;
+                        watermark_started = Some(std::time::Instant::now());
                         continue;
                     }
                     if self.handle_selection_mouse(m, &mut state)? {
@@ -3672,6 +3797,30 @@ mod dialog_tests {
         assert_eq!(back.lines[8].spans[19].content.as_ref(), "⣿");
     }
 
+    #[test]
+    fn watermark_animation_turns_to_leaf_holds_and_returns_to_m() {
+        let frames = (0..=350)
+            .map(|event| watermark_animation_at(std::time::Duration::from_millis(event * 10)).0)
+            .collect::<Vec<_>>();
+        assert_eq!(frames[0], Some(0));
+        assert_eq!(frames[3], Some(1));
+        assert_eq!(frames[74], Some(24));
+        assert_eq!(frames[75], Some(25));
+        assert_eq!(frames[100], Some(25));
+        assert_eq!(frames[274], Some(25));
+        assert_eq!(frames[275], Some(24));
+        assert_eq!(frames[347], Some(0));
+        assert_eq!(frames[350], None);
+        assert_eq!(
+            watermark_animation_at(std::time::Duration::from_millis(2749)),
+            (Some(25), Some(std::time::Duration::from_millis(2750)))
+        );
+        assert_eq!(
+            watermark_animation_at(std::time::Duration::from_millis(3500)),
+            (None, None)
+        );
+    }
+
     fn make_key(code: KeyCode) -> KeyEvent {
         KeyEvent {
             code,
@@ -4062,11 +4211,15 @@ mod dialog_tests {
         );
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         let mut button = None;
-        terminal.draw(|frame| button = state.render(frame).back_to_bottom).unwrap();
+        terminal
+            .draw(|frame| button = state.render(frame).back_to_bottom)
+            .unwrap();
         assert!(button.is_none());
 
         state.scroll_from_bottom = 10;
-        terminal.draw(|frame| button = state.render(frame).back_to_bottom).unwrap();
+        terminal
+            .draw(|frame| button = state.render(frame).back_to_bottom)
+            .unwrap();
         let area = button.expect("button should appear above the composer");
         let rendered: String = terminal
             .backend()
@@ -4096,7 +4249,9 @@ mod dialog_tests {
             },
         ));
         assert_eq!(state.scroll_from_bottom, 0);
-        terminal.draw(|frame| button = state.render(frame).back_to_bottom).unwrap();
+        terminal
+            .draw(|frame| button = state.render(frame).back_to_bottom)
+            .unwrap();
         assert!(button.is_none());
     }
 
@@ -4303,5 +4458,7 @@ mod dialog_tests {
             std::time::Instant::now() - std::time::Duration::from_millis(3000),
         ));
         assert_eq!(state.active_notice(), None);
+        assert!(state.notice_visibility_changed_since_draw(true));
+        assert!(!state.notice_visibility_changed_since_draw(false));
     }
 }

@@ -67,7 +67,7 @@ pub(in crate::orchestration) async fn execute(
                 Err(e) => Ok(format!(
                     "Web search error: {e}. Web search is currently unavailable. \
                      Do not try to search again. You MUST now proceed by calling the 'finish' action. \
-                     In your finish summary, explain to the user in Thai that the web search failed (mentioning the search error: {e}), \
+                     In your finish summary, explain in the user's language that the web search failed (mentioning the search error: {e}), \
                      and then answer their query using your own pre-existing knowledge/database."
                 )),
             }

@@ -294,6 +294,8 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                 && route != "/api/config"
                 && route != "/api/gemini-live"
                 && route != "/api/interactions"
+                && route != "/api/conversation-snapshot"
+                && route != "/api/conversation-changes"
                 && route != "/api/status"
                 && route != "/api/chat-sessions"
             {
@@ -493,7 +495,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                     )
                     .await;
                 }
-                                ("GET", "/api/interactions") => {
+                                ("GET", "/api/interactions" | "/api/conversation-snapshot" | "/api/conversation-changes") => {
                     routes::sessions::execute(
                         routes::RequestCtx {
                             method,

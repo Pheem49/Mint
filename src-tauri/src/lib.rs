@@ -32,14 +32,15 @@ use tokio::sync::oneshot;
 use integrations::{channel_inventory, list_plugins};
 use mint_core::{
     AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, AuthUser, BranchInfo,
-    ChatRequest, ChatResponse, ChatSession, CodeEdit, CodeEditProposal, CronJob, CronJobDraft,
-    CronStore, GeminiLiveEvent, GeminiLiveHandle, ImageGenRequest, InteractionMemory, LinkedFolder,
-    LinkedFolderDraft, MemoryStore, MicRecordingHandle, MintConfig, PictureEntry,
-    SubagentDefinition, SubagentDraft, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport,
-    apply_code_edits, classify_shell_command, config_path, delete_saved_picture,
-    delete_subagent as core_delete_subagent, get_user, google_tts_urls, list_saved_pictures,
-    list_subagents as core_list_subagents, load_config, login_user, orchestrate_agent_loop,
-    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback, propose_code_edits,
+    ChatRequest, ChatResponse, ChatSession, CodeEdit, CodeEditProposal, ConversationChanges,
+    ConversationSnapshot, CronJob, CronJobDraft, CronStore, GeminiLiveEvent, GeminiLiveHandle,
+    ImageGenRequest, InteractionMemory, LinkedFolder, LinkedFolderDraft, MemoryStore,
+    MicRecordingHandle, MintConfig, PictureEntry, SubagentDefinition, SubagentDraft, TtsUrl,
+    VideoGenRequest, VideoGenResponse, WeatherReport, apply_code_edits, classify_shell_command,
+    config_path, delete_saved_picture, delete_subagent as core_delete_subagent, get_user,
+    google_tts_urls, list_saved_pictures, list_subagents as core_list_subagents, load_config,
+    login_user, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
+    orchestrate_chat_with_fallback, propose_code_edits, with_turn_start_listener,
     reauth_mcp_server as core_reauth_mcp_server, register_user, save_avatar_file, save_chat_images,
     save_config, save_subagent as core_save_subagent, start_channels, start_cron_scheduler,
     start_gemini_live_session as core_start_gemini_live_session,
@@ -488,6 +489,10 @@ struct RuntimeStatus {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum DesktopStreamEvent {
+    Started {
+        #[serde(rename = "interactionId")]
+        interaction_id: i64,
+    },
     Chunk { chunk: String },
     Progress { progress: AgentProgress },
 }
@@ -601,7 +606,6 @@ async fn get_workspace_git_diff(
     .await
     .map_err(|error| format!("git diff task failed: {error}"))?
 }
-
 
 /// Re-runs a configured MCP server's OAuth login in the foreground (fixes an
 /// expired/invalid refresh token, e.g. `invalid_grant` from a Gmail MCP
@@ -946,6 +950,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
     let plan_mode = request.plan_mode;
 
     let app_clone = app.clone();
+    let approval_chat_id = request.chat_id.clone().unwrap_or_default();
     let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         let (tx, rx) = oneshot::channel();
         let token = format!("tok-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
@@ -958,7 +963,8 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
                 "tool-approval-requested",
                 serde_json::json!({
                     "token": token,
-                    "approval": approval
+                    "approval": approval,
+                    "chatId": approval_chat_id
                 }),
             )
             .map_err(|e| e.to_string())?;
@@ -1071,12 +1077,17 @@ async fn stream_chat_message(
         clean_request.message = request.message.strip_prefix("/chat ").unwrap().to_owned();
         let config_clone = config.clone();
         let on_event_clone = on_event.clone();
+        let on_event_started = on_event.clone();
         let chat_id_str = request.chat_id.clone().unwrap_or_default();
 
         let join_handle = tokio::spawn(async move {
-            orchestrate_chat_stream_with_fallback(&config_clone, &clean_request, move |chunk| {
+            let expected_chat_id = clean_request.chat_id.clone()
+                .unwrap_or_else(|| mint_core::DEFAULT_CONVERSATION_ID.to_owned());
+            with_turn_start_listener(expected_chat_id, move |id| {
+                let _ = on_event_started.send(DesktopStreamEvent::Started { interaction_id: id });
+            }, orchestrate_chat_stream_with_fallback(&config_clone, &clean_request, move |chunk| {
                 let _ = on_event_clone.send(DesktopStreamEvent::Chunk { chunk });
-            })
+            }))
             .await
         });
 
@@ -1117,6 +1128,7 @@ async fn stream_chat_message(
     let plan_mode = request.plan_mode;
 
     let app_clone = app.clone();
+    let approval_chat_id = request.chat_id.clone().unwrap_or_default();
     let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         let (tx, rx) = oneshot::channel();
         let token = format!("tok-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
@@ -1129,7 +1141,8 @@ async fn stream_chat_message(
                 "tool-approval-requested",
                 serde_json::json!({
                     "token": token,
-                    "approval": approval
+                    "approval": approval,
+                    "chatId": approval_chat_id
                 }),
             )
             .map_err(|e| e.to_string())?;
@@ -1150,6 +1163,7 @@ async fn stream_chat_message(
     };
 
     let on_event_clone = on_event.clone();
+    let on_event_started = on_event.clone();
     let chunk_app = app.clone();
     let on_chunk = move |chunk: String| {
         let bridge = chunk_app.state::<mint_core::avatar_bridge::AvatarBridge>();
@@ -1169,7 +1183,11 @@ async fn stream_chat_message(
     let pinned_mcp_server_clone = request.pinned_mcp_server.clone();
 
     let join_handle = tokio::spawn(async move {
-        orchestrate_agent_loop(
+        let expected_chat_id = chat_id_clone.clone()
+            .unwrap_or_else(|| mint_core::DEFAULT_CONVERSATION_ID.to_owned());
+        with_turn_start_listener(expected_chat_id, move |id| {
+            let _ = on_event_started.send(DesktopStreamEvent::Started { interaction_id: id });
+        }, orchestrate_agent_loop(
             &config_clone,
             &message_clone,
             &root_clone,
@@ -1185,7 +1203,7 @@ async fn stream_chat_message(
             approve_cb,
             progress_cb,
             on_chunk,
-        )
+        ))
         .await
     });
 
@@ -1274,6 +1292,7 @@ async fn start_gemini_live_session(
     let session_id = format!("gemini-live-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
 
     let app_clone = app.clone();
+    let approval_chat_id = chat_id.clone();
     let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         let (tx, rx) = oneshot::channel();
         let token = format!("tok-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
@@ -1286,7 +1305,8 @@ async fn start_gemini_live_session(
                 "tool-approval-requested",
                 serde_json::json!({
                     "token": token,
-                    "approval": approval
+                    "approval": approval,
+                    "chatId": approval_chat_id
                 }),
             )
             .map_err(|e| e.to_string())?;
@@ -1421,9 +1441,7 @@ fn update_chat_session_workspace(
     workspace_path: Option<String>,
 ) -> Result<(), String> {
     MemoryStore::open_default()
-        .and_then(|memory| {
-            memory.set_chat_session_workspace(&chat_id, workspace_path.as_deref())
-        })
+        .and_then(|memory| memory.set_chat_session_workspace(&chat_id, workspace_path.as_deref()))
         .map_err(|error| error.to_string())
 }
 
@@ -1441,6 +1459,28 @@ fn get_recent_interactions(
     );
     MemoryStore::open_default()
         .and_then(|memory| memory.recent_interactions_for_chat(&scoped_chat_id, limit.unwrap_or(5)))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_conversation_snapshot(
+    chat_id: String,
+    before_id: Option<i64>,
+    limit: Option<usize>,
+) -> Result<ConversationSnapshot, String> {
+    MemoryStore::open_default()
+        .and_then(|memory| memory.conversation_snapshot(&chat_id, before_id, limit.unwrap_or(50)))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_conversation_changes(
+    chat_id: String,
+    after: i64,
+    limit: Option<usize>,
+) -> Result<ConversationChanges, String> {
+    MemoryStore::open_default()
+        .and_then(|memory| memory.conversation_changes(&chat_id, after, limit.unwrap_or(100)))
         .map_err(|error| error.to_string())
 }
 
@@ -2379,6 +2419,8 @@ pub fn run() {
             stop_mic_recording_and_transcribe,
             submit_tool_approval,
             get_recent_interactions,
+            get_conversation_snapshot,
+            get_conversation_changes,
             save_interaction_agent_activity,
             list_chat_sessions,
             delete_chat_session,

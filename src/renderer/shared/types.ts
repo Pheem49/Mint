@@ -91,7 +91,20 @@ export interface InteractionMemory {
   model: string
   fallbackProvider?: string | null
   createdAt: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted'
   agentActivity?: AgentProgress[] | null
+}
+
+export interface ConversationSnapshot {
+  interactions: InteractionMemory[]
+  cursor: number
+  hasOlder: boolean
+}
+
+export interface ConversationChanges {
+  changes: { sequence: number; interactionId: number; interaction: InteractionMemory | null }[]
+  cursor: number
+  hasMore: boolean
 }
 
 export interface ChatSession {

@@ -17,6 +17,7 @@ import UiGridCard from '../components/UiGridCard'
 import { parseCardJsonSafely } from './cardJson'
 import UiFeatureCard from '../components/UiFeatureCard'
 import UiMockupWidget from '../components/UiMockupWidget'
+import type { WebSearchSource } from './agentActivity'
 import {
   Info,
   Lightbulb,
@@ -404,6 +405,63 @@ function renderAlertBox(type: string, children: ReactNode): ReactNode {
   )
 }
 
+function renderMessageImage(src: string | undefined, alt: string | undefined, sourceUrl?: string): ReactNode {
+  const url = resolveMediaUrl(String(src || ''))
+  const label = alt || 'Generated Image'
+  const isExternal = /^https?:\/\//.test(url)
+  if (isExternal) {
+    const pageUrl = sourceUrl && /^https?:\/\//.test(sourceUrl) ? sourceUrl : url
+    return (
+      <div
+        className="chat-media-card chat-media-card--thumbnail"
+        style={{ margin: '6px 0 10px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px' }}
+      >
+        <a href={pageUrl} target="_blank" rel="noopener noreferrer" title={sourceUrl ? `Open source page: ${label}` : label} style={{ display: 'block', textDecoration: 'none' }}>
+          <img
+            src={url}
+            alt={label}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', display: 'block' }}
+            onError={(e) => { const card = e.currentTarget.closest('.chat-media-card') as HTMLElement | null; if (card) card.style.display = 'none' }}
+          />
+        </a>
+        {(label !== 'Generated Image' || sourceUrl) && (
+          <div style={{ padding: '5px 10px', fontSize: '0.72rem', color: 'var(--text-muted, #64748b)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+            {sourceUrl && (
+              <a href={url} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, color: 'var(--interactive-fg-hover)' }}>
+                ดูรูปเต็ม
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+  return (
+    <div className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
+      <img src={url} alt={label} referrerPolicy="no-referrer" style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
+    </div>
+  )
+}
+
+function renderMessageLink(href: string | undefined, children: ReactNode, node: any, sourceByImage?: Map<string, string>): ReactNode {
+  const imageNode = node?.children?.length === 1 && node.children[0]?.tagName === 'img'
+    ? node.children[0]
+    : null
+  if (imageNode) {
+    const imageUrl = String(imageNode.properties?.src || '')
+    const sourceUrl = sourceByImage?.get(resolveMediaUrl(imageUrl)) || href
+    return renderMessageImage(imageUrl, String(imageNode.properties?.alt || ''), sourceUrl)
+  }
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="chat-link">
+      {highlightMentions(children)}
+    </a>
+  )
+}
+
 // `ol`/`ul` inject `ordered`/`index` onto their `li` children (via cloneElement below) so each
 // list item knows how to render itself without needing shared state; react-markdown's own
 // component types don't declare these, so the object is cast to `Components` where it's used.
@@ -451,46 +509,8 @@ const mdComponents = {
     )
   },
   strong: ({ children }) => <strong className="chat-bold-highlight">{children}</strong>,
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="chat-link">
-      {highlightMentions(children)}
-    </a>
-  ),
-  img: ({ src, alt }) => {
-    const rawUrl = String(src || '')
-    const url = resolveMediaUrl(rawUrl)
-    const label = alt || 'Generated Image'
-    const isExternal = url.startsWith('https://') || url.startsWith('http://')
-    if (isExternal) {
-      return (
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={label}
-          className="chat-media-card chat-media-card--thumbnail"
-          style={{ display: 'block', margin: '6px 0 10px 0', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px', textDecoration: 'none', cursor: 'pointer' }}
-        >
-          <img
-            src={url}
-            alt={label}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', display: 'block' }}
-            onError={(e) => { (e.currentTarget as HTMLImageElement).closest('a')!.style.display = 'none' }}
-          />
-          {label !== 'Generated Image' && (
-            <div style={{ padding: '5px 10px', fontSize: '0.72rem', color: 'var(--text-muted, #64748b)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
-          )}
-        </a>
-      )
-    }
-    return (
-      <div className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
-        <img src={url} alt={label} referrerPolicy="no-referrer" style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
-      </div>
-    )
-  },
+  a: ({ href, children, node }) => renderMessageLink(href, children, node),
+  img: ({ src, alt }) => renderMessageImage(src, alt),
   code({ children }) {
     // Detect single-line UI widgets parsed as inline code (e.g. `ui-card [...]` or ```ui-card [...]```)
     const rawText = typeof children === 'string'
@@ -678,11 +698,21 @@ function splitVideoSegments(text: string): Segment[] {
   return segments
 }
 
-export function renderFormattedMessage(text: string): ReactNode {
+export function renderFormattedMessage(text: string, webSources: WebSearchSource[] = []): ReactNode {
   const displayText = readableAssistantText(text)
   if (!displayText) return null
 
   const segments = splitVideoSegments(displayText)
+  const sourceByImage = new Map(
+    webSources.filter((source) => source.imageUrl).map((source) => [resolveMediaUrl(source.imageUrl!), source.url]),
+  )
+  const components = webSources.length === 0 ? mdComponents : {
+    ...mdComponents,
+    a: ({ href, children, node }: { href?: string; children?: ReactNode; node?: any }) =>
+      renderMessageLink(href, children, node, sourceByImage),
+    img: ({ src, alt }: { src?: string; alt?: string }) =>
+      renderMessageImage(src, alt, sourceByImage.get(resolveMediaUrl(String(src || '')))),
+  }
 
   return (
     <div className="chat-formatted-body">
@@ -695,7 +725,7 @@ export function renderFormattedMessage(text: string): ReactNode {
           )
         }
         return (
-          <ReactMarkdown key={`md-${i}`} remarkPlugins={[remarkGfm]} components={mdComponents as Components}>
+          <ReactMarkdown key={`md-${i}`} remarkPlugins={[remarkGfm]} components={components as Components}>
             {normalizeListMarkers(segment.value)}
           </ReactMarkdown>
         )

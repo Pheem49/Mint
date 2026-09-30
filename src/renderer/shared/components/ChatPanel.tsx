@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
 import { hasAgentToolActivity, thoughtsFrom, extendedThoughtsFrom, mergeFileChanges, parseFileChangesFromProgress } from '../agentProgress'
+import { visibleInteractionsDuringRun } from '../conversation/syncView'
 import {
   GEMINI_MODELS,
   OPENAI_MODELS,
@@ -77,6 +78,9 @@ const { fetchProviderModels } = catalogPlatform
 
 interface ChatPanelContract {
   interactions: any[]
+  sendingInteractionId?: number | null
+  hasOlder?: boolean
+  onLoadOlder?: () => Promise<void>
   sending: boolean
   sendingMessage: string
   sendingImageCount: number
@@ -99,6 +103,7 @@ interface ChatPanelContract {
   status: RuntimeStatus | null
   /** Desktop only — web has no local workspace-folder concept to select from. */
   workspacePath?: string
+  chatId: string
   chatEnd: RefObject<HTMLDivElement | null>
   welcomeInteraction: any
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
@@ -144,9 +149,11 @@ export type ConversationViewModel = Pick<ChatPanelContract,
   | 'interactions' | 'sending' | 'sendingMessage' | 'sendingImageCount' | 'sendingVideoCount'
   | 'streamedReply' | 'streamedResponse' | 'agentProgress' | 'agentActivitySnapshots'
   | 'thinkingExpanded' | 'message' | 'imageAttachments' | 'videoAttachments' | 'documentName'
-  | 'pendingApproval' | 'smartContext' | 'agentMode' | 'planMode' | 'status' | 'workspacePath' | 'recentWorkspacePaths'
+  | 'pendingApproval' | 'smartContext' | 'agentMode' | 'planMode' | 'status' | 'workspacePath' | 'chatId' | 'recentWorkspacePaths'
   | 'chatEnd' | 'welcomeInteraction' | 'settingsConfig' | 'isCliSession' | 'cliSessionId'
   | 'conversationTitle'
+  | 'hasOlder'
+  | 'sendingInteractionId'
 >
 export type ConversationActions = Omit<ChatPanelContract, keyof ConversationViewModel>
 
@@ -161,6 +168,9 @@ export default function ChatPanel({
 }: ChatPanelProps) {
   const {
   interactions,
+  sendingInteractionId,
+  hasOlder,
+  onLoadOlder,
   sending,
   sendingMessage,
   sendingImageCount,
@@ -181,6 +191,7 @@ export default function ChatPanel({
   planMode,
   status,
   workspacePath,
+  chatId,
   recentWorkspacePaths,
   chatEnd,
   welcomeInteraction,
@@ -218,6 +229,13 @@ export default function ChatPanel({
   onOpenArtifact,
   onOpenReview,
   } = { ...conversation, ...actions }
+  // The initiating surface already renders a live prompt/reply pair below.
+  // Hide its matching persisted turn until the local stream settles, while
+  // still showing turns submitted from other surfaces during that time.
+  const visibleInteractions = useMemo(
+    () => visibleInteractionsDuringRun(interactions, sending, sendingInteractionId),
+    [interactions, sending, sendingInteractionId],
+  )
   const agentActivities = activitiesFrom(agentProgress)
   // Keep the composer summary tied to the active/latest agent run. This is cheap
   // metadata, but memoizing it avoids parsing the activity stream while typing.
@@ -254,6 +272,7 @@ export default function ChatPanel({
   // Markdown parsing can be expensive for code, tables, and interactive cards.
   // Limit it to a steady cadence instead of parsing on every stream chunk.
   const throttledStreamedReply = useThrottledValue(streamedReply, STREAM_MARKDOWN_UPDATE_MS)
+  const liveWebSources = useMemo(() => parseWebSearchSources(agentProgress), [agentProgress])
   const activeFallbackNotice = fallbackNotice(streamedResponse)
   const lastThinkingProgress = [...agentProgress].reverse().find(p => p.type === 'Thinking')
   let activeAgentName: string | null = null
@@ -348,6 +367,7 @@ export default function ChatPanel({
 
   const chatContainerRef = useRef<HTMLDivElement | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const isNearBottomRef = useRef(true)
   const scrollFrameRef = useRef<number | null>(null)
 
@@ -690,6 +710,7 @@ export default function ChatPanel({
   const geminiLiveEnabled = settingsConfig?.voiceMode === 'geminiLive'
   const geminiLive = useGeminiLiveVoice({
     workspacePath,
+    chatId,
     startSession: startGeminiLiveSession,
     sendAudioChunk: sendGeminiLiveAudioChunk,
     stopSession: stopGeminiLiveSession
@@ -1555,9 +1576,28 @@ export default function ChatPanel({
           </div>
         </div>
       <div className="chat-container" ref={chatContainerRef} onScroll={handleChatScroll}>
-        {interactions.map((interaction, index) => (
+        {hasOlder && onLoadOlder && (
+          <button type="button" className="load-older-messages" disabled={loadingOlder}
+            style={{ display: 'block', margin: '0 auto 20px', padding: '7px 14px', borderRadius: 8,
+              border: '1px solid var(--border-color, #3a3a3a)', background: 'var(--surface, #252525)',
+              color: 'var(--text-secondary, #c0c0c0)', cursor: loadingOlder ? 'default' : 'pointer' }}
+            onClick={async () => {
+            const container = chatContainerRef.current
+            const previousHeight = container?.scrollHeight ?? 0
+            setLoadingOlder(true)
+            try {
+              await onLoadOlder()
+              window.requestAnimationFrame(() => {
+                if (container) container.scrollTop += container.scrollHeight - previousHeight
+              })
+            } finally { setLoadingOlder(false) }
+          }}>
+            {loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}
+          </button>
+        )}
+        {visibleInteractions.map((interaction, index) => (
           <Fragment key={interaction.id}>
-            {index > 0 && shouldShowSessionDivider(interactions[index - 1].createdAt, interaction.createdAt) && (
+            {index > 0 && shouldShowSessionDivider(visibleInteractions[index - 1].createdAt, interaction.createdAt) && (
               <div className="system-event-divider">
                 <div className="system-event-line" />
                 <div className="system-event-pill">
@@ -1627,7 +1667,7 @@ export default function ChatPanel({
                 <div className="message-bubble">
                   <span>
                     {throttledStreamedReply ? (
-                      renderFormattedMessage(throttledStreamedReply)
+                      renderFormattedMessage(throttledStreamedReply, liveWebSources)
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-soft, #94a3b8)' }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', flexShrink: 0 }}>

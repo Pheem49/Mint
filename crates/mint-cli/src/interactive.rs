@@ -351,13 +351,6 @@ pub async fn run_interactive_chat_with_session(
         (mint_core::generate_cli_session_id(), false)
     };
 
-    // Notifies this prompt loop when web/desktop writes a message into the
-    // same conversation while this terminal is open
-    mint_core::live_sync::start_live_sync_poller(mint_core::scoped_chat_id(
-        &chat_id,
-        Some(&current_dir.to_string_lossy()),
-    ));
-
     let mut session = InteractiveSession {
         chat_id,
         config: config.clone(),
@@ -387,6 +380,14 @@ pub async fn run_interactive_chat_with_session(
     } else {
         None
     };
+
+    // Classic CLI prints short sync notices; the TUI consumes persisted turns
+    // directly and must not accumulate an undrained notice queue.
+    let mut classic_sync_started = false;
+    if tui.is_none() {
+        mint_core::live_sync::start_live_sync_poller(session.chat_id.clone());
+        classic_sync_started = true;
+    }
 
     if tui.is_none() {
         print_welcome_banner(&session.config);
@@ -425,6 +426,7 @@ pub async fn run_interactive_chat_with_session(
         ) {
             Ok(Some(target_id)) => {
                 session.chat_id = target_id.clone();
+                mint_core::live_sync::update_live_sync_chat_id(&session.chat_id);
                 ui.reload_transcript(&session.chat_id, &session.current_dir);
                 ui.push_notice(format!("Switched to session: {target_id}"));
             }
@@ -558,6 +560,11 @@ pub async fn run_interactive_chat_with_session(
                 pending_draft = Some(input.text);
                 if let Some((mut terminal, _, _)) = tui.take() {
                     terminal.suspend();
+                    let _ = mint_core::live_sync::take_live_sync_notices();
+                    if !classic_sync_started {
+                        mint_core::live_sync::start_live_sync_poller(session.chat_id.clone());
+                        classic_sync_started = true;
+                    }
                     println!("{MINT}Switched to Classic CLI. Press F6 for TUI.{RESET}");
                 } else {
                     match chat_tui::ChatTui::enter(&session.current_dir) {

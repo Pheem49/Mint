@@ -15,6 +15,50 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
         auth_label: _auth_label,
     } = ctx;
     match (method, route) {
+        ("GET", "/api/conversation-snapshot") => {
+            let chat_id =
+                query_param(query, "chatId").unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
+            let before_id = query_param(query, "beforeId").and_then(|s| s.parse::<i64>().ok());
+            let limit = query_param(query, "limit")
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(50);
+            match MemoryStore::open_default()
+                .and_then(|m| m.conversation_snapshot(&chat_id, before_id, limit))
+            {
+                Ok(snapshot) => {
+                    send_json_response(
+                        socket,
+                        "200 OK",
+                        &serde_json::to_string(&snapshot).unwrap_or_default(),
+                    )
+                    .await
+                }
+                Err(_) => send_json_response(socket, "500 Internal Server Error", "{}").await,
+            }
+        }
+        ("GET", "/api/conversation-changes") => {
+            let chat_id =
+                query_param(query, "chatId").unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
+            let after = query_param(query, "after")
+                .and_then(|s| s.parse::<i64>().ok())
+                .unwrap_or(0);
+            let limit = query_param(query, "limit")
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(100);
+            match MemoryStore::open_default()
+                .and_then(|m| m.conversation_changes(&chat_id, after, limit))
+            {
+                Ok(changes) => {
+                    send_json_response(
+                        socket,
+                        "200 OK",
+                        &serde_json::to_string(&changes).unwrap_or_default(),
+                    )
+                    .await
+                }
+                Err(_) => send_json_response(socket, "500 Internal Server Error", "{}").await,
+            }
+        }
         ("GET", "/api/interactions") => {
             let limit = query_param(query, "limit")
                 .and_then(|value| value.parse::<usize>().ok())

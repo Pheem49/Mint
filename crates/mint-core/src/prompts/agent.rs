@@ -430,7 +430,7 @@ pub fn build_system_prompt(
     if allowed_actions.contains(&"generate_video") {
         input_formats.push("- generate_video / veo.generate: {\"prompt\":\"sunset over ocean waves\",\"aspectRatio\":\"16:9\",\"duration\":5}");
     }
-    input_formats.push("- finish: {\"summary\":\"complete final answer in Thai when the user writes Thai, covering every part of what was asked\",\"verification\":\"what you ran via the verify tool and its result — REQUIRED (finish will be rejected) if this run used apply_patch or write_file, unless you explain here why no check applies (no test suite, documentation-only change, etc.)\"}");
+    input_formats.push("- finish: {\"summary\":\"complete final answer in the user's language, covering every part of what was asked\",\"verification\":\"what you ran via the verify tool and its result — REQUIRED (finish will be rejected) if this run used apply_patch or write_file, unless you explain here why no check applies (no test suite, documentation-only change, etc.)\"}");
 
     let input_formats_str = input_formats.join("\n");
 
@@ -556,9 +556,9 @@ pub fn build_system_prompt(
         rules.push(&pin_rule);
     }
     if native {
-        rules.push("11. When you call tools, you may include a brief 1-line progress note (in Thai when the task is in Thai) explaining what you are about to do next. DO NOT repeat greetings (e.g. 'สวัสดีค่ะ', 'สวัสดีครับ') in intermediate notes before tool calls — state your immediate action directly (e.g. 'กำลังอ่านไฟล์...', 'ขอตรวจสอบโครงสร้างโค้ดก่อนนะคะ'). Give your final answer in Thai when the task is written in Thai. When work is complete, call the finish tool and put the entire final answer in its summary field; do not return a plain-text final answer.");
+        rules.push("11. When you call tools, you may include a brief 1-line progress note in the user's language explaining what you are about to do next. Do not repeat greetings in intermediate notes before tool calls — state your immediate action directly. Give your final answer in the language the user uses or explicitly requests. When work is complete, call the finish tool and put the entire final answer in its summary field; do not return a plain-text final answer.");
     } else {
-        rules.push("11. Keep thought short and concrete (1-2 sentences). DO NOT repeat greetings in the thought field — state your immediate action directly. You may use Thai for the thought field when the task is in Thai. Use Thai for the final summary when the task is written in Thai.");
+        rules.push("11. Keep thought short and concrete (1-2 sentences). DO NOT repeat greetings in the thought field — state your immediate action directly. Use the user's language for the thought and final summary, unless they explicitly request another language.");
     }
     rules.push("11a. The final summary must be complete, not just concise. Include every relevant detail you gathered (numbers, names, dates, steps, options, caveats) that answers what the user asked. If the user asked multiple things, address all of them. Only cut filler and repetition, never cut substance. Never truncate a list or explanation just to keep the reply short.");
     rules.push("11b. When a diagram, mindmap, flowchart, or tree structure would clarify your answer, include one directly in your response as a fenced ```mermaid code block using standard Mermaid syntax (flowchart, mindmap, sequenceDiagram, etc.) — do not attempt to draw diagrams with ASCII art or Unicode box characters.");
@@ -581,19 +581,19 @@ For every JSON-backed card, ensure all properties stay inside their intended obj
 
     let mut prompt = if native {
         format!(
-            "You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.\n\
+            "You are Mint Agent, a pragmatic AI coding agent working in a local workspace. Help with non-coding requests too when your available tools support them.\n\
              You are also Mint: {persona} Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision.\n\
              Follow an inspect -> act -> verify loop using the tools available to you. On every single turn, call a tool immediately; when the task is complete, call the finish tool with the complete final answer. \
-             When calling tools, you may include a brief 1-line progress note explaining what you are about to do next (e.g. in Thai when the task is in Thai). Do not repeat greetings in intermediate notes — state your immediate action directly. Never output a progress note without calling the tool in the same turn. \
+             When calling tools, you may include a brief 1-line progress note in the user's language explaining what you are about to do next. Do not repeat greetings in intermediate notes — state your immediate action directly. Never output a progress note without calling the tool in the same turn. \
              Use finish only when the task is genuinely finished. Put all user-facing final text in finish.summary; never return a plain-text final answer.\n\n\
              Rules:\n\
              {rules}",
-            persona = persona::PERSONA_TH,
+            persona = persona::PERSONA,
             rules = rules_str
         )
     } else {
         format!(
-            "You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.\n\
+            "You are Mint Agent, a pragmatic AI coding agent working in a local workspace. Help with non-coding requests too when your available tools support them.\n\
              You are also Mint: {persona} Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision.\n\
              Follow an inspect -> act -> verify loop. Return exactly one JSON object per response, with no markdown:\n\
              {{\"thought\":\"short user-visible progress note\",\"action\":\"{actions}\",\"input\":{{...}}}}\n\n\
@@ -601,7 +601,7 @@ For every JSON-backed card, ensure all properties stay inside their intended obj
              {inputs}\n\n\
              Rules:\n\
              {rules}",
-            persona = persona::PERSONA_TH,
+            persona = persona::PERSONA,
             actions = actions_str,
             inputs = input_formats_str,
             rules = rules_str
