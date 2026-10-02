@@ -1908,7 +1908,13 @@ mod conversation_sync_tests {
         assert!(memory.claim_turn("cli::one", id).unwrap());
         let cursor = memory.latest_conversation_sequence("cli::one").unwrap();
         memory.renew_turn(id).unwrap();
-        assert!(memory.conversation_changes("cli::one", cursor, 100).unwrap().changes.is_empty());
+        assert!(
+            memory
+                .conversation_changes("cli::one", cursor, 100)
+                .unwrap()
+                .changes
+                .is_empty()
+        );
     }
 }
 

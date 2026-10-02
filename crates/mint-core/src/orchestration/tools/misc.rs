@@ -74,8 +74,7 @@ pub(in crate::orchestration) async fn execute(
             let mut results = Vec::new();
 
             if let Ok(memory) = MemoryStore::open_default() {
-                if let Ok(interactions) =
-                    memory.recent_completed_interactions_for_chat(chat_id, 50)
+                if let Ok(interactions) = memory.recent_completed_interactions_for_chat(chat_id, 50)
                 {
                     for item in interactions.iter().rev() {
                         if item.user_text.to_ascii_lowercase().contains(&query_lower)

@@ -262,7 +262,10 @@ pub async fn translate_captured_region(
     target_language: &str,
 ) -> Result<String, String> {
     let target_language = target_language.trim();
-    if target_language.is_empty() || target_language.len() > 64 || target_language.chars().any(char::is_control) {
+    if target_language.is_empty()
+        || target_language.len() > 64
+        || target_language.chars().any(char::is_control)
+    {
         return Err("choose a valid target language".into());
     }
     let encoded = image_data_uri

@@ -1144,7 +1144,8 @@ impl ChatViewState {
         if self.chat_id.is_empty() {
             return;
         }
-        let scoped = mint_core::scoped_chat_id(&self.chat_id, Some(&self.current_dir.to_string_lossy()));
+        let scoped =
+            mint_core::scoped_chat_id(&self.chat_id, Some(&self.current_dir.to_string_lossy()));
         if let Ok(seq) = memory.latest_conversation_sequence(&scoped) {
             self.sync_cursor = seq;
         }
@@ -1169,7 +1170,8 @@ impl ChatViewState {
         if self.chat_id.is_empty() {
             return false;
         }
-        let scoped = mint_core::scoped_chat_id(&self.chat_id, Some(&self.current_dir.to_string_lossy()));
+        let scoped =
+            mint_core::scoped_chat_id(&self.chat_id, Some(&self.current_dir.to_string_lossy()));
         let Ok(changes) = memory.conversation_changes(&scoped, self.sync_cursor, 200) else {
             return false;
         };
@@ -1178,7 +1180,11 @@ impl ChatViewState {
         }
 
         // If any interaction was deleted (e.g. /clear on Web or Desktop), do a full reload.
-        if changes.changes.iter().any(|change| change.interaction.is_none()) {
+        if changes
+            .changes
+            .iter()
+            .any(|change| change.interaction.is_none())
+        {
             let chat_id = self.chat_id.clone();
             let workspace = self.current_dir.clone();
             self.reload_transcript_with(memory, &chat_id, &workspace);
@@ -1192,9 +1198,13 @@ impl ChatViewState {
             };
             if row.id > self.last_interaction_id {
                 // Incoming new interaction from an external client (Web/Desktop)
-                self.transcript.push(TranscriptEntry::new(TranscriptRole::User, &row.user_text));
+                self.transcript
+                    .push(TranscriptEntry::new(TranscriptRole::User, &row.user_text));
                 match row.status.as_str() {
-                    "completed" => self.transcript.push(TranscriptEntry::new(TranscriptRole::Assistant, &row.ai_text)),
+                    "completed" => self.transcript.push(TranscriptEntry::new(
+                        TranscriptRole::Assistant,
+                        &row.ai_text,
+                    )),
                     "queued" => self.transcript.push(TranscriptEntry::new(
                         TranscriptRole::Notice,
                         "Queued for this session…",
@@ -1225,14 +1235,20 @@ impl ChatViewState {
                             *last = TranscriptEntry::new(TranscriptRole::Assistant, &row.ai_text);
                             changed = true;
                         } else if last.role != TranscriptRole::Assistant {
-                            self.transcript.push(TranscriptEntry::new(TranscriptRole::Assistant, &row.ai_text));
+                            self.transcript.push(TranscriptEntry::new(
+                                TranscriptRole::Assistant,
+                                &row.ai_text,
+                            ));
                             changed = true;
                         }
                     }
                 } else if row.status == "running" {
                     if let Some(last) = self.transcript.last_mut() {
-                        if last.role == TranscriptRole::Notice && last.text.starts_with("Queued for this session") {
-                            *last = TranscriptEntry::new(TranscriptRole::Notice, "Mint is responding…");
+                        if last.role == TranscriptRole::Notice
+                            && last.text.starts_with("Queued for this session")
+                        {
+                            *last =
+                                TranscriptEntry::new(TranscriptRole::Notice, "Mint is responding…");
                             changed = true;
                         }
                     }
@@ -4628,19 +4644,26 @@ mod dialog_tests {
         // In DB, TurnLease records this interaction:
         let turn_id = memory.start_turn(&scoped, "List files please").unwrap();
         memory.claim_turn(&scoped, turn_id).unwrap();
-        memory.finish_turn(turn_id, "Found 2 files.", "test", "model", None).unwrap();
+        memory
+            .finish_turn(turn_id, "Found 2 files.", "test", "model", None)
+            .unwrap();
 
         // Advance cursor as local turn completion would:
         state.advance_sync_cursor_with(&memory);
 
         // Refresh shared transcript:
         let redrawn = state.refresh_shared_transcript_with(&memory);
-        assert!(!redrawn, "Should not redraw since changes were from local turn");
+        assert!(
+            !redrawn,
+            "Should not redraw since changes were from local turn"
+        );
 
         // Now simulate an external message arriving from Web/Desktop on the same session:
         let ext_id = memory.start_turn(&scoped, "Message from Web").unwrap();
         memory.claim_turn(&scoped, ext_id).unwrap();
-        memory.finish_turn(ext_id, "Reply to Web", "test", "model", None).unwrap();
+        memory
+            .finish_turn(ext_id, "Reply to Web", "test", "model", None)
+            .unwrap();
 
         let redrawn2 = state.refresh_shared_transcript_with(&memory);
         assert!(redrawn2, "Should redraw when external turn arrives");
@@ -4654,7 +4677,10 @@ mod dialog_tests {
         assert_eq!(texts[1], "• Listing 2 directories...");
         assert_eq!(texts[2], "✓ Completed in 1.2s • 1 tool • 0 files changed");
         assert_eq!(texts[3], "Found 2 files.");
-        assert_eq!(texts[4], "─ Worked for 1s • test ──────────────────────────────");
+        assert_eq!(
+            texts[4],
+            "─ Worked for 1s • test ──────────────────────────────"
+        );
         assert_eq!(texts[5], "Message from Web");
         assert_eq!(texts[6], "Reply to Web");
 

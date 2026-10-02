@@ -37,10 +37,18 @@ pub fn read_workspace_git_diff(root: &Path) -> Result<Vec<WorkspaceFileChange>, 
         _ => {
             // Fallback for empty repo without HEAD commit
             let mut combined = String::new();
-            if let Ok(out) = Command::new("git").args(["diff", "-U3"]).current_dir(root).output() {
+            if let Ok(out) = Command::new("git")
+                .args(["diff", "-U3"])
+                .current_dir(root)
+                .output()
+            {
                 combined.push_str(&String::from_utf8_lossy(&out.stdout));
             }
-            if let Ok(out) = Command::new("git").args(["diff", "--cached", "-U3"]).current_dir(root).output() {
+            if let Ok(out) = Command::new("git")
+                .args(["diff", "--cached", "-U3"])
+                .current_dir(root)
+                .output()
+            {
                 combined.push_str(&String::from_utf8_lossy(&out.stdout));
             }
             combined
@@ -48,7 +56,8 @@ pub fn read_workspace_git_diff(root: &Path) -> Result<Vec<WorkspaceFileChange>, 
     };
 
     let mut changes = parse_unified_diff(&diff_text);
-    let tracked_paths: std::collections::HashSet<String> = changes.iter().map(|c| c.path.clone()).collect();
+    let tracked_paths: std::collections::HashSet<String> =
+        changes.iter().map(|c| c.path.clone()).collect();
 
     // Also include untracked new files from `git status --porcelain`
     if let Ok(status_out) = Command::new("git")
@@ -75,7 +84,8 @@ pub fn read_workspace_git_diff(root: &Path) -> Result<Vec<WorkspaceFileChange>, 
                                 deletions: 0,
                                 hunks: vec![DiffHunk {
                                     old_text: String::new(),
-                                    new_text: "(Large untracked file omitted from preview)".to_string(),
+                                    new_text: "(Large untracked file omitted from preview)"
+                                        .to_string(),
                                 }],
                             });
                             continue;
@@ -110,16 +120,17 @@ fn parse_unified_diff(diff: &str) -> Vec<WorkspaceFileChange> {
     let mut current_new_lines = Vec::new();
     let mut in_hunk = false;
 
-    let flush_hunk = |f: &mut WorkspaceFileChange, old_lines: &mut Vec<String>, new_lines: &mut Vec<String>| {
-        if !old_lines.is_empty() || !new_lines.is_empty() {
-            f.hunks.push(DiffHunk {
-                old_text: old_lines.join("\n"),
-                new_text: new_lines.join("\n"),
-            });
-            old_lines.clear();
-            new_lines.clear();
-        }
-    };
+    let flush_hunk =
+        |f: &mut WorkspaceFileChange, old_lines: &mut Vec<String>, new_lines: &mut Vec<String>| {
+            if !old_lines.is_empty() || !new_lines.is_empty() {
+                f.hunks.push(DiffHunk {
+                    old_text: old_lines.join("\n"),
+                    new_text: new_lines.join("\n"),
+                });
+                old_lines.clear();
+                new_lines.clear();
+            }
+        };
 
     for line in diff.lines() {
         if line.starts_with("diff --git ") {

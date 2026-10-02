@@ -314,7 +314,10 @@ fn render_markdown_table_with_width(table_lines: &[String], term_width: u16) -> 
         rendered.push_str(&render_wrapped_row(
             header,
             &col_widths,
-            Some((crate::terminal_theme::ANSI_BLUE_BOLD, crate::terminal_theme::ANSI_RESET)),
+            Some((
+                crate::terminal_theme::ANSI_BLUE_BOLD,
+                crate::terminal_theme::ANSI_RESET,
+            )),
         ));
         rendered.push_str(&draw_border("├", "┼", "┤", "─", &col_widths));
     }

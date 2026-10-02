@@ -7,8 +7,8 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Command;
-use std::time::Instant;
 use std::sync::Arc;
+use std::time::Instant;
 use thiserror::Error;
 
 use crate::chat::{
@@ -62,10 +62,15 @@ pub async fn with_turn_start_listener<F, R>(
 where
     F: Future<Output = R>,
 {
-    TURN_START_LISTENER.scope(TurnStartListener {
-        chat_id,
-        callback: Arc::new(callback),
-    }, future).await
+    TURN_START_LISTENER
+        .scope(
+            TurnStartListener {
+                chat_id,
+                callback: Arc::new(callback),
+            },
+            future,
+        )
+        .await
 }
 
 /// Owns one persisted turn, including its cross-process queue lease. Dropping a
@@ -119,7 +124,9 @@ impl TurnLease {
             let compacted = compact_agent_progress(&lock);
             if !compacted.is_empty() {
                 if let Ok(activity_json) = serde_json::to_string(&compacted) {
-                    let _ = self.memory.set_interaction_agent_activity_json(self.id, &activity_json);
+                    let _ = self
+                        .memory
+                        .set_interaction_agent_activity_json(self.id, &activity_json);
                 }
             }
         }
@@ -133,13 +140,8 @@ impl TurnLease {
         fallback_provider: Option<&str>,
     ) -> Result<(), MemoryError> {
         self.persist_activity();
-        self.memory.finish_turn(
-            self.id,
-            summary,
-            provider,
-            model,
-            fallback_provider,
-        )?;
+        self.memory
+            .finish_turn(self.id, summary, provider, model, fallback_provider)?;
         self.finished = true;
         Ok(())
     }
@@ -3396,8 +3398,12 @@ mod tests {
             "cli::one".to_string(),
             move |id| callback_reported.lock().unwrap().push(id),
             async {
-                let first = TurnLease::start(&memory, "cli::one", "hello").await.unwrap();
-                let other = TurnLease::start(&memory, "cli::two", "other").await.unwrap();
+                let first = TurnLease::start(&memory, "cli::one", "hello")
+                    .await
+                    .unwrap();
+                let other = TurnLease::start(&memory, "cli::two", "other")
+                    .await
+                    .unwrap();
                 assert_eq!(*reported.lock().unwrap(), vec![first.id]);
                 drop(first);
                 drop(other);
@@ -3448,9 +3454,19 @@ mod tests {
         ];
 
         let compacted = compact_agent_progress(&events);
-        assert!(!compacted.iter().any(|e| matches!(e, AgentProgress::ThinkingDelta { id, .. } if id == "cot-1")));
-        assert!(compacted.iter().any(|e| matches!(e, AgentProgress::ToolStart { action, .. } if action == "read_file")));
-        assert!(compacted.iter().any(|e| matches!(e, AgentProgress::ToolEnd { action, .. } if action == "read_file")));
+        assert!(
+            !compacted
+                .iter()
+                .any(|e| matches!(e, AgentProgress::ThinkingDelta { id, .. } if id == "cot-1"))
+        );
+        assert!(compacted.iter().any(
+            |e| matches!(e, AgentProgress::ToolStart { action, .. } if action == "read_file")
+        ));
+        assert!(
+            compacted.iter().any(
+                |e| matches!(e, AgentProgress::ToolEnd { action, .. } if action == "read_file")
+            )
+        );
         assert!(compacted.iter().any(|e| matches!(e, AgentProgress::ExtendedThinking { id: Some(id), thought, .. } if id == "cot-1" && thought == "Reading the file...")));
         assert!(compacted.iter().any(|e| matches!(e, AgentProgress::ExtendedThinking { id: Some(id), thought, .. } if id == "cot-interrupted" && thought == "Let's check more lines")));
     }
@@ -3461,13 +3477,18 @@ mod tests {
             "mint-turn-lease-complete-{}.sqlite",
             uuid::Uuid::new_v4()
         )));
-        let mut turn = TurnLease::start(&memory, "cli::test_complete", "hello").await.unwrap();
+        let mut turn = TurnLease::start(&memory, "cli::test_complete", "hello")
+            .await
+            .unwrap();
         let turn_id = turn.id;
-        turn.activity.lock().unwrap().push(AgentProgress::ToolStart {
-            action: "run_shell".into(),
-            input: serde_json::json!({ "command": "ls -la" }),
-            subagent: None,
-        });
+        turn.activity
+            .lock()
+            .unwrap()
+            .push(AgentProgress::ToolStart {
+                action: "run_shell".into(),
+                input: serde_json::json!({ "command": "ls -la" }),
+                subagent: None,
+            });
         turn.activity.lock().unwrap().push(AgentProgress::ToolEnd {
             action: "run_shell".into(),
             input: serde_json::json!({ "command": "ls -la" }),
@@ -3475,7 +3496,8 @@ mod tests {
             subagent: None,
         });
 
-        turn.complete_with_summary("Done listing files", "test_provider", "test_model", None).unwrap();
+        turn.complete_with_summary("Done listing files", "test_provider", "test_model", None)
+            .unwrap();
 
         let rows = memory.interactions_for_chat("cli::test_complete").unwrap();
         assert_eq!(rows.len(), 1);
@@ -3497,13 +3519,18 @@ mod tests {
             "mint-turn-lease-interrupt-{}.sqlite",
             uuid::Uuid::new_v4()
         )));
-        let turn = TurnLease::start(&memory, "cli::test_interrupt", "run something").await.unwrap();
+        let turn = TurnLease::start(&memory, "cli::test_interrupt", "run something")
+            .await
+            .unwrap();
         let turn_id = turn.id;
-        turn.activity.lock().unwrap().push(AgentProgress::ToolStart {
-            action: "read_file".into(),
-            input: serde_json::json!({ "path": "test.txt" }),
-            subagent: None,
-        });
+        turn.activity
+            .lock()
+            .unwrap()
+            .push(AgentProgress::ToolStart {
+                action: "read_file".into(),
+                input: serde_json::json!({ "path": "test.txt" }),
+                subagent: None,
+            });
         drop(turn);
 
         let rows = memory.interactions_for_chat("cli::test_interrupt").unwrap();

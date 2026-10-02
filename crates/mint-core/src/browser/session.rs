@@ -1488,7 +1488,10 @@ mod tests {
             loop {
                 let (mut stream, _) = http.accept().await.unwrap();
                 let mut buffer = [0; 1024];
-                stream.read(&mut buffer).await.unwrap();
+                let bytes_read = stream.read(&mut buffer).await.unwrap();
+                if bytes_read == 0 {
+                    continue;
+                }
                 stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).as_bytes()).await.unwrap();
             }
         });

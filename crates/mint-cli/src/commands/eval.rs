@@ -13,7 +13,9 @@ pub async fn handle_eval(suite_path: PathBuf, limit: usize, config: &MintConfig)
             "│ \x1b[31mBenchmark suite file not found: {}\x1b[0m",
             suite_path.display()
         );
-        println!("{ANSI_BLUE_BOLD}└─────────────────────────────────────────────────────────\x1b[0m");
+        println!(
+            "{ANSI_BLUE_BOLD}└─────────────────────────────────────────────────────────\x1b[0m"
+        );
         anyhow::bail!("Suite file not found: {}", suite_path.display());
     }
 

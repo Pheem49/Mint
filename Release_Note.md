@@ -1,5 +1,8 @@
 # Release Notes - Mint Agent v1.15.0
 
+- Applied workspace Rust formatting required by CI and fixed the browser transport test's handling of empty reads so Clippy passes its I/O check.
+- Updated brace-expansion, qs, and DOMPurify dependency resolutions to patched versions; raised the brace-expansion override minimum to 5.0.12.
+
 - Added the active model's thinking level to the Full-Screen TUI footer, including an `off` indicator when thinking is disabled.
 
 ## Mint Auto Browser Reliability

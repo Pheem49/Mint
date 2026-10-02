@@ -88,14 +88,12 @@ fn render_cli_ui_grid(json_str: &str, term_width: usize) -> Option<Vec<String>> 
         .unwrap_or("OPTIONS");
     let mut lines = Vec::new();
     lines.push(format!(
-            "{ANSI_BLUE}┌─ {title} {}{RESET}",
+        "{ANSI_BLUE}┌─ {title} {}{RESET}",
         "─".repeat(dashes)
     ));
 
     if let Some(subtitle) = val.get("subtitle").and_then(|v| v.as_str()) {
-        lines.push(format!(
-            "{ANSI_BLUE}│{RESET} {ANSI_MUTED}{subtitle}{RESET}"
-        ));
+        lines.push(format!("{ANSI_BLUE}│{RESET} {ANSI_MUTED}{subtitle}{RESET}"));
         lines.push(format!("{ANSI_BLUE}│{RESET}"));
     }
 
@@ -427,7 +425,10 @@ pub(crate) fn format_markdown_bold(text: &str) -> String {
                 active_alert_color = Some(crate::terminal_theme::ANSI_BLUE);
                 let body = quote_content[7..].trim();
                 if body.is_empty() {
-                    formatted_lines.push(format!("{}│ NOTE:{RESET}", crate::terminal_theme::ANSI_BLUE));
+                    formatted_lines.push(format!(
+                        "{}│ NOTE:{RESET}",
+                        crate::terminal_theme::ANSI_BLUE
+                    ));
                 } else {
                     formatted_lines.push(format!(
                         "{}│ NOTE:{RESET} {}",

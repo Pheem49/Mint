@@ -16,9 +16,10 @@ use mint_core::browser::{
 };
 
 use desktop::{
-    ActionResult, CaptureRect, DesktopAction, capture_screen, capture_translation_region, close_window, emit_to_main,
-    execute_action, hide_window, integration_status, open_desktop_window, position_widget,
-    resize_window, translate_captured_region, translate_screen_region,
+    ActionResult, CaptureRect, DesktopAction, capture_screen, capture_translation_region,
+    close_window, emit_to_main, execute_action, hide_window, integration_status,
+    open_desktop_window, position_widget, resize_window, translate_captured_region,
+    translate_screen_region,
 };
 use events::start_system_events;
 use headless::{run_next_task, start_headless_queue};
@@ -40,12 +41,13 @@ use mint_core::{
     config_path, delete_saved_picture, delete_subagent as core_delete_subagent, get_user,
     google_tts_urls, list_saved_pictures, list_subagents as core_list_subagents, load_config,
     login_user, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
-    orchestrate_chat_with_fallback, propose_code_edits, with_turn_start_listener,
+    orchestrate_chat_with_fallback, propose_code_edits,
     reauth_mcp_server as core_reauth_mcp_server, register_user, save_avatar_file, save_chat_images,
     save_config, save_subagent as core_save_subagent, start_channels, start_cron_scheduler,
     start_gemini_live_session as core_start_gemini_live_session,
     start_recording as core_start_mic_recording, stop_recording as core_stop_mic_recording,
     transcribe_recording as core_transcribe_mic_recording, update_profile, weather,
+    with_turn_start_listener,
 };
 use plugins::execute_plugin;
 
@@ -495,8 +497,12 @@ enum DesktopStreamEvent {
         #[serde(rename = "interactionId")]
         interaction_id: i64,
     },
-    Chunk { chunk: String },
-    Progress { progress: AgentProgress },
+    Chunk {
+        chunk: String,
+    },
+    Progress {
+        progress: AgentProgress,
+    },
 }
 #[tauri::command]
 fn get_runtime_status() -> Result<RuntimeStatus, String> {
@@ -1076,13 +1082,24 @@ async fn stream_chat_message(
         let chat_id_str = request.chat_id.clone().unwrap_or_default();
 
         let join_handle = tokio::spawn(async move {
-            let expected_chat_id = clean_request.chat_id.clone()
+            let expected_chat_id = clean_request
+                .chat_id
+                .clone()
                 .unwrap_or_else(|| mint_core::DEFAULT_CONVERSATION_ID.to_owned());
-            with_turn_start_listener(expected_chat_id, move |id| {
-                let _ = on_event_started.send(DesktopStreamEvent::Started { interaction_id: id });
-            }, orchestrate_chat_stream_with_fallback(&config_clone, &clean_request, move |chunk| {
-                let _ = on_event_clone.send(DesktopStreamEvent::Chunk { chunk });
-            }))
+            with_turn_start_listener(
+                expected_chat_id,
+                move |id| {
+                    let _ =
+                        on_event_started.send(DesktopStreamEvent::Started { interaction_id: id });
+                },
+                orchestrate_chat_stream_with_fallback(
+                    &config_clone,
+                    &clean_request,
+                    move |chunk| {
+                        let _ = on_event_clone.send(DesktopStreamEvent::Chunk { chunk });
+                    },
+                ),
+            )
             .await
         });
 
@@ -1178,27 +1195,32 @@ async fn stream_chat_message(
     let pinned_mcp_server_clone = request.pinned_mcp_server.clone();
 
     let join_handle = tokio::spawn(async move {
-        let expected_chat_id = chat_id_clone.clone()
+        let expected_chat_id = chat_id_clone
+            .clone()
             .unwrap_or_else(|| mint_core::DEFAULT_CONVERSATION_ID.to_owned());
-        with_turn_start_listener(expected_chat_id, move |id| {
-            let _ = on_event_started.send(DesktopStreamEvent::Started { interaction_id: id });
-        }, orchestrate_agent_loop(
-            &config_clone,
-            &message_clone,
-            &root_clone,
-            image_data_uri_clone,
-            audio_data_uri_clone,
-            video_data_uri_clone,
-            chat_id_clone.as_deref(),
-            agent_id_clone.as_deref(),
-            None,
-            pinned_mcp_server_clone.as_deref(),
-            fast_mode,
-            plan_mode,
-            approve_cb,
-            progress_cb,
-            on_chunk,
-        ))
+        with_turn_start_listener(
+            expected_chat_id,
+            move |id| {
+                let _ = on_event_started.send(DesktopStreamEvent::Started { interaction_id: id });
+            },
+            orchestrate_agent_loop(
+                &config_clone,
+                &message_clone,
+                &root_clone,
+                image_data_uri_clone,
+                audio_data_uri_clone,
+                video_data_uri_clone,
+                chat_id_clone.as_deref(),
+                agent_id_clone.as_deref(),
+                None,
+                pinned_mcp_server_clone.as_deref(),
+                fast_mode,
+                plan_mode,
+                approve_cb,
+                progress_cb,
+                on_chunk,
+            ),
+        )
         .await
     });
 
@@ -1841,10 +1863,7 @@ fn open_linked_folder_note(name: String, id: String) -> Result<(), String> {
         command.arg("url.dll,FileProtocolHandler");
         command
     };
-    command
-        .arg(note.path)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    command.arg(note.path).spawn().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -2206,7 +2225,10 @@ async fn capture_translation_frame(rect: CaptureRect) -> Result<String, String> 
 }
 
 #[tauri::command]
-async fn translate_captured_frame(image: String, target_language: String) -> Result<String, String> {
+async fn translate_captured_frame(
+    image: String,
+    target_language: String,
+) -> Result<String, String> {
     let config = load_config().map_err(|error| error.to_string())?;
     translate_captured_region(&config, &image, &target_language).await
 }

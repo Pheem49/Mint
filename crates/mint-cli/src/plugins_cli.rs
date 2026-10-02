@@ -5,7 +5,6 @@
 const ANSI_BLUE: &str = crate::terminal_theme::ANSI_BLUE;
 const ANSI_BLUE_BOLD: &str = crate::terminal_theme::ANSI_BLUE_BOLD;
 
-
 use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use crossterm::event::{self, Event, KeyCode};

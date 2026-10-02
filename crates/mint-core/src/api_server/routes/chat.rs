@@ -302,7 +302,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             let chat_id_str = chat_req.chat_id.clone().unwrap_or_default();
                             let auth_label_clone = auth_label.clone();
                             let join_handle = tokio::spawn(async move {
-                                let expected_chat_id = chat_req_clone.chat_id.clone()
+                                let expected_chat_id = chat_req_clone
+                                    .chat_id
+                                    .clone()
                                     .unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
                                 let result = crate::with_turn_start_listener(expected_chat_id, move |id| {
                                     let event = serde_json::json!({ "type": "started", "interactionId": id });
