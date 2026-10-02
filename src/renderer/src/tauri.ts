@@ -49,6 +49,8 @@ import type {
   CronJobDraft,
   LinkedFolder,
   LinkedFolderDraft,
+  LinkedFolderNote,
+  LinkedFolderStatus,
   GitCheckpoint,
   GitBranchInfo,
   GitBranchChangeOutcome,
@@ -1021,7 +1023,7 @@ export async function setCronJobEnabled(id: string, enabled: boolean): Promise<C
 export async function listLinkedFolders(): Promise<Record<string, LinkedFolder>> {
   if (!isTauriRuntime()) {
     const res = await authFetch(`${getLocalApiBase()}/linked-folders`)
-    if (!res.ok) return {}
+    if (!res.ok) throw new Error('Failed to load linked folders')
     return res.json()
   }
   const { invoke } = await import('@tauri-apps/api/core')
@@ -1055,6 +1057,52 @@ export async function removeLinkedFolder(name: string): Promise<void> {
   }
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('remove_linked_folder', { name })
+}
+
+export async function linkedFolderStatus(name: string): Promise<LinkedFolderStatus> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/linked-folders/${encodeURIComponent(name)}/status`)
+    if (!res.ok) throw new Error('Failed to load folder status')
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('linked_folder_status', { name })
+}
+
+export async function refreshLinkedFolder(name: string): Promise<LinkedFolderStatus> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/linked-folders/${encodeURIComponent(name)}/refresh`, { method: 'POST' })
+    if (!res.ok) throw new Error('Failed to refresh folder')
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('refresh_linked_folder', { name })
+}
+
+export async function listLinkedFolderNotes(name: string): Promise<LinkedFolderNote[]> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/linked-folders/${encodeURIComponent(name)}/notes`)
+    if (!res.ok) throw new Error('Failed to load notes')
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('list_linked_folder_notes', { name })
+}
+
+export async function readLinkedFolderNote(name: string, id: string): Promise<string> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/linked-folders/${encodeURIComponent(name)}/notes/${encodeURIComponent(id)}`)
+    if (!res.ok) throw new Error('Failed to read note')
+    return (await res.json()).content
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('read_linked_folder_note', { name, id })
+}
+
+export async function openLinkedFolderNote(name: string, id: string): Promise<void> {
+  if (!isTauriRuntime()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('open_linked_folder_note', { name, id })
 }
 
 export async function clearChatHistory(chatId?: string | null): Promise<number> {

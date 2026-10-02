@@ -643,10 +643,9 @@ async fn test_mcp_connection(
 
 /// Fetch the live model list for `provider` from its API.
 ///
-/// Returns the dynamic list on success, or the static preset fallback if the
-/// network is unavailable or the API key is absent/invalid. This is the bridge
-/// used by the Desktop Settings UI's model-picker dropdowns so they always show
-/// up-to-date models without a hardcoded list.
+/// Returns the provider list with the same preset fallback policy
+/// used by the CLI picker. The UI form can supply an API key not yet saved to
+/// config.
 #[tauri::command]
 async fn fetch_provider_models(
     provider: String,
@@ -654,21 +653,15 @@ async fn fetch_provider_models(
     base_url: Option<String>,
 ) -> Result<Vec<String>, String> {
     let config = load_config().map_err(|e| e.to_string())?;
-    let dynamic = mint_core::slash::model_fetcher::fetch_provider_models(
-        &provider,
-        &api_key,
-        base_url.as_deref(),
+    Ok(
+        mint_core::slash::models::model_options_for_provider_with_credentials_async(
+            &config,
+            &provider,
+            &api_key,
+            base_url.as_deref(),
+        )
+        .await,
     )
-    .await;
-
-    if !dynamic.is_empty() {
-        Ok(dynamic)
-    } else {
-        // Fallback to static presets so the UI is never empty.
-        Ok(mint_core::slash::models::model_options_for_provider(
-            &config, &provider,
-        ))
-    }
 }
 
 /// Returns the dynamic list of image models for the specified provider on success,
@@ -1803,6 +1796,59 @@ fn remove_linked_folder(name: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+fn linked_folder_status(name: String) -> Result<mint_core::LinkedFolderStatus, String> {
+    mint_core::linked_folder_status(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn refresh_linked_folder(name: String) -> Result<mint_core::LinkedFolderStatus, String> {
+    mint_core::refresh_linked_folder(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_linked_folder_notes(name: String) -> Result<Vec<mint_core::LinkedFolderNote>, String> {
+    mint_core::list_linked_folder_notes(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_linked_folder_note(name: String, id: String) -> Result<String, String> {
+    mint_core::read_linked_folder_note(&name, &id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_linked_folder_note(
+    name: String,
+    content: String,
+) -> Result<mint_core::LinkedFolderNote, String> {
+    mint_core::save_linked_folder_note(&name, &content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_linked_folder_note(name: String, id: String) -> Result<(), String> {
+    let note = mint_core::list_linked_folder_notes(&name)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|note| note.id == id && note.status == "saved")
+        .ok_or_else(|| "note not found".to_string())?;
+    mint_core::read_linked_folder_note(&name, &id).map_err(|e| e.to_string())?;
+    #[cfg(target_os = "linux")]
+    let mut command = Command::new("xdg-open");
+    #[cfg(target_os = "macos")]
+    let mut command = Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("rundll32");
+        command.arg("url.dll,FileProtocolHandler");
+        command
+    };
+    command
+        .arg(note.path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn clear_chat_history(chat_id: Option<String>) -> Result<usize, String> {
     MemoryStore::open_default()
         .and_then(|memory| {
@@ -2505,6 +2551,12 @@ pub fn run() {
             list_linked_folders,
             add_linked_folder,
             remove_linked_folder,
+            linked_folder_status,
+            refresh_linked_folder,
+            list_linked_folder_notes,
+            read_linked_folder_note,
+            save_linked_folder_note,
+            open_linked_folder_note,
             list_pictures,
             delete_picture,
             save_pictures,

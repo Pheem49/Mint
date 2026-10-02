@@ -753,6 +753,15 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                     )
                     .await;
                 }
+                                ("GET" | "POST", route) if route.starts_with("/api/linked-folders/") => {
+                    routes::linked_folders::execute(
+                        routes::RequestCtx {
+                            method, route, query, body,
+                            request_str: &request_str, request_bytes: &request_bytes,
+                            header_end, auth_label: auth_label.clone(),
+                        }, socket,
+                    ).await;
+                }
                                 ("POST", "/api/linked-folders") => {
                     routes::linked_folders::execute(
                         routes::RequestCtx {

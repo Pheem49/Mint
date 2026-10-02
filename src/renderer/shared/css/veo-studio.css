@@ -421,7 +421,7 @@
   border-radius: var(--radius-lg);
   background: var(--accent);
   border: 1px solid var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 0.90rem;
   font-weight: 600;
   cursor: pointer;
@@ -647,12 +647,13 @@
 .veo-studio-action-btn--primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
 }
 
 .veo-studio-action-btn--primary:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+  color: var(--text-on-accent);
 }
 
 /* ── Meta info ───────────────────────────────────────────── */
@@ -1040,7 +1041,7 @@
   height: 22px;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 0.75rem;
   font-weight: 700;
 }

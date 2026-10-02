@@ -1,14 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
-import {
-  GEMINI_MODELS,
-  OPENAI_MODELS,
-  OPENROUTER_MODELS,
-  DEEPSEEK_MODELS,
-  ANTHROPIC_MODELS,
-  HF_MODELS,
-  LOCAL_MODELS,
-} from '../../constants/models'
+import { HF_MODELS } from '../../constants/models'
 import type { CustomProviderConfig, SubagentDefinition, SubagentDraft } from '../../types'
 import { catalogPlatform } from '../../platform'
 import ApiKeyInput from './ApiKeyInput'
@@ -31,9 +23,10 @@ interface AgentsTabProps {
   config: typeof DEFAULT_CONFIG & { agents?: Agent[], customProviders?: CustomProviderConfig[] }
   updateField: (field: any, value: any) => void
   dynamicOllamaModels?: string[]
+  providerModels: Record<string, string[]>
 }
 
-export default function AgentsTab({ config, updateField, dynamicOllamaModels = [] }: AgentsTabProps) {
+export default function AgentsTab({ config, updateField, dynamicOllamaModels = [], providerModels }: AgentsTabProps) {
   const agents = config.agents || []
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null)
   const [name, setName] = useState('')
@@ -45,13 +38,13 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
 
   const handleProviderChange = (newProvider: string) => {
     setProvider(newProvider)
-    if (newProvider === 'gemini') setModel(config.geminiModel || GEMINI_MODELS[0])
-    else if (newProvider === 'openai') setModel(config.openaiModel || OPENAI_MODELS[0])
-    else if (newProvider === 'openrouter') setModel(config.openrouterModel || OPENROUTER_MODELS[0])
-    else if (newProvider === 'deepseek') setModel(config.deepseekModel || DEEPSEEK_MODELS[0])
-    else if (newProvider === 'anthropic') setModel(config.anthropicModel || ANTHROPIC_MODELS[0])
+    if (newProvider === 'gemini') setModel(config.geminiModel || providerModels.gemini[0] || '')
+    else if (newProvider === 'openai') setModel(config.openaiModel || providerModels.openai[0] || '')
+    else if (newProvider === 'openrouter') setModel(config.openrouterModel || providerModels.openrouter[0] || '')
+    else if (newProvider === 'deepseek') setModel(config.deepseekModel || providerModels.deepseek[0] || '')
+    else if (newProvider === 'anthropic') setModel(config.anthropicModel || providerModels.anthropic[0] || '')
     else if (newProvider === 'huggingface') setModel(config.hfModel || HF_MODELS[0])
-    else if (newProvider === 'local_openai') setModel(config.localModelName || LOCAL_MODELS[0])
+    else if (newProvider === 'local_openai') setModel(config.localModelName || providerModels.local_openai[0] || '')
     else if (newProvider === 'ollama') setModel(config.ollamaModel || dynamicOllamaModels[0] || '')
     else if (newProvider.startsWith('custom:')) {
       const cpId = newProvider.replace(/^custom:/, '')
@@ -175,25 +168,25 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
   let modelList: readonly string[] = []
   let defaultGeneralModel = ''
   if (provider === 'gemini') {
-    modelList = GEMINI_MODELS
+    modelList = providerModels.gemini
     defaultGeneralModel = config.geminiModel
   } else if (provider === 'openai') {
-    modelList = OPENAI_MODELS
+    modelList = providerModels.openai
     defaultGeneralModel = config.openaiModel
   } else if (provider === 'openrouter') {
-    modelList = OPENROUTER_MODELS
+    modelList = providerModels.openrouter
     defaultGeneralModel = config.openrouterModel
   } else if (provider === 'deepseek') {
-    modelList = DEEPSEEK_MODELS
+    modelList = providerModels.deepseek
     defaultGeneralModel = config.deepseekModel
   } else if (provider === 'anthropic') {
-    modelList = ANTHROPIC_MODELS
+    modelList = providerModels.anthropic
     defaultGeneralModel = config.anthropicModel
   } else if (provider === 'huggingface') {
     modelList = HF_MODELS
     defaultGeneralModel = config.hfModel
   } else if (provider === 'local_openai') {
-    modelList = LOCAL_MODELS
+    modelList = providerModels.local_openai
     defaultGeneralModel = config.localModelName
   } else if (provider === 'ollama') {
     modelList = dynamicOllamaModels

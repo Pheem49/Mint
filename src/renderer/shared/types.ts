@@ -291,6 +291,25 @@ export interface LinkedFolderDraft {
   description?: string
 }
 
+export interface LinkedFolderStatus {
+  indexedFiles: number
+  indexedAt?: string | null
+  indexError?: string | null
+  pendingJobs: number
+  failedJobs: number
+  lastJobError?: string | null
+}
+
+export interface LinkedFolderNote {
+  id: string
+  folder: string
+  path: string
+  content: string
+  createdAt: string
+  status: 'pending' | 'saved' | 'failed'
+  error?: string | null
+}
+
 export interface DiffHunk {
   oldText: string
   newText: string

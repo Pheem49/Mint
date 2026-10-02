@@ -133,8 +133,10 @@ pub use knowledge::{
     KnowledgeError, KnowledgeHit, KnowledgeSource, KnowledgeStore, extract_document_text,
 };
 pub use linked_folders::{
-    LinkedFolder, LinkedFolderDraft, LinkedFolderError, add_linked_folder,
-    configured_linked_folders, list_linked_folders, remove_linked_folder, spawn_linked_folder_note,
+    LinkedFolder, LinkedFolderDraft, LinkedFolderError, LinkedFolderNote, LinkedFolderStatus,
+    add_linked_folder, configured_linked_folders, linked_folder_status, list_linked_folder_notes,
+    list_linked_folders, read_linked_folder_note, refresh_linked_folder, remove_linked_folder,
+    save_linked_folder_note, spawn_linked_folder_note,
 };
 pub use mcp::{
     McpError, McpRegistryArgInput, McpRegistryEntry, McpRegistryEnvVar, McpServer, add_mcp_server,
@@ -159,9 +161,9 @@ pub use mic_transcribe::{
 pub use orchestration::{
     ActivePlan, AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption,
     MCP_ALLOW_ALL_SENTINEL, OrchestrationError, PlanTaskItem, RunTelemetrySummary,
-    ToolExecutionRecord, orchestrate_agent_loop, orchestrate_chat, orchestrate_chat_stream,
-    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-    with_turn_start_listener,
+    ToolExecutionRecord, compact_agent_progress, orchestrate_agent_loop, orchestrate_chat,
+    orchestrate_chat_stream, orchestrate_chat_stream_with_fallback,
+    orchestrate_chat_with_fallback, with_turn_start_listener,
 };
 pub use pictures::{
     PictureEntry, PictureError, delete_saved_picture, list_saved_pictures, parse_data_uri,

@@ -82,8 +82,6 @@ export function isFreeModel(modelId: string): boolean {
 }
 
 export const DEEPSEEK_MODELS = [
-  'deepseek-v4-flash',
-  'deepseek-v4-pro',
   'deepseek-chat',
   'deepseek-reasoner',
 ] as const
@@ -359,4 +357,3 @@ export function getModelMetadata(modelId: string, provider?: string): ModelMeta 
 
   return { description, contextWindow, supportsThinking }
 }
-

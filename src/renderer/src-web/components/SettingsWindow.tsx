@@ -783,6 +783,14 @@ export default function SettingsWindow() {
               config={config}
               updateField={updateField}
               dynamicOllamaModels={dynamicOllamaModels}
+              providerModels={{
+                gemini: dynamicGeminiModels,
+                anthropic: dynamicAnthropicModels,
+                openai: dynamicOpenAIModels,
+                openrouter: dynamicOpenRouterModels,
+                deepseek: dynamicDeepSeekModels,
+                local_openai: dynamicLocalModels,
+              }}
             />
           )}
         </div>

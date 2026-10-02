@@ -120,6 +120,7 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 ### 6. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Scheduled Tasks & Linked Folders
 - `mint cron` runs agent tasks on a schedule with no OS-level daemon — rides along on whatever's already open, or `mint gateway start` for always-on.
 - Link a folder (e.g. "Food") and chat that touches its topic gets a short, cross-referenced note written into it automatically.
+- Mint indexes supported files in linked folders and their subfolders to decide which conversations contain useful notes. Use `/link refresh <name>` after changing files, `/link notes <name>` to inspect saved notes, or `/link save <name> | <text>` to save text directly. Notes are stored in `<folder>/mint-notes/`.
 
 ---
 

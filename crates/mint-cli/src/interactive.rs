@@ -98,7 +98,7 @@ async fn run_interactive_agent_turn(
         tui: None,
     };
     let image = session.pending_image.take();
-    if let Some((terminal, _, handle)) = tui.as_mut() {
+    if let Some((terminal, state, handle)) = tui.as_mut() {
         terminal.resume()?;
         options.tui = Some(handle.clone());
         let current_dir = session.current_dir.clone();
@@ -114,7 +114,11 @@ async fn run_interactive_agent_turn(
             )
             .await
         });
-        terminal.drive_agent(handle, task).await?
+        let result = terminal.drive_agent(handle, task).await;
+        if let Ok(mut state) = state.lock() {
+            state.advance_sync_cursor();
+        }
+        result?
     } else {
         crate::run_code_agent_with_saved_image(
             &task,

@@ -188,8 +188,8 @@
   border-radius: 20px;
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   background: var(--panel-bg, rgba(22, 22, 26, 0.75));
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.25);
   color: var(--text-chat, var(--text-main));
 }
@@ -482,4 +482,14 @@
   color: var(--text-chat, var(--text-main, rgba(255, 255, 255, 0.45)));
   opacity: 0.75;
   margin-top: 8px;
+}
+.message:has(.source-links-popover) {
+  position: relative;
+  z-index: 2;
+}
+
+[data-surface="opaque"] .chat-header {
+  background: var(--bg-surface);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }

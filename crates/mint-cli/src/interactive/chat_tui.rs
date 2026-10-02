@@ -28,6 +28,17 @@ use std::sync::{
 };
 use unicode_width::UnicodeWidthStr;
 
+fn format_thinking_status(config: &mint_core::MintConfig) -> String {
+    let model = active_model(&config.ai_provider, config);
+    if !config.resolved_thinking_enabled_for_model(&config.ai_provider, model) {
+        return "off".to_string();
+    }
+    match config.resolved_thinking_effort_for_model(model) {
+        "extra_high" => "extra high".to_string(),
+        effort => effort.to_string(),
+    }
+}
+
 const MIN_WIDTH: u16 = 60;
 const MIN_HEIGHT: u16 = 12;
 const COPY_LIMIT: usize = 100 * 1024;
@@ -323,6 +334,7 @@ pub(crate) struct ChatViewState {
     pub(crate) transcript: Vec<TranscriptEntry>,
     chat_id: String,
     sync_cursor: i64,
+    last_interaction_id: i64,
     composer: Vec<char>,
     cursor: usize,
     history: Vec<String>,
@@ -331,6 +343,7 @@ pub(crate) struct ChatViewState {
     slash_selected: usize,
     status: Vec<String>,
     model: String,
+    thinking_status: String,
     provider: String,
     workspace: String,
     current_dir: std::path::PathBuf,
@@ -948,18 +961,12 @@ impl TuiHandle {
     }
     pub fn push_notice(&self, text: impl Into<String>) {
         if let Ok(mut state) = self.state.lock() {
-            state
-                .transcript
-                .push(TranscriptEntry::new(TranscriptRole::Notice, text));
-            state.scroll_from_bottom = 0;
+            state.push_notice(text);
         }
     }
     pub fn push_assistant(&self, text: impl Into<String>) {
         if let Ok(mut state) = self.state.lock() {
-            state
-                .transcript
-                .push(TranscriptEntry::new(TranscriptRole::Assistant, text));
-            state.scroll_from_bottom = 0;
+            state.push_assistant(text);
         }
     }
     pub fn push_command(&self, text: impl Into<String>) {
@@ -1058,6 +1065,7 @@ impl ChatViewState {
     pub fn from_session(session: &InteractiveSession) -> Self {
         let mut state = Self {
             model: active_model(&session.config.ai_provider, &session.config).to_owned(),
+            thinking_status: format_thinking_status(&session.config),
             provider: format_provider_display_name(&session.config.ai_provider, &session.config),
             workspace: format_workspace_with_branch(&session.current_dir),
             current_dir: session.current_dir.clone(),
@@ -1074,37 +1082,75 @@ impl ChatViewState {
         self.cursor = self.composer.len();
     }
     pub fn reload_transcript(&mut self, chat_id: &str, workspace: &Path) {
+        if let Ok(memory) = mint_core::MemoryStore::open_default() {
+            self.reload_transcript_with(&memory, chat_id, workspace);
+        } else {
+            self.chat_id = chat_id.to_owned();
+            self.transcript.clear();
+            self.last_interaction_id = 0;
+            self.sync_cursor = 0;
+        }
+    }
+
+    pub fn reload_transcript_with(
+        &mut self,
+        memory: &mint_core::MemoryStore,
+        chat_id: &str,
+        workspace: &Path,
+    ) {
         self.chat_id = chat_id.to_owned();
         self.transcript.clear();
         let scoped = mint_core::scoped_chat_id(chat_id, Some(&workspace.to_string_lossy()));
-        if let Ok(memory) = mint_core::MemoryStore::open_default() {
-            self.sync_cursor = memory.latest_conversation_sequence(&scoped).unwrap_or(0);
-            if let Ok(rows) = memory.interactions_for_chat(&scoped) {
-                for row in rows {
-                    self.transcript
-                        .push(TranscriptEntry::new(TranscriptRole::User, row.user_text));
-                    match row.status.as_str() {
-                        "completed" => self
-                            .transcript
-                            .push(TranscriptEntry::new(TranscriptRole::Assistant, row.ai_text)),
-                        "queued" => self.transcript.push(TranscriptEntry::new(
-                            TranscriptRole::Notice,
-                            "Queued for this session…",
-                        )),
-                        "running" => self.transcript.push(TranscriptEntry::new(
-                            TranscriptRole::Notice,
-                            "Mint is responding…",
-                        )),
-                        "failed" => self.transcript.push(TranscriptEntry::new(
-                            TranscriptRole::Notice,
-                            "This turn failed. Send it again to retry.",
-                        )),
-                        _ => self.transcript.push(TranscriptEntry::new(
-                            TranscriptRole::Notice,
-                            "This turn was interrupted. Send it again to retry.",
-                        )),
-                    }
+        self.sync_cursor = memory.latest_conversation_sequence(&scoped).unwrap_or(0);
+        if let Ok(rows) = memory.interactions_for_chat(&scoped) {
+            self.last_interaction_id = rows.last().map(|row| row.id).unwrap_or(0);
+            for row in rows {
+                self.transcript
+                    .push(TranscriptEntry::new(TranscriptRole::User, row.user_text));
+                match row.status.as_str() {
+                    "completed" => self
+                        .transcript
+                        .push(TranscriptEntry::new(TranscriptRole::Assistant, row.ai_text)),
+                    "queued" => self.transcript.push(TranscriptEntry::new(
+                        TranscriptRole::Notice,
+                        "Queued for this session…",
+                    )),
+                    "running" => self.transcript.push(TranscriptEntry::new(
+                        TranscriptRole::Notice,
+                        "Mint is responding…",
+                    )),
+                    "failed" => self.transcript.push(TranscriptEntry::new(
+                        TranscriptRole::Notice,
+                        "This turn failed. Send it again to retry.",
+                    )),
+                    _ => self.transcript.push(TranscriptEntry::new(
+                        TranscriptRole::Notice,
+                        "This turn was interrupted. Send it again to retry.",
+                    )),
                 }
+            }
+        } else {
+            self.last_interaction_id = 0;
+        }
+    }
+
+    pub fn advance_sync_cursor(&mut self) {
+        if let Ok(memory) = mint_core::MemoryStore::open_default() {
+            self.advance_sync_cursor_with(&memory);
+        }
+    }
+
+    pub fn advance_sync_cursor_with(&mut self, memory: &mint_core::MemoryStore) {
+        if self.chat_id.is_empty() {
+            return;
+        }
+        let scoped = mint_core::scoped_chat_id(&self.chat_id, Some(&self.current_dir.to_string_lossy()));
+        if let Ok(seq) = memory.latest_conversation_sequence(&scoped) {
+            self.sync_cursor = seq;
+        }
+        if let Ok(rows) = memory.interactions_for_chat(&scoped) {
+            if let Some(last) = rows.last() {
+                self.last_interaction_id = last.id;
             }
         }
     }
@@ -1116,38 +1162,115 @@ impl ChatViewState {
         let Ok(memory) = mint_core::MemoryStore::open_default() else {
             return false;
         };
-        let Ok(changes) = memory.conversation_changes(&self.chat_id, self.sync_cursor, 200) else {
+        self.refresh_shared_transcript_with(&memory)
+    }
+
+    pub fn refresh_shared_transcript_with(&mut self, memory: &mint_core::MemoryStore) -> bool {
+        if self.chat_id.is_empty() {
+            return false;
+        }
+        let scoped = mint_core::scoped_chat_id(&self.chat_id, Some(&self.current_dir.to_string_lossy()));
+        let Ok(changes) = memory.conversation_changes(&scoped, self.sync_cursor, 200) else {
             return false;
         };
         if changes.changes.is_empty() {
             return false;
         }
-        let transient = self
-            .transcript
-            .iter()
-            .filter(|entry| {
-                matches!(
-                    entry.role,
-                    TranscriptRole::Notice | TranscriptRole::Command | TranscriptRole::System
-                )
-            })
-            .filter(|entry| {
-                !entry.text.starts_with("Queued for this session")
-                    && !entry.text.starts_with("Mint is responding")
-                    && !entry.text.starts_with("This turn failed")
-                    && !entry.text.starts_with("This turn was interrupted")
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        let chat_id = self.chat_id.clone();
-        let workspace = self.current_dir.clone();
-        self.reload_transcript(&chat_id, &workspace);
-        self.transcript.extend(transient);
-        true
+
+        // If any interaction was deleted (e.g. /clear on Web or Desktop), do a full reload.
+        if changes.changes.iter().any(|change| change.interaction.is_none()) {
+            let chat_id = self.chat_id.clone();
+            let workspace = self.current_dir.clone();
+            self.reload_transcript_with(memory, &chat_id, &workspace);
+            return true;
+        }
+
+        let mut changed = false;
+        for change in &changes.changes {
+            let Some(row) = &change.interaction else {
+                continue;
+            };
+            if row.id > self.last_interaction_id {
+                // Incoming new interaction from an external client (Web/Desktop)
+                self.transcript.push(TranscriptEntry::new(TranscriptRole::User, &row.user_text));
+                match row.status.as_str() {
+                    "completed" => self.transcript.push(TranscriptEntry::new(TranscriptRole::Assistant, &row.ai_text)),
+                    "queued" => self.transcript.push(TranscriptEntry::new(
+                        TranscriptRole::Notice,
+                        "Queued for this session…",
+                    )),
+                    "running" => self.transcript.push(TranscriptEntry::new(
+                        TranscriptRole::Notice,
+                        "Mint is responding…",
+                    )),
+                    "failed" => self.transcript.push(TranscriptEntry::new(
+                        TranscriptRole::Notice,
+                        "This turn failed. Send it again to retry.",
+                    )),
+                    _ => self.transcript.push(TranscriptEntry::new(
+                        TranscriptRole::Notice,
+                        "This turn was interrupted. Send it again to retry.",
+                    )),
+                }
+                self.last_interaction_id = row.id;
+                changed = true;
+            } else if row.id == self.last_interaction_id {
+                // Status update for an external interaction that was previously queued/running
+                if row.status == "completed" {
+                    if let Some(last) = self.transcript.last_mut() {
+                        if last.role == TranscriptRole::Notice
+                            && (last.text.starts_with("Mint is responding")
+                                || last.text.starts_with("Queued for this session"))
+                        {
+                            *last = TranscriptEntry::new(TranscriptRole::Assistant, &row.ai_text);
+                            changed = true;
+                        } else if last.role != TranscriptRole::Assistant {
+                            self.transcript.push(TranscriptEntry::new(TranscriptRole::Assistant, &row.ai_text));
+                            changed = true;
+                        }
+                    }
+                } else if row.status == "running" {
+                    if let Some(last) = self.transcript.last_mut() {
+                        if last.role == TranscriptRole::Notice && last.text.starts_with("Queued for this session") {
+                            *last = TranscriptEntry::new(TranscriptRole::Notice, "Mint is responding…");
+                            changed = true;
+                        }
+                    }
+                } else if matches!(row.status.as_str(), "failed" | "interrupted") {
+                    let msg = if row.status == "failed" {
+                        "This turn failed. Send it again to retry."
+                    } else {
+                        "This turn was interrupted. Send it again to retry."
+                    };
+                    if let Some(last) = self.transcript.last_mut() {
+                        if last.role == TranscriptRole::Notice
+                            && (last.text.starts_with("Mint is responding")
+                                || last.text.starts_with("Queued for this session"))
+                        {
+                            *last = TranscriptEntry::new(TranscriptRole::Notice, msg);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        self.sync_cursor = changes.cursor;
+        changed
     }
     pub fn push_user(&mut self, text: String) {
         self.transcript
             .push(TranscriptEntry::new(TranscriptRole::User, text));
+        self.scroll_from_bottom = 0;
+    }
+    pub fn push_notice(&mut self, text: impl Into<String>) {
+        self.transcript
+            .push(TranscriptEntry::new(TranscriptRole::Notice, text));
+        self.scroll_from_bottom = 0;
+    }
+    pub fn push_assistant(&mut self, text: impl Into<String>) {
+        self.transcript
+            .push(TranscriptEntry::new(TranscriptRole::Assistant, text));
         self.scroll_from_bottom = 0;
     }
     pub fn clear_transcript(&mut self) {
@@ -1157,6 +1280,7 @@ impl ChatViewState {
     }
     pub fn sync_session(&mut self, session: &InteractiveSession) {
         self.model = active_model(&session.config.ai_provider, &session.config).to_owned();
+        self.thinking_status = format_thinking_status(&session.config);
         self.provider = format_provider_display_name(&session.config.ai_provider, &session.config);
         self.workspace = format_workspace_with_branch(&session.current_dir);
         self.current_dir = session.current_dir.clone();
@@ -2340,7 +2464,11 @@ impl ChatViewState {
                 String::new()
             };
             let path_text = format!("path: {}", self.workspace);
-            let left_len = mode_label.chars().count() + self.model.chars().count();
+            let thinking_text = format!("• {}", self.thinking_status);
+            let left_len = mode_label.chars().count()
+                + self.model.chars().count()
+                + thinking_text.chars().count()
+                + 1;
             let right_len = jobs_prefix.chars().count() + path_text.chars().count();
             let available = rows[5].width as usize;
             let gap = available.saturating_sub(left_len + right_len);
@@ -2367,6 +2495,11 @@ impl ChatViewState {
                         Style::default()
                             .fg(crate::terminal_theme::ACCENT)
                             .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        thinking_text,
+                        Style::default().fg(crate::terminal_theme::ACCENT),
                     ),
                     Span::raw(" ".repeat(gap)),
                     Span::styled(
@@ -4460,5 +4593,124 @@ mod dialog_tests {
         assert_eq!(state.active_notice(), None);
         assert!(state.notice_visibility_changed_since_draw(true));
         assert!(!state.notice_visibility_changed_since_draw(false));
+    }
+
+    #[test]
+    fn test_refresh_shared_transcript_preserves_tool_notice_order() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "mint-test-tui-sync-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let db_path = temp_dir.join("test_memory.db");
+        let memory = mint_core::MemoryStore::open(db_path);
+        let workspace = temp_dir.clone();
+        let chat_id = "test-session";
+        let scoped = mint_core::scoped_chat_id(chat_id, Some(&workspace.to_string_lossy()));
+
+        let mut state = ChatViewState {
+            chat_id: chat_id.to_string(),
+            current_dir: workspace.clone(),
+            ..ChatViewState::default()
+        };
+        state.reload_transcript_with(&memory, chat_id, &workspace);
+
+        // Turn 1 runs locally in CLI:
+        state.push_user("List files please".into());
+        state.push_notice("• Listing 2 directories...");
+        state.push_notice("✓ Completed in 1.2s • 1 tool • 0 files changed");
+        state.push_assistant("Found 2 files.");
+        state.push_notice("─ Worked for 1s • test ──────────────────────────────");
+
+        // In DB, TurnLease records this interaction:
+        let turn_id = memory.start_turn(&scoped, "List files please").unwrap();
+        memory.claim_turn(&scoped, turn_id).unwrap();
+        memory.finish_turn(turn_id, "Found 2 files.", "test", "model", None).unwrap();
+
+        // Advance cursor as local turn completion would:
+        state.advance_sync_cursor_with(&memory);
+
+        // Refresh shared transcript:
+        let redrawn = state.refresh_shared_transcript_with(&memory);
+        assert!(!redrawn, "Should not redraw since changes were from local turn");
+
+        // Now simulate an external message arriving from Web/Desktop on the same session:
+        let ext_id = memory.start_turn(&scoped, "Message from Web").unwrap();
+        memory.claim_turn(&scoped, ext_id).unwrap();
+        memory.finish_turn(ext_id, "Reply to Web", "test", "model", None).unwrap();
+
+        let redrawn2 = state.refresh_shared_transcript_with(&memory);
+        assert!(redrawn2, "Should redraw when external turn arrives");
+
+        // Verify transcript order:
+        // Turn 1's tool notices must still be BEFORE Turn 1's assistant reply!
+        // Not pushed to the very bottom!
+        let texts: Vec<&str> = state.transcript.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts.len(), 7);
+        assert_eq!(texts[0], "List files please");
+        assert_eq!(texts[1], "• Listing 2 directories...");
+        assert_eq!(texts[2], "✓ Completed in 1.2s • 1 tool • 0 files changed");
+        assert_eq!(texts[3], "Found 2 files.");
+        assert_eq!(texts[4], "─ Worked for 1s • test ──────────────────────────────");
+        assert_eq!(texts[5], "Message from Web");
+        assert_eq!(texts[6], "Reply to Web");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_refresh_shared_transcript_external_turn_lifecycle() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "mint-test-tui-sync-lifecycle-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let db_path = temp_dir.join("test_memory.db");
+        let memory = mint_core::MemoryStore::open(db_path);
+        let workspace = temp_dir.clone();
+        let chat_id = "test-session-2";
+        let scoped = mint_core::scoped_chat_id(chat_id, Some(&workspace.to_string_lossy()));
+
+        let mut state = ChatViewState {
+            chat_id: chat_id.to_string(),
+            current_dir: workspace.clone(),
+            ..ChatViewState::default()
+        };
+        state.reload_transcript_with(&memory, chat_id, &workspace);
+
+        // Turn arrives from Web (status: queued):
+        let ext_id = memory.start_turn(&scoped, "External prompt").unwrap();
+        let redrawn = state.refresh_shared_transcript_with(&memory);
+        assert!(redrawn);
+        assert_eq!(state.transcript.len(), 2);
+        assert_eq!(state.transcript[0].text, "External prompt");
+        assert_eq!(state.transcript[1].text, "Queued for this session…");
+
+        // External turn updates to running:
+        memory.claim_turn(&scoped, ext_id).unwrap();
+        let redrawn = state.refresh_shared_transcript_with(&memory);
+        assert!(redrawn);
+        assert_eq!(state.transcript.len(), 2);
+        assert_eq!(state.transcript[0].text, "External prompt");
+        assert_eq!(state.transcript[1].text, "Mint is responding…");
+
+        // External turn completes:
+        memory
+            .finish_turn(ext_id, "External answer", "provider", "model", None)
+            .unwrap();
+        let redrawn = state.refresh_shared_transcript_with(&memory);
+        assert!(redrawn);
+        assert_eq!(state.transcript.len(), 2);
+        assert_eq!(state.transcript[0].text, "External prompt");
+        assert_eq!(state.transcript[1].text, "External answer");
+        assert_eq!(state.transcript[1].role, TranscriptRole::Assistant);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

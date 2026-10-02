@@ -1,5 +1,35 @@
 # Release Notes - Mint Agent v1.15.0
 
+- Added the active model's thinking level to the Full-Screen TUI footer, including an `off` indicator when thinking is disabled.
+
+## Sidebar Projects
+
+- Added a three-dot menu to each project in the sidebar. New chat actions are available from the menu, and projects can be removed from the sidebar without deleting their conversations; those conversations move to Recents.
+- Moved conversation rename, move, and delete actions into a three-dot menu in both project lists and Recents.
+
+## Linked Folders
+
+- Linked folders now index supported files in nested directories and use relevant excerpts to decide where to save useful chat notes. The index refreshes on link, periodically during note processing, or with `/link refresh <name>`.
+- Added `/link save <name> | <text>` and `/link notes <name>` across CLI, Desktop, and Web. A single turn can save separate notes in multiple relevant folders.
+- Notes receive unique IDs and are appended under a cross-process file lock. A SQLite job and note ledger records pending, saved, skipped, and failed work and allows interrupted work to resume.
+- The Linked Folders view shows index status, recent notes, errors, and note previews. Desktop can open the source note file; Web previews it in the app and can copy its path.
+
+## Opaque Chat Surfaces
+
+- Made source cards, their links popover, and markdown callouts use solid theme surfaces when Opaque is selected, while keeping their translucent treatment in Glassmorphism mode.
+- Raised an open source-links popover above later chat messages so callout text and backgrounds do not overlap its links.
+- Removed the remaining fixed blur on chat headers and rich grid cards while Opaque mode is active.
+
+## Consistent Provider Model Lists
+
+- Made CLI, Desktop, and Web use the same Rust model-list fallback policy. When a provider responds, its model IDs are shown as returned; static presets are used only if the fetch fails. Desktop and Web no longer append separate frontend presets, and their initial DeepSeek options match the Rust fallback, so models absent from the provider response no longer appear only in the app picker.
+- Reused the fetched provider lists in the Desktop and Web Agents settings model picker, so its Gemini, Anthropic, OpenAI, OpenRouter, DeepSeek, and local model choices follow the main picker.
+
+## Monochrome Theme Contrast
+
+- Corrected text and icon contrast on accent-filled controls in Skills, MCP management, Image Studio, Veo Studio, chat, and Settings. These controls now use the theme's text-on-accent color, including selected, hovered, and disabled states.
+- Made the custom checkbox checkmark follow the same contrast token and fixed selected sidebar items and light-theme management hover text.
+
 ## Live Translate
 
 - Rebuilt the Desktop live translation picker as a transparent overlay: select a screen region, choose a target language (including a custom language), and read the translated text over the selected area.
@@ -29,9 +59,9 @@
 
 ## Web Search Image Navigation
 
-- Linked Web Search thumbnails to their actual result pages using the image and page URLs paired in agent progress, with a separate “ดูรูปเต็ม” link for opening the image file. The same rendering applies to Desktop and Web, including live replies and chat history.
-- Added a separate “ดูรูปเต็ม” link to Image Search tiles while keeping a click on the thumbnail directed to its source page. CLI search results continue to show both URLs in text.
-- Made both “ดูรูปเต็ม” links use the theme's interactive text color; the Image Search link background also follows the active surface theme.
+- Linked Web Search thumbnails to their actual result pages using the image and page URLs paired in agent progress, with a separate “View full image” link for opening the image file. The same rendering applies to Desktop and Web, including live replies and chat history.
+- Added a separate “View full image” link to Image Search tiles while keeping a click on the thumbnail directed to its source page. CLI search results continue to show both URLs in text.
+- Made both “View full image” links use the theme's interactive text color; the Image Search link background also follows the active surface theme.
 
 ## Shared Conversation Turns
 
@@ -43,6 +73,11 @@
 - Redrew the Full-Screen TUI once when a timed notice expires, so it disappears even while the terminal is idle.
 - Made the conversation snapshot and change cursor authoritative for Web/Desktop history loads, preventing an older request for the same session from replacing newer turns.
 - Kept tool approvals associated with their originating chat across session switches; returning to that chat restores its approval card, including for Desktop approval events.
+- Preserved the chronological order of tool activity cards, timeline notes, and turn completion summaries in the Full-Screen TUI by switching live sync to an incremental feed that appends incoming external turns without wiping local in-memory transcripts or displacing notices to the bottom.
+- Advanced the CLI's shared conversation cursor and interaction ID immediately upon local turn completion, preventing idle sync checks from treating a completed local turn as an external change.
+- Fixed scoped session ID resolution in the TUI live sync poller so workspace-scoped conversations query their matching change sequences.
+- Persisted agent activity timelines (tool execution cards, file changes/diffs, extended thinking, and run telemetry) directly from the engine level (`TurnLease`) into SQLite upon turn completion, failure, or interruption, establishing full cross-surface visibility across CLI, Desktop, and Web.
+- Enabled real-time merging of agent activity snapshots during live conversation polling on Web and Desktop, dynamically rendering tool cards, file diffs, and thinking blocks for CLI/TUI turns without requiring a manual page reload.
 
 ## Shared Terminal Color Palette
 

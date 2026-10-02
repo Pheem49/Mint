@@ -193,6 +193,11 @@ export type RendererAdapter = MintPlatformApi & {
   listLinkedFolders: RuntimeOperation
   addLinkedFolder: RuntimeOperation
   removeLinkedFolder: RuntimeOperation
+  linkedFolderStatus: RuntimeOperation
+  refreshLinkedFolder: RuntimeOperation
+  listLinkedFolderNotes: RuntimeOperation
+  readLinkedFolderNote: RuntimeOperation
+  openLinkedFolderNote: RuntimeOperation
   startGeminiLiveSession: RuntimeOperation
   sendGeminiLiveAudioChunk: RuntimeOperation
   stopGeminiLiveSession: RuntimeOperation
@@ -258,6 +263,9 @@ export const catalogPlatform = {
   addCronJob: operation('addCronJob'), removeCronJob: operation('removeCronJob'),
   setCronJobEnabled: operation('setCronJobEnabled'), listLinkedFolders: operation('listLinkedFolders'),
   addLinkedFolder: operation('addLinkedFolder'), removeLinkedFolder: operation('removeLinkedFolder'),
+  linkedFolderStatus: operation('linkedFolderStatus'), refreshLinkedFolder: operation('refreshLinkedFolder'),
+  listLinkedFolderNotes: operation('listLinkedFolderNotes'), readLinkedFolderNote: operation('readLinkedFolderNote'),
+  openLinkedFolderNote: operation('openLinkedFolderNote'),
   runSlashCommand: operation('runSlashCommand'),
 }
 

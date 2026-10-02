@@ -18,7 +18,7 @@ describe('web search image links', () => {
 
     expect(html).toContain(`href="${source.url}"`)
     expect(html).toContain(`href="${source.imageUrl}"`)
-    expect(html).toContain('ดูรูปเต็ม')
+    expect(html).toContain('View full image')
   })
 
   it('does not invent a source page for an unrelated image', () => {
@@ -27,7 +27,7 @@ describe('web search image links', () => {
 
     expect(html).toContain(`href="${otherImage}"`)
     expect(html).not.toContain(`href="${source.url}"`)
-    expect(html).not.toContain('ดูรูปเต็ม')
+    expect(html).not.toContain('View full image')
   })
 
   it('uses an explicitly linked page without nesting image links', () => {

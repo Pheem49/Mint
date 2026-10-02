@@ -102,6 +102,12 @@ export default function DashboardSidebar({
   const [editTitleValue, setEditTitleValue] = useState('')
   const [isMoreOpen, setIsMoreOpen] = useState(false)
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false)
+  const [projectMenu, setProjectMenu] = useState<{ projectId: string; top: number; left: number } | null>(null)
+  const [conversationMenu, setConversationMenu] = useState<{ sessionId: string; top: number; left: number } | null>(null)
+  const [removedProjectIds, setRemovedProjectIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return []
+    try { return JSON.parse(window.localStorage.getItem('mint_removed_sidebar_projects') || '[]') } catch { return [] }
+  })
   const [moveMenu, setMoveMenu] = useState<{
     sessionId: string
     currentWorkspacePath?: string | null
@@ -172,6 +178,8 @@ export default function DashboardSidebar({
       if (moveMenuRef.current && !moveMenuRef.current.contains(event.target as Node)) {
         setMoveMenu(null)
       }
+      if (!(event.target as Element).closest('.sidebar-project-menu-popover, .sidebar-project-menu-trigger')) setProjectMenu(null)
+      if (!(event.target as Element).closest('.sidebar-conversation-menu-popover, .sidebar-conversation-menu-trigger')) setConversationMenu(null)
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
@@ -305,7 +313,7 @@ export default function DashboardSidebar({
 
     // If active workspace is known, initialize its project folder
     const activeProj = getProjectInfo(activeWorkspacePath)
-    if (activeProj) {
+    if (activeProj && !removedProjectIds.includes(activeProj.id)) {
       groupsMap.set(activeProj.id, { id: activeProj.id, name: activeProj.name, sessions: [] })
     }
 
@@ -313,6 +321,10 @@ export default function DashboardSidebar({
       const effectivePath = session.workspacePath || null
       const proj = getProjectInfo(effectivePath)
       if (proj) {
+        if (removedProjectIds.includes(proj.id)) {
+          recents.push(session)
+          continue
+        }
         if (!groupsMap.has(proj.id)) {
           groupsMap.set(proj.id, { id: proj.id, name: proj.name, sessions: [] })
         }
@@ -333,7 +345,7 @@ export default function DashboardSidebar({
     })
 
     return { projectGroups: sortedGroups, recentSessions: recents }
-  }, [conversationSessions, activeWorkspacePath, activeConversationId, projectOrder])
+  }, [conversationSessions, activeWorkspacePath, activeConversationId, projectOrder, removedProjectIds])
 
   const availableProjects = useMemo(() => {
     const getProjectInfo = (workspacePath?: string | null): { id: string; name: string } | null => {
@@ -346,23 +358,23 @@ export default function DashboardSidebar({
     }
 
     const map = new Map<string, string>()
-    if (activeWorkspacePath) {
+    if (activeWorkspacePath && !removedProjectIds.includes(activeWorkspacePath.replace(/[\\/]+$/, '').trim())) {
       const info = getProjectInfo(activeWorkspacePath)
       if (info) map.set(info.id, info.name)
     }
     for (const g of projectGroups) {
-      map.set(g.id, g.name)
+      if (!removedProjectIds.includes(g.id)) map.set(g.id, g.name)
     }
     if (recentWorkspacePaths) {
       for (const p of recentWorkspacePaths) {
         const info = getProjectInfo(p)
-        if (info && !map.has(info.id)) {
+        if (info && !removedProjectIds.includes(info.id) && !map.has(info.id)) {
           map.set(info.id, info.name)
         }
       }
     }
     return Array.from(map.entries()).map(([path, name]) => ({ path, name }))
-  }, [projectGroups, activeWorkspacePath, recentWorkspacePaths])
+  }, [projectGroups, activeWorkspacePath, recentWorkspacePaths, removedProjectIds])
 
   const openMoveMenu = (event: ReactMouseEvent, session: ChatSessionItem) => {
     event.stopPropagation()
@@ -409,6 +421,15 @@ export default function DashboardSidebar({
 
   const toggleShowMore = (projectId: string) => {
     setExpandedShowMore((prev) => ({ ...prev, [projectId]: !prev[projectId] }))
+  }
+
+  const removeProjectFromSidebar = (projectId: string) => {
+    setRemovedProjectIds((previous) => {
+      const next = [...new Set([...previous, projectId])]
+      try { localStorage.setItem('mint_removed_sidebar_projects', JSON.stringify(next)) } catch { /* ignore */ }
+      return next
+    })
+    setProjectMenu(null)
   }
 
   // Remember the last active CLI session so it remains pinned in the sidebar
@@ -849,32 +870,21 @@ export default function DashboardSidebar({
                         <span className="sidebar-project-group-name">{group.name}</span>
                       </span>
                       <span className="sidebar-project-group-right">
-                        {onNewChatInProject && (
-                          <span
-                            role="button"
-                            tabIndex={0}
-                            className="sidebar-project-add-btn"
-                            title={`New chat in ${group.name}`}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setCollapsedProjects((prev) => ({ ...prev, [group.id]: false }))
-                              onNewChatInProject(group.id)
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                e.stopPropagation()
-                                setCollapsedProjects((prev) => ({ ...prev, [group.id]: false }))
-                                onNewChatInProject(group.id)
-                              }
-                            }}
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <line x1="12" y1="5" x2="12" y2="19"></line>
-                              <line x1="5" y1="12" x2="19" y2="12"></line>
-                            </svg>
-                          </span>
-                        )}
+                        <button
+                          type="button"
+                          className="sidebar-project-menu-trigger"
+                          aria-label={`Project actions for ${group.name}`}
+                          aria-haspopup="menu"
+                          aria-expanded={projectMenu?.projectId === group.id}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const rect = e.currentTarget.getBoundingClientRect()
+                            setProjectMenu(projectMenu?.projectId === group.id ? null : { projectId: group.id, top: Math.min(rect.bottom + 4, window.innerHeight - 120), left: Math.max(8, Math.min(rect.right - 190, window.innerWidth - 198)) })
+                          }}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+                        </button>
                         <span className="sidebar-project-group-count">{group.sessions.length}</span>
                         <span
                           className="sidebar-project-group-chevron"
@@ -889,6 +899,12 @@ export default function DashboardSidebar({
                         </span>
                       </span>
                     </div>
+                    {projectMenu?.projectId === group.id && (
+                      <div className="sidebar-project-menu-popover" role="menu" style={{ top: projectMenu.top, left: projectMenu.left }} onClick={(e) => e.stopPropagation()}>
+                        {onNewChatInProject && <button type="button" role="menuitem" onClick={() => { setCollapsedProjects((prev) => ({ ...prev, [group.id]: false })); onNewChatInProject(group.id); setProjectMenu(null) }}>＋ <span>New chat in project</span></button>}
+                        <button type="button" role="menuitem" className="is-destructive" onClick={() => removeProjectFromSidebar(group.id)}>⌫ <span>Remove from sidebar</span></button>
+                      </div>
+                    )}
                     {!isCollapsed && (
                       <div className="sidebar-project-sessions">
                         {visibleSessions.map((session) => (
@@ -928,6 +944,17 @@ export default function DashboardSidebar({
                             )}
                             {editingSessionId !== session.id && (
                               <>
+                                <span role="button" tabIndex={0} className="sidebar-conversation-menu-trigger" aria-label={`Actions for ${session.title || 'conversation'}`} onClick={(event) => {
+                                  event.stopPropagation()
+                                  const rect = event.currentTarget.getBoundingClientRect()
+                                  setConversationMenu({ sessionId: session.id, top: Math.min(rect.bottom + 4, window.innerHeight - 120), left: Math.max(8, Math.min(rect.right - 190, window.innerWidth - 198)) })
+                                }} onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault(); event.stopPropagation()
+                                    const rect = event.currentTarget.getBoundingClientRect()
+                                    setConversationMenu({ sessionId: session.id, top: Math.min(rect.bottom + 4, window.innerHeight - 120), left: Math.max(8, Math.min(rect.right - 190, window.innerWidth - 198)) })
+                                  }
+                                }}><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg></span>
                                 <span
                                   className="sidebar-chat-edit"
                                   role="button"
@@ -1063,6 +1090,17 @@ export default function DashboardSidebar({
                   )}
                   {editingSessionId !== session.id && (
                     <>
+                      <span role="button" tabIndex={0} className="sidebar-conversation-menu-trigger" aria-label={`Actions for ${session.title || 'conversation'}`} onClick={(event) => {
+                        event.stopPropagation()
+                        const rect = event.currentTarget.getBoundingClientRect()
+                        setConversationMenu({ sessionId: session.id, top: Math.min(rect.bottom + 4, window.innerHeight - 120), left: Math.max(8, Math.min(rect.right - 190, window.innerWidth - 198)) })
+                      }} onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault(); event.stopPropagation()
+                          const rect = event.currentTarget.getBoundingClientRect()
+                          setConversationMenu({ sessionId: session.id, top: Math.min(rect.bottom + 4, window.innerHeight - 120), left: Math.max(8, Math.min(rect.right - 190, window.innerWidth - 198)) })
+                        }
+                      }}><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg></span>
                       <span
                         className="sidebar-chat-edit"
                         role="button"
@@ -1288,6 +1326,16 @@ export default function DashboardSidebar({
           )}
         </div>
       )}
+
+      {conversationMenu && (() => {
+        const session = conversationSessions.find((item) => item.id === conversationMenu.sessionId)
+        if (!session) return null
+        return <div className="sidebar-conversation-menu-popover" role="menu" style={{ top: conversationMenu.top, left: conversationMenu.left }} onClick={(event) => event.stopPropagation()}>
+          <button type="button" role="menuitem" onClick={() => { setEditingSessionId(session.id); setEditTitleValue(session.title || ''); setConversationMenu(null) }}>✎ <span>Rename</span></button>
+          {onUpdateSessionWorkspace && <button type="button" role="menuitem" onClick={(event) => { setConversationMenu(null); openMoveMenu(event as any, session) }}>↗ <span>Move to project</span></button>}
+          <button type="button" role="menuitem" className="is-destructive" onClick={() => { onDeleteConversation(session.id); setConversationMenu(null) }}>⌫ <span>Delete conversation</span></button>
+        </div>
+      })()}
     </aside>
   )
 }

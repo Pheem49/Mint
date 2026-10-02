@@ -365,7 +365,7 @@
 
 .user-message .message-bubble {
   background: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 70%, #000000) 100%);
-  color: white;
+  color: var(--text-on-accent);
   border-radius: 22px 22px 6px 22px;
   box-shadow: var(--glow-accent-md), inset 1px 1px 0 rgba(255, 255, 255, 0.2);
 }
@@ -778,7 +778,7 @@
 #chat-tool-btn,
 #screen-capture-btn {
   background: var(--accent);
-  color: white;
+  color: var(--text-on-accent);
   border: none;
   width: 44px;
   height: 40px;

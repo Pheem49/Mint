@@ -37,16 +37,9 @@ export function useProviderModels(
     setLoading(true)
 
     fetchProviderModels(provider, apiKey, baseUrl)
-      .then((live) => {
+      .then((available) => {
         if (id !== reqId.current) return
-        if (live && live.length > 0) {
-          const presets = getPresets(provider)
-          const merged = [...live]
-          for (const p of presets) {
-            if (!merged.includes(p)) merged.push(p)
-          }
-          setModels(merged)
-        }
+        setModels(available)
       })
       .catch(() => { /* network error — presets already in state */ })
       .finally(() => { if (id === reqId.current) setLoading(false) })

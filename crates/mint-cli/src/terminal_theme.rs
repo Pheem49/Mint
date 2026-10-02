@@ -172,6 +172,7 @@ pub const ANSI_ACCENT: &str = "\x1b[38;2;105;230;166m";
 pub const ANSI_ACCENT_BOLD: &str = "\x1b[1;38;2;105;230;166m";
 pub const ANSI_BLUE: &str = "\x1b[38;2;96;165;250m";
 pub const ANSI_BLUE_BOLD: &str = "\x1b[1;38;2;96;165;250m";
+pub const ANSI_BLUE_BOLD_UNDERLINE: &str = "\x1b[1m\x1b[4m\x1b[38;2;96;165;250m";
 pub const ANSI_TEXT: &str = "\x1b[97m";
 pub const ANSI_BRIGHT_TEXT: &str = "\x1b[1;97m";
 pub const ANSI_MUTED: &str = "\x1b[90m";

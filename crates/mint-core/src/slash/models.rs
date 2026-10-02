@@ -153,8 +153,6 @@ pub fn model_options_for_provider(config: &MintConfig, provider: &str) -> Vec<St
 ///
 /// Results are cached for 1 hour inside [`super::model_fetcher`].
 pub async fn model_options_for_provider_async(config: &MintConfig, provider: &str) -> Vec<String> {
-    use super::model_fetcher;
-
     // Resolve the API key and optional base URL for this provider.
     let (api_key, base_url): (&str, Option<&str>) = match provider {
         "gemini" => (&config.api_key, None),
@@ -167,16 +165,22 @@ pub async fn model_options_for_provider_async(config: &MintConfig, provider: &st
         _ => return model_options_for_provider(config, provider),
     };
 
+    model_options_for_provider_with_credentials_async(config, provider, api_key, base_url).await
+}
+
+/// Fetch using credentials supplied by a UI form, then apply the same preset
+/// fallback policy used by the CLI picker.
+pub async fn model_options_for_provider_with_credentials_async(
+    config: &MintConfig,
+    provider: &str,
+    api_key: &str,
+    base_url: Option<&str>,
+) -> Vec<String> {
+    use super::model_fetcher;
+
     let dynamic = model_fetcher::fetch_provider_models(provider, api_key, base_url).await;
     if !dynamic.is_empty() {
-        // Merge: put dynamic list first, then append any presets not already present.
-        let mut merged = dynamic;
-        for preset in model_options_for_provider(config, provider) {
-            if !merged.contains(&preset) {
-                merged.push(preset);
-            }
-        }
-        merged
+        dynamic
     } else {
         // Network/auth error → fall back to static presets.
         model_options_for_provider(config, provider)

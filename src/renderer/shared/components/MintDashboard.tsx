@@ -20,6 +20,7 @@ const {
   listLearnedSkills, addLearnedSkill, deleteLearnedSkill, detectSystemTools, reauthMcpServer,
   listMcpServerTools, setProfileValue, listCronJobs, addCronJob, removeCronJob,
   setCronJobEnabled, listLinkedFolders, addLinkedFolder, removeLinkedFolder, runSlashCommand,
+  linkedFolderStatus, refreshLinkedFolder, listLinkedFolderNotes, readLinkedFolderNote, openLinkedFolderNote,
 } = catalogPlatform
 
 import ChatPanel, { type ConversationActions, type ConversationViewModel } from './ChatPanel'
@@ -747,6 +748,23 @@ export default function MintDashboard() {
                 else byId.delete(change.interactionId)
               }
               return Array.from(byId.values()).sort((a, b) => a.id - b.id)
+            })
+            setAgentActivitySnapshots((current) => {
+              if (!isCurrent()) return current
+              if (conversationCursorRef.current?.chatId === conversationId
+                && conversationCursorRef.current.cursor > batch.cursor) return current
+              const merged = { ...current }
+              for (const change of batch.changes) {
+                const key = String(change.interactionId)
+                if (change.interaction) {
+                  if (change.interaction.agentActivity && Array.isArray(change.interaction.agentActivity)) {
+                    merged[key] = change.interaction.agentActivity
+                  }
+                } else {
+                  delete merged[key]
+                }
+              }
+              return merged
             })
           }
           if (!batch.hasMore) break
@@ -2512,6 +2530,12 @@ export default function MintDashboard() {
                 listLinkedFolders={listLinkedFolders}
                 addLinkedFolder={addLinkedFolder}
                 removeLinkedFolder={removeLinkedFolder}
+                linkedFolderStatus={linkedFolderStatus}
+                refreshLinkedFolder={refreshLinkedFolder}
+                listLinkedFolderNotes={listLinkedFolderNotes}
+                readLinkedFolderNote={readLinkedFolderNote}
+                openLinkedFolderNote={openLinkedFolderNote}
+                canOpenNote={isTauriRuntime()}
                 // Desktop: native Tauri picker. Web: asks `mint web` (same
                 // machine) to open its own dialog via a loopback-gated route.
                 selectFolder={selectLinkedFolderPath}

@@ -378,9 +378,10 @@ function renderAlertBox(type: string, children: ReactNode): ReactNode {
         borderTop: `1px solid ${config.borderSubtle}`,
         borderRight: `1px solid ${config.borderSubtle}`,
         borderBottom: `1px solid ${config.borderSubtle}`,
-        background: config.bg,
+        '--callout-tint': config.bg,
+        '--callout-accent': config.border,
         boxShadow: '0 2px 10px rgba(0, 0, 0, 0.15)',
-      }}
+      } as CSSProperties}
     >
       <div
         style={{
@@ -431,7 +432,7 @@ function renderMessageImage(src: string | undefined, alt: string | undefined, so
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
             {sourceUrl && (
               <a href={url} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, color: 'var(--interactive-fg-hover)' }}>
-                ดูรูปเต็ม
+                View full image
               </a>
             )}
           </div>

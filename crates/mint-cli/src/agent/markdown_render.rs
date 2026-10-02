@@ -537,7 +537,7 @@ pub(crate) fn format_markdown_bold(text: &str) -> String {
                 let leading_spaces_str = &line[..leading_len];
                 let heading_text = trimmed[hash_count + 1..].trim_end();
                 let (style_start, style_end) = match hash_count {
-                    1 => (crate::terminal_theme::ANSI_BLUE_BOLD, RESET),
+                    1 => (crate::terminal_theme::ANSI_BLUE_BOLD_UNDERLINE, RESET),
                     2 => (crate::terminal_theme::ANSI_BLUE_BOLD, RESET),
                     _ => (BRIGHT, RESET),
                 };

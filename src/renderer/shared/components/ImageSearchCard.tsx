@@ -84,7 +84,7 @@ function ImageTile({ image }: { image: ImageSearchHit }) {
         rel="noopener noreferrer"
         style={{ position: 'absolute', right: 6, bottom: 5, zIndex: 1, padding: '2px 5px', borderRadius: 4, background: 'var(--surface-strong)', color: 'var(--interactive-fg-hover)', fontSize: 10 }}
       >
-        ดูรูปเต็ม
+        View full image
       </a>
     </div>
   )

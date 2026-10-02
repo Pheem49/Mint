@@ -75,6 +75,7 @@ struct TurnLease {
     id: i64,
     heartbeat: tokio::task::JoinHandle<()>,
     finished: bool,
+    activity: Arc<std::sync::Mutex<Vec<AgentProgress>>>,
 }
 
 impl TurnLease {
@@ -99,6 +100,7 @@ impl TurnLease {
             id,
             heartbeat,
             finished: false,
+            activity: Arc::new(std::sync::Mutex::new(Vec::new())),
         };
         loop {
             match memory.claim_turn(chat_id, id) {
@@ -112,19 +114,47 @@ impl TurnLease {
         }
     }
 
-    fn complete(&mut self, response: &ChatResponse) -> Result<(), MemoryError> {
+    fn persist_activity(&self) {
+        if let Ok(lock) = self.activity.lock() {
+            let compacted = compact_agent_progress(&lock);
+            if !compacted.is_empty() {
+                if let Ok(activity_json) = serde_json::to_string(&compacted) {
+                    let _ = self.memory.set_interaction_agent_activity_json(self.id, &activity_json);
+                }
+            }
+        }
+    }
+
+    fn complete_with_summary(
+        &mut self,
+        summary: &str,
+        provider: &str,
+        model: &str,
+        fallback_provider: Option<&str>,
+    ) -> Result<(), MemoryError> {
+        self.persist_activity();
         self.memory.finish_turn(
             self.id,
-            &response.text,
-            &response.provider,
-            &response.model,
-            response.fallback_provider.as_deref(),
+            summary,
+            provider,
+            model,
+            fallback_provider,
         )?;
         self.finished = true;
         Ok(())
     }
 
+    fn complete(&mut self, response: &ChatResponse) -> Result<(), MemoryError> {
+        self.complete_with_summary(
+            &response.text,
+            &response.provider,
+            &response.model,
+            response.fallback_provider.as_deref(),
+        )
+    }
+
     fn fail(&mut self) {
+        self.persist_activity();
         let _ = self.memory.end_turn(self.id, "failed");
         self.finished = true;
     }
@@ -134,6 +164,7 @@ impl Drop for TurnLease {
     fn drop(&mut self) {
         self.heartbeat.abort();
         if !self.finished {
+            self.persist_activity();
             let _ = self.memory.end_turn(self.id, "interrupted");
         }
     }
@@ -232,6 +263,7 @@ pub async fn orchestrate_chat(
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        turn.id,
     );
     Ok(response)
 }
@@ -273,6 +305,7 @@ where
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        turn.id,
     );
     Ok(response)
 }
@@ -305,6 +338,7 @@ pub async fn orchestrate_chat_with_fallback(
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        turn.id,
     );
     Ok((response, fallback))
 }
@@ -346,6 +380,7 @@ where
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        turn.id,
     );
     Ok((response, fallback))
 }
@@ -706,6 +741,62 @@ pub fn is_internal_cot(text: &str) -> bool {
         return true;
     }
     false
+}
+
+/// Compacts an agent progress event stream for storage, removing transport-only
+/// streaming deltas (`ThinkingDelta`) while preserving complete `ExtendedThinking`
+/// blocks, or synthesizing an `ExtendedThinking` block for any interrupted delta sequence.
+pub fn compact_agent_progress(progress: &[AgentProgress]) -> Vec<AgentProgress> {
+    let completed_ids: std::collections::HashSet<String> = progress
+        .iter()
+        .filter_map(|event| match event {
+            AgentProgress::ExtendedThinking { id: Some(id), .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+
+    let mut result = Vec::new();
+    let mut interrupted_order: Vec<String> = Vec::new();
+    let mut interrupted: std::collections::HashMap<String, (String, Option<u64>)> =
+        std::collections::HashMap::new();
+
+    for event in progress {
+        match event {
+            AgentProgress::ThinkingDelta {
+                id,
+                delta,
+                elapsed_ms,
+            } => {
+                if !completed_ids.contains(id) {
+                    if !interrupted.contains_key(id) {
+                        interrupted_order.push(id.clone());
+                    }
+                    interrupted
+                        .entry(id.clone())
+                        .and_modify(|(text, elapsed)| {
+                            text.push_str(delta);
+                            *elapsed = Some(*elapsed_ms);
+                        })
+                        .or_insert_with(|| (delta.clone(), Some(*elapsed_ms)));
+                }
+            }
+            _ => {
+                result.push(event.clone());
+            }
+        }
+    }
+
+    for id in interrupted_order {
+        if let Some((thought, elapsed_ms)) = interrupted.remove(&id) {
+            result.push(AgentProgress::ExtendedThinking {
+                id: Some(id),
+                thought,
+                elapsed_ms,
+            });
+        }
+    }
+
+    result
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1368,6 +1459,13 @@ where
         let chat_id = chat_id.as_str();
         let memory = MemoryStore::open_default()?;
         let mut turn = TurnLease::start(&memory, chat_id, task).await?;
+        let record_activity = Arc::clone(&turn.activity);
+        let mut progress = move |event: AgentProgress| {
+            if let Ok(mut lock) = record_activity.lock() {
+                lock.push(event.clone());
+            }
+            progress(event);
+        };
         let resolved_task = resolve_github_links(task, config).await;
         let agent_result = async {
         // Subagent runs use a synthetic `{parent_chat_id}::subagent::{name}` chat id
@@ -2002,11 +2100,6 @@ where
                             on_chunk(remainder.to_owned());
                         }
 
-                        memory.finish_turn(
-                            turn.id, &summary, &final_provider, &final_model,
-                            final_fallback.as_deref(),
-                        )?;
-                        turn.finished = true;
                         memory.save_workspace_session(
                             &root.to_string_lossy(),
                             &summary,
@@ -2023,6 +2116,7 @@ where
                             config.clone(),
                             task.to_string(),
                             summary.clone(),
+                            turn.id,
                         );
                         if config.auto_skill_writing && looks_skill_worthy(step, &action_counts) {
                             spawn_auto_skill_write(
@@ -2052,6 +2146,13 @@ where
                         progress(AgentProgress::RunCompleted {
                             summary: run_summary,
                         });
+
+                        turn.complete_with_summary(
+                            &summary,
+                            &final_provider,
+                            &final_model,
+                            final_fallback.as_deref(),
+                        )?;
 
                         return Ok(AgentResult {
                             provider: final_provider,
@@ -3272,6 +3373,118 @@ mod tests {
             },
         )
         .await;
+    }
+
+    #[test]
+    fn test_compact_agent_progress_cleans_deltas_and_preserves_tools() {
+        let events = vec![
+            AgentProgress::ToolStart {
+                action: "read_file".into(),
+                input: serde_json::json!({ "path": "src/main.rs" }),
+                subagent: None,
+            },
+            AgentProgress::ThinkingDelta {
+                id: "cot-1".into(),
+                delta: "Reading ".into(),
+                elapsed_ms: 100,
+            },
+            AgentProgress::ThinkingDelta {
+                id: "cot-1".into(),
+                delta: "the file...".into(),
+                elapsed_ms: 200,
+            },
+            AgentProgress::ExtendedThinking {
+                id: Some("cot-1".into()),
+                thought: "Reading the file...".into(),
+                elapsed_ms: Some(200),
+            },
+            AgentProgress::ToolEnd {
+                action: "read_file".into(),
+                input: serde_json::json!({ "path": "src/main.rs" }),
+                result: "fn main() {}".into(),
+                subagent: None,
+            },
+            AgentProgress::ThinkingDelta {
+                id: "cot-interrupted".into(),
+                delta: "Let's check ".into(),
+                elapsed_ms: 300,
+            },
+            AgentProgress::ThinkingDelta {
+                id: "cot-interrupted".into(),
+                delta: "more lines".into(),
+                elapsed_ms: 350,
+            },
+        ];
+
+        let compacted = compact_agent_progress(&events);
+        assert!(!compacted.iter().any(|e| matches!(e, AgentProgress::ThinkingDelta { id, .. } if id == "cot-1")));
+        assert!(compacted.iter().any(|e| matches!(e, AgentProgress::ToolStart { action, .. } if action == "read_file")));
+        assert!(compacted.iter().any(|e| matches!(e, AgentProgress::ToolEnd { action, .. } if action == "read_file")));
+        assert!(compacted.iter().any(|e| matches!(e, AgentProgress::ExtendedThinking { id: Some(id), thought, .. } if id == "cot-1" && thought == "Reading the file...")));
+        assert!(compacted.iter().any(|e| matches!(e, AgentProgress::ExtendedThinking { id: Some(id), thought, .. } if id == "cot-interrupted" && thought == "Let's check more lines")));
+    }
+
+    #[tokio::test]
+    async fn test_turn_lease_persists_agent_activity_on_complete() {
+        let memory = MemoryStore::open(std::env::temp_dir().join(format!(
+            "mint-turn-lease-complete-{}.sqlite",
+            uuid::Uuid::new_v4()
+        )));
+        let mut turn = TurnLease::start(&memory, "cli::test_complete", "hello").await.unwrap();
+        let turn_id = turn.id;
+        turn.activity.lock().unwrap().push(AgentProgress::ToolStart {
+            action: "run_shell".into(),
+            input: serde_json::json!({ "command": "ls -la" }),
+            subagent: None,
+        });
+        turn.activity.lock().unwrap().push(AgentProgress::ToolEnd {
+            action: "run_shell".into(),
+            input: serde_json::json!({ "command": "ls -la" }),
+            result: "file.txt".into(),
+            subagent: None,
+        });
+
+        turn.complete_with_summary("Done listing files", "test_provider", "test_model", None).unwrap();
+
+        let rows = memory.interactions_for_chat("cli::test_complete").unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.id, turn_id);
+        assert_eq!(row.status, "completed");
+        assert_eq!(row.ai_text, "Done listing files");
+        assert!(row.agent_activity.is_some());
+        let activity_val = row.agent_activity.as_ref().unwrap();
+        let activity_arr = activity_val.as_array().unwrap();
+        assert_eq!(activity_arr.len(), 2);
+        assert_eq!(activity_arr[0]["type"], "ToolStart");
+        assert_eq!(activity_arr[1]["type"], "ToolEnd");
+    }
+
+    #[tokio::test]
+    async fn test_turn_lease_persists_partial_activity_on_interrupt() {
+        let memory = MemoryStore::open(std::env::temp_dir().join(format!(
+            "mint-turn-lease-interrupt-{}.sqlite",
+            uuid::Uuid::new_v4()
+        )));
+        let turn = TurnLease::start(&memory, "cli::test_interrupt", "run something").await.unwrap();
+        let turn_id = turn.id;
+        turn.activity.lock().unwrap().push(AgentProgress::ToolStart {
+            action: "read_file".into(),
+            input: serde_json::json!({ "path": "test.txt" }),
+            subagent: None,
+        });
+        drop(turn);
+
+        let rows = memory.interactions_for_chat("cli::test_interrupt").unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.id, turn_id);
+        assert_eq!(row.status, "interrupted");
+        assert!(row.agent_activity.is_some());
+        let activity_val = row.agent_activity.as_ref().unwrap();
+        let activity_arr = activity_val.as_array().unwrap();
+        assert_eq!(activity_arr.len(), 1);
+        assert_eq!(activity_arr[0]["type"], "ToolStart");
     }
 
     #[test]

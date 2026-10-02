@@ -2114,7 +2114,38 @@ fn cmd_link(rest: &str) -> SlashResponse {
             Ok(false) => error(format!("No linked folder named `{args}`.")),
             Err(e) => error(e),
         },
-        _ => error("Usage: /link [list] | add <name> | <path> | <desc> | remove <name>"),
+        "refresh" if !args.is_empty() => match crate::refresh_linked_folder(args) {
+            Ok(status) => message(format!(
+                "Indexed {} files in `{args}`.",
+                status.indexed_files
+            )),
+            Err(e) => error(e),
+        },
+        "notes" if !args.is_empty() => match crate::list_linked_folder_notes(args) {
+            Ok(notes) if notes.is_empty() => message(format!("No saved notes in `{args}`.")),
+            Ok(notes) => message(md_list(
+                &notes
+                    .iter()
+                    .map(|n| format!("`{}` — {} — {}", n.created_at, n.status, n.path))
+                    .collect::<Vec<_>>(),
+            )),
+            Err(e) => error(e),
+        },
+        "save" => {
+            let Some((name, content)) = args.split_once('|') else {
+                return error("Usage: /link save <name> | <text>");
+            };
+            match crate::save_linked_folder_note(name.trim(), content.trim()) {
+                Ok(note) if note.status == "saved" => {
+                    message(format!("Saved note to `{}`: `{}`", name.trim(), note.path))
+                }
+                Ok(note) => error(note.error.unwrap_or_else(|| "note was not saved".into())),
+                Err(e) => error(e),
+            }
+        }
+        _ => error(
+            "Usage: /link [list] | add <name> | <path> | <desc> | remove <name> | refresh <name> | notes <name> | save <name> | <text>",
+        ),
     }
 }
 

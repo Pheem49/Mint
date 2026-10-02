@@ -243,20 +243,34 @@
   --glass-blur: none !important;
   --bg-surface: #121215;
   --bg-surface-raised: #18181c;
+  --bg-surface-soft: #1b1b20;
+  --bg-surface-hover: #25252b;
 }
 
 [data-theme="light"][data-surface="opaque"] {
   --bg-surface: #ffffff;
   --bg-surface-raised: #ffffff;
+  --bg-surface-soft: #f8fafc;
+  --bg-surface-hover: #f1f5f9;
 }
 
 [data-theme="midnight"][data-surface="opaque"] {
   --bg-surface: #050508;
   --bg-surface-raised: #0d0d12;
+  --bg-surface-soft: #121218;
+  --bg-surface-hover: #1a1a22;
 }
 
 [data-surface="glass"] {
   --glass-blur: blur(16px);
+}
+
+.chat-callout-card {
+  background: var(--callout-tint);
+}
+
+[data-surface="opaque"] .chat-callout-card {
+  background: color-mix(in srgb, var(--bg-surface) 92%, var(--callout-accent) 8%);
 }
 
 /* ==========================================================================

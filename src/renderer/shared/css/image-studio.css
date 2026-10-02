@@ -331,7 +331,7 @@
   border: none;
   border-radius: var(--radius-lg);
   background: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 80%, #000) 100%);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 0.88rem;
   font-weight: 600;
   cursor: pointer;
