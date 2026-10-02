@@ -23,14 +23,14 @@ pub fn prompt_interactive_select(
         return Ok(None);
     }
 
-    let mut selected = options
-        .iter()
-        .position(|p| p == current_selection)
-        .unwrap_or(0);
+    const MAX_VISIBLE: usize = 12;
+    let total_options = options.len();
+    let has_scroll = total_options > MAX_VISIBLE;
 
-    // Title line + one line per option — fixed for this call's whole
-    // lifetime, so the viewport is sized once and only ever redrawn.
-    let height = (options.len() as u16).saturating_add(1);
+    // Viewport height: title line + visible items + (if scrolling: status line)
+    let visible_capacity = total_options.min(MAX_VISIBLE);
+    let height = (visible_capacity as u16) + if has_scroll { 2 } else { 1 };
+
     let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
     let Ok(mut terminal) = agent::with_raw_mode_for_cursor_query(move || {
         ratatui::Terminal::with_options(
@@ -48,8 +48,48 @@ pub fn prompt_interactive_select(
         return Ok(None);
     }
 
-    let render = |terminal: &mut ratatui::Terminal<_>, selected: usize| {
-        let nav_hint = if options.len() <= 9 {
+    let mut filter_text = String::new();
+    let get_filtered = |filter: &str| -> Vec<usize> {
+        if filter.is_empty() {
+            (0..options.len()).collect()
+        } else {
+            let q = filter.to_lowercase();
+            options
+                .iter()
+                .enumerate()
+                .filter(|(_, opt)| opt.to_lowercase().contains(&q))
+                .map(|(idx, _)| idx)
+                .collect()
+        }
+    };
+
+    let mut filtered_indices = get_filtered(&filter_text);
+    let mut selected_filtered = options
+        .iter()
+        .position(|p| p == current_selection)
+        .and_then(|idx| filtered_indices.iter().position(|&fi| fi == idx))
+        .unwrap_or(0);
+    let mut scroll_offset = 0usize;
+
+    let render = |terminal: &mut ratatui::Terminal<_>,
+                  selected: usize,
+                  scroll: &mut usize,
+                  filter: &str,
+                  filtered: &[usize]| {
+        let total = filtered.len();
+        if total > 0 {
+            if selected < *scroll {
+                *scroll = selected;
+            } else if selected >= *scroll + visible_capacity {
+                *scroll = selected + 1 - visible_capacity;
+            }
+        } else {
+            *scroll = 0;
+        }
+
+        let nav_hint = if !filter.is_empty() {
+            format!("(Filter: \"{filter}\" • Esc to clear, Enter to select)")
+        } else if options.len() <= 9 {
             format!(
                 "(Press 1-{}, ↑/↓ to navigate, Enter to select, Esc to cancel)",
                 options.len()
@@ -57,22 +97,53 @@ pub fn prompt_interactive_select(
         } else {
             "(Use ↑/↓ to navigate, Enter to select, Esc to cancel)".to_string()
         };
+
         let mut lines = vec![format!("{BLUE}{title} {nav_hint}:{RESET}")];
-        for (i, opt) in options.iter().enumerate() {
-            let prefix = if options.len() <= 9
-                && !opt.starts_with('[')
-                && !opt.starts_with(&format!("{}.", i + 1))
-            {
-                format!("[{}] ", i + 1)
-            } else {
-                String::new()
-            };
-            if i == selected {
-                lines.push(format!("  {BLUE}❯ {prefix}{opt}{RESET}"));
-            } else {
-                lines.push(format!("    {DIM}{prefix}{opt}{RESET}"));
+
+        if total == 0 {
+            lines.push(format!("  {DIM}(No matching options){RESET}"));
+        } else {
+            let start = *scroll;
+            let end = (start + visible_capacity).min(total);
+            for i in start..end {
+                let orig_idx = filtered[i];
+                let opt = &options[orig_idx];
+                let prefix = if options.len() <= 9
+                    && filter.is_empty()
+                    && !opt.starts_with('[')
+                    && !opt.starts_with(&format!("{}.", orig_idx + 1))
+                {
+                    format!("[{}] ", orig_idx + 1)
+                } else {
+                    String::new()
+                };
+
+                if i == selected {
+                    lines.push(format!("  {BLUE}❯ {prefix}{opt}{RESET}"));
+                } else {
+                    lines.push(format!("    {DIM}{prefix}{opt}{RESET}"));
+                }
             }
         }
+
+        if has_scroll || !filter.is_empty() {
+            if total > 0 {
+                let start = *scroll + 1;
+                let end = (*scroll + visible_capacity).min(total);
+                lines.push(format!(
+                    "{DIM}  [Showing {start}-{end} of {total}] • Use ↑/↓ to scroll • Type to filter{RESET}"
+                ));
+            } else {
+                lines.push(format!(
+                    "{DIM}  [0 of {total}] • Press Backspace or Esc to clear filter{RESET}"
+                ));
+            }
+        }
+
+        while lines.len() < height as usize {
+            lines.push(String::new());
+        }
+
         if let Ok(text) = lines.join("\n").into_text() {
             let _ = terminal.draw(|frame| {
                 let area = frame.area();
@@ -81,7 +152,13 @@ pub fn prompt_interactive_select(
         }
     };
 
-    render(&mut terminal, selected);
+    render(
+        &mut terminal,
+        selected_filtered,
+        &mut scroll_offset,
+        &filter_text,
+        &filtered_indices,
+    );
 
     let choice = loop {
         match event::poll(std::time::Duration::from_millis(100)) {
@@ -97,33 +174,99 @@ pub fn prompt_interactive_select(
                         }
 
                         match key_event.code {
-                            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                            KeyCode::Char(c)
+                                if c.is_ascii_digit()
+                                    && c != '0'
+                                    && filter_text.is_empty()
+                                    && options.len() <= 9 =>
+                            {
                                 let idx = (c as usize) - ('1' as usize);
                                 if idx < options.len() {
                                     break Some(idx);
                                 }
                             }
                             KeyCode::Up => {
-                                selected = if selected > 0 {
-                                    selected - 1
-                                } else {
-                                    options.len() - 1
-                                };
-                                render(&mut terminal, selected);
+                                if !filtered_indices.is_empty() {
+                                    selected_filtered = if selected_filtered > 0 {
+                                        selected_filtered - 1
+                                    } else {
+                                        filtered_indices.len() - 1
+                                    };
+                                    render(
+                                        &mut terminal,
+                                        selected_filtered,
+                                        &mut scroll_offset,
+                                        &filter_text,
+                                        &filtered_indices,
+                                    );
+                                }
                             }
                             KeyCode::Down | KeyCode::Tab => {
-                                selected = if selected < options.len() - 1 {
-                                    selected + 1
-                                } else {
-                                    0
-                                };
-                                render(&mut terminal, selected);
+                                if !filtered_indices.is_empty() {
+                                    selected_filtered =
+                                        if selected_filtered < filtered_indices.len() - 1 {
+                                            selected_filtered + 1
+                                        } else {
+                                            0
+                                        };
+                                    render(
+                                        &mut terminal,
+                                        selected_filtered,
+                                        &mut scroll_offset,
+                                        &filter_text,
+                                        &filtered_indices,
+                                    );
+                                }
                             }
                             KeyCode::Enter => {
-                                break Some(selected);
+                                if let Some(&orig_idx) = filtered_indices.get(selected_filtered) {
+                                    break Some(orig_idx);
+                                }
                             }
                             KeyCode::Esc => {
-                                break None;
+                                if !filter_text.is_empty() {
+                                    filter_text.clear();
+                                    filtered_indices = get_filtered(&filter_text);
+                                    selected_filtered = 0;
+                                    scroll_offset = 0;
+                                    render(
+                                        &mut terminal,
+                                        selected_filtered,
+                                        &mut scroll_offset,
+                                        &filter_text,
+                                        &filtered_indices,
+                                    );
+                                } else {
+                                    break None;
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                if !filter_text.is_empty() {
+                                    filter_text.pop();
+                                    filtered_indices = get_filtered(&filter_text);
+                                    selected_filtered = 0;
+                                    scroll_offset = 0;
+                                    render(
+                                        &mut terminal,
+                                        selected_filtered,
+                                        &mut scroll_offset,
+                                        &filter_text,
+                                        &filtered_indices,
+                                    );
+                                }
+                            }
+                            KeyCode::Char(c) if !c.is_control() => {
+                                filter_text.push(c);
+                                filtered_indices = get_filtered(&filter_text);
+                                selected_filtered = 0;
+                                scroll_offset = 0;
+                                render(
+                                    &mut terminal,
+                                    selected_filtered,
+                                    &mut scroll_offset,
+                                    &filter_text,
+                                    &filtered_indices,
+                                );
                             }
                             _ => {}
                         }

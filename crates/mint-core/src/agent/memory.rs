@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -27,9 +27,15 @@ pub fn scoped_chat_id(chat_id: &str, _workspace_path: Option<&str>) -> String {
 /// (`"cli::subagent::<name>"`, or `"cli::<hash>::subagent::<name>"`) —
 /// those must keep behaving like a normal, deletable conversation exactly
 /// as they do today, unaffected by workspace scoping.
-fn is_cli_chat_id(chat_id: &str) -> bool {
+pub fn is_cli_chat_id(chat_id: &str) -> bool {
     chat_id == CHAT_CLI_ID
         || (chat_id.starts_with(&format!("{CHAT_CLI_ID}::")) && !chat_id.contains("::subagent::"))
+}
+
+pub fn generate_cli_session_id() -> String {
+    let raw_uuid = uuid::Uuid::new_v4().to_string();
+    let short_id = &raw_uuid.replace('-', "")[..12];
+    format!("cli::{short_id}")
 }
 
 /// The subagent name embedded in a chat id of the form
@@ -72,11 +78,36 @@ pub struct InteractionMemory {
     pub model: String,
     pub fallback_provider: Option<String>,
     pub created_at: String,
+    pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_activity: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationChange {
+    pub sequence: i64,
+    pub interaction_id: i64,
+    pub interaction: Option<InteractionMemory>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationChanges {
+    pub changes: Vec<ConversationChange>,
+    pub cursor: i64,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationSnapshot {
+    pub interactions: Vec<InteractionMemory>,
+    pub cursor: i64,
+    pub has_older: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatSession {
     pub id: String,
@@ -84,6 +115,16 @@ pub struct ChatSession {
     pub kind: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main_language: Option<String>,
+    #[serde(default)]
+    pub message_count: usize,
+    #[serde(default)]
+    pub total_bytes: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -220,6 +261,232 @@ impl MemoryStore {
         Ok(connection.last_insert_rowid())
     }
 
+    /// Insert a visible prompt before any provider or tool work begins.
+    pub fn start_turn(&self, chat_id: &str, user_text: &str) -> Result<i64, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        ensure_chat_session_row(&tx, &chat_id)?;
+        tx.execute(
+            "INSERT INTO interaction_memories (chat_id, user_text, ai_text, status, lease_until)
+             VALUES (?1, ?2, '', 'queued', unixepoch() + 45)",
+            params![chat_id, user_text],
+        )?;
+        let id = tx.last_insert_rowid();
+        tx.execute(
+            "UPDATE chat_sessions SET title = CASE
+               WHEN title = 'New chat' AND trim(?2) != '' THEN substr(trim(?2), 1, 80)
+               ELSE title END, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            params![chat_id, user_text],
+        )?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// Claim only the oldest unfinished turn. The short transaction never spans AI work.
+    pub fn claim_turn(&self, chat_id: &str, id: i64) -> Result<bool, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "UPDATE interaction_memories SET status = 'interrupted', lease_until = 0
+             WHERE chat_id = ?1 AND status IN ('queued', 'running') AND lease_until < unixepoch()",
+            params![chat_id],
+        )?;
+        let own_status: Option<String> = tx
+            .query_row(
+                "SELECT status FROM interaction_memories WHERE id = ?1 AND chat_id = ?2",
+                params![id, chat_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if own_status.as_deref() != Some("queued") {
+            tx.commit()?;
+            return Err(MemoryError::Database(rusqlite::Error::QueryReturnedNoRows));
+        }
+        let earlier: i64 = tx.query_row(
+            "SELECT count(*) FROM interaction_memories
+             WHERE chat_id = ?1 AND id < ?2 AND status IN ('queued', 'running')",
+            params![chat_id, id],
+            |row| row.get(0),
+        )?;
+        let claimed = if earlier == 0 {
+            tx.execute(
+                "UPDATE interaction_memories SET status = 'running', lease_until = unixepoch() + 45
+                 WHERE id = ?1 AND chat_id = ?2 AND status = 'queued'",
+                params![id, chat_id],
+            )? == 1
+        } else {
+            false
+        };
+        tx.commit()?;
+        Ok(claimed)
+    }
+
+    pub fn renew_turn(&self, id: i64) -> Result<(), MemoryError> {
+        self.connection()?.execute(
+            "UPDATE interaction_memories SET lease_until = unixepoch() + 45
+             WHERE id = ?1 AND status IN ('queued', 'running')",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    fn expire_abandoned_turns(&self, chat_id: &str) -> Result<(), MemoryError> {
+        self.connection()?.execute(
+            "UPDATE interaction_memories SET status = 'interrupted', lease_until = 0
+             WHERE chat_id = ?1 AND status IN ('queued', 'running') AND lease_until < unixepoch()",
+            params![normalized_chat_id(chat_id)],
+        )?;
+        Ok(())
+    }
+
+    pub fn finish_turn(
+        &self,
+        id: i64,
+        ai_text: &str,
+        provider: &str,
+        model: &str,
+        fallback_provider: Option<&str>,
+    ) -> Result<(), MemoryError> {
+        let connection = self.connection()?;
+        let changed = connection.execute(
+            "UPDATE interaction_memories SET ai_text = ?2, provider = ?3, model = ?4,
+             fallback_provider = ?5, status = 'completed', lease_until = 0
+             WHERE id = ?1 AND status = 'running'",
+            params![id, ai_text, provider, model, fallback_provider],
+        )?;
+        if changed != 1 {
+            return Err(MemoryError::Database(rusqlite::Error::QueryReturnedNoRows));
+        }
+        Ok(())
+    }
+
+    pub fn end_turn(&self, id: i64, status: &str) -> Result<(), MemoryError> {
+        if !matches!(status, "failed" | "interrupted") {
+            return Ok(());
+        }
+        self.connection()?.execute(
+            "UPDATE interaction_memories SET status = ?2, lease_until = 0
+             WHERE id = ?1 AND status IN ('queued', 'running')",
+            params![id, status],
+        )?;
+        Ok(())
+    }
+
+    pub fn conversation_changes(
+        &self,
+        chat_id: &str,
+        after: i64,
+        limit: usize,
+    ) -> Result<ConversationChanges, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        self.expire_abandoned_turns(&chat_id)?;
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT c.sequence, c.interaction_id,
+                    m.id, m.chat_id, m.user_text, m.ai_text, m.provider, m.model,
+                    m.fallback_provider, m.created_at, m.agent_activity_json, m.status
+             FROM conversation_changes c
+             LEFT JOIN interaction_memories m ON m.id = c.interaction_id AND m.chat_id = c.chat_id
+             WHERE c.chat_id = ?1 AND c.sequence > ?2 ORDER BY c.sequence LIMIT ?3",
+        )?;
+        let rows = statement.query_map(
+            params![chat_id, after, limit.clamp(1, 200) as i64 + 1],
+            |row| {
+                let sequence: i64 = row.get(0)?;
+                let interaction_id: i64 = row.get(1)?;
+                let interaction = if row.get::<_, Option<i64>>(2)?.is_some() {
+                    let agent_activity = row
+                        .get::<_, Option<String>>(10)?
+                        .and_then(|raw| serde_json::from_str(&raw).ok());
+                    let created: String = row.get(9)?;
+                    Some(InteractionMemory {
+                        id: row.get(2)?,
+                        chat_id: row.get(3)?,
+                        user_text: row.get(4)?,
+                        ai_text: row.get(5)?,
+                        provider: row.get(6)?,
+                        model: row.get(7)?,
+                        fallback_provider: row.get(8)?,
+                        created_at: normalize_sqlite_utc_timestamp(&created),
+                        agent_activity,
+                        status: row.get(11)?,
+                    })
+                } else {
+                    None
+                };
+                Ok(ConversationChange {
+                    sequence,
+                    interaction_id,
+                    interaction,
+                })
+            },
+        )?;
+        let mut changes = rows.collect::<Result<Vec<_>, _>>()?;
+        let has_more = changes.len() > limit.clamp(1, 200);
+        if has_more {
+            changes.pop();
+        }
+        let cursor = changes.last().map_or(after, |change| change.sequence);
+        Ok(ConversationChanges {
+            changes,
+            cursor,
+            has_more,
+        })
+    }
+
+    pub fn latest_conversation_sequence(&self, chat_id: &str) -> Result<i64, MemoryError> {
+        self.expire_abandoned_turns(chat_id)?;
+        let connection = self.connection()?;
+        Ok(connection.query_row(
+            "SELECT coalesce(max(sequence), 0) FROM conversation_changes WHERE chat_id = ?1",
+            params![normalized_chat_id(chat_id)],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn conversation_snapshot(
+        &self,
+        chat_id: &str,
+        before_id: Option<i64>,
+        limit: usize,
+    ) -> Result<ConversationSnapshot, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        self.expire_abandoned_turns(&chat_id)?;
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let cursor: i64 = tx.query_row(
+            "SELECT coalesce(max(sequence), 0) FROM conversation_changes WHERE chat_id = ?1",
+            params![chat_id],
+            |row| row.get(0),
+        )?;
+        let mut statement = tx.prepare(
+            "SELECT id, chat_id, user_text, ai_text, provider, model, fallback_provider,
+                    created_at, agent_activity_json, status FROM interaction_memories
+             WHERE chat_id = ?1 AND (?2 IS NULL OR id < ?2)
+             ORDER BY id DESC LIMIT ?3",
+        )?;
+        let page_size = limit.clamp(1, 200);
+        let rows = statement.query_map(
+            params![chat_id, before_id, page_size as i64 + 1],
+            interaction_row,
+        )?;
+        let mut interactions = rows.collect::<Result<Vec<_>, _>>()?;
+        let has_older = interactions.len() > page_size;
+        if has_older {
+            interactions.pop();
+        }
+        interactions.reverse();
+        drop(statement);
+        tx.commit()?;
+        Ok(ConversationSnapshot {
+            interactions,
+            cursor,
+            has_older,
+        })
+    }
+
     pub fn recent_interactions(&self, limit: usize) -> Result<Vec<InteractionMemory>, MemoryError> {
         self.recent_interactions_for_chat(DEFAULT_CONVERSATION_ID, limit)
     }
@@ -233,13 +500,52 @@ impl MemoryStore {
         let connection = self.connection()?;
         ensure_builtin_chat_sessions(&connection)?;
         let mut statement = connection.prepare(
-            "SELECT id, chat_id, user_text, ai_text, provider, model, fallback_provider, created_at, agent_activity_json
+            "SELECT id, chat_id, user_text, ai_text, provider, model, fallback_provider, created_at, agent_activity_json, status
              FROM interaction_memories
              WHERE chat_id = ?1
              ORDER BY id DESC
              LIMIT ?2",
         )?;
         let rows = statement.query_map(params![chat_id, limit as i64], interaction_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn recent_completed_interactions_for_chat(
+        &self,
+        chat_id: &str,
+        limit: usize,
+    ) -> Result<Vec<InteractionMemory>, MemoryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, chat_id, user_text, ai_text, provider, model, fallback_provider,
+                    created_at, agent_activity_json, status FROM interaction_memories
+             WHERE chat_id = ?1 AND status = 'completed' ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = statement.query_map(
+            params![normalized_chat_id(chat_id), limit as i64],
+            interaction_row,
+        )?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Returns the complete transcript for one conversation in display order.
+    /// This deliberately has no caller supplied `LIMIT`: passing `usize::MAX`
+    /// through SQLite's signed limit is not portable and can wrap on 64-bit
+    /// platforms.
+    pub fn interactions_for_chat(
+        &self,
+        chat_id: &str,
+    ) -> Result<Vec<InteractionMemory>, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        let connection = self.connection()?;
+        ensure_builtin_chat_sessions(&connection)?;
+        let mut statement = connection.prepare(
+            "SELECT id, chat_id, user_text, ai_text, provider, model, fallback_provider, created_at, agent_activity_json, status
+             FROM interaction_memories
+             WHERE chat_id = ?1
+             ORDER BY id ASC",
+        )?;
+        let rows = statement.query_map(params![chat_id], interaction_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
@@ -262,11 +568,12 @@ impl MemoryStore {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
             "SELECT m.id, m.chat_id, m.user_text, m.ai_text, m.provider, m.model,
-                    m.fallback_provider, m.created_at, m.agent_activity_json
+                    m.fallback_provider, m.created_at, m.agent_activity_json, m.status
              FROM interaction_fts
              JOIN interaction_memories m ON m.id = interaction_fts.rowid
              WHERE interaction_fts MATCH ?1
                AND m.chat_id = ?2
+               AND m.status = 'completed'
                AND m.id NOT IN (
                  SELECT id FROM interaction_memories
                  WHERE chat_id = ?2 ORDER BY id DESC LIMIT ?3
@@ -286,29 +593,119 @@ impl MemoryStore {
         ensure_builtin_chat_sessions(&connection)?;
         let _ = connection.execute(
             "DELETE FROM chat_sessions
-             WHERE kind = 'conversation'
-               AND id != ?1
+             WHERE id != ?1
+               AND id != ?2
                AND id NOT LIKE 'cron::%'
                AND (SELECT COUNT(*) FROM interaction_memories WHERE interaction_memories.chat_id = chat_sessions.id) = 0",
-            params![DEFAULT_CONVERSATION_ID],
+            params![DEFAULT_CONVERSATION_ID, CHAT_CLI_ID],
         );
         let mut statement = connection.prepare(
-            "SELECT id, title, kind, created_at, updated_at
-             FROM chat_sessions
-             ORDER BY CASE WHEN id = ?1 THEN 0 ELSE 1 END, updated_at DESC",
+            "SELECT s.id, s.title, s.kind, s.created_at, s.updated_at,
+                    s.workspace_path, s.git_branch, s.main_language,
+                    COUNT(m.id) AS msg_count,
+                    COALESCE(SUM(LENGTH(m.user_text) + LENGTH(m.ai_text)), 0) AS total_bytes
+             FROM chat_sessions s
+             LEFT JOIN interaction_memories m ON m.chat_id = s.id
+             GROUP BY s.id
+             ORDER BY CASE WHEN s.id = ?1 THEN 0 ELSE 1 END, s.updated_at DESC",
         )?;
         let rows = statement.query_map(params![CHAT_CLI_ID], |row| {
             let created_raw: String = row.get(3)?;
             let updated_raw: String = row.get(4)?;
+            let msg_count: i64 = row.get(8)?;
+            let bytes: i64 = row.get(9)?;
             Ok(ChatSession {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 kind: row.get(2)?,
                 created_at: normalize_sqlite_utc_timestamp(&created_raw),
                 updated_at: normalize_sqlite_utc_timestamp(&updated_raw),
+                workspace_path: row.get(5)?,
+                git_branch: row.get(6)?,
+                main_language: row.get(7)?,
+                message_count: msg_count.max(0) as usize,
+                total_bytes: bytes.max(0) as usize,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn update_chat_session_metadata(
+        &self,
+        chat_id: &str,
+        workspace_path: Option<&str>,
+        git_branch: Option<&str>,
+        main_language: Option<&str>,
+    ) -> Result<(), MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        let connection = self.connection()?;
+        ensure_builtin_chat_sessions(&connection)?;
+        ensure_chat_session_row(&connection, &chat_id)?;
+        connection.execute(
+            "UPDATE chat_sessions
+             SET workspace_path = COALESCE(?2, workspace_path),
+                 git_branch = COALESCE(?3, git_branch),
+                 main_language = COALESCE(?4, main_language),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+            params![chat_id, workspace_path, git_branch, main_language],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_chat_session_workspace(
+        &self,
+        chat_id: &str,
+        workspace_path: Option<&str>,
+    ) -> Result<(), MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        let connection = self.connection()?;
+        ensure_builtin_chat_sessions(&connection)?;
+        ensure_chat_session_row(&connection, &chat_id)?;
+        connection.execute(
+            "UPDATE chat_sessions
+             SET workspace_path = ?2,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+            params![chat_id, workspace_path],
+        )?;
+        Ok(())
+    }
+
+    pub fn create_cli_session(
+        &self,
+        workspace_path: Option<&str>,
+        git_branch: Option<&str>,
+        main_language: Option<&str>,
+    ) -> Result<String, MemoryError> {
+        let session_id = generate_cli_session_id();
+        self.register_cli_session(&session_id, workspace_path, git_branch, main_language)?;
+        Ok(session_id)
+    }
+
+    pub fn register_cli_session(
+        &self,
+        session_id: &str,
+        workspace_path: Option<&str>,
+        git_branch: Option<&str>,
+        main_language: Option<&str>,
+    ) -> Result<(), MemoryError> {
+        let connection = self.connection()?;
+        ensure_builtin_chat_sessions(&connection)?;
+        connection.execute(
+            "INSERT OR IGNORE INTO chat_sessions (id, title, kind, workspace_path, git_branch, main_language)
+             VALUES (?1, 'New chat', 'cli', ?2, ?3, ?4)",
+            params![session_id, workspace_path, git_branch, main_language],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_session_preview(
+        &self,
+        chat_id: &str,
+        limit: usize,
+    ) -> Result<Vec<InteractionMemory>, MemoryError> {
+        self.recent_interactions_for_chat(chat_id, limit)
     }
 
     /// Registers a chat session with an explicit title/kind up front instead
@@ -361,7 +758,7 @@ impl MemoryStore {
 
     pub fn delete_chat_session(&self, chat_id: &str) -> Result<usize, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
-        if is_cli_chat_id(&chat_id) {
+        if chat_id == CHAT_CLI_ID {
             return Ok(0);
         }
         let connection = self.connection()?;
@@ -910,13 +1307,23 @@ fn initialize(
            keywords TEXT DEFAULT '',
            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
          );
-         CREATE TABLE IF NOT EXISTS chat_sessions (
-           id TEXT PRIMARY KEY,
-           title TEXT NOT NULL DEFAULT 'New chat',
-           kind TEXT NOT NULL DEFAULT 'conversation',
-           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+         CREATE TABLE IF NOT EXISTS conversation_changes (
+           sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+           chat_id TEXT NOT NULL,
+           interaction_id INTEGER NOT NULL
          );
+         CREATE INDEX IF NOT EXISTS idx_conversation_changes_chat_sequence
+           ON conversation_changes(chat_id, sequence);
+          CREATE TABLE IF NOT EXISTS chat_sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT 'New chat',
+            kind TEXT NOT NULL DEFAULT 'conversation',
+            workspace_path TEXT DEFAULT NULL,
+            git_branch TEXT DEFAULT NULL,
+            main_language TEXT DEFAULT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
          CREATE TABLE IF NOT EXISTS learned_skills (
            id INTEGER PRIMARY KEY AUTOINCREMENT,
            name TEXT NOT NULL,
@@ -970,7 +1377,7 @@ fn initialize(
            VALUES ('delete', old.id, old.user_text, old.ai_text);
          END;
          CREATE TRIGGER IF NOT EXISTS trg_interaction_fts_au
-         AFTER UPDATE ON interaction_memories BEGIN
+         AFTER UPDATE OF user_text, ai_text ON interaction_memories BEGIN
            INSERT INTO interaction_fts(interaction_fts, rowid, user_text, ai_text)
            VALUES ('delete', old.id, old.user_text, old.ai_text);
            INSERT INTO interaction_fts(rowid, user_text, ai_text)
@@ -1009,9 +1416,63 @@ fn initialize(
     )?;
     ensure_column(
         connection,
+        "interaction_memories",
+        "status",
+        "TEXT NOT NULL DEFAULT 'completed'",
+    )?;
+    ensure_column(
+        connection,
+        "interaction_memories",
+        "lease_until",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    connection.execute_batch(
+        "DROP TRIGGER IF EXISTS trg_interaction_fts_au;
+         CREATE TRIGGER trg_interaction_fts_au
+         AFTER UPDATE OF user_text, ai_text ON interaction_memories BEGIN
+           INSERT INTO interaction_fts(interaction_fts, rowid, user_text, ai_text)
+           VALUES ('delete', old.id, old.user_text, old.ai_text);
+           INSERT INTO interaction_fts(rowid, user_text, ai_text)
+           VALUES (new.id, new.user_text, new.ai_text);
+         END;
+         DROP TRIGGER IF EXISTS trg_conversation_change_update;
+         CREATE TRIGGER IF NOT EXISTS trg_conversation_change_insert
+         AFTER INSERT ON interaction_memories BEGIN
+           INSERT INTO conversation_changes(chat_id, interaction_id) VALUES (new.chat_id, new.id);
+         END;
+         CREATE TRIGGER trg_conversation_change_update
+         AFTER UPDATE OF user_text, ai_text, provider, model, fallback_provider,
+                         status, agent_activity_json, chat_id ON interaction_memories BEGIN
+           INSERT INTO conversation_changes(chat_id, interaction_id) VALUES (new.chat_id, new.id);
+         END;
+         CREATE TRIGGER IF NOT EXISTS trg_conversation_change_delete
+         AFTER DELETE ON interaction_memories BEGIN
+           INSERT INTO conversation_changes(chat_id, interaction_id) VALUES (old.chat_id, old.id);
+         END;",
+    )?;
+    ensure_column(
+        connection,
         "chat_sessions",
         "kind",
         "TEXT NOT NULL DEFAULT 'conversation'",
+    )?;
+    ensure_column(
+        connection,
+        "chat_sessions",
+        "workspace_path",
+        "TEXT DEFAULT NULL",
+    )?;
+    ensure_column(
+        connection,
+        "chat_sessions",
+        "git_branch",
+        "TEXT DEFAULT NULL",
+    )?;
+    ensure_column(
+        connection,
+        "chat_sessions",
+        "main_language",
+        "TEXT DEFAULT NULL",
     )?;
     // `agent_id` scopes a fact to the subagent that produced it (NULL = shared /
     // user-authored); `embedding` is the on-device similarity vector used for
@@ -1233,6 +1694,7 @@ fn interaction_row(row: &rusqlite::Row<'_>) -> Result<InteractionMemory, rusqlit
         model: row.get(5)?,
         fallback_provider: row.get(6)?,
         created_at: normalize_sqlite_utc_timestamp(&raw_created),
+        status: row.get(9)?,
         agent_activity,
     })
 }
@@ -1267,8 +1729,10 @@ fn ensure_builtin_chat_sessions(connection: &Connection) -> Result<(), rusqlite:
 }
 
 fn ensure_chat_session_row(connection: &Connection, chat_id: &str) -> Result<(), rusqlite::Error> {
-    let (title, kind) = if is_cli_chat_id(chat_id) {
+    let (title, kind) = if chat_id == CHAT_CLI_ID {
         ("Chat CLI", "cli")
+    } else if is_cli_chat_id(chat_id) {
+        ("New chat", "cli")
     } else {
         ("New chat", "conversation")
     };
@@ -1278,6 +1742,180 @@ fn ensure_chat_session_row(connection: &Connection, chat_id: &str) -> Result<(),
         params![chat_id, title, kind],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod conversation_sync_tests {
+    use super::*;
+
+    fn store() -> MemoryStore {
+        MemoryStore::open(std::env::temp_dir().join(format!(
+            "mint-conversation-sync-{}.sqlite",
+            uuid::Uuid::new_v4()
+        )))
+    }
+
+    #[test]
+    fn prompt_and_reply_use_one_id_and_emit_changes() {
+        let memory = store();
+        let first = memory.start_turn("cli::one", "hello").unwrap();
+        let other_process = MemoryStore::open(memory.path.clone());
+        let second = other_process.start_turn("cli::one", "next").unwrap();
+        let other = memory.start_turn("cli::two", "separate").unwrap();
+        assert!(memory.claim_turn("cli::one", first).unwrap());
+        assert!(!other_process.claim_turn("cli::one", second).unwrap());
+        assert!(memory.claim_turn("cli::two", other).unwrap());
+        assert_eq!(
+            memory
+                .recent_completed_interactions_for_chat("cli::one", 3)
+                .unwrap()
+                .len(),
+            0
+        );
+
+        memory
+            .finish_turn(first, "world", "test", "model", None)
+            .unwrap();
+        assert!(other_process.claim_turn("cli::one", second).unwrap());
+        memory
+            .finish_turn(second, "done", "test", "model", None)
+            .unwrap();
+
+        let rows = memory.interactions_for_chat("cli::one").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, first);
+        assert_eq!(rows[0].ai_text, "world");
+        assert_eq!(rows[1].status, "completed");
+        let changes = memory.conversation_changes("cli::one", 0, 100).unwrap();
+        assert!(changes.changes.iter().any(|c| {
+            c.interaction_id == first
+                && c.interaction
+                    .as_ref()
+                    .is_some_and(|row| row.ai_text == "world")
+        }));
+        assert!(changes.changes.iter().all(|c| c.interaction_id != other));
+        assert!(
+            memory
+                .conversation_changes("cli::one", changes.cursor, 100)
+                .unwrap()
+                .changes
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn interrupted_turn_unblocks_queue_and_snapshot_pages() {
+        let memory = store();
+        let first = memory.start_turn("cli::one", "first").unwrap();
+        let second = memory.start_turn("cli::one", "second").unwrap();
+        assert!(memory.claim_turn("cli::one", first).unwrap());
+        memory.end_turn(first, "interrupted").unwrap();
+        assert!(memory.claim_turn("cli::one", second).unwrap());
+        let page = memory.conversation_snapshot("cli::one", None, 1).unwrap();
+        assert_eq!(page.interactions[0].id, second);
+        assert!(page.has_older);
+        let older = memory
+            .conversation_snapshot("cli::one", Some(second), 1)
+            .unwrap();
+        assert_eq!(older.interactions[0].status, "interrupted");
+        assert!(!older.has_older);
+    }
+
+    #[test]
+    fn abandoned_turn_is_reported_after_lease_expires() {
+        let memory = store();
+        let id = memory.start_turn("cli::one", "unfinished").unwrap();
+        assert!(memory.claim_turn("cli::one", id).unwrap());
+        memory
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE interaction_memories SET lease_until = 0 WHERE id = ?1",
+                params![id],
+            )
+            .unwrap();
+        let changes = memory.conversation_changes("cli::one", 0, 100).unwrap();
+        assert_eq!(
+            changes
+                .changes
+                .last()
+                .unwrap()
+                .interaction
+                .as_ref()
+                .unwrap()
+                .status,
+            "interrupted"
+        );
+        assert!(
+            memory
+                .finish_turn(id, "late", "test", "model", None)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn old_completed_rows_migrate_without_losing_content() {
+        let path = std::env::temp_dir().join(format!(
+            "mint-conversation-legacy-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE interaction_memories (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               chat_id TEXT NOT NULL DEFAULT 'conversation-default',
+               user_text TEXT NOT NULL, ai_text TEXT NOT NULL,
+               provider TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+               fallback_provider TEXT DEFAULT NULL, keywords TEXT DEFAULT '',
+               created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+             );
+             INSERT INTO interaction_memories(chat_id, user_text, ai_text)
+             VALUES ('cli::old', 'old prompt', 'old reply');",
+            )
+            .unwrap();
+        drop(connection);
+        let memory = MemoryStore::open(path);
+        let rows = memory.interactions_for_chat("cli::old").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "completed");
+        assert_eq!(rows[0].ai_text, "old reply");
+    }
+
+    #[test]
+    fn clearing_history_emits_tombstones_for_open_views() {
+        let memory = store();
+        let id = memory
+            .add_interaction_for_chat("cli::one", "hello", "world", "test", "model")
+            .unwrap();
+        let cursor = memory.latest_conversation_sequence("cli::one").unwrap();
+        memory.clear_interactions_for_chat("cli::one").unwrap();
+        let changes = memory
+            .conversation_changes("cli::one", cursor, 100)
+            .unwrap();
+        assert!(
+            changes
+                .changes
+                .iter()
+                .any(|change| change.interaction_id == id && change.interaction.is_none())
+        );
+    }
+
+    #[test]
+    fn heartbeat_does_not_emit_visible_changes() {
+        let memory = store();
+        let id = memory.start_turn("cli::one", "hello").unwrap();
+        assert!(memory.claim_turn("cli::one", id).unwrap());
+        let cursor = memory.latest_conversation_sequence("cli::one").unwrap();
+        memory.renew_turn(id).unwrap();
+        assert!(
+            memory
+                .conversation_changes("cli::one", cursor, 100)
+                .unwrap()
+                .changes
+                .is_empty()
+        );
+    }
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@
 interface ProviderResponse {
   provider: string
   fallbackProvider?: string | null
+  fallbackReason?: string | null
 }
 
 export function badge(provider: string, model: string): string {
@@ -14,7 +15,9 @@ export function badge(provider: string, model: string): string {
 }
 
 export function providerLabel(provider: string): string {
-  switch (provider) {
+  if (!provider) return 'Primary provider'
+  const normalized = provider.startsWith('custom:') ? provider.replace(/^custom:/, '') : provider
+  switch (normalized.toLowerCase()) {
     case 'gemini':       return 'Gemini'
     case 'openai':       return 'OpenAI'
     case 'openrouter':   return 'OpenRouter'
@@ -23,7 +26,8 @@ export function providerLabel(provider: string): string {
     case 'huggingface':  return 'Hugging Face'
     case 'local_openai': return 'Local OpenAI'
     case 'ollama':       return 'Ollama'
-    default:             return provider || 'Primary provider'
+    case 'groq':         return 'Groq'
+    default:             return normalized.charAt(0).toUpperCase() + normalized.slice(1)
   }
 }
 
@@ -31,6 +35,7 @@ export function fallbackNotice(
   response: ProviderResponse | null | undefined,
 ): string {
   if (!response?.fallbackProvider) return ''
-  return `${providerLabel(response.fallbackProvider)} unavailable, fell back to ${providerLabel(response.provider)}.`
+  const reasonText = response.fallbackReason ? ` (${response.fallbackReason})` : ''
+  return `${providerLabel(response.fallbackProvider)} unavailable${reasonText}, fell back to ${providerLabel(response.provider)}.`
 }
 

@@ -20,14 +20,14 @@ export default function AudioTab({ config, updateField, apiKey }: AudioTabProps)
         <div className="section-heading">
           <div>
             <p className="section-kicker">Speech</p>
-            <h2 className="section-title">Voice Reply</h2>
+            <h2 className="section-title">Voice reply</h2>
           </div>
         </div>
 
         <div className="toggle-card">
           <div className="toggle-row">
             <div>
-              <label>Enable Voice Reply</label>
+              <label>Enable voice reply</label>
               <p className="hint">Speaks responses out loud when enabled.</p>
             </div>
             <label className="settings-toggle-switch">
@@ -42,8 +42,8 @@ export default function AudioTab({ config, updateField, apiKey }: AudioTabProps)
         </div>
 
         <div className="setting-row">
-          <label>Voice Engine</label>
-          <div className="pill-segmented" role="radiogroup" aria-label="Voice Engine">
+          <label>Voice engine</label>
+          <div className="pill-segmented" role="radiogroup" aria-label="Voice engine">
             {[
               { id: 'google', label: 'Google Cloud', title: 'Google Cloud (Natural, Auto Lang)' },
               { id: 'native', label: 'OS Native', title: 'OS Native (Supports Pitch)' },
@@ -66,7 +66,7 @@ export default function AudioTab({ config, updateField, apiKey }: AudioTabProps)
         <div className="toggle-card">
           <div className="toggle-row">
             <div>
-              <label>Enable Gemini Live (Beta)</label>
+              <label>Enable Gemini Live (beta)</label>
               <p className="hint">Adds real-time voice conversation with Gemini, including running Mint's tools by voice. Requires a Gemini API key.</p>
             </div>
             <label className="settings-toggle-switch">
@@ -83,7 +83,7 @@ export default function AudioTab({ config, updateField, apiKey }: AudioTabProps)
         {config.voiceMode === 'geminiLive' && (
           <div className="form-grid single">
             <div className="setting-row">
-              <label>Realtime Live Model{liveLoading && <span style={{ marginLeft: 6, opacity: 0.5, fontSize: '0.8em' }}>loading…</span>}</label>
+              <label>Real-time model{liveLoading && <span style={{ marginLeft: 6, opacity: 0.5, fontSize: '0.8em' }}>loading…</span>}</label>
               <select
                 value={isCustomLiveModel ? 'custom' : config.geminiLiveModel}
                 onChange={(e) => {
@@ -108,7 +108,7 @@ export default function AudioTab({ config, updateField, apiKey }: AudioTabProps)
             </div>
             {isCustomLiveModel && (
               <div className="setting-row">
-                <label>Custom Realtime Live Model</label>
+                <label>Custom real-time model</label>
                 <input
                   type="text"
                   value={config.geminiLiveModel}
@@ -118,7 +118,7 @@ export default function AudioTab({ config, updateField, apiKey }: AudioTabProps)
               </div>
             )}
             <div className="setting-row">
-              <label>Live Voice</label>
+              <label>Live voice</label>
               <select value={config.geminiLiveVoice} onChange={(e) => updateField('geminiLiveVoice', e.target.value)}>
                 {GEMINI_LIVE_VOICES.map((voiceName) => (
                   <option key={voiceName} value={voiceName}>{voiceName}</option>

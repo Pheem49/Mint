@@ -12,7 +12,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use super::agent::{PLAN_MODE_ALLOWED_ACTIONS, base_allowed_actions, is_port_9222_open};
+use super::agent::{PLAN_MODE_ALLOWED_ACTIONS, base_allowed_actions, browser_endpoint_available};
 use crate::MintConfig;
 use crate::chat::ToolSpec;
 use crate::subagents::list_subagents;
@@ -55,15 +55,8 @@ pub fn tool_catalog(
     allow_subagent_dispatch: bool,
 ) -> Vec<ToolSpec> {
     let mut allowed = base_allowed_actions();
-    if is_port_9222_open() {
-        allowed.push("browser_open");
-        allowed.push("browser_click");
-        allowed.push("browser_type");
-        allowed.push("browser_read");
-        allowed.push("browser_mouse_move");
-        allowed.push("browser_mouse_click");
-        allowed.push("browser_key_press");
-        allowed.push("browser_screenshot");
+    if browser_endpoint_available(config) {
+        allowed.extend_from_slice(crate::browser::BROWSER_TOOLS);
     }
     if !config.avatar_token.is_empty() && !config.avatar_signal_disabled {
         allowed.push("avatar_signal");
@@ -80,6 +73,11 @@ pub fn tool_catalog(
         .into_iter()
         .filter_map(|action| all_tools().into_iter().find(|t| t.name == action))
         .collect();
+
+    // Native models need a structured terminal action. Plain text can be a
+    // progress preamble or a final reply, but finish.summary is unambiguous
+    // and can be streamed as the final answer.
+    tools.push(finish_tool());
 
     if allow_subagent_dispatch && !plan_mode {
         let subagents = list_subagents(Some(root));
@@ -112,6 +110,26 @@ fn dispatch_subagent_tool(subagents: &[crate::subagents::SubagentDefinition]) ->
                 "instruction": { "type": "string", "description": "The task/question to give the subagent." }
             }),
             &["name", "instruction"],
+        ),
+    )
+}
+
+fn finish_tool() -> ToolSpec {
+    tool(
+        "finish",
+        "Complete the task and deliver the final answer. Call this only when no further tool calls are needed. Put the complete user-facing response in summary. If this run changed files, verification must state the check and its result, or explain why no check applies.",
+        schema(
+            json!({
+                "summary": {
+                    "type": "string",
+                    "description": "Complete final answer in the user's language."
+                },
+                "verification": {
+                    "type": "string",
+                    "description": "Verification performed after file changes and its result; otherwise omit."
+                }
+            }),
+            &["summary"],
         ),
     )
 }
@@ -277,26 +295,66 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "browser_click",
-            "Click an element in the automation browser.",
+            "Click an observed element. Provide elementRef or selector, not both.",
             schema(
-                json!({
-                    "selector": {
-                        "type": "string",
-                        "description": "CSS selector, or text=ExactText, contains=PartialText, xpath=//expr."
-                    }
-                }),
-                &["selector"],
+                json!({"elementRef":{"type":"string"},"selector":{"type":"string"}}),
+                &[],
             ),
         ),
         tool(
             "browser_type",
-            "Type text into a form field or search box in the automation browser.",
+            "Append text to a field. Provide elementRef or selector, not both.",
             schema(
-                json!({
-                    "selector": { "type": "string", "description": "Same formats as browser_click." },
-                    "text": { "type": "string" }
-                }),
-                &["selector", "text"],
+                json!({"elementRef":{"type":"string"},"selector":{"type":"string"},"text":{"type":"string"}}),
+                &["text"],
+            ),
+        ),
+        tool(
+            "browser_fill",
+            "Replace a field's value and verify it.",
+            schema(
+                json!({"elementRef":{"type":"string"},"selector":{"type":"string"},"text":{"type":"string"}}),
+                &["text"],
+            ),
+        ),
+        tool(
+            "browser_select",
+            "Select a native dropdown option by value.",
+            schema(
+                json!({"elementRef":{"type":"string"},"selector":{"type":"string"},"value":{"type":"string"}}),
+                &["value"],
+            ),
+        ),
+        tool(
+            "browser_observe",
+            "Read structured page state and fresh element references. Confirm takeover only after the user has completed it.",
+            schema(
+                json!({"textOffset":{"type":"integer","minimum":0},"elementOffset":{"type":"integer","minimum":0},"takeoverComplete":{"type":"boolean"}}),
+                &[],
+            ),
+        ),
+        tool(
+            "browser_tabs",
+            "List/open/select/close tabs. Selection and closure require explicit tabId; popups are never auto-selected.",
+            schema(
+                json!({"operation":{"type":"string","enum":["list","open","select","close"]},"tabId":{"type":"string"},"url":{"type":"string"}}),
+                &["operation"],
+            ),
+        ),
+        tool(
+            "browser_scroll",
+            "Scroll the viewport or an observed element by pixels.",
+            schema(
+                json!({"elementRef":{"type":"string"},"selector":{"type":"string"},"x":{"type":"number"},"y":{"type":"number"}}),
+                &[],
+            ),
+        ),
+        tool(
+            "browser_wait",
+            "Wait for a URL, text, or element visibility condition; at most 30 seconds.",
+            schema(
+                json!({"condition":{"type":"string","enum":["url","text","visible","hidden"]},"value":{"type":"string"},"elementRef":{"type":"string"},"selector":{"type":"string"},"timeoutMs":{"type":"integer","minimum":1,"maximum":30000}}),
+                &["condition"],
             ),
         ),
         tool(
@@ -306,7 +364,7 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "browser_mouse_move",
-            "Move the real mouse cursor to absolute (x, y) coordinates.",
+            "Move the browser cursor to viewport (x, y) coordinates.",
             schema(
                 json!({ "x": { "type": "number" }, "y": { "type": "number" } }),
                 &["x", "y"],
@@ -1096,5 +1154,15 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn native_catalog_always_offers_finish() {
+        let config = MintConfig::default();
+        let tools = tool_catalog(&config, false, Path::new("."), true);
+        assert!(
+            tools.iter().any(|tool| tool.name == "finish"),
+            "native tool catalog must include the terminal finish tool"
+        );
     }
 }

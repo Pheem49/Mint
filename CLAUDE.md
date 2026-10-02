@@ -25,7 +25,7 @@ Rust workspace, `edition = "2024"`. `npm` wraps the Rust build; the npm package
 | TS typecheck | `npm run typecheck` |
 | Build web UI (CI-enforced) | `npm run build:web` |
 | Release link check (CI-enforced) | `cargo build --release -p mint-core -p mint-cli` |
-| Run the CLI | `cargo run -p mint-cli -- <args>` (alias: `npm run cli -- <args>`) |
+| Run the CLI | `npm run cli -- <args>` (cached binary); use `npm run cli:dev -- <args>` for `cargo run` development mode |
 | Desktop dev | `npm run dev` (`tauri dev`) |
 | Web dev server (port 9000) | `npm run dev:web`; backend: `cargo run -p mint-cli -- web` |
 

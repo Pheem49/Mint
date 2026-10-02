@@ -27,8 +27,8 @@ That footer stays until Windows/macOS code signing lands.
 Pushing a semver tag starts the release workflow:
 
 ```bash
-git tag v1.13.0
-git push origin v1.13.0
+git tag v1.15.0
+git push origin v1.15.0
 ```
 
 The workflow runs one job per platform on GitHub Actions and publishes their

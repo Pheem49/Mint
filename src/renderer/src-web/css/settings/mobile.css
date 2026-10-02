@@ -1,0 +1,320 @@
+/* Web settings become one scrollable content pane under a horizontal section list. */
+@media (max-width: 760px) {
+  body {
+    height: var(--mint-viewport-height, 100dvh);
+  }
+
+  .settings-container {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .settings-header {
+    display: flex;
+    align-items: center;
+    min-height: calc(56px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 12px 0 16px;
+  }
+
+  .settings-header .header-left {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .settings-header .header-left p {
+    display: none;
+  }
+
+  .settings-header .close-btn {
+    position: static;
+    top: auto;
+    right: auto;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    margin-left: 8px;
+    transform: none;
+    border: 1px solid var(--border);
+    background: var(--bg-surface-soft);
+  }
+
+  .settings-header .close-btn:hover {
+    transform: none;
+  }
+
+  .settings-body {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    padding: 8px 10px;
+    overflow: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .settings-nav-search {
+    margin: 0 0 6px;
+  }
+
+  .settings-nav-search input {
+    font-size: 16px;
+  }
+
+  .settings-nav-scroll {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .settings-nav-group {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+  }
+
+  .settings-nav-group + .settings-nav-group {
+    margin-top: 0;
+  }
+
+  .settings-nav-group-label {
+    display: none;
+  }
+
+  .tab-btn,
+  .tab-btn + .tab-btn {
+    width: auto;
+    min-height: 44px;
+    margin: 0;
+    padding: 8px 10px;
+    gap: 6px;
+    justify-content: center;
+    white-space: nowrap;
+  }
+
+  .tab-btn strong {
+    display: inline;
+  }
+
+  .settings-content {
+    min-height: 0;
+    padding: 16px 14px 24px;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .settings-content .tab-pane,
+  .settings-content .setting-section,
+  .settings-content .section-collapsible-body,
+  .settings-content .form-grid,
+  .settings-content .provider-cards-container,
+  .settings-content .provider-card,
+  .settings-content .provider-card-body {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .settings-content .form-grid.two-col {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-content .setting-row,
+  .settings-content .provider-card-body .setting-row {
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 12px 0;
+  }
+
+  .settings-content .setting-row > *,
+  .settings-content .toggle-row > * {
+    min-width: 0;
+  }
+
+  .settings-content .toggle-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    padding: 12px 0;
+  }
+
+  .settings-content .button-row,
+  .settings-content .setting-actions {
+    flex-wrap: wrap;
+  }
+
+  .settings-content .setting-row select,
+  .settings-content .setting-row input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+  .settings-content .setting-row textarea,
+  .settings-content .model-combobox-container {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    justify-self: stretch;
+    font-size: 16px;
+  }
+
+  .settings-content .model-combobox-search-input {
+    font-size: 16px;
+  }
+
+  .settings-content .provider-cards-container {
+    padding: 0;
+    gap: 12px;
+  }
+
+  .settings-content .provider-card,
+  .settings-content .setting-feature-card {
+    min-width: 0;
+    padding: 14px;
+    border-radius: 18px;
+  }
+
+  .settings-content .provider-card-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .settings-content .provider-card-title {
+    min-width: 0;
+    flex: 1 1 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .settings-content .provider-card-actions {
+    margin-left: auto;
+  }
+
+  .settings-content .provider-card-actions button,
+  .settings-content .pill-segmented-btn {
+    min-height: 40px;
+  }
+
+  .settings-content .pill-segmented {
+    width: 100%;
+    min-width: 0;
+    justify-self: stretch;
+  }
+
+  .settings-content .section-heading-collapsible > div {
+    min-width: 0;
+  }
+
+  .settings-content .section-title,
+  .settings-content .section-description,
+  .settings-content .setting-row label,
+  .settings-content .hint {
+    overflow-wrap: anywhere;
+  }
+
+  .thinking-card-header,
+  .thinking-card-status,
+  .thinking-card-effort-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .thinking-card-title {
+    flex: 1 1 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .thinking-card-status {
+    width: 100%;
+    min-width: 0;
+    justify-content: space-between;
+  }
+
+  .thinking-card-status .section-current-badge {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .thinking-card-toggle-row {
+    gap: 12px;
+  }
+
+  .thinking-card-toggle-row > div {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .thinking-card-toggle-row .settings-toggle-switch {
+    flex: 0 0 46px;
+  }
+
+  .thinking-card-effort-row > span {
+    flex: 1 1 100%;
+  }
+
+  .thinking-card-effort-options {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+    gap: 8px !important;
+  }
+
+  .thinking-card-effort-options button {
+    min-width: 0;
+    min-height: 44px;
+    white-space: normal;
+  }
+
+  .settings-footer {
+    display: flex;
+    flex-direction: row;
+    min-height: 0;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  }
+
+  .settings-footer-meta {
+    display: none;
+  }
+
+  .settings-footer .footer-actions {
+    display: flex;
+    width: 100%;
+    gap: 8px;
+    margin: 0;
+  }
+
+  .settings-footer .footer-actions button {
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    justify-content: center;
+    padding: 8px;
+    white-space: normal;
+  }
+
+  .settings-container,
+  .settings-header,
+  .settings-sidebar,
+  .settings-content,
+  .settings-footer {
+    background: var(--bg-overlay);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .settings-nav-search,
+  .tab-btn {
+    border-radius: 14px;
+  }
+}

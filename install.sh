@@ -1,14 +1,14 @@
 #!/bin/bash
-# Installs the Mint CLI via npm (the npm package compiles `mint-cli` from source
-# on postinstall). This script makes sure every build- and run-time dependency
-# that compile needs is present first:
+# Installs the Mint CLI from the latest GitHub Release when a matching prebuilt
+# binary exists. If no matching release asset exists, it falls back to the
+# source-based npm installation below.
 #
 #   Required (build fails without them):
 #     - a C toolchain            rusqlite (bundled SQLite) + tree-sitter grammars
 #     - pkg-config               used to locate ALSA
 #     - ALSA dev + runtime libs  cpal / native microphone capture (Linux only)
 #     - Node.js & npm            install vehicle + frontend build
-#     - Rust toolchain (cargo)   compiles mint-core / mint-cli
+#     - Rust toolchain (cargo)   only needed for the source-install fallback
 #
 #   Optional feature tools (installed too, unless MINT_SKIP_OPTIONAL=1):
 #     - git                      repo-aware tools
@@ -25,10 +25,84 @@ set -e
 NPM_PKG="@pheem49/mint@latest"
 SKIP_OPTIONAL="${MINT_SKIP_OPTIONAL:-0}"
 ASSUME_YES="${MINT_YES:-0}"
+SOURCE_INSTALL="${MINT_SOURCE_INSTALL:-0}"
+RELEASE_BASE="https://github.com/Pheem49/Mint/releases/latest/download"
 
 OS="$(uname -s)"
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+install_prebuilt() {
+  [ "$SOURCE_INSTALL" = "1" ] && return 1
+  have curl || return 1
+
+  local asset="" tmp_dir="" tmp_bin="" tmp_checksum="" expected="" actual="" install_dir=""
+  case "$OS" in
+    Linux)
+      [ "$(uname -m)" = "x86_64" ] || return 1
+      asset="mint-cli_linux_x86_64"
+      ;;
+    Darwin)
+      case "$(uname -m)" in
+        arm64) asset="mint-cli_macos_arm64" ;;
+        x86_64) asset="mint-cli_macos_x86_64" ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *) return 1 ;;
+  esac
+
+  tmp_dir="$(mktemp -d)"
+  tmp_bin="${tmp_dir}/${asset}"
+  tmp_checksum="${tmp_bin}.sha256"
+  echo "--- Checking for prebuilt Mint CLI (${asset}) ---"
+  if ! curl -fsSL "${RELEASE_BASE}/${asset}" -o "$tmp_bin" || \
+     ! curl -fsSL "${RELEASE_BASE}/${asset}.sha256" -o "$tmp_checksum"; then
+    rm -rf "$tmp_dir"
+    echo "No matching prebuilt release found; falling back to source installation."
+    return 1
+  fi
+
+  expected="$(awk '{print $1}' "$tmp_checksum")"
+  if have sha256sum; then
+    actual="$(sha256sum "$tmp_bin" | awk '{print $1}')"
+  elif have shasum; then
+    actual="$(shasum -a 256 "$tmp_bin" | awk '{print $1}')"
+  else
+    rm -rf "$tmp_dir"
+    echo "Error: no SHA-256 tool found (sha256sum or shasum)."
+    return 2
+  fi
+  if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+    rm -rf "$tmp_dir"
+    echo "Error: checksum verification failed for ${asset}."
+    return 2
+  fi
+
+  install_dir="${HOME}/.local/bin"
+  mkdir -p "$install_dir"
+  chmod +x "$tmp_bin"
+  mv "$tmp_bin" "${install_dir}/mint"
+  rm -rf "$tmp_dir"
+
+  echo "Mint CLI installed from a verified prebuilt binary."
+  echo "Binary: ${install_dir}/mint"
+  if ! printf '%s' ":${PATH}:" | grep -q ":${install_dir}:"; then
+    echo "Add this directory to your PATH if needed:"
+    echo "  export PATH=\"${install_dir}:\$PATH\""
+  fi
+  "${install_dir}/mint" --version 2>/dev/null || true
+  return 0
+}
+
+if install_prebuilt; then
+  exit 0
+else
+  PREBUILT_STATUS=$?
+fi
+if [ "$PREBUILT_STATUS" -eq 2 ]; then
+  exit 1
+fi
 
 ask() {
   # ask "question" -> 0 for yes (default yes). Reads the real terminal so the
@@ -89,7 +163,7 @@ have cargo || echo "  - install the Rust toolchain (rustup)"
 if [ "$SKIP_OPTIONAL" != "1" ]; then
   echo "  - install optional feature tools: git, poppler (pdftotext), ffmpeg"
 fi
-echo "  - run 'npm install -g $NPM_PKG' (compiles mint-cli from source)"
+echo "  - run 'npm install -g $NPM_PKG' (source-install fallback)"
 echo
 echo "  Env toggles: MINT_YES=1 (no prompts)  MINT_SKIP_OPTIONAL=1 (skip extras)"
 echo

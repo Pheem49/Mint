@@ -1,3 +1,5 @@
+const ANSI_BLUE: &str = crate::terminal_theme::ANSI_BLUE;
+
 use super::*;
 
 fn is_reachable(host: &str, port: u16) -> bool {
@@ -165,31 +167,11 @@ fn first_line_preview(path: &Path) -> String {
     }
 }
 
-fn print_rendered_markdown(text: &str) {
-    let mut table_buffer: Vec<String> = Vec::new();
-    for line in text.lines() {
-        if crate::markdown::is_table_line(line) {
-            table_buffer.push(line.to_string());
-        } else {
-            if !table_buffer.is_empty() {
-                print!("{}", crate::markdown::render_markdown_table(&table_buffer));
-                table_buffer.clear();
-            }
-            if let Some(h) = line.strip_prefix("## ") {
-                println!("\n{BLUE}{h}{RESET}");
-            } else if let Some(h) = line.strip_prefix("# ") {
-                println!("\n{BLUE}{h}{RESET}");
-            } else {
-                println!("{line}");
-            }
-        }
-    }
-    if !table_buffer.is_empty() {
-        print!("{}", crate::markdown::render_markdown_table(&table_buffer));
-    }
-}
-
-async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Option<SlashResult> {
+async fn execute_core_slash(
+    session: &mut InteractiveSession,
+    ui: &mut dyn CommandUi,
+    query: &str,
+) -> Option<SlashResult> {
     use mint_core::slash::{SlashEffect, SlashRequest, SlashResponse};
 
     let trimmed = query.trim();
@@ -213,28 +195,17 @@ async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Op
             | "/videomodels"
             | "/video-provider"
     ) {
-        print!("{DIM}Fetching available models...{RESET}\r");
-        let _ = std::io::Write::flush(&mut std::io::stdout());
+        ui.set_status(vec!["Fetching available models…".into()]);
     }
 
     let response = mint_core::slash::execute_async(&req, &mut session.config).await;
-
-    if matches!(
-        cmd,
-        "/models"
-            | "/image-models"
-            | "/image-provider"
-            | "/video-models"
-            | "/videomodels"
-            | "/video-provider"
-    ) {
-        print!("\r\x1b[2K");
-        let _ = std::io::Write::flush(&mut std::io::stdout());
-    }
+    ui.clear_status();
 
     match response {
         SlashResponse::Message { markdown } => {
-            print_rendered_markdown(&markdown);
+            if !markdown.is_empty() {
+                ui.push_command_output(markdown);
+            }
             Some(SlashResult::Handled)
         }
         SlashResponse::Applied { markdown, effects } => {
@@ -246,7 +217,7 @@ async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Op
                     }
                     SlashEffect::ProviderChanged { display } => {
                         save_needed = true;
-                        println!("Switched to: {MINT}{display}{RESET}\n");
+                        ui.push_notice(format!("Switched to: {display}"));
                     }
                     SlashEffect::FastModeChanged { enabled } => {
                         session.fast_mode = *enabled;
@@ -264,6 +235,10 @@ async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Op
                     }
                     SlashEffect::HistoryCleared => {
                         session.history.clear();
+                        ui.clear_transcript();
+                    }
+                    SlashEffect::ThinkingChanged { .. } => {
+                        save_needed = true;
                     }
                 }
             }
@@ -271,7 +246,7 @@ async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Op
                 let _ = mint_core::save_config(&session.config);
             }
             if !markdown.is_empty() {
-                print_rendered_markdown(&markdown);
+                ui.push_command_output(markdown);
             }
             Some(SlashResult::Handled)
         }
@@ -280,20 +255,49 @@ async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Op
             title,
             options,
         } => {
-            let labels: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
-            let default_choice = labels.first().cloned().unwrap_or_default();
-            match prompt_interactive_select(&title, &labels, &default_choice) {
-                Ok(Some(selected_label)) => {
-                    if let Some(opt) = options.iter().find(|o| o.label == selected_label) {
-                        let next_input = format!("{command} {}", opt.value);
-                        return Box::pin(handle_slash_command(session, &next_input)).await;
+            let choice_items: Vec<ChoiceItem> = options
+                .iter()
+                .map(|opt| ChoiceItem::new(opt.label.clone(), opt.value.clone()))
+                .collect();
+            match ui.prompt_choice(&title, "", &choice_items) {
+                Ok(Some(idx)) => {
+                    let opt = &options[idx];
+                    if opt.value == "__action:search" {
+                        let text = ui
+                            .prompt_text("Search models", "Search query", None)
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            let next_input = format!("{command} __action:search:{trimmed}");
+                            return Box::pin(handle_slash_command(session, ui, &next_input)).await;
+                        }
+                        ui.push_notice("Cancelled.");
+                        return Some(SlashResult::Handled);
                     }
+                    if opt.value == "__action:custom" {
+                        let custom = ui
+                            .prompt_text("Custom model", "Enter custom model ID", None)
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
+                        let trimmed = custom.trim();
+                        if !trimmed.is_empty() {
+                            let next_input = format!("{command} {trimmed}");
+                            return Box::pin(handle_slash_command(session, ui, &next_input)).await;
+                        }
+                        ui.push_notice("Cancelled.");
+                        return Some(SlashResult::Handled);
+                    }
+                    let next_input = format!("{command} {}", opt.value);
+                    return Box::pin(handle_slash_command(session, ui, &next_input)).await;
                 }
                 Ok(None) => {
-                    println!("Cancelled.\n");
+                    ui.push_notice("Command cancelled");
                 }
                 Err(e) => {
-                    println!("{ERROR}Selection error:{RESET} {e}\n");
+                    ui.report_error(&e);
                 }
             }
             Some(SlashResult::Handled)
@@ -308,7 +312,7 @@ async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Op
         }
         SlashResponse::Navigate { markdown, .. } => {
             if !markdown.is_empty() {
-                print_rendered_markdown(&markdown);
+                ui.push_command_output(markdown);
             }
             Some(SlashResult::Handled)
         }
@@ -320,6 +324,7 @@ async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Op
 /// Route `/…` commands. Returns `None` if the input is not a slash command.
 pub async fn handle_slash_command(
     session: &mut InteractiveSession,
+    ui: &mut dyn CommandUi,
     query: &str,
 ) -> Option<SlashResult> {
     let trimmed = query.trim();
@@ -337,10 +342,15 @@ pub async fn handle_slash_command(
     let is_cli_only_or_wizard = matches!(
         cmd,
         "/plan"
+            | "/thought"
+            | "/think"
+            | "/resume"
+            | "/branch"
             | "/bg"
             | "/jobs"
             | "/shells"
             | "/palette"
+            | "/theme"
             | "/image"
             | "/paste"
             | "/avatar"
@@ -352,28 +362,33 @@ pub async fn handle_slash_command(
         && rest.is_empty());
 
     if !is_cli_only_or_wizard {
-        if let Some(res) = execute_core_slash(session, trimmed).await {
+        if let Some(res) = execute_core_slash(session, ui, trimmed).await {
             return Some(res);
         }
     }
 
     match cmd {
         "/help" => {
-            println!("\n{BLUE}────────────────────────────────────────────{RESET}");
-            println!("{MINT}  Mint Interactive Commands{RESET}");
-            println!("{BLUE}────────────────────────────────────────────{RESET}");
+            let mut lines = Vec::new();
+            lines.push(format!(
+                "{BLUE}────────────────────────────────────────────{RESET}"
+            ));
+            lines.push(format!("{MINT}  Mint Interactive Commands{RESET}"));
+            lines.push(format!(
+                "{BLUE}────────────────────────────────────────────{RESET}"
+            ));
             for spec in SLASH_COMMANDS.iter() {
                 let label = if spec.usage.is_empty() {
                     spec.token.to_string()
                 } else {
                     format!("{} {}", spec.token, spec.usage)
                 };
-                println!(
+                lines.push(format!(
                     "  {MINT}{:<30}{RESET} {DIM}{}{RESET}",
                     label, spec.description
-                );
+                ));
             }
-            println!();
+            ui.push_command_output(lines.join("\n"));
             Some(SlashResult::Handled)
         }
 
@@ -384,34 +399,20 @@ pub async fn handle_slash_command(
         "/fast" => {
             let choice = if rest.is_empty() {
                 let options = vec![
-                    "on (hide thinking traces)".to_string(),
-                    "off (show thinking traces)".to_string(),
+                    ChoiceItem::new("on (hide thinking traces)", "on"),
+                    ChoiceItem::new("off (show thinking traces)", "off"),
                 ];
-                let current = if session.fast_mode {
-                    &options[0]
-                } else {
-                    &options[1]
-                };
-                match prompt_interactive_select("Select Fast Mode", &options, current) {
-                    Ok(Some(sel)) => {
-                        if sel.starts_with("on") {
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    Ok(None) => None,
-                    Err(e) => {
-                        println!("{ERROR}Error selecting fast mode:{RESET} {e}\n");
-                        None
-                    }
+                match ui.prompt_choice("Select Fast Mode", "", &options) {
+                    Ok(Some(0)) => Some(true),
+                    Ok(Some(1)) => Some(false),
+                    _ => None,
                 }
             } else {
                 match rest {
                     "on" => Some(true),
                     "off" => Some(false),
                     _ => {
-                        println!("{WARN}/fast usage: /fast [on|off]{RESET}\n");
+                        ui.push_notice("/fast usage: /fast [on|off]");
                         None
                     }
                 }
@@ -420,16 +421,82 @@ pub async fn handle_slash_command(
             if let Some(mode) = choice {
                 session.fast_mode = mode;
                 if session.fast_mode {
-                    println!("{DIM}[Fast] mode ON — thinking traces hidden{RESET}\n");
+                    ui.push_notice("[Fast] mode ON — thinking traces hidden");
                 } else {
-                    println!("{DIM}[Fast] mode OFF{RESET}\n");
+                    ui.push_notice("[Fast] mode OFF");
                 }
             }
             Some(SlashResult::Handled)
         }
 
+        "/resume" => {
+            let target_session_id = if rest.is_empty() {
+                prompt_resume_session_picker_with_ui(ui, &session.current_dir, &session.chat_id)
+                    .ok()
+                    .flatten()
+            } else {
+                let trimmed = rest.trim();
+                let candidate =
+                    if !trimmed.starts_with("cli::") && trimmed != mint_core::CHAT_CLI_ID {
+                        format!("cli::{trimmed}")
+                    } else {
+                        trimmed.to_string()
+                    };
+                if let Ok(memory) = MemoryStore::open_default()
+                    && let Ok(sessions) = memory.list_chat_sessions()
+                    && sessions.iter().any(|s| s.id == candidate)
+                {
+                    Some(candidate)
+                } else {
+                    Some(trimmed.to_string())
+                }
+            };
+
+            if let Some(target_id) = target_session_id {
+                if target_id == session.chat_id {
+                    ui.push_notice(format!("Already in session '{target_id}'."));
+                } else {
+                    session.chat_id = target_id.clone();
+                    mint_core::live_sync::update_live_sync_chat_id(&session.chat_id);
+                    ui.reload_transcript(&session.chat_id, &session.current_dir);
+                    if let Ok(memory) = MemoryStore::open_default() {
+                        let sessions = memory.list_chat_sessions().unwrap_or_default();
+                        let title = sessions
+                            .iter()
+                            .find(|s| s.id == session.chat_id)
+                            .map(|s| s.title.as_str())
+                            .unwrap_or("Conversation");
+                        ui.push_notice(format!("Switched to session: {title} ({target_id})"));
+                        if let Ok(recent) = memory.get_session_preview(&session.chat_id, 2)
+                            && let Some(last) = recent.first()
+                        {
+                            let snippet = crate::interactive::truncate_utf8(&last.user_text, 80);
+                            ui.push_notice(format!("Last turn: {snippet}"));
+                        }
+                    } else {
+                        ui.push_notice(format!("Switched to session: {target_id}"));
+                    }
+                }
+            } else {
+                ui.push_notice("Resume cancelled.");
+            }
+            Some(SlashResult::Handled)
+        }
+
         "/rewind" => {
-            let checkpoints = mint_core::git::list_checkpoints(mint_core::CHAT_CLI_ID);
+            let (target_rewind_chat_id, checkpoints) = {
+                let local_cps = mint_core::git::list_checkpoints(&session.chat_id);
+                if local_cps.is_empty() && session.chat_id != mint_core::CHAT_CLI_ID {
+                    let fallback_cps = mint_core::git::list_checkpoints(mint_core::CHAT_CLI_ID);
+                    if !fallback_cps.is_empty() {
+                        (mint_core::CHAT_CLI_ID.to_string(), fallback_cps)
+                    } else {
+                        (session.chat_id.clone(), local_cps)
+                    }
+                } else {
+                    (session.chat_id.clone(), local_cps)
+                }
+            };
             if rest.is_empty() {
                 if checkpoints.is_empty() {
                     println!("\n{DIM}No git checkpoints recorded for this CLI session yet.{RESET}");
@@ -472,7 +539,7 @@ pub async fn handle_slash_command(
                     Ok(step) => {
                         match mint_core::git::rollback_to_step(
                             &session.current_dir,
-                            mint_core::CHAT_CLI_ID,
+                            &target_rewind_chat_id,
                             step,
                         ) {
                             Ok(msg) => {
@@ -493,67 +560,125 @@ pub async fn handle_slash_command(
             }
         }
 
+        "/theme" => {
+            let current = crate::terminal_theme::TuiTheme::from_config(&session.config.tui_theme);
+            match ui.prompt_theme(current.index()) {
+                Ok(Some(index)) => {
+                    let selected = crate::terminal_theme::TuiTheme::from_index(index);
+                    let previous = std::mem::replace(
+                        &mut session.config.tui_theme,
+                        selected.config_value().to_owned(),
+                    );
+                    if let Err(error) = mint_core::save_config(&session.config) {
+                        session.config.tui_theme = previous;
+                        ui.report_error(&error.into());
+                    } else {
+                        ui.set_theme(selected);
+                        ui.push_notice(format!("Theme: {}", selected.label()));
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => ui.report_error(&error),
+            }
+            Some(SlashResult::Handled)
+        }
+
         "/palette" => {
             let options = vec![
-                "Quick Actions Menu".to_string(),
-                "Switch AI Model (/models)".to_string(),
-                "Toggle Plan Mode (/plan)".to_string(),
-                "Toggle Fast Mode (/fast)".to_string(),
-                "Git Checkpoint Rollback (/rewind)".to_string(),
-                "Manage MCP Servers (/mcp)".to_string(),
-                "Manage Memory & Facts (/memory)".to_string(),
-                "Change Directory (/cd)".to_string(),
-                "Clear Conversation (/clear)".to_string(),
-                "Help & Documentation (/help)".to_string(),
+                ChoiceItem::with_description(
+                    "Quick Actions Menu",
+                    "Show general quick actions",
+                    "tip",
+                ),
+                ChoiceItem::with_description(
+                    "Switch AI Model (/models)",
+                    "Change active model or provider",
+                    "/models",
+                ),
+                ChoiceItem::with_description(
+                    "Toggle Plan Mode (/plan)",
+                    "Turn plan mode on or off",
+                    "/plan",
+                ),
+                ChoiceItem::with_description(
+                    "Toggle Fast Mode (/fast)",
+                    "Turn fast mode on or off",
+                    "/fast",
+                ),
+                ChoiceItem::with_description(
+                    "Git Checkpoint Rollback (/rewind)",
+                    "Undo recent AI edits",
+                    "/rewind",
+                ),
+                ChoiceItem::with_description(
+                    "Manage MCP Servers (/mcp)",
+                    "Add, remove, or configure tools",
+                    "/mcp",
+                ),
+                ChoiceItem::with_description(
+                    "Manage Memory & Facts (/memory)",
+                    "View or clear project memory",
+                    "/memory",
+                ),
+                ChoiceItem::with_description(
+                    "Change Directory (/cd)",
+                    "Change workspace directory",
+                    "/cd",
+                ),
+                ChoiceItem::with_description(
+                    "Clear Conversation (/clear)",
+                    "Clear current conversation history",
+                    "/clear",
+                ),
+                ChoiceItem::with_description(
+                    "Help & Documentation (/help)",
+                    "List all available slash commands",
+                    "/help",
+                ),
             ];
-            match prompt_interactive_select("Universal Command Palette", &options, &options[0]) {
-                Ok(Some(sel)) => {
-                    let next_cmd = if sel.contains("/models") {
-                        "/models"
-                    } else if sel.contains("/plan") {
-                        "/plan"
-                    } else if sel.contains("/fast") {
-                        "/fast"
-                    } else if sel.contains("/rewind") {
-                        "/rewind"
-                    } else if sel.contains("/mcp") {
-                        "/mcp"
-                    } else if sel.contains("/memory") {
-                        "/memory"
-                    } else if sel.contains("/clear") {
-                        "/clear"
-                    } else if sel.contains("/help") {
-                        "/help"
-                    } else {
-                        println!(
-                            "{MINT}Tip:{RESET} Type {BLUE}/<command>{RESET} or press {MINT}Tab{RESET} to autocomplete commands anytime.\n"
+            match ui.prompt_choice(
+                "Universal Command Palette",
+                "Select command to run",
+                &options,
+            ) {
+                Ok(Some(idx)) => {
+                    let val = &options[idx].value;
+                    if val == "tip" {
+                        ui.push_notice(
+                            "Tip: Type /<command> or press Tab to autocomplete commands anytime.",
                         );
-                        return Some(SlashResult::Handled);
-                    };
-                    Box::pin(handle_slash_command(session, next_cmd)).await
+                        Some(SlashResult::Handled)
+                    } else {
+                        Box::pin(handle_slash_command(session, ui, val)).await
+                    }
                 }
-                Ok(None) => Some(SlashResult::Handled),
-                Err(e) => {
-                    println!("{ERROR}Palette error:{RESET} {e}\n");
-                    Some(SlashResult::Handled)
-                }
+                _ => Some(SlashResult::Handled),
             }
+        }
+
+        "/thought" | "/think" => {
+            if let Some(record) = get_last_thought() {
+                let _ = show_thought_viewer(&record.thought, &record.elapsed_str);
+            } else {
+                ui.push_notice("No recent thought process recorded for this turn.");
+            }
+            Some(SlashResult::Handled)
         }
 
         "/plan" if rest == "list" => {
             let files = list_plan_files(&session.current_dir);
             if files.is_empty() {
-                println!("{DIM}No saved plans yet.{RESET}\n");
+                ui.push_notice("No saved plans yet.");
             } else {
-                println!("\n{BLUE}Saved plans:{RESET}");
+                let mut lines = vec![format!("{BLUE}Saved plans:{RESET}")];
                 for (idx, path) in files.iter().enumerate() {
-                    println!(
+                    lines.push(format!(
                         "  {DIM}[{}]{RESET} {BLUE}{}{RESET}",
                         idx + 1,
                         first_line_preview(path)
-                    );
+                    ));
                 }
-                println!();
+                ui.push_command_output(lines.join("\n"));
             }
             Some(SlashResult::Handled)
         }
@@ -572,12 +697,12 @@ pub async fn handle_slash_command(
             };
             match found {
                 Some(path) => match std::fs::read_to_string(path) {
-                    Ok(content) => println!("\n{content}\n"),
-                    Err(e) => println!("{ERROR}Could not read plan file:{RESET} {e}\n"),
+                    Ok(content) => ui.push_command_output(content),
+                    Err(e) => ui.push_notice(format!("Could not read plan file: {e}")),
                 },
-                None => println!(
-                    "{WARN}No saved plan matching \"{arg}\" — run /plan list to see saved plans.{RESET}\n"
-                ),
+                None => ui.push_notice(format!(
+                    "No saved plan matching \"{arg}\" — run /plan list to see saved plans."
+                )),
             }
             Some(SlashResult::Handled)
         }
@@ -585,27 +710,13 @@ pub async fn handle_slash_command(
         "/plan" => {
             let choice = if rest.is_empty() {
                 let options = vec![
-                    "on (read-only until plan is approved)".to_string(),
-                    "off (edits/shell run immediately)".to_string(),
+                    ChoiceItem::new("on (read-only until plan is approved)", "on"),
+                    ChoiceItem::new("off (edits/shell run immediately)", "off"),
                 ];
-                let current = if session.plan_mode {
-                    &options[0]
-                } else {
-                    &options[1]
-                };
-                match prompt_interactive_select("Select Plan Mode", &options, current) {
-                    Ok(Some(sel)) => {
-                        if sel.starts_with("on") {
-                            Some(true)
-                        } else {
-                            Some(false)
-                        }
-                    }
-                    Ok(None) => None,
-                    Err(e) => {
-                        println!("{ERROR}Error selecting plan mode:{RESET} {e}\n");
-                        None
-                    }
+                match ui.prompt_choice("Select Plan Mode", "", &options) {
+                    Ok(Some(0)) => Some(true),
+                    Ok(Some(1)) => Some(false),
+                    _ => None,
                 }
             } else {
                 match rest {
@@ -613,9 +724,7 @@ pub async fn handle_slash_command(
                     "off" => Some(false),
                     task => {
                         session.plan_mode = true;
-                        println!(
-                            "{DIM}[Plan] mode ON — agent will investigate read-only and present a plan before editing{RESET}\n"
-                        );
+                        ui.push_notice("[Plan] mode ON — agent will investigate read-only and present a plan before editing");
                         return Some(SlashResult::ForwardToAgent(task.to_string()));
                     }
                 }
@@ -624,11 +733,9 @@ pub async fn handle_slash_command(
             if let Some(mode) = choice {
                 session.plan_mode = mode;
                 if session.plan_mode {
-                    println!(
-                        "{DIM}[Plan] mode ON — agent will investigate read-only and present a plan via exit_plan_mode before editing files or running commands{RESET}\n"
-                    );
+                    ui.push_notice("[Plan] mode ON — agent will investigate read-only and present a plan via exit_plan_mode before editing files or running commands");
                 } else {
-                    println!("{DIM}[Plan] mode OFF{RESET}\n");
+                    ui.push_notice("[Plan] mode OFF");
                 }
             }
             Some(SlashResult::Handled)
@@ -1438,18 +1545,15 @@ pub async fn handle_slash_command(
 
         "/bg" => {
             if rest.is_empty() {
-                println!("{ERROR}Usage:{RESET} /bg <query>\n");
+                ui.push_notice("Usage: /bg <query>");
                 return Some(SlashResult::Handled);
             }
             let id = session
                 .jobs
                 .spawn(&session.config, &session.current_dir, rest);
-            println!(
-                "{DIM}Started background job #{id}. Keep chatting — check on it with {RESET}/jobs{DIM}, or view its result with {RESET}/jobs show {id}{DIM}.{RESET}"
-            );
-            println!(
-                "{DIM}Note: /bg runs non-interactively, so file writes/shell/plugin/MCP actions needing approval are declined automatically.{RESET}\n"
-            );
+            ui.push_notice(format!(
+                "Started background job #{id}. Keep chatting — check on it with /jobs, or view its result with /jobs show {id}."
+            ));
             Some(SlashResult::Handled)
         }
 
@@ -1457,9 +1561,9 @@ pub async fn handle_slash_command(
             if rest.is_empty() {
                 let list = session.jobs.list();
                 if list.is_empty() {
-                    println!("{DIM}No background jobs yet. Start one with /bg <query>.{RESET}\n");
+                    ui.push_notice("No background jobs yet. Start one with /bg <query>.");
                 } else {
-                    println!("\n{BLUE}Background jobs{RESET}");
+                    let mut lines = vec![format!("{BLUE}Background jobs{RESET}")];
                     for job in &list {
                         let status_str = match job.status {
                             JobStatus::Running => format!("{MINT}running{RESET}"),
@@ -1473,13 +1577,13 @@ pub async fn handle_slash_command(
                         } else {
                             ""
                         };
-                        println!(
+                        lines.push(format!(
                             "  #{:<3} [{status_str}] {DIM}{:>4}s{RESET}  {preview}{suffix}",
                             job.id,
                             job.elapsed_secs(),
-                        );
+                        ));
                     }
-                    println!();
+                    ui.push_command_output(lines.join("\n"));
                 }
                 return Some(SlashResult::Handled);
             }
@@ -1492,22 +1596,30 @@ pub async fn handle_slash_command(
             match sub {
                 "show" => match arg.parse::<u32>().ok().and_then(|id| session.jobs.show(id)) {
                     Some(job) => {
-                        println!("\n{BLUE}Job #{} — {}{RESET}", job.id, job.status);
-                        println!("{DIM}Query:{RESET} {}", job.query);
+                        let mut lines = vec![
+                            format!("{BLUE}Job #{} — {}{RESET}", job.id, job.status),
+                            format!("{DIM}Query:{RESET} {}", job.query),
+                        ];
                         match job.result {
-                            Some(result) => println!("\n{}\n", result),
-                            None => println!("{DIM}(still running — no result yet){RESET}\n"),
+                            Some(result) => {
+                                lines.push(String::new());
+                                lines.push(result);
+                            }
+                            None => {
+                                lines.push(format!("{DIM}(still running — no result yet){RESET}"))
+                            }
                         }
+                        ui.push_command_output(lines.join("\n"));
                     }
-                    None => println!("{ERROR}No such job.{RESET}\n"),
+                    None => ui.push_notice("No such job."),
                 },
                 "cancel" => match arg.parse::<u32>().ok() {
                     Some(id) if session.jobs.cancel(id) => {
-                        println!("{DIM}Cancelling job #{id}...{RESET}\n");
+                        ui.push_notice(format!("Cancelling job #{id}..."));
                     }
-                    _ => println!("{ERROR}No such running job.{RESET}\n"),
+                    _ => ui.push_notice("No such running job."),
                 },
-                _ => println!("{ERROR}Usage:{RESET} /jobs [show <id>|cancel <id>]\n"),
+                _ => ui.push_notice("Usage: /jobs [show <id>|cancel <id>]"),
             }
             Some(SlashResult::Handled)
         }
@@ -1516,11 +1628,11 @@ pub async fn handle_slash_command(
             if rest.is_empty() {
                 let jobs = mint_core::bg_shell::list_jobs();
                 if jobs.is_empty() {
-                    println!(
-                        "{DIM}No background shell jobs. The agent starts one when it calls run_shell with background: true.{RESET}\n"
+                    ui.push_notice(
+                        "No background shell jobs. The agent starts one when it calls run_shell with background: true."
                     );
                 } else {
-                    println!("\n{BLUE}Background shell jobs{RESET}");
+                    let mut lines = vec![format!("{BLUE}Background shell jobs{RESET}")];
                     for job in &jobs {
                         let status_str = match &job.status {
                             mint_core::bg_shell::JobStatus::Running => {
@@ -1543,12 +1655,12 @@ pub async fn handle_slash_command(
                         } else {
                             ""
                         };
-                        println!(
+                        lines.push(format!(
                             "  {:<6} [{status_str}] {DIM}{:>4}s{RESET}  {preview}{suffix}",
                             job.id, job.elapsed_secs,
-                        );
+                        ));
                     }
-                    println!();
+                    ui.push_command_output(lines.join("\n"));
                 }
                 return Some(SlashResult::Handled);
             }
@@ -1561,48 +1673,48 @@ pub async fn handle_slash_command(
             match sub {
                 "show" if !arg.is_empty() => match mint_core::bg_shell::snapshot(arg) {
                     Ok(job) => {
-                        println!("\n{BLUE}Job {} — {}{RESET}", job.id, job.command);
+                        let mut lines =
+                            vec![format!("{BLUE}Job {} — {}{RESET}", job.id, job.command)];
                         if let Some(pid) = job.pid {
-                            println!("{DIM}pid: {pid}  cwd: {}{RESET}", job.cwd.display());
+                            lines.push(format!(
+                                "{DIM}pid: {pid}  cwd: {}{RESET}",
+                                job.cwd.display()
+                            ));
                         }
-                        println!("{DIM}stdout:{RESET}\n{}", job.stdout);
-                        println!("{DIM}stderr:{RESET}\n{}\n", job.stderr);
+                        lines.push(format!("{DIM}stdout:{RESET}\n{}", job.stdout));
+                        lines.push(format!("{DIM}stderr:{RESET}\n{}", job.stderr));
+                        ui.push_command_output(lines.join("\n"));
                     }
-                    Err(_) => println!("{ERROR}No such job.{RESET}\n"),
+                    Err(_) => ui.push_notice("No such job."),
                 },
                 "kill" if !arg.is_empty() => match mint_core::bg_shell::kill_job(arg) {
-                    Ok(msg) => println!("{DIM}{msg}{RESET}\n"),
-                    Err(_) => println!("{ERROR}No such job.{RESET}\n"),
+                    Ok(msg) => ui.push_notice(msg),
+                    Err(_) => ui.push_notice("No such job."),
                 },
-                _ => println!("{ERROR}Usage:{RESET} /shells [show <id>|kill <id>]\n"),
+                _ => ui.push_notice("Usage: /shells [show <id>|kill <id>]"),
             }
             Some(SlashResult::Handled)
         }
 
         "/clear" | "/reset" => {
-            let options = vec![
-                "No (keep history)".to_string(),
-                "Yes (clear history)".to_string(),
-            ];
-            let choice = match prompt_interactive_select(
-                "Clear conversation history?",
-                &options,
-                &options[0],
-            ) {
-                Ok(Some(sel)) => sel == options[1],
-                _ => false,
-            };
-
+            let choice = ui
+                .prompt_confirm("Clear conversation history?", false)
+                .unwrap_or(false);
             if choice {
+                clear_last_thought();
+                session.history.clear();
+                ui.clear_transcript();
                 if let Ok(memory) = MemoryStore::open_default() {
-                    match memory.clear_interactions() {
-                        Ok(count) => println!("{DIM}Cleared {count} interactions.{RESET}"),
-                        Err(error) => println!("{ERROR}Memory error:{RESET} {error}"),
+                    match memory.clear_interactions_for_chat(&session.chat_id) {
+                        Ok(count) => {
+                            ui.push_notice(format!("Cleared {count} interactions for session."));
+                        }
+                        Err(error) => ui.push_notice(format!("Memory error: {error}")),
                     }
                 }
-                println!("{DIM}Conversation context cleared.{RESET}\n");
+                ui.push_notice("Conversation context cleared.");
             } else {
-                println!("{DIM}Cancelled.{RESET}\n");
+                ui.push_notice("Cancelled.");
             }
             Some(SlashResult::Handled)
         }
@@ -1616,7 +1728,7 @@ pub async fn handle_slash_command(
                     session.current_dir = new_dir.canonicalize().unwrap_or(new_dir);
                     println!(
                         "{DIM}Workspace: {}{RESET}\n",
-                        format_path_with_tilde(&session.current_dir)
+                        format_workspace_with_branch(&session.current_dir)
                     );
                 } else {
                     println!("{ERROR}Directory not found:{RESET} {rest}\n");
@@ -1624,6 +1736,8 @@ pub async fn handle_slash_command(
             }
             Some(SlashResult::Handled)
         }
+
+        "/branch" => Some(handle_branch_slash(session, ui, rest)),
 
         "/veo" => {
             if rest.is_empty() {
@@ -2272,8 +2386,35 @@ pub async fn handle_slash_command(
                         }
                     }
                 }
+                "refresh" => match mint_core::refresh_linked_folder(args) {
+                    Ok(status) => println!("Indexed {} files in {args}.\n", status.indexed_files),
+                    Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                },
+                "notes" => match mint_core::list_linked_folder_notes(args) {
+                    Ok(notes) => {
+                        for note in notes {
+                            println!("{} [{}] {}", note.created_at, note.status, note.path);
+                        }
+                    }
+                    Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                },
+                "save" => {
+                    if let Some((name, content)) = args.split_once('|') {
+                        match mint_core::save_linked_folder_note(name.trim(), content.trim()) {
+                            Ok(note) if note.status == "saved" => {
+                                println!("Saved note: {}", note.path)
+                            }
+                            Ok(note) => {
+                                println!("{ERROR}{}{RESET}", note.error.unwrap_or_default())
+                            }
+                            Err(e) => println!("{ERROR}Error:{RESET} {e}"),
+                        }
+                    } else {
+                        println!("{WARN}/link save <name> | <text>{RESET}");
+                    }
+                }
                 _ => println!(
-                    "{WARN}/link usage: list | add <name> | <path> | <description> | remove <name>{RESET}\n"
+                    "{WARN}/link usage: list | add <name> | <path> | <description> | remove <name> | refresh <name> | notes <name> | save <name> | <text>{RESET}\n"
                 ),
             }
             Some(SlashResult::Handled)
@@ -2337,7 +2478,7 @@ pub async fn handle_slash_command(
                 .split_once(char::is_whitespace)
                 .map(|(c, a)| (c, a.trim()))
                 .unwrap_or((rest, ""));
-            handle_mcp_slash(session, subcmd, args);
+            handle_mcp_slash(session, ui, subcmd, args);
             Some(SlashResult::Handled)
         }
 
@@ -2356,36 +2497,42 @@ pub async fn handle_slash_command(
                 })
                 .map(|v| v.len())
                 .unwrap_or(0);
-            println!("\n{BLUE}─ Session Stats ─────────────────────────{RESET}");
-            println!("  Provider : {MINT}{provider}{RESET}");
-            println!("  Model    : {model}");
-            println!(
+            let mut out = Vec::new();
+            out.push(format!(
+                "\n{BLUE}─ Session Stats ─────────────────────────{RESET}"
+            ));
+            out.push(format!("  Provider : {MINT}{provider}{RESET}"));
+            out.push(format!("  Model    : {model}"));
+            out.push(format!(
                 "  Workspace: {}",
-                format_path_with_tilde(&session.current_dir)
-            );
-            println!(
+                format_workspace_with_branch(&session.current_dir)
+            ));
+            out.push(format!(
                 "  Fast mode: {}",
                 if session.fast_mode { "on" } else { "off" }
-            );
-            println!("  Memory   : {interactions} interactions");
+            ));
+            out.push(format!("  Memory   : {interactions} interactions"));
             if let Some(ref img_data) = session.pending_image {
                 let count = img_data.split_whitespace().count();
                 if count > 1 {
-                    println!("  Images   : {WARN}{} images attached{RESET}", count);
+                    out.push(format!(
+                        "  Images   : {WARN}{} images attached{RESET}",
+                        count
+                    ));
                 } else {
-                    println!("  Image    : {WARN}attached{RESET}");
+                    out.push(format!("  Image    : {WARN}attached{RESET}"));
                 }
             }
-
-            println!();
+            ui.push_command_output(out.join("\n"));
             Some(SlashResult::Handled)
         }
 
         "/release-notes" => {
             const RELEASE_NOTES: &str = include_str!("../../../../Release_Note.md");
-            println!("\n{BLUE}────────────────────────────────────────────{RESET}");
-            println!("{}", RELEASE_NOTES.trim());
-            println!("{BLUE}────────────────────────────────────────────{RESET}\n");
+            ui.push_command_output(format!(
+                "\n{BLUE}────────────────────────────────────────────{RESET}\n{}\n{BLUE}────────────────────────────────────────────{RESET}",
+                RELEASE_NOTES.trim()
+            ));
             Some(SlashResult::Handled)
         }
 
@@ -2541,7 +2688,7 @@ pub async fn handle_slash_command(
                             } else if e.is_oauth {
                                 format!("{DIM}{:<22}{RESET}", plain_status)
                             } else {
-                                format!("\x1b[36m{:<22}\x1b[0m", plain_status)
+                                format!("{ANSI_BLUE}{:<22}\x1b[0m", plain_status)
                             };
                             println!(
                                 "  {BLUE}❯ {:<18}{RESET}{}  {DIM}{short_desc}{RESET}",
@@ -2824,6 +2971,136 @@ pub async fn handle_slash_command(
     }
 }
 
+fn handle_branch_slash(
+    session: &mut InteractiveSession,
+    ui: &mut dyn CommandUi,
+    requested: &str,
+) -> SlashResult {
+    use mint_core::git::{BranchChange, BranchChangeOutcome, change_branch, read_branch_info};
+
+    let info = match read_branch_info(&session.current_dir) {
+        Ok(info) if info.is_repository => info,
+        Ok(_) => {
+            ui.push_notice("Current workspace is not a Git repository.");
+            return SlashResult::Handled;
+        }
+        Err(error) => {
+            ui.push_notice(format!("Git error: {error}"));
+            return SlashResult::Handled;
+        }
+    };
+
+    let (remote, branch) = if requested.is_empty() {
+        let mut choices = info
+            .branches
+            .iter()
+            .map(|branch| {
+                (
+                    format!(
+                        "{branch}{}",
+                        if info.current_branch.as_deref() == Some(branch) {
+                            "  (current)"
+                        } else {
+                            ""
+                        }
+                    ),
+                    false,
+                    branch.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        choices.extend(
+            info.remote_branches
+                .iter()
+                .map(|branch| (format!("{branch}  (remote · track)"), true, branch.clone())),
+        );
+        if choices.is_empty() {
+            ui.push_notice("No branches found in this workspace.");
+            return SlashResult::Handled;
+        }
+        let items: Vec<ChoiceItem> = choices
+            .iter()
+            .map(|(label, is_remote, name)| {
+                let desc = if *is_remote {
+                    "remote · track"
+                } else {
+                    "local"
+                };
+                ChoiceItem::with_description(label.clone(), desc, name.clone())
+            })
+            .collect();
+        match ui.prompt_choice("Switch Git Branch", "Select a branch to switch to", &items) {
+            Ok(Some(idx)) => {
+                let (_, is_remote, ref b) = choices[idx];
+                (is_remote, b.clone())
+            }
+            _ => {
+                ui.push_notice("Branch selection cancelled.");
+                return SlashResult::Handled;
+            }
+        }
+    } else if info.branches.iter().any(|branch| branch == requested) {
+        (false, requested.to_string())
+    } else if info
+        .remote_branches
+        .iter()
+        .any(|branch| branch == requested)
+    {
+        (true, requested.to_string())
+    } else {
+        ui.push_notice(format!("Branch not found: {requested}"));
+        return SlashResult::Handled;
+    };
+
+    if !remote && info.current_branch.as_deref() == Some(branch.as_str()) {
+        ui.push_notice(format!("Already on branch {branch}."));
+        return SlashResult::Handled;
+    }
+
+    let change = if remote {
+        BranchChange::Track {
+            remote_branch: branch.clone(),
+        }
+    } else {
+        BranchChange::Switch {
+            branch: branch.clone(),
+        }
+    };
+    let result = match change_branch(&session.current_dir, &change, false) {
+        Ok(BranchChangeOutcome::Changed { info }) => Ok(info),
+        Ok(BranchChangeOutcome::ConfirmationRequired { .. }) => {
+            match ui.prompt_confirm(
+                "Workspace has uncommitted changes. Continue switching branches?",
+                false,
+            ) {
+                Ok(true) => {
+                    change_branch(&session.current_dir, &change, true).and_then(|outcome| {
+                        match outcome {
+                            BranchChangeOutcome::Changed { info } => Ok(info),
+                            BranchChangeOutcome::ConfirmationRequired { .. } => {
+                                Err("Workspace still requires confirmation.".to_string())
+                            }
+                        }
+                    })
+                }
+                _ => {
+                    ui.push_notice("Branch change cancelled.");
+                    return SlashResult::Handled;
+                }
+            }
+        }
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(next) => {
+            let current = next.current_branch.as_deref().unwrap_or("detached HEAD");
+            ui.push_notice(format!("Switched to {current}."));
+        }
+        Err(error) => ui.push_notice(format!("Git error: {error}")),
+    }
+    SlashResult::Handled
+}
+
 // ── /mcp interactive handling ────────────────────────────────────────────────
 
 /// Pull the just-persisted config back into the session so subsequent turns
@@ -2834,9 +3111,14 @@ fn reload_session_config(session: &mut InteractiveSession) {
     }
 }
 
-fn handle_mcp_slash(session: &mut InteractiveSession, subcmd: &str, args: &str) {
+fn handle_mcp_slash(
+    session: &mut InteractiveSession,
+    ui: &mut dyn CommandUi,
+    subcmd: &str,
+    args: &str,
+) {
     match subcmd {
-        "list" | "" => mcp_interactive_picker(session),
+        "list" | "" => mcp_interactive_picker(session, ui),
 
         "add" => {
             let mut tokens: Vec<&str> = args.split_whitespace().collect();
@@ -2857,54 +3139,52 @@ fn handle_mcp_slash(session: &mut InteractiveSession, subcmd: &str, args: &str) 
                             if allow_all {
                                 let _ = crate::mcp::allow(name, "*");
                             }
-                            println!(
-                                "{MINT}Added MCP server '{name}'{}.{RESET}\n",
+                            ui.push_notice(format!(
+                                "Added MCP server '{name}'{}.",
                                 if allow_all {
                                     " (all tools allowed)"
                                 } else {
                                     ""
                                 }
-                            );
+                            ));
                             reload_session_config(session);
                         }
-                        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                        Err(e) => ui.push_notice(format!("MCP error: {e}")),
                     }
                 }
-                _ => println!(
-                    "{WARN}/mcp add usage:{RESET} <name> <command|url> [args...] [--allow-all]\n"
-                ),
+                _ => ui.push_notice("/mcp add usage: <name> <command|url> [args...] [--allow-all]"),
             }
         }
 
         "remove" if !args.is_empty() => match crate::mcp::remove(args) {
             Ok(true) => {
-                println!("{MINT}Removed '{args}'.{RESET}\n");
+                ui.push_notice(format!("Removed '{args}'."));
                 reload_session_config(session);
             }
-            Ok(false) => println!("{WARN}No MCP server named '{args}'.{RESET}\n"),
-            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+            Ok(false) => ui.push_notice(format!("No MCP server named '{args}'.")),
+            Err(e) => ui.push_notice(format!("MCP error: {e}")),
         },
 
         "clear" => match crate::mcp::clear() {
             Ok(()) => {
-                println!("{MINT}Removed all MCP servers.{RESET}\n");
+                ui.push_notice("Removed all MCP servers.");
                 reload_session_config(session);
             }
-            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+            Err(e) => ui.push_notice(format!("MCP error: {e}")),
         },
 
         "enable" | "disable" if !args.is_empty() => {
             let disable = subcmd == "disable";
             match crate::mcp::set_disabled(args, disable) {
                 Ok(true) => {
-                    println!(
-                        "{MINT}{} '{args}'.{RESET}\n",
+                    ui.push_notice(format!(
+                        "{} '{args}'.",
                         if disable { "Disabled" } else { "Enabled" }
-                    );
+                    ));
                     reload_session_config(session);
                 }
-                Ok(false) => println!("{WARN}No MCP server named '{args}'.{RESET}\n"),
-                Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                Ok(false) => ui.push_notice(format!("No MCP server named '{args}'.")),
+                Err(e) => ui.push_notice(format!("MCP error: {e}")),
             }
         }
 
@@ -2918,9 +3198,7 @@ fn handle_mcp_slash(session: &mut InteractiveSession, subcmd: &str, args: &str) 
                             crate::mcp::edit(name, Some(value.to_string()), None, None, None)
                         }
                         "command" => {
-                            println!(
-                                "{WARN}/mcp edit <name> command <value> needs a value{RESET}\n"
-                            );
+                            ui.push_notice("/mcp edit <name> command <value> needs a value");
                             return;
                         }
                         "args" => crate::mcp::edit(
@@ -2938,20 +3216,20 @@ fn handle_mcp_slash(session: &mut InteractiveSession, subcmd: &str, args: &str) 
                             Some((!value.is_empty()).then(|| value.to_string())),
                         ),
                         _ => {
-                            println!("{WARN}Editable fields:{RESET} command | args | icon\n");
+                            ui.push_notice("Editable fields: command | args | icon");
                             return;
                         }
                     };
                     match result {
                         Ok(true) => {
-                            println!("{MINT}Updated '{name}'.{RESET}\n");
+                            ui.push_notice(format!("Updated '{name}'."));
                             reload_session_config(session);
                         }
-                        Ok(false) => println!("{WARN}No MCP server named '{name}'.{RESET}\n"),
-                        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                        Ok(false) => ui.push_notice(format!("No MCP server named '{name}'.")),
+                        Err(e) => ui.push_notice(format!("MCP error: {e}")),
                     }
                 }
-                _ => println!("{WARN}/mcp edit usage:{RESET} <name> command|args|icon <value>\n"),
+                _ => ui.push_notice("/mcp edit usage: <name> command|args|icon <value>"),
             }
         }
 
@@ -2966,45 +3244,43 @@ fn handle_mcp_slash(session: &mut InteractiveSession, subcmd: &str, args: &str) 
                     };
                     match result {
                         Ok(true) => {
-                            println!("{MINT}{verb} {server}/{tool}.{RESET}\n");
+                            ui.push_notice(format!("{verb} {server}/{tool}."));
                             reload_session_config(session);
                         }
-                        Ok(false) => println!("{DIM}No change for {server}/{tool}.{RESET}\n"),
-                        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                        Ok(false) => ui.push_notice(format!("No change for {server}/{tool}.")),
+                        Err(e) => ui.push_notice(format!("MCP error: {e}")),
                     }
                 }
-                _ => println!("{WARN}/mcp {subcmd} usage:{RESET} <server> <tool>\n"),
+                _ => ui.push_notice(format!("/mcp {subcmd} usage: <server> <tool>")),
             }
         }
 
         "reauth" if !args.is_empty() => {
-            println!(
-                "{DIM}Re-authenticating MCP server '{args}'... (a browser tab may open){RESET}\n"
-            );
+            ui.push_notice(format!(
+                "Re-authenticating MCP server '{args}'... (a browser tab may open)"
+            ));
             match crate::mcp::reauth(args) {
-                Ok(true) => println!("{MINT}Re-authentication succeeded for '{args}'.{RESET}\n"),
-                Ok(false) => println!(
-                    "{ERROR}Re-authentication failed for '{args}' (see output above).{RESET}\n"
-                ),
-                Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                Ok(true) => ui.push_notice(format!("Re-authentication succeeded for '{args}'.")),
+                Ok(false) => ui.push_notice(format!("Re-authentication failed for '{args}'.")),
+                Err(e) => ui.push_notice(format!("MCP error: {e}")),
             }
         }
 
-        _ => println!(
-            "{WARN}/mcp usage:{RESET} list | add <name> <cmd> [args...] | remove <name> | \
+        _ => ui.push_notice(
+            "/mcp usage: list | add <name> <cmd> [args...] | remove <name> | \
              enable|disable <name> | edit <name> command|args|icon <value> | \
-             allow|disallow <server> <tool> | reauth <server> | clear\n"
+             allow|disallow <server> <tool> | reauth <server> | clear",
         ),
     }
 }
 
-/// The arrow-key `/mcp` flow: an "add" row plus every configured server; picking
+/// The `/mcp` flow: an "add" row plus every configured server; picking
 /// a server opens a per-server action menu.
-fn mcp_interactive_picker(session: &mut InteractiveSession) {
+fn mcp_interactive_picker(session: &mut InteractiveSession, ui: &mut dyn CommandUi) {
     let servers = match crate::mcp::list() {
         Ok(servers) => servers,
         Err(e) => {
-            println!("{ERROR}MCP error:{RESET} {e}\n");
+            ui.push_notice(format!("MCP error: {e}"));
             return;
         }
     };
@@ -3019,100 +3295,114 @@ fn mcp_interactive_picker(session: &mut InteractiveSession) {
         .and_then(|v| v.as_object())
         .cloned();
 
-    let mut choices = vec![ADD_ROW.to_string()];
+    let mut choices = vec![ChoiceItem::with_description(
+        ADD_ROW,
+        "Connect a new MCP server (catalog, remote SSE, or local stdio)",
+        ADD_ROW,
+    )];
     let mut names = Vec::new();
-    let width = servers.keys().map(|k| k.len()).max().unwrap_or(6) + 2;
     for (name, srv) in &servers {
         let tools = allowed
             .as_ref()
             .and_then(|m| m.get(name))
             .and_then(|v| v.as_array());
         let label = match tools {
-            Some(a) if a.iter().any(|t| t.as_str() == Some("*")) => {
-                format!("{MINT}[tools: *]{RESET}")
-            }
+            Some(a) if a.iter().any(|t| t.as_str() == Some("*")) => "[tools: *]".to_string(),
             Some(a) if !a.is_empty() => format!(
-                "{MINT}[tools: {}]{RESET}",
+                "[tools: {}]",
                 a.iter()
                     .filter_map(|t| t.as_str())
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            _ => format!("{DIM}[no tools allowed]{RESET}"),
+            _ => "[no tools allowed]".to_string(),
         };
-        let disabled = if srv.disabled {
-            format!(" {DIM}(disabled){RESET}")
-        } else {
-            String::new()
-        };
+        let disabled = if srv.disabled { " (disabled)" } else { "" };
         let desc = if let Some(url) = srv.remote_url() {
             format!("(url: {url})")
         } else {
             format!("({} {})", srv.command, srv.args.join(" "))
         };
-        choices.push(format!(
-            "{name:<width$}{label}{disabled} {DIM}{desc}{RESET}",
+        choices.push(ChoiceItem::with_description(
+            name.clone(),
+            format!("{label}{disabled} {desc}"),
+            name.clone(),
         ));
         names.push(name.clone());
     }
-    choices.push(CANCEL.to_string());
+    choices.push(ChoiceItem::with_description(
+        CANCEL,
+        "Close this menu",
+        CANCEL,
+    ));
 
-    let Ok(Some(pick)) = prompt_interactive_select("MCP Servers", &choices, ADD_ROW) else {
+    let Ok(Some(idx)) = ui.prompt_choice(
+        "MCP Servers",
+        "Select a server to manage or add a new one",
+        &choices,
+    ) else {
         return;
     };
+    let pick = &choices[idx].label;
     if pick == CANCEL {
         return;
     }
     if pick == ADD_ROW {
-        mcp_add_flow(session);
+        mcp_add_flow(session, ui);
         return;
     }
-    let Some(pos) = choices.iter().position(|c| *c == pick) else {
-        return;
-    };
-    let name = names[pos - 1].clone();
+    let name = names[idx - 1].clone();
     let disabled = servers.get(&name).map(|s| s.disabled).unwrap_or(false);
-    mcp_server_actions(session, &name, disabled);
+    mcp_server_actions(session, ui, &name, disabled);
 }
 
-fn mcp_add_flow(session: &mut InteractiveSession) {
+fn mcp_add_flow(session: &mut InteractiveSession, ui: &mut dyn CommandUi) {
     let choices = vec![
-        "From catalog".to_string(),
-        "Remote URL (SSE)".to_string(),
-        "Local Command (stdio)".to_string(),
+        ChoiceItem::with_description(
+            "From catalog",
+            "Install from known MCP tools catalog",
+            "catalog",
+        ),
+        ChoiceItem::with_description(
+            "Remote URL (SSE)",
+            "Connect to remote HTTP/SSE MCP endpoint",
+            "remote",
+        ),
+        ChoiceItem::with_description(
+            "Local Command (stdio)",
+            "Run local command (e.g. npx, uvx)",
+            "local",
+        ),
     ];
-    match prompt_interactive_select("Add MCP server", &choices, &choices[0]) {
-        Ok(Some(c)) if c == "From catalog" => mcp_add_from_catalog(session),
-        Ok(Some(c)) if c == "Remote URL (SSE)" => mcp_add_remote_flow(session),
-        Ok(Some(c)) if c == "Local Command (stdio)" => mcp_add_custom_flow(session),
+    match ui.prompt_choice("Add MCP server", "Select server type", &choices) {
+        Ok(Some(0)) => mcp_add_from_catalog(session, ui),
+        Ok(Some(1)) => mcp_add_remote_flow(session, ui),
+        Ok(Some(2)) => mcp_add_custom_flow(session, ui),
         _ => {}
     }
 }
 
-fn mcp_add_from_catalog(session: &mut InteractiveSession) {
+fn mcp_add_from_catalog(session: &mut InteractiveSession, ui: &mut dyn CommandUi) {
     let entries = crate::mcp::registry();
-    let labels: Vec<String> = entries
+    let choices: Vec<ChoiceItem> = entries
         .iter()
         .map(|e| {
             let needs = if e.required_env.is_empty() {
                 String::new()
             } else {
-                format!(" {DIM}(needs a key){RESET}")
+                " (needs a key)".to_string()
             };
-            format!("{:<20} {}{needs}", e.name, e.desc)
+            ChoiceItem::with_description(&e.name, format!("{}{needs}", e.desc), &e.key)
         })
         .collect();
-    let Ok(Some(picked)) = prompt_interactive_select("MCP server catalog", &labels, &labels[0])
-    else {
+    let Ok(Some(idx)) = ui.prompt_choice(
+        "MCP server catalog",
+        "Select an MCP server from catalog",
+        &choices,
+    ) else {
         return;
     };
-    let Some(entry) = labels
-        .iter()
-        .position(|l| *l == picked)
-        .map(|i| &entries[i])
-    else {
-        return;
-    };
+    let entry = &entries[idx];
 
     // One prompt per declared argInput (path / connection string / …).
     let mut extra_args = Vec::new();
@@ -3122,10 +3412,14 @@ fn mcp_add_from_catalog(session: &mut InteractiveSession) {
         } else {
             format!("{} (e.g. {})", input.label, input.placeholder)
         };
-        let value = crate::onboard::prompt_input(&hint, None).unwrap_or_default();
+        let value = ui
+            .prompt_text(&entry.name, &hint, None)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let value = value.trim();
         if value.is_empty() {
-            println!("{WARN}Cancelled ('{}' is required).{RESET}\n", input.label);
+            ui.push_notice(format!("Cancelled ('{}' is required).", input.label));
             return;
         }
         extra_args.push(value.to_string());
@@ -3134,65 +3428,96 @@ fn mcp_add_from_catalog(session: &mut InteractiveSession) {
     // One prompt per required env var.
     let mut env = Vec::new();
     for var in &entry.required_env {
-        if let Some(help) = &var.help {
-            println!("{DIM}  {}: get one at {help}{RESET}", var.label);
-        }
-        let value = crate::onboard::prompt_input(&var.label, None).unwrap_or_default();
+        let prompt_body = if let Some(help) = &var.help {
+            format!("{} (get one at {help})", var.label)
+        } else {
+            var.label.clone()
+        };
+        let value = ui
+            .prompt_text(&entry.name, &prompt_body, None)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let value = value.trim();
         if value.is_empty() {
-            println!("{WARN}Cancelled ('{}' is required).{RESET}\n", var.label);
+            ui.push_notice(format!("Cancelled ('{}' is required).", var.label));
             return;
         }
         env.push(format!("{}={value}", var.key));
     }
 
-    let name = crate::onboard::prompt_input("Server name", Some(&entry.key)).unwrap_or_default();
+    let name = ui
+        .prompt_text(
+            "Server name",
+            "Choose a unique name for this MCP server",
+            Some(&entry.key),
+        )
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     let name = if name.trim().is_empty() {
         entry.key.clone()
     } else {
         name.trim().to_string()
     };
 
-    let allow_all = confirm(
-        "Allow the agent to call all of this server's tools now? (else approve them one by one)",
-    )
-    .unwrap_or(false);
+    let allow_all = ui
+        .prompt_confirm(
+            "Allow the agent to call all of this server's tools now? (else approve them one by one)",
+            false,
+        )
+        .unwrap_or(false);
 
     match crate::mcp::registry_add(&entry.key, Some(&name), extra_args, env, allow_all) {
         Ok(saved) => {
-            println!(
-                "{MINT}Added MCP server '{saved}'{}.{RESET}\n",
+            ui.push_notice(format!(
+                "Added MCP server '{saved}'{}.",
                 if allow_all {
                     " (all tools allowed)"
                 } else {
                     ""
                 }
-            );
+            ));
             reload_session_config(session);
         }
-        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+        Err(e) => ui.push_notice(format!("MCP error: {e}")),
     }
 }
 
-fn mcp_add_remote_flow(session: &mut InteractiveSession) {
-    let name = crate::onboard::prompt_input("Server name", None).unwrap_or_default();
+fn mcp_add_remote_flow(session: &mut InteractiveSession, ui: &mut dyn CommandUi) {
+    let name = ui
+        .prompt_text("Remote MCP Server", "Server name", None)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     let name = name.trim().to_string();
     if name.is_empty() {
-        println!("{WARN}Cancelled (no name).{RESET}\n");
+        ui.push_notice("Cancelled (no name).");
         return;
     }
-    let url = crate::onboard::prompt_input("Server URL (e.g. https://example.com/sse)", None)
+    let url = ui
+        .prompt_text(
+            "Remote MCP Server",
+            "Server URL (e.g. https://example.com/sse)",
+            None,
+        )
+        .ok()
+        .flatten()
         .unwrap_or_default();
     let url = url.trim().to_string();
     if url.is_empty() {
-        println!("{WARN}Cancelled (no URL).{RESET}\n");
+        ui.push_notice("Cancelled (no URL).");
         return;
     }
-    let auth = crate::onboard::prompt_input(
-        "Auth header or bearer token (blank for none, e.g. Bearer token)",
-        None,
-    )
-    .unwrap_or_default();
+    let auth = ui
+        .prompt_text(
+            "Remote MCP Server",
+            "Auth header or bearer token (blank for none, e.g. Bearer token)",
+            None,
+        )
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     let headers = if auth.trim().is_empty() {
         None
     } else {
@@ -3212,46 +3537,65 @@ fn mcp_add_remote_flow(session: &mut InteractiveSession) {
 
     match crate::mcp::add_remote(&name, &url, headers) {
         Ok(()) => {
-            let allow_all = confirm(
-                "Allow the agent to call all of this server's tools now? (else approve them one by one)",
-            )
-            .unwrap_or(false);
+            let allow_all = ui
+                .prompt_confirm(
+                    "Allow the agent to call all of this server's tools now? (else approve them one by one)",
+                    false,
+                )
+                .unwrap_or(false);
             if allow_all {
                 let _ = crate::mcp::allow(&name, "*");
             }
-            println!(
-                "{MINT}Added Remote MCP server '{name}'{}.{RESET}\n",
+            ui.push_notice(format!(
+                "Added Remote MCP server '{name}'{}.",
                 if allow_all {
                     " (all tools allowed)"
                 } else {
                     ""
                 }
-            );
+            ));
             reload_session_config(session);
         }
-        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+        Err(e) => ui.push_notice(format!("MCP error: {e}")),
     }
 }
 
-fn mcp_add_custom_flow(session: &mut InteractiveSession) {
-    let name = crate::onboard::prompt_input("Server name", None).unwrap_or_default();
+fn mcp_add_custom_flow(session: &mut InteractiveSession, ui: &mut dyn CommandUi) {
+    let name = ui
+        .prompt_text("Custom MCP Server", "Server name", None)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     let name = name.trim().to_string();
     if name.is_empty() {
-        println!("{WARN}Cancelled (no name).{RESET}\n");
+        ui.push_notice("Cancelled (no name).");
         return;
     }
-    let command = crate::onboard::prompt_input("Command or URL (e.g. npx or https://...)", None)
+    let command = ui
+        .prompt_text(
+            "Custom MCP Server",
+            "Command or URL (e.g. npx or https://...)",
+            None,
+        )
+        .ok()
+        .flatten()
         .unwrap_or_default();
     let command = command.trim().to_string();
     if command.is_empty() {
-        println!("{WARN}Cancelled (no command).{RESET}\n");
+        ui.push_notice("Cancelled (no command).");
         return;
     }
 
     if command.starts_with("http://") || command.starts_with("https://") {
-        let auth =
-            crate::onboard::prompt_input("Auth header or bearer token (blank for none)", None)
-                .unwrap_or_default();
+        let auth = ui
+            .prompt_text(
+                "Remote MCP Server",
+                "Auth header or bearer token (blank for none)",
+                None,
+            )
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let headers = if auth.trim().is_empty() {
             None
         } else {
@@ -3270,35 +3614,48 @@ fn mcp_add_custom_flow(session: &mut InteractiveSession) {
         };
         match crate::mcp::add_remote(&name, &command, headers) {
             Ok(()) => {
-                let allow_all = confirm(
-                    "Allow the agent to call all of this server's tools now? (else approve them one by one)",
-                )
-                .unwrap_or(false);
+                let allow_all = ui
+                    .prompt_confirm(
+                        "Allow the agent to call all of this server's tools now? (else approve them one by one)",
+                        false,
+                    )
+                    .unwrap_or(false);
                 if allow_all {
                     let _ = crate::mcp::allow(&name, "*");
                 }
-                println!(
-                    "{MINT}Added Remote MCP server '{name}'{}.{RESET}\n",
+                ui.push_notice(format!(
+                    "Added Remote MCP server '{name}'{}.",
                     if allow_all {
                         " (all tools allowed)"
                     } else {
                         ""
                     }
-                );
+                ));
                 reload_session_config(session);
             }
-            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+            Err(e) => ui.push_notice(format!("MCP error: {e}")),
         }
         return;
     }
 
-    let args = crate::onboard::prompt_input("Arguments (space-separated, blank for none)", None)
+    let args = ui
+        .prompt_text(
+            "Custom MCP Server",
+            "Arguments (space-separated, blank for none)",
+            None,
+        )
+        .ok()
+        .flatten()
         .unwrap_or_default();
-    let env_raw = crate::onboard::prompt_input(
-        "Env vars (KEY=VALUE, comma-separated, blank for none)",
-        None,
-    )
-    .unwrap_or_default();
+    let env_raw = ui
+        .prompt_text(
+            "Custom MCP Server",
+            "Env vars (KEY=VALUE, comma-separated, blank for none)",
+            None,
+        )
+        .ok()
+        .flatten()
+        .unwrap_or_default();
 
     let args: Vec<String> = args.split_whitespace().map(str::to_string).collect();
     let env: Vec<String> = env_raw
@@ -3310,79 +3667,115 @@ fn mcp_add_custom_flow(session: &mut InteractiveSession) {
 
     match crate::mcp::add(&name, &command, args, env) {
         Ok(()) => {
-            let allow_all = confirm(
-                "Allow the agent to call all of this server's tools now? (else approve them one by one)",
-            )
-            .unwrap_or(false);
+            let allow_all = ui
+                .prompt_confirm(
+                    "Allow the agent to call all of this server's tools now? (else approve them one by one)",
+                    false,
+                )
+                .unwrap_or(false);
             if allow_all {
                 let _ = crate::mcp::allow(&name, "*");
             }
-            println!(
-                "{MINT}Added MCP server '{name}'{}.{RESET}\n",
+            ui.push_notice(format!(
+                "Added MCP server '{name}'{}.",
                 if allow_all {
                     " (all tools allowed)"
                 } else {
                     ""
                 }
-            );
+            ));
             reload_session_config(session);
         }
-        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+        Err(e) => ui.push_notice(format!("MCP error: {e}")),
     }
 }
 
-fn mcp_server_actions(session: &mut InteractiveSession, name: &str, disabled: bool) {
+fn mcp_server_actions(
+    session: &mut InteractiveSession,
+    ui: &mut dyn CommandUi,
+    name: &str,
+    disabled: bool,
+) {
     let toggle_label = if disabled {
         "Enable server"
     } else {
         "Disable server"
     };
     let actions = vec![
-        "Check connection".to_string(),
-        "Allow all tools (*)".to_string(),
-        "Allow a specific tool".to_string(),
-        "Disallow a tool".to_string(),
-        "Re-authenticate (OAuth)".to_string(),
-        toggle_label.to_string(),
-        "Edit (command / args / icon)".to_string(),
-        "Remove server".to_string(),
-        "Back".to_string(),
+        ChoiceItem::with_description("Check connection", "Test tool discovery", "check"),
+        ChoiceItem::with_description(
+            "Allow all tools (*)",
+            "Grant unrestricted tool call access",
+            "allow_all",
+        ),
+        ChoiceItem::with_description(
+            "Allow a specific tool",
+            "Whitelist an individual tool name",
+            "allow_tool",
+        ),
+        ChoiceItem::with_description(
+            "Disallow a tool",
+            "Remove a tool from allowlist",
+            "disallow_tool",
+        ),
+        ChoiceItem::with_description(
+            "Re-authenticate (OAuth)",
+            "Trigger browser OAuth login flow",
+            "reauth",
+        ),
+        ChoiceItem::with_description(toggle_label, "Toggle server active status", "toggle"),
+        ChoiceItem::with_description(
+            "Edit (command / args / icon)",
+            "Update server settings",
+            "edit",
+        ),
+        ChoiceItem::with_description("Remove server", "Delete server from config", "remove"),
+        ChoiceItem::with_description("Back", "Return to MCP servers list", "back"),
     ];
-    let Ok(Some(choice)) =
-        prompt_interactive_select(&format!("MCP: {name}"), &actions, &actions[0])
-    else {
+    let Ok(Some(idx)) = ui.prompt_choice(&format!("MCP: {name}"), "Choose action", &actions) else {
         return;
     };
 
-    match choice.as_str() {
-        "Check connection" => match mint_core::list_server_tools(&session.config, name) {
-            Ok(_) => println!("{MINT}● Connected{RESET}\n"),
-            Err(e) => println!("{ERROR}● Not connected:{RESET} {e}\n"),
+    match actions[idx].value.as_str() {
+        "check" => match mint_core::list_server_tools(&session.config, name) {
+            Ok(_) => ui.push_notice("● Connected"),
+            Err(e) => ui.push_notice(format!("● Not connected: {e}")),
         },
-        "Allow all tools (*)" => match crate::mcp::allow(name, "*") {
+        "allow_all" => match crate::mcp::allow(name, "*") {
             Ok(_) => {
-                println!("{MINT}Allowed all tools for '{name}'.{RESET}\n");
+                ui.push_notice(format!("Allowed all tools for '{name}'."));
                 reload_session_config(session);
             }
-            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+            Err(e) => ui.push_notice(format!("MCP error: {e}")),
         },
-        "Allow a specific tool" => {
-            let tool = crate::onboard::prompt_input("Tool name", None).unwrap_or_default();
+        "allow_tool" => {
+            let tool = ui
+                .prompt_text(&format!("MCP: {name}"), "Tool name", None)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
             let tool = tool.trim();
             if tool.is_empty() {
                 return;
             }
             match crate::mcp::allow(name, tool) {
                 Ok(true) => {
-                    println!("{MINT}Allowed {name}/{tool}.{RESET}\n");
+                    ui.push_notice(format!("Allowed {name}/{tool}."));
                     reload_session_config(session);
                 }
-                Ok(false) => println!("{DIM}{name}/{tool} was already allowed.{RESET}\n"),
-                Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                Ok(false) => ui.push_notice(format!("{name}/{tool} was already allowed.")),
+                Err(e) => ui.push_notice(format!("MCP error: {e}")),
             }
         }
-        "Disallow a tool" => {
-            let tool = crate::onboard::prompt_input("Tool to remove (* to clear all)", None)
+        "disallow_tool" => {
+            let tool = ui
+                .prompt_text(
+                    &format!("MCP: {name}"),
+                    "Tool to remove (* to clear all)",
+                    None,
+                )
+                .ok()
+                .flatten()
                 .unwrap_or_default();
             let tool = tool.trim();
             if tool.is_empty() {
@@ -3390,42 +3783,45 @@ fn mcp_server_actions(session: &mut InteractiveSession, name: &str, disabled: bo
             }
             match crate::mcp::disallow(name, tool) {
                 Ok(true) => {
-                    println!("{MINT}Removed {name}/{tool} from the allowlist.{RESET}\n");
+                    ui.push_notice(format!("Removed {name}/{tool} from the allowlist."));
                     reload_session_config(session);
                 }
-                Ok(false) => println!("{DIM}{name}/{tool} was not in the allowlist.{RESET}\n"),
-                Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                Ok(false) => ui.push_notice(format!("{name}/{tool} was not in the allowlist.")),
+                Err(e) => ui.push_notice(format!("MCP error: {e}")),
             }
         }
-        "Re-authenticate (OAuth)" => {
-            println!("{DIM}Re-authenticating '{name}'... (a browser tab may open){RESET}\n");
+        "reauth" => {
+            ui.push_notice(format!(
+                "Re-authenticating '{name}'... (a browser tab may open)"
+            ));
             match crate::mcp::reauth(name) {
-                Ok(true) => println!("{MINT}Re-authentication succeeded.{RESET}\n"),
-                Ok(false) => {
-                    println!("{ERROR}Re-authentication failed (see output above).{RESET}\n")
-                }
-                Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                Ok(true) => ui.push_notice("Re-authentication succeeded."),
+                Ok(false) => ui.push_notice("Re-authentication failed (see output above)."),
+                Err(e) => ui.push_notice(format!("MCP error: {e}")),
             }
         }
-        other if other == toggle_label => match crate::mcp::set_disabled(name, !disabled) {
+        "toggle" => match crate::mcp::set_disabled(name, !disabled) {
             Ok(_) => {
-                println!(
-                    "{MINT}{} '{name}'.{RESET}\n",
+                ui.push_notice(format!(
+                    "{} '{name}'.",
                     if disabled { "Enabled" } else { "Disabled" }
-                );
+                ));
                 reload_session_config(session);
             }
-            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+            Err(e) => ui.push_notice(format!("MCP error: {e}")),
         },
-        "Edit (command / args / icon)" => mcp_edit_flow(session, name),
-        "Remove server" => {
-            if confirm(&format!("Remove MCP server '{name}'?")).unwrap_or(false) {
+        "edit" => mcp_edit_flow(session, ui, name),
+        "remove" => {
+            if ui
+                .prompt_confirm(&format!("Remove MCP server '{name}'?"), false)
+                .unwrap_or(false)
+            {
                 match crate::mcp::remove(name) {
                     Ok(_) => {
-                        println!("{MINT}Removed '{name}'.{RESET}\n");
+                        ui.push_notice(format!("Removed '{name}'."));
                         reload_session_config(session);
                     }
-                    Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                    Err(e) => ui.push_notice(format!("MCP error: {e}")),
                 }
             }
         }
@@ -3433,25 +3829,28 @@ fn mcp_server_actions(session: &mut InteractiveSession, name: &str, disabled: bo
     }
 }
 
-fn mcp_edit_flow(session: &mut InteractiveSession, name: &str) {
+fn mcp_edit_flow(session: &mut InteractiveSession, ui: &mut dyn CommandUi, name: &str) {
     let Some(srv) = crate::mcp::list().ok().and_then(|m| m.get(name).cloned()) else {
-        println!("{WARN}No MCP server named '{name}'.{RESET}\n");
+        ui.push_notice(format!("No MCP server named '{name}'."));
         return;
     };
     let fields = vec![
-        "command".to_string(),
-        "args".to_string(),
-        "icon".to_string(),
-        "Back".to_string(),
+        ChoiceItem::with_description("command", &srv.command, "command"),
+        ChoiceItem::with_description("args", srv.args.join(" "), "args"),
+        ChoiceItem::with_description("icon", srv.icon.as_deref().unwrap_or("(none)"), "icon"),
+        ChoiceItem::with_description("Back", "Cancel edit", "back"),
     ];
-    let Ok(Some(field)) = prompt_interactive_select(&format!("Edit {name}"), &fields, &fields[0])
+    let Ok(Some(idx)) = ui.prompt_choice(&format!("Edit {name}"), "Select field to edit", &fields)
     else {
         return;
     };
-    let result = match field.as_str() {
+    let result = match fields[idx].value.as_str() {
         "command" => {
-            let value =
-                crate::onboard::prompt_input("Command", Some(&srv.command)).unwrap_or_default();
+            let value = ui
+                .prompt_text(&format!("Edit {name}"), "Command", Some(&srv.command))
+                .ok()
+                .flatten()
+                .unwrap_or_default();
             let value = value.trim();
             if value.is_empty() {
                 return;
@@ -3460,7 +3859,14 @@ fn mcp_edit_flow(session: &mut InteractiveSession, name: &str) {
         }
         "args" => {
             let current = srv.args.join(" ");
-            let value = crate::onboard::prompt_input("Arguments (space-separated)", Some(&current))
+            let value = ui
+                .prompt_text(
+                    &format!("Edit {name}"),
+                    "Arguments (space-separated)",
+                    Some(&current),
+                )
+                .ok()
+                .flatten()
                 .unwrap_or_default();
             crate::mcp::edit(
                 name,
@@ -3472,7 +3878,14 @@ fn mcp_edit_flow(session: &mut InteractiveSession, name: &str) {
         }
         "icon" => {
             let current = srv.icon.clone().unwrap_or_default();
-            let value = crate::onboard::prompt_input("Icon (blank to clear)", Some(&current))
+            let value = ui
+                .prompt_text(
+                    &format!("Edit {name}"),
+                    "Icon (blank to clear)",
+                    Some(&current),
+                )
+                .ok()
+                .flatten()
                 .unwrap_or_default();
             let value = value.trim();
             crate::mcp::edit(
@@ -3487,10 +3900,10 @@ fn mcp_edit_flow(session: &mut InteractiveSession, name: &str) {
     };
     match result {
         Ok(_) => {
-            println!("{MINT}Updated '{name}'.{RESET}\n");
+            ui.push_notice(format!("Updated '{name}'."));
             reload_session_config(session);
         }
-        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+        Err(e) => ui.push_notice(format!("MCP error: {e}")),
     }
 }
 
@@ -3500,7 +3913,8 @@ mod tests {
 
     /// Commands that are dispatched but deliberately left undocumented —
     /// shortcuts for another command's own token, not gaps in `SLASH_COMMANDS`.
-    const UNDOCUMENTED_ALIASES: &[&str] = &["/quit", "/reset", "/plugin", "/searchProvider"];
+    const UNDOCUMENTED_ALIASES: &[&str] =
+        &["/quit", "/reset", "/plugin", "/searchProvider", "/think"];
 
     /// Regression guard for the exact bug that motivated `SLASH_COMMANDS`:
     /// `/edit-image`, `/gen-image`, `/shells`, and `/subagent` all worked but
@@ -3555,6 +3969,7 @@ mod tests {
     #[tokio::test]
     async fn core_slash_clear_clears_history() {
         let mut session = InteractiveSession {
+            chat_id: mint_core::CHAT_CLI_ID.to_string(),
             config: MintConfig::default(),
             current_dir: std::env::current_dir().unwrap(),
             fast_mode: false,
@@ -3564,7 +3979,8 @@ mod tests {
             jobs: BackgroundJobs::new(),
         };
 
-        let res = handle_slash_command(&mut session, "/clear").await;
+        let mut ui = MockCommandUi::new();
+        let res = handle_slash_command(&mut session, &mut ui, "/clear").await;
         assert!(matches!(res, Some(SlashResult::Handled)));
         assert!(session.history.is_empty());
     }
@@ -3572,6 +3988,7 @@ mod tests {
     #[tokio::test]
     async fn core_slash_fast_mode_toggle() {
         let mut session = InteractiveSession {
+            chat_id: mint_core::CHAT_CLI_ID.to_string(),
             config: MintConfig::default(),
             current_dir: std::env::current_dir().unwrap(),
             fast_mode: false,
@@ -3581,7 +3998,8 @@ mod tests {
             jobs: BackgroundJobs::new(),
         };
 
-        let res = handle_slash_command(&mut session, "/fast on").await;
+        let mut ui = MockCommandUi::new();
+        let res = handle_slash_command(&mut session, &mut ui, "/fast on").await;
         assert!(matches!(res, Some(SlashResult::Handled)));
         assert!(session.fast_mode);
     }

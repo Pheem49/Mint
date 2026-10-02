@@ -1,3 +1,5 @@
+const ANSI_BLUE_BOLD: &str = crate::terminal_theme::ANSI_BLUE_BOLD;
+
 use anyhow::{Context, Result};
 use mint_core::MintConfig;
 use mint_core::eval::{aggregate_benchmark_report, evaluate_task_result, load_suite_from_file};
@@ -5,13 +7,15 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 pub async fn handle_eval(suite_path: PathBuf, limit: usize, config: &MintConfig) -> Result<()> {
-    println!("\x1b[1;36m┌─ Mint Benchmark Evaluation Harness ──────────────────────\x1b[0m");
+    println!("{ANSI_BLUE_BOLD}┌─ Mint Benchmark Evaluation Harness ──────────────────────\x1b[0m");
     if !suite_path.exists() {
         println!(
             "│ \x1b[31mBenchmark suite file not found: {}\x1b[0m",
             suite_path.display()
         );
-        println!("\x1b[1;36m└─────────────────────────────────────────────────────────\x1b[0m");
+        println!(
+            "{ANSI_BLUE_BOLD}└─────────────────────────────────────────────────────────\x1b[0m"
+        );
         anyhow::bail!("Suite file not found: {}", suite_path.display());
     }
 
@@ -22,7 +26,7 @@ pub async fn handle_eval(suite_path: PathBuf, limit: usize, config: &MintConfig)
         suite.name, suite.version
     );
     println!("│ Total Tasks: {}", suite.tasks.len());
-    println!("\x1b[1;36m├─────────────────────────────────────────────────────────\x1b[0m");
+    println!("{ANSI_BLUE_BOLD}├─────────────────────────────────────────────────────────\x1b[0m");
 
     let cwd = std::env::current_dir().context("failed to get current dir")?;
     let mut results = Vec::new();
@@ -131,7 +135,7 @@ pub async fn handle_eval(suite_path: PathBuf, limit: usize, config: &MintConfig)
     }
 
     let report = aggregate_benchmark_report(&suite.name, results);
-    println!("\x1b[1;36m├─ Final Evaluation Report ───────────────────────────────\x1b[0m");
+    println!("{ANSI_BLUE_BOLD}├─ Final Evaluation Report ───────────────────────────────\x1b[0m");
     println!("│ Suite:            {}", report.suite_name);
     println!(
         "│ Tasks Completed:  {}/{}",
@@ -146,7 +150,7 @@ pub async fn handle_eval(suite_path: PathBuf, limit: usize, config: &MintConfig)
     println!("│ Avg Tokens:       {}", report.avg_tokens);
     println!("│ Avg Tool Calls:   {:.1}", report.avg_tool_calls);
     println!("│ Avg Retries:      {:.1}", report.avg_retries);
-    println!("\x1b[1;36m└─────────────────────────────────────────────────────────\x1b[0m");
+    println!("{ANSI_BLUE_BOLD}└─────────────────────────────────────────────────────────\x1b[0m");
 
     let report_path = cwd.join("mint_eval_report.json");
     if let Ok(json) = serde_json::to_string_pretty(&report) {

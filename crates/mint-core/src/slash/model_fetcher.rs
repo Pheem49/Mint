@@ -363,9 +363,18 @@ async fn fetch_openrouter_models(api_key: &str) -> Result<Vec<String>, ()> {
     let resp = reqwest_get(url, Some(&auth)).await?;
     let parsed: OpenRouterModelsResponse = serde_json::from_str(&resp).map_err(|_| ())?;
 
-    let mut models: Vec<String> = parsed.data.into_iter().map(|m| m.id).collect();
-    models.sort();
-    Ok(models)
+    let mut all_models: Vec<String> = parsed.data.into_iter().map(|m| m.id).collect();
+    all_models.sort();
+
+    // Prioritize popular / recommended models at the top
+    let mut prioritized = Vec::new();
+    for pop in super::models::OPENROUTER_POPULAR_MODELS {
+        if let Some(pos) = all_models.iter().position(|m| m == pop) {
+            prioritized.push(all_models.remove(pos));
+        }
+    }
+    prioritized.extend(all_models);
+    Ok(prioritized)
 }
 
 // ---------------------------------------------------------------------------

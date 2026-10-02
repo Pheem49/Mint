@@ -59,7 +59,7 @@
 }
 
 .img-studio-header-title svg {
-  color: var(--accent);
+  color: var(--interactive-fg);
   flex-shrink: 0;
 }
 
@@ -70,11 +70,11 @@
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.03em;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .img-studio-subtitle {
@@ -138,7 +138,7 @@
   font-size: 0.76rem;
   font-weight: 500;
   letter-spacing: 0.02em;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .img-studio-label-hint {
@@ -200,7 +200,7 @@
 .img-studio-chip:hover:not(:disabled) {
   border-color: var(--accent-hover);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
 }
 
 /* ── Negative prompt toggle ────────────────────────────── */
@@ -255,13 +255,13 @@
 .img-studio-provider-btn:hover:not(:disabled) {
   border-color: var(--accent-hover);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
 }
 
 .img-studio-provider-btn.is-active {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
   font-weight: 600;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 15%, transparent) inset;
 }
@@ -298,14 +298,14 @@
 .img-studio-count-btn:hover:not(:disabled) {
   border-color: var(--accent-hover);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
 }
 
 .img-studio-aspect-btn.is-active,
 .img-studio-count-btn.is-active {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
   font-weight: 600;
 }
 
@@ -331,7 +331,7 @@
   border: none;
   border-radius: var(--radius-lg);
   background: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 80%, #000) 100%);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 0.88rem;
   font-weight: 600;
   cursor: pointer;
@@ -583,12 +583,12 @@
 
 .img-studio-action-btn--primary {
   border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-  color: var(--accent);
+  color: var(--interactive-fg);
 }
 
 .img-studio-action-btn--primary:hover {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
   border-color: var(--accent);
 }
 
@@ -616,7 +616,7 @@
 
 .img-studio-empty-icon {
   opacity: 0.35;
-  color: var(--accent);
+  color: var(--interactive-fg);
 }
 
 .img-studio-empty p {
@@ -650,7 +650,7 @@
 }
 
 .img-studio-history-title svg {
-  color: var(--accent);
+  color: var(--interactive-fg);
 }
 
 .img-studio-history-badge {
@@ -761,7 +761,7 @@
 .img-studio-dropzone-icon {
   width: 28px;
   height: 28px;
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   transition: transform 0.2s ease;
 }
 
@@ -816,7 +816,7 @@
 
 .img-studio-preview-subtitle {
   font-size: 0.72rem;
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   margin-top: 2px;
 }
 

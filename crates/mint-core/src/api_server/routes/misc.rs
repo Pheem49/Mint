@@ -413,21 +413,17 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 .find_map(|kv| kv.strip_prefix("baseUrl="))
                 .map(|v| percent_decode(v));
 
-            let dynamic = crate::slash::model_fetcher::fetch_provider_models(
-                &provider,
-                &api_key,
-                base_url_opt.as_deref(),
-            )
-            .await;
-
-            let models = if !dynamic.is_empty() {
-                dynamic
-            } else {
-                // Fallback: static presets so the UI is never empty.
-                match load_config() {
-                    Ok(cfg) => crate::slash::models::model_options_for_provider(&cfg, &provider),
-                    Err(_) => Vec::new(),
+            let models = match load_config() {
+                Ok(cfg) => {
+                    crate::slash::models::model_options_for_provider_with_credentials_async(
+                        &cfg,
+                        &provider,
+                        &api_key,
+                        base_url_opt.as_deref(),
+                    )
+                    .await
                 }
+                Err(_) => Vec::new(),
             };
 
             send_json_response(

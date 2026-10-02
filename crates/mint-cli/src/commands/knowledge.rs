@@ -258,6 +258,7 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
             messages: None,
             tools: None,
             temperature: config.temperature,
+            ..Default::default()
         },
     )
     .await {

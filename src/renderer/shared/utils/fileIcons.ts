@@ -131,5 +131,5 @@ export function materialFileIcon(name: string, fileExtension: string): string {
   return FILE_ICONS_BY_NAME[name.toLowerCase()] || FILE_ICONS_BY_EXTENSION[fileExtension] || documentIcon
 }
 
-export { folderIcon, folderOpenIcon }
+export { folderIcon, folderOpenIcon, documentIcon }
 

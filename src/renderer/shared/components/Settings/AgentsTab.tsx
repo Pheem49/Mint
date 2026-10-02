@@ -1,17 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
-import {
-  GEMINI_MODELS,
-  OPENAI_MODELS,
-  OPENROUTER_MODELS,
-  DEEPSEEK_MODELS,
-  ANTHROPIC_MODELS,
-  HF_MODELS,
-  LOCAL_MODELS,
-} from '../../constants/models'
-import type { CustomProviderConfig } from '../../types'
-import { listSubagents, saveSubagent, deleteSubagent, SubagentDefinition, SubagentDraft } from '@/tauri'
+import { HF_MODELS } from '../../constants/models'
+import type { CustomProviderConfig, SubagentDefinition, SubagentDraft } from '../../types'
+import { catalogPlatform } from '../../platform'
 import ApiKeyInput from './ApiKeyInput'
+
+const { listSubagents, saveSubagent, deleteSubagent } = catalogPlatform
 
 export interface Agent {
   id: string
@@ -29,9 +23,10 @@ interface AgentsTabProps {
   config: typeof DEFAULT_CONFIG & { agents?: Agent[], customProviders?: CustomProviderConfig[] }
   updateField: (field: any, value: any) => void
   dynamicOllamaModels?: string[]
+  providerModels: Record<string, string[]>
 }
 
-export default function AgentsTab({ config, updateField, dynamicOllamaModels = [] }: AgentsTabProps) {
+export default function AgentsTab({ config, updateField, dynamicOllamaModels = [], providerModels }: AgentsTabProps) {
   const agents = config.agents || []
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null)
   const [name, setName] = useState('')
@@ -43,13 +38,13 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
 
   const handleProviderChange = (newProvider: string) => {
     setProvider(newProvider)
-    if (newProvider === 'gemini') setModel(config.geminiModel || GEMINI_MODELS[0])
-    else if (newProvider === 'openai') setModel(config.openaiModel || OPENAI_MODELS[0])
-    else if (newProvider === 'openrouter') setModel(config.openrouterModel || OPENROUTER_MODELS[0])
-    else if (newProvider === 'deepseek') setModel(config.deepseekModel || DEEPSEEK_MODELS[0])
-    else if (newProvider === 'anthropic') setModel(config.anthropicModel || ANTHROPIC_MODELS[0])
+    if (newProvider === 'gemini') setModel(config.geminiModel || providerModels.gemini[0] || '')
+    else if (newProvider === 'openai') setModel(config.openaiModel || providerModels.openai[0] || '')
+    else if (newProvider === 'openrouter') setModel(config.openrouterModel || providerModels.openrouter[0] || '')
+    else if (newProvider === 'deepseek') setModel(config.deepseekModel || providerModels.deepseek[0] || '')
+    else if (newProvider === 'anthropic') setModel(config.anthropicModel || providerModels.anthropic[0] || '')
     else if (newProvider === 'huggingface') setModel(config.hfModel || HF_MODELS[0])
-    else if (newProvider === 'local_openai') setModel(config.localModelName || LOCAL_MODELS[0])
+    else if (newProvider === 'local_openai') setModel(config.localModelName || providerModels.local_openai[0] || '')
     else if (newProvider === 'ollama') setModel(config.ollamaModel || dynamicOllamaModels[0] || '')
     else if (newProvider.startsWith('custom:')) {
       const cpId = newProvider.replace(/^custom:/, '')
@@ -173,25 +168,25 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
   let modelList: readonly string[] = []
   let defaultGeneralModel = ''
   if (provider === 'gemini') {
-    modelList = GEMINI_MODELS
+    modelList = providerModels.gemini
     defaultGeneralModel = config.geminiModel
   } else if (provider === 'openai') {
-    modelList = OPENAI_MODELS
+    modelList = providerModels.openai
     defaultGeneralModel = config.openaiModel
   } else if (provider === 'openrouter') {
-    modelList = OPENROUTER_MODELS
+    modelList = providerModels.openrouter
     defaultGeneralModel = config.openrouterModel
   } else if (provider === 'deepseek') {
-    modelList = DEEPSEEK_MODELS
+    modelList = providerModels.deepseek
     defaultGeneralModel = config.deepseekModel
   } else if (provider === 'anthropic') {
-    modelList = ANTHROPIC_MODELS
+    modelList = providerModels.anthropic
     defaultGeneralModel = config.anthropicModel
   } else if (provider === 'huggingface') {
     modelList = HF_MODELS
     defaultGeneralModel = config.hfModel
   } else if (provider === 'local_openai') {
-    modelList = LOCAL_MODELS
+    modelList = providerModels.local_openai
     defaultGeneralModel = config.localModelName
   } else if (provider === 'ollama') {
     modelList = dynamicOllamaModels
@@ -216,7 +211,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
         <div className="section-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <p className="section-kicker">Multi-Agent System</p>
-            <h2 className="section-title">Agent Collaboration Settings</h2>
+            <h2 className="section-title">Agent collaboration settings</h2>
           </div>
           {!isEditing && (
             <div style={{ display: 'flex', gap: '10px', height: 'fit-content', flexShrink: 0 }}>
@@ -233,7 +228,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
         <div className="toggle-card" style={{ margin: '4px 0 24px 0' }}>
           <div className="toggle-row">
             <div>
-              <label>Enable Multi-Agent Collaboration</label>
+              <label>Enable multi-agent collaboration</label>
               <p className="hint">Allow multiple specialized agents to collaborate sequentially (Planner → Coder → Reviewer).</p>
             </div>
             <label className="settings-toggle-switch">
@@ -249,12 +244,12 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
 
         {isEditing ? (
           <div className="form-grid single" style={{ background: 'var(--panel-soft)', padding: '20px', borderRadius: '8px', border: '1px solid var(--panel-raised)', marginTop: '10px' }}>
-            <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: 'var(--accent)' }}>
+            <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: 'var(--interactive-fg)' }}>
               {editingAgent ? `Edit Agent: ${editingAgent.name}` : 'Create New Agent'}
             </h3>
             
             <div className="setting-row">
-              <label>Agent Name</label>
+              <label>Agent name</label>
               <input 
                 type="text" 
                 value={name} 
@@ -264,7 +259,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
             </div>
 
             <div className="setting-row">
-              <label>AI Provider</label>
+              <label>AI provider</label>
               <select value={provider} onChange={(e) => handleProviderChange(e.target.value)}>
                 {availableProviders.map(p => (
                   <option key={p.value} value={p.value}>{p.label}</option>
@@ -273,7 +268,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
             </div>
 
             <div className="setting-row">
-              <label>Model Name</label>
+              <label>Model name</label>
               <select 
                 value={isCustomModel ? 'custom' : model} 
                 onChange={(e) => {
@@ -294,7 +289,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
 
             {isCustomModel && (
               <div className="setting-row">
-                <label>Custom Model Name</label>
+                <label>Custom model name</label>
                 <input 
                   type="text" 
                   value={model} 
@@ -314,7 +309,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
             </div>
 
             <div className="setting-row">
-              <label>System Instructions / Role</label>
+              <label>System instructions / role</label>
               <textarea 
                 value={systemInstruction} 
                 onChange={(e) => setSystemInstruction(e.target.value)} 
@@ -325,7 +320,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '16px', justifyContent: 'flex-end' }}>
               <button className="btn btn-secondary" onClick={closeForm}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSaveAgent}>Save Agent</button>
+              <button className="btn btn-primary" onClick={handleSaveAgent}>Save agent</button>
             </div>
           </div>
         ) : (
@@ -498,7 +493,7 @@ function SubagentsSection() {
 
       {isEditing ? (
         <div className="form-grid single" style={{ background: 'var(--panel-soft)', padding: '20px', borderRadius: '8px', border: '1px solid var(--panel-raised)' }}>
-          <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: 'var(--accent)' }}>
+          <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: 'var(--interactive-fg)' }}>
             {editingSourcePath ? `Edit Subagent: ${form.name}` : 'Create New Subagent'}
           </h3>
 
@@ -523,7 +518,7 @@ function SubagentsSection() {
           </div>
 
           <div className="setting-row">
-            <label>System Prompt</label>
+            <label>System prompt</label>
             <textarea
               value={form.systemPrompt}
               onChange={(e) => setForm({ ...form, systemPrompt: e.target.value })}
@@ -533,7 +528,7 @@ function SubagentsSection() {
           </div>
 
           <div className="setting-row">
-            <label>Allowed Tools (optional)</label>
+            <label>Allowed tools (optional)</label>
             <input
               type="text"
               value={form.tools}
@@ -543,7 +538,7 @@ function SubagentsSection() {
           </div>
 
           <div className="setting-row">
-            <label>Model Override (optional)</label>
+            <label>Model override (optional)</label>
             <input
               type="text"
               value={form.model}
@@ -553,7 +548,7 @@ function SubagentsSection() {
           </div>
 
           <div className="setting-row">
-            <label>Provider Override (optional)</label>
+            <label>Provider override (optional)</label>
             <input
               type="text"
               value={form.provider}
@@ -590,7 +585,7 @@ function SubagentsSection() {
 
           <div style={{ display: 'flex', gap: '10px', marginTop: '16px', justifyContent: 'flex-end' }}>
             <button className="btn btn-secondary" onClick={closeForm}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleSave}>Save Subagent</button>
+            <button className="btn btn-primary" onClick={handleSave}>Save subagent</button>
           </div>
         </div>
       ) : (

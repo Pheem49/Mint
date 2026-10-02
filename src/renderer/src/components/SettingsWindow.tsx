@@ -1,4 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react'
+import '../css/settings/base.css'
+import '../../shared/css/settings/general.css'
+import '../../shared/css/settings/profile.css'
+import '../../shared/css/settings/automation.css'
+import '../../shared/css/settings/theme.css'
+import '../../shared/css/settings/plugins.css'
+import '../../shared/css/settings/agents.css'
+import '../../shared/css/settings/shortcuts.css'
 import { getProfileValue, setProfileValue, setActiveModel, authUpdateProfile } from '../tauri'
 import { useAuthUser } from '../../shared/components/AuthGate'
 import { useProviderModels } from '../hooks/useProviderModels'
@@ -31,7 +39,7 @@ export type {
   CustomProviderConfig,
 } from '../../shared/types'
 
-import { DEFAULT_CONFIG } from '../../shared/constants/config'
+import { DEFAULT_CONFIG, migrateTypographyScale, migrateTuiTheme } from '../../shared/constants/config'
 export { DEFAULT_CONFIG }
 import { applyThemeStyles } from '../../shared/utils/ui'
 import { APP_VERSION } from '../../shared/version'
@@ -256,7 +264,7 @@ export default function SettingsWindow() {
         }
         
         if (loadedConfig) {
-          const merged = { ...DEFAULT_CONFIG, ...loadedConfig }
+          const merged = { ...DEFAULT_CONFIG, ...migrateTuiTheme(migrateTypographyScale(loadedConfig)) }
           setConfig(merged)
           
           // sync helper custom models
@@ -562,6 +570,27 @@ export default function SettingsWindow() {
     const updated = { ...config, [field]: value }
     setConfig(updated)
     applyThemeStyles(updated)
+    // Assistant Presence is a live window preference; save it immediately so
+    // closing Settings before pressing Save does not discard the choice.
+    if (field === 'showDesktopWidget' && window.settingsApi) {
+      void window.settingsApi.saveSettings(updated).catch((error) => {
+        console.error('Failed to save Assistant Presence setting:', error)
+      })
+    }
+  }
+
+  const updateFields = (patch: Partial<typeof DEFAULT_CONFIG>) => {
+    const updated = { ...config, ...patch }
+    setConfig(updated)
+    applyThemeStyles(updated)
+    // Theme choices are immediately visible in this window. Persist the same
+    // complete patch so the main window receives one consistent theme update
+    // instead of retaining a stale combination such as glass + no blur.
+    if (window.settingsApi) {
+      void window.settingsApi.saveSettings(updated).catch((error) => {
+        console.error('Failed to save live theme settings:', error)
+      })
+    }
   }
 
   return (
@@ -703,6 +732,7 @@ export default function SettingsWindow() {
             <ThemeTab
               config={config}
               updateField={updateField}
+              updateFields={updateFields}
             />
           )}
 
@@ -731,6 +761,14 @@ export default function SettingsWindow() {
               config={config}
               updateField={updateField}
               dynamicOllamaModels={dynamicOllamaModels}
+              providerModels={{
+                gemini: dynamicGeminiModels,
+                anthropic: dynamicAnthropicModels,
+                openai: dynamicOpenAIModels,
+                openrouter: dynamicOpenRouterModels,
+                deepseek: dynamicDeepSeekModels,
+                local_openai: dynamicLocalModels,
+              }}
             />
           )}
         </div>

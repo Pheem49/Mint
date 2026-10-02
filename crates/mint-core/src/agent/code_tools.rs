@@ -19,14 +19,78 @@ use thiserror::Error;
 use crate::{Capability, MintConfig, SafetyError, assert_path_capability};
 
 const IGNORED_DIRECTORIES: &[&str] = &[
+    // VCS
     ".git",
-    ".cache",
+    // Build outputs
     "build",
     "dist",
-    "node_modules",
     "out",
     "target",
+    // Dependencies
+    "node_modules",
+    ".cargo",
+    ".rustup",
+    // Caches
+    ".cache",
+    ".npm",
+    ".yarn",
+    ".pnpm-store",
+    ".gem",
+    ".bundle",
+    ".gradle",
+    ".m2",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    // Virtual environments
+    ".venv",
+    "venv",
+    ".env",
+    ".conda",
+    // Media / personal folders (common in home dir)
+    "Pictures",
+    "Videos",
+    "Music",
+    "Downloads",
+    "Trash",
+    // Toolchains / runtimes
+    ".local",
+    ".nvm",
+    ".rbenv",
+    ".pyenv",
+    ".asdf",
+    "snap",
+    ".steam",
+    ".wine",
+    // IDE / editor state
+    ".idea",
+    ".vscode",
 ];
+
+/// File extensions that are almost certainly binary or media — not worth
+/// regex-searching for text patterns. Skipping them early avoids wasting
+/// time opening large blobs and burning CPU on backtracking.
+const BINARY_EXTENSIONS: &[&str] = &[
+    // Images (binary raster — SVG is XML text and intentionally excluded)
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "avif", // Video / audio
+    "mp4", "avi", "mkv", "mov", "webm", "mp3", "wav", "flac", "ogg", "m4a", // Archives
+    "zip", "tar", "gz", "bz2", "xz", "7z", "rar", // Compiled / binary
+    "so", "dylib", "dll", "exe", "bin", "o", "a", "wasm", // Documents (non-text)
+    "pdf", "docx", "xlsx", "pptx", "odt", // Databases / blobs
+    "db", "sqlite", "sqlite3", "rdb", // Fonts
+    "ttf", "otf", "woff",
+    "woff2",
+    // NOTE: .lock files (Cargo.lock, package-lock.json) are plain text and
+    // intentionally NOT skipped — agents may need to verify dependency versions.
+];
+
+/// Maximum file size to regex-search. Files larger than this are skipped
+/// to avoid spending CPU on minified bundles, generated assets, or large
+/// data files that are unlikely to contain meaningful source patterns.
+/// Set to 2 MB (not 1 MB) so that large-but-legitimate text files such as
+/// Cargo.lock or package-lock.json are still searchable.
+const MAX_SEARCHABLE_FILE_BYTES: u64 = 2_000_000; // 2 MB
 
 #[derive(Debug, Error)]
 pub enum CodeInspectionError {
@@ -299,6 +363,23 @@ pub fn search_code(
 
             if entry.file_type().map_or(false, |ft| ft.is_file()) {
                 let path = entry.path();
+
+                // Skip binary/media files by extension — opening them and
+                // running regex matching would waste CPU with zero benefit.
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if BINARY_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()) {
+                        return ignore::WalkState::Continue;
+                    }
+                }
+
+                // Skip files that are too large (minified bundles, generated
+                // assets, etc.) to avoid unnecessary I/O and regex work.
+                if let Ok(metadata) = std::fs::metadata(path) {
+                    if metadata.len() > MAX_SEARCHABLE_FILE_BYTES {
+                        return ignore::WalkState::Continue;
+                    }
+                }
+
                 let current = hit_count.load(Ordering::Relaxed);
                 if current >= limit {
                     stop.store(true, Ordering::Relaxed);

@@ -44,7 +44,7 @@
     padding: 2px 6px;
     border-radius: var(--radius-xs);
     background: var(--panel-raised);
-    color: var(--accent);
+    color: var(--interactive-fg);
     font-size: 11px;
 }
 

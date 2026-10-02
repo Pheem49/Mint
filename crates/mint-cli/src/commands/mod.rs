@@ -7,14 +7,17 @@ use mint_core::MintConfig;
 pub mod agent;
 pub mod config;
 pub mod eval;
+pub mod git;
 pub mod integrations;
 pub mod knowledge;
 pub mod system;
+pub mod tailnet_web;
 pub mod tasks;
 
 pub use agent::*;
 pub use config::*;
 pub use eval::*;
+pub use git::*;
 pub use integrations::*;
 pub use knowledge::*;
 pub use system::*;
@@ -99,13 +102,26 @@ pub enum Command {
         #[arg(long, default_value = "cli")]
         chat_id: String,
     },
+    /// Inspect and manage Git branches in the current workspace.
+    Git {
+        #[command(subcommand)]
+        command: GitCommand,
+    },
+    /// Resume a previous conversation session, or open the interactive session picker.
+    Resume {
+        /// Optional session ID to resume directly (omitting opens the interactive picker).
+        id: Option<String>,
+    },
     /// Start the browser automation environment and enable browser actions.
     Auto,
     /// Launch the web UI and local API server.
     Web {
         /// Force development mode with Hot Module Replacement (HMR)
-        #[arg(long, default_value_t = false)]
+        #[arg(long, default_value_t = false, conflicts_with = "tailscale")]
         dev: bool,
+        /// Share the production web UI privately over Tailscale HTTPS.
+        #[arg(long, default_value_t = false)]
+        tailscale: bool,
     },
     /// Start only the local API server.
     Api {
@@ -273,8 +289,27 @@ pub async fn dispatch(cmd: Command, config: &mut MintConfig, cli: &crate::Cli) -
         Command::Agent { task } => agent::handle_agent(task).await,
         Command::Eval { suite, limit } => eval::handle_eval(suite, limit, config).await,
         Command::Rewind { step, chat_id } => agent::handle_rewind(step, chat_id),
+        Command::Git { command } => git::handle_git(command),
+        Command::Resume { id } => {
+            mint_core::channels::start_channels();
+            mint_core::start_cron_scheduler();
+            let current_dir = std::env::current_dir()?;
+            let resume_id = match id {
+                Some(sid) => Some(sid),
+                None => crate::interactive::prompt_resume_session_picker(&current_dir, "")?,
+            };
+            crate::interactive::run_interactive_chat_with_session(
+                cli.model.clone(),
+                cli.fast,
+                cli.plan,
+                resume_id,
+                !cli.classic,
+            )
+            .await?;
+            Ok(())
+        }
         Command::Auto => agent::handle_auto().await,
-        Command::Web { dev } => agent::handle_web(dev).await,
+        Command::Web { dev, tailscale } => agent::handle_web(dev, tailscale).await,
         Command::Api { port } => agent::handle_api(port).await,
         Command::Gateway { command } => agent::handle_gateway(command).await,
         Command::Chat {

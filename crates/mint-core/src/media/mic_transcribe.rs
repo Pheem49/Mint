@@ -126,6 +126,7 @@ pub async fn transcribe_recording(
         messages: None,
         tools: None,
         temperature: config.temperature,
+        ..Default::default()
     };
 
     // Deliberately `send_chat`, not `send_chat_with_fallback` — the fallback path

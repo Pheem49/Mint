@@ -8,7 +8,7 @@ pub fn default_chat_system_instruction() -> String {
         "You are Mint, {persona} \
          {completeness} \
          {mature_policy}",
-        persona = persona::PERSONA_TH,
+        persona = persona::PERSONA,
         completeness = persona::COMPLETENESS_RULE,
         mature_policy = persona::MATURE_CONTENT_POLICY,
     )

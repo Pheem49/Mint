@@ -13,6 +13,19 @@ import CalculationCard from '../components/CalculationCard'
 import ImageSearchCard from '../components/ImageSearchCard'
 import ImageGenCard from '../components/ImageGenCard'
 import MermaidCard from '../components/MermaidCard'
+import UiGridCard from '../components/UiGridCard'
+import { parseCardJsonSafely } from './cardJson'
+import UiFeatureCard from '../components/UiFeatureCard'
+import UiMockupWidget from '../components/UiMockupWidget'
+import type { WebSearchSource } from './agentActivity'
+import {
+  Info,
+  Lightbulb,
+  AlertCircle,
+  AlertTriangle,
+  ShieldAlert,
+  type LucideIcon,
+} from 'lucide-react'
 
 /**
  * Unwraps Brave Search internal image proxy URLs (imgs.search.brave.com)
@@ -134,7 +147,7 @@ export function renderSpeakerIcon(isSpeaking: boolean): ReactNode {
 export function renderCopyIcon(isCopied: boolean): ReactNode {
   if (isCopied) {
     return (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', color: 'var(--accent, #10b981)' }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', color: 'var(--interactive-fg)' }}>
         <polyline points="20 6 9 17 4 12" />
       </svg>
     )
@@ -158,19 +171,33 @@ function flattenText(node: ReactNode): string {
   return ''
 }
 
-/** Wraps bare "@mention" tokens in plain-text children with a highlight span, without touching already-rendered elements (links, code, bold, ...). */
+/** Wraps bare "@mention" tokens with styled spans and strips any leftover "[badge:color text]" into plain natural text. */
 function highlightMentions(node: ReactNode, keyPrefix = 'm'): ReactNode {
   if (typeof node === 'string') {
-    const parts = node.split(/(@[\w\-.\/]+)/g)
+    const parts = node.split(/(@[\w\-.\/]+|\[badge(?::[a-zA-Z]+)?\s+[^\]]+\])/g)
     if (parts.length <= 1) return node
-    return parts.map((part, i) =>
-      i % 2 === 1
-        ? <span key={`${keyPrefix}-${i}`} className="chat-mention">{part}</span>
-        : part ? <Fragment key={`${keyPrefix}-t-${i}`}>{part}</Fragment> : null
-    )
+    return parts.map((part, i) => {
+      if (i % 2 === 1) {
+        if (part.startsWith('@')) {
+          return (
+            <span key={`${keyPrefix}-${i}`} className="chat-mention">
+              {part}
+            </span>
+          )
+        }
+        const badgeMatch = part.match(/^\[badge(?::([a-zA-Z]+))?\s+([^\]]+)\]$/)
+        if (badgeMatch) {
+          // Render plain natural text without robotic badge frame/pill
+          return <Fragment key={`${keyPrefix}-${i}`}>{badgeMatch[2]}</Fragment>
+        }
+      }
+      return part ? <Fragment key={`${keyPrefix}-t-${i}`}>{part}</Fragment> : null
+    })
   }
   if (Array.isArray(node)) {
-    return node.map((child, i) => <Fragment key={`${keyPrefix}-${i}`}>{highlightMentions(child, `${keyPrefix}-${i}`)}</Fragment>)
+    return node.map((child, i) => (
+      <Fragment key={`${keyPrefix}-${i}`}>{highlightMentions(child, `${keyPrefix}-${i}`)}</Fragment>
+    ))
   }
   return node
 }
@@ -222,48 +249,218 @@ function trimListItemEdges(children: ReactNode): ReactNode {
   return arr
 }
 
+function parseJsonSafely(codeText: string): any {
+  if (!codeText || !codeText.trim()) return null
+  let cleaned = codeText.trim()
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\s*/, '').replace(/\s*```$/, '').trim()
+  }
+  return parseCardJsonSafely(cleaned)
+}
+
+function renderJsonCard(
+  codeText: string,
+  lang: string,
+  render: (data: any) => ReactNode,
+): ReactNode {
+  const parsed = parseJsonSafely(codeText)
+  return parsed
+    ? render(parsed)
+    : <ChatCodeBlock code={codeText} language={lang} />
+}
+
 function renderCodeCard(lang: string, codeText: string): ReactNode {
   switch (lang) {
     case 'weather_json':
     case 'weather-json':
-      try {
-        return <WeatherCard data={JSON.parse(codeText)} />
-      } catch {
-        return <ChatCodeBlock code={codeText} language={lang} />
-      }
+      return renderJsonCard(codeText, lang, (data) => <WeatherCard data={data} />)
     case 'stock_json':
     case 'stock-json':
-      try {
-        return <StockCard data={JSON.parse(codeText)} />
-      } catch {
-        return <ChatCodeBlock code={codeText} language={lang} />
-      }
+      return renderJsonCard(codeText, lang, (data) => <StockCard data={data} />)
     case 'calculation_json':
     case 'calculation-json':
-      try {
-        return <CalculationCard data={JSON.parse(codeText)} />
-      } catch {
-        return <ChatCodeBlock code={codeText} language={lang} />
-      }
+      return renderJsonCard(codeText, lang, (data) => <CalculationCard data={data} />)
     case 'image_search_json':
     case 'image-search-json':
-      try {
-        return <ImageSearchCard data={JSON.parse(codeText)} />
-      } catch {
-        return <ChatCodeBlock code={codeText} language={lang} />
-      }
+      return renderJsonCard(codeText, lang, (data) => <ImageSearchCard data={data} />)
     case 'image_gen_json':
     case 'image-gen-json':
-      try {
-        return <ImageGenCard data={JSON.parse(codeText)} />
-      } catch {
-        return <ChatCodeBlock code={codeText} language={lang} />
-      }
+      return renderJsonCard(codeText, lang, (data) => <ImageGenCard data={data} />)
     case 'mermaid':
       return <MermaidCard code={codeText} />
+    case 'ui_grid':
+    case 'ui-grid':
+    case 'ui_grid_json':
+    case 'ui-grid-json': {
+      let clean = codeText.trim()
+      if (/^ui[-_]grid(?:[-_]json)?\s*/i.test(clean)) {
+        clean = clean.replace(/^ui[-_]grid(?:[-_]json)?\s*/i, '')
+      }
+      const parsed = parseJsonSafely(clean)
+      if (parsed) return <UiGridCard data={parsed} />
+      return <ChatCodeBlock code={codeText} language={lang} />
+    }
+    case 'ui_card':
+    case 'ui-card':
+    case 'ui_card_json':
+    case 'ui-card-json':
+    case 'ui_feature':
+    case 'ui-feature': {
+      let clean = codeText.trim()
+      if (/^ui[-_](?:card|feature)(?:[-_]json)?\s*/i.test(clean)) {
+        clean = clean.replace(/^ui[-_](?:card|feature)(?:[-_]json)?\s*/i, '')
+      }
+      const parsed = parseJsonSafely(clean)
+      if (parsed) return <UiFeatureCard data={parsed} />
+      return <ChatCodeBlock code={codeText} language={lang} />
+    }
+    case 'ui_mockup':
+    case 'ui-mockup':
+    case 'ui_mockup_json':
+    case 'ui-mockup-json': {
+      let clean = codeText.trim()
+      if (/^ui[-_]mockup(?:[-_]json)?\s*/i.test(clean)) {
+        clean = clean.replace(/^ui[-_]mockup(?:[-_]json)?\s*/i, '')
+      }
+      const parsed = parseJsonSafely(clean)
+      if (parsed) return <UiMockupWidget data={parsed} />
+      return <ChatCodeBlock code={codeText} language={lang} />
+    }
     default:
       return <ChatCodeBlock code={codeText} language={lang} />
   }
+}
+
+function stripAlertTag(node: ReactNode): ReactNode {
+  let done = false
+  function clean(item: ReactNode): ReactNode {
+    if (done || item == null) return item
+    if (typeof item === 'string') {
+      const match = item.match(/^\s*\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(?:\r?\n)?/i)
+      if (match) {
+        done = true
+        return item.slice(match[0].length)
+      }
+      return item
+    }
+    if (Array.isArray(item)) {
+      return item.map(clean).filter((v) => v !== '' && v != null)
+    }
+    if (isValidElement(item)) {
+      const props = item.props as { children?: ReactNode }
+      if (props.children) {
+        return cloneElement(item, {}, clean(props.children))
+      }
+    }
+    return item
+  }
+  return clean(node)
+}
+
+function renderAlertBox(type: string, children: ReactNode): ReactNode {
+  const config: { title: string; color: string; border: string; bg: string; borderSubtle: string; Icon: LucideIcon } = {
+    NOTE: { title: 'Note', color: '#38bdf8', border: '#38bdf8', bg: 'rgba(56, 189, 248, 0.08)', borderSubtle: 'rgba(56, 189, 248, 0.25)', Icon: Info },
+    TIP: { title: 'Tip', color: '#34d399', border: '#10b981', bg: 'rgba(16, 185, 129, 0.08)', borderSubtle: 'rgba(16, 185, 129, 0.25)', Icon: Lightbulb },
+    IMPORTANT: { title: 'Important', color: '#c084fc', border: '#a855f7', bg: 'rgba(168, 85, 247, 0.08)', borderSubtle: 'rgba(168, 85, 247, 0.25)', Icon: AlertCircle },
+    WARNING: { title: 'Warning', color: '#fbbf24', border: '#f59e0b', bg: 'rgba(245, 158, 11, 0.08)', borderSubtle: 'rgba(245, 158, 11, 0.25)', Icon: AlertTriangle },
+    CAUTION: { title: 'Caution', color: '#f87171', border: '#ef4444', bg: 'rgba(239, 68, 68, 0.08)', borderSubtle: 'rgba(239, 68, 68, 0.25)', Icon: ShieldAlert },
+  }[type] || { title: 'Note', color: '#38bdf8', border: '#38bdf8', bg: 'rgba(56, 189, 248, 0.08)', borderSubtle: 'rgba(56, 189, 248, 0.25)', Icon: Info }
+
+  const IconComponent = config.Icon
+  return (
+    <div
+      className={`chat-callout-card chat-callout--${type.toLowerCase()}`}
+      style={{
+        margin: '14px 0',
+        padding: '12px 16px',
+        borderRadius: '10px',
+        borderLeft: `4px solid ${config.border}`,
+        borderTop: `1px solid ${config.borderSubtle}`,
+        borderRight: `1px solid ${config.borderSubtle}`,
+        borderBottom: `1px solid ${config.borderSubtle}`,
+        '--callout-tint': config.bg,
+        '--callout-accent': config.border,
+        boxShadow: '0 2px 10px rgba(0, 0, 0, 0.15)',
+      } as CSSProperties}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: '6px',
+          color: config.color,
+          fontWeight: 700,
+          fontSize: '0.86rem',
+          letterSpacing: '0.3px',
+          textTransform: 'none',
+        }}
+      >
+        <IconComponent size={16} strokeWidth={2.2} />
+        <span>{config.title}</span>
+      </div>
+      <div style={{ fontSize: '0.86rem', color: 'var(--text-chat, #cbd5e1)', lineHeight: 1.5 }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function renderMessageImage(src: string | undefined, alt: string | undefined, sourceUrl?: string): ReactNode {
+  const url = resolveMediaUrl(String(src || ''))
+  const label = alt || 'Generated Image'
+  const isExternal = /^https?:\/\//.test(url)
+  if (isExternal) {
+    const pageUrl = sourceUrl && /^https?:\/\//.test(sourceUrl) ? sourceUrl : url
+    return (
+      <div
+        className="chat-media-card chat-media-card--thumbnail"
+        style={{ margin: '6px 0 10px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px' }}
+      >
+        <a href={pageUrl} target="_blank" rel="noopener noreferrer" title={sourceUrl ? `Open source page: ${label}` : label} style={{ display: 'block', textDecoration: 'none' }}>
+          <img
+            src={url}
+            alt={label}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', display: 'block' }}
+            onError={(e) => { const card = e.currentTarget.closest('.chat-media-card') as HTMLElement | null; if (card) card.style.display = 'none' }}
+          />
+        </a>
+        {(label !== 'Generated Image' || sourceUrl) && (
+          <div style={{ padding: '5px 10px', fontSize: '0.72rem', color: 'var(--text-muted, #64748b)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+            {sourceUrl && (
+              <a href={url} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, color: 'var(--interactive-fg-hover)' }}>
+                View full image
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+  return (
+    <div className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
+      <img src={url} alt={label} referrerPolicy="no-referrer" style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
+    </div>
+  )
+}
+
+function renderMessageLink(href: string | undefined, children: ReactNode, node: any, sourceByImage?: Map<string, string>): ReactNode {
+  const imageNode = node?.children?.length === 1 && node.children[0]?.tagName === 'img'
+    ? node.children[0]
+    : null
+  if (imageNode) {
+    const imageUrl = String(imageNode.properties?.src || '')
+    const sourceUrl = sourceByImage?.get(resolveMediaUrl(imageUrl)) || href
+    return renderMessageImage(imageUrl, String(imageNode.properties?.alt || ''), sourceUrl)
+  }
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="chat-link">
+      {highlightMentions(children)}
+    </a>
+  )
 }
 
 // `ol`/`ul` inject `ordered`/`index` onto their `li` children (via cloneElement below) so each
@@ -274,6 +471,10 @@ const mdComponents = {
     const text = flattenText(children).trim()
     if (EMOJI_HEADER_RE.test(text)) {
       return <div className="chat-heading chat-heading-3 chat-section-title">{children}</div>
+    }
+    const alertMatch = text.match(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i)
+    if (alertMatch) {
+      return renderAlertBox(alertMatch[1].toUpperCase(), stripAlertTag(children))
     }
     // A plain <div> (not <p>) so block-level media cards can nest inside safely.
     return <div className="chat-paragraph">{highlightMentions(children)}</div>
@@ -309,48 +510,29 @@ const mdComponents = {
     )
   },
   strong: ({ children }) => <strong className="chat-bold-highlight">{children}</strong>,
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="chat-link">
-      {highlightMentions(children)}
-    </a>
-  ),
-  img: ({ src, alt }) => {
-    const rawUrl = String(src || '')
-    const url = resolveMediaUrl(rawUrl)
-    const label = alt || 'Generated Image'
-    const isExternal = url.startsWith('https://') || url.startsWith('http://')
-    if (isExternal) {
-      return (
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={label}
-          className="chat-media-card chat-media-card--thumbnail"
-          style={{ display: 'block', margin: '6px 0 10px 0', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px', textDecoration: 'none', cursor: 'pointer' }}
-        >
-          <img
-            src={url}
-            alt={label}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', display: 'block' }}
-            onError={(e) => { (e.currentTarget as HTMLImageElement).closest('a')!.style.display = 'none' }}
-          />
-          {label !== 'Generated Image' && (
-            <div style={{ padding: '5px 10px', fontSize: '0.72rem', color: 'var(--text-muted, #64748b)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
-          )}
-        </a>
-      )
-    }
-    return (
-      <div className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
-        <img src={url} alt={label} referrerPolicy="no-referrer" style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
-      </div>
-    )
-  },
+  a: ({ href, children, node }) => renderMessageLink(href, children, node),
+  img: ({ src, alt }) => renderMessageImage(src, alt),
   code({ children }) {
-    // Only reached for inline code — block code is intercepted by `pre` below.
+    // Detect single-line UI widgets parsed as inline code (e.g. `ui-card [...]` or ```ui-card [...]```)
+    const rawText = typeof children === 'string'
+      ? children
+      : Array.isArray(children) && children.every((c) => typeof c === 'string')
+        ? children.join('')
+        : ''
+    if (rawText) {
+      const trimmed = rawText.trim()
+      const match = trimmed.match(/^(ui[-_](?:card|grid|mockup|feature)(?:[-_]json)?)\s+([\s\S]+)$/i)
+      if (match) {
+        const lang = match[1].replace(/_/g, '-').toLowerCase()
+        const parsed = parseJsonSafely(match[2].trim())
+        if (parsed) {
+          if (lang.startsWith('ui-grid')) return <UiGridCard data={parsed} />
+          if (lang.startsWith('ui-card') || lang.startsWith('ui-feature')) return <UiFeatureCard data={parsed} />
+          if (lang.startsWith('ui-mockup')) return <UiMockupWidget data={parsed} />
+        }
+      }
+    }
+    // Only reached for regular inline code — block code is intercepted by `pre` below.
     return <code className="chat-inline-code">{children}</code>
   },
   pre({ node }) {
@@ -362,8 +544,40 @@ const mdComponents = {
         ? rawClassName.split(/\s+/)
         : []
     const langClass = classNames.find((c) => c.startsWith('language-'))
-    const lang = langClass ? langClass.slice('language-'.length) : 'plaintext'
-    const codeText = readHastText(codeNode).replace(/\n$/, '')
+    let lang = langClass ? langClass.slice('language-'.length) : 'plaintext'
+    let codeText = readHastText(codeNode).replace(/\n$/, '')
+
+    // Check if AST node has data.meta with arguments/json (e.g. ```ui-card [{"title": ...}]```)
+    const meta = (codeNode as any)?.data?.meta
+    if (typeof meta === 'string' && meta.trim()) {
+      const trimmedMeta = meta.trim()
+      if (!codeText.trim()) {
+        codeText = trimmedMeta
+      } else if (trimmedMeta.startsWith('[') || trimmedMeta.startsWith('{')) {
+        codeText = trimmedMeta + '\n' + codeText
+      }
+    }
+
+    // If lang has JSON attached (e.g. language-ui-card [{"title": ...}])
+    if (lang.includes('[') || lang.includes('{')) {
+      const splitIdx = lang.search(/[\s\[\{]/)
+      if (splitIdx > 0) {
+        const extractedLang = lang.slice(0, splitIdx)
+        const rest = lang.slice(splitIdx)
+        lang = extractedLang
+        codeText = (rest + ' ' + codeText).trim()
+      }
+    }
+
+    // If lang is plaintext or generic, but codeText starts with ui-card / ui-grid / ui-mockup
+    if (lang === 'plaintext' || !lang) {
+      const match = codeText.trim().match(/^(ui[-_](?:card|grid|mockup|feature)(?:[-_]json)?)\s+([\s\S]+)$/i)
+      if (match) {
+        lang = match[1].replace(/_/g, '-').toLowerCase()
+        codeText = match[2].trim()
+      }
+    }
+
     return renderCodeCard(lang, codeText)
   },
   table: ({ children }) => (
@@ -410,7 +624,7 @@ const mdComponents = {
   // `style` here comes from the cloneElement calls in `thead`/`tbody` above.
   tr: ({ children, style }: { children?: ReactNode; style?: CSSProperties }) => <tr style={style}>{children}</tr>,
   th: ({ children }) => (
-    <th style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--accent, #38bdf8)', fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>
+    <th style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--interactive-fg)', fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>
       {highlightMentions(children)}
     </th>
   ),
@@ -419,6 +633,31 @@ const mdComponents = {
       {highlightMentions(children)}
     </td>
   ),
+
+  blockquote: ({ children }) => {
+    const rawText = flattenText(children).trim()
+    const alertMatch = rawText.match(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i)
+
+    if (alertMatch) {
+      return renderAlertBox(alertMatch[1].toUpperCase(), stripAlertTag(children))
+    }
+
+    return (
+      <blockquote
+        style={{
+          margin: '12px 0',
+          padding: '8px 16px',
+          borderLeft: '3px solid var(--accent, #38bdf8)',
+          background: 'rgba(255, 255, 255, 0.02)',
+          borderRadius: '0 8px 8px 0',
+          color: 'var(--text-muted, #94a3b8)',
+          fontStyle: 'italic',
+        }}
+      >
+        {children}
+      </blockquote>
+    )
+  },
 }
 
 /** Normalizes non-standard list markers ("(1)", "[1]", "•") to plain GFM syntax so remark recognizes them as real lists. */
@@ -460,11 +699,21 @@ function splitVideoSegments(text: string): Segment[] {
   return segments
 }
 
-export function renderFormattedMessage(text: string): ReactNode {
+export function renderFormattedMessage(text: string, webSources: WebSearchSource[] = []): ReactNode {
   const displayText = readableAssistantText(text)
   if (!displayText) return null
 
   const segments = splitVideoSegments(displayText)
+  const sourceByImage = new Map(
+    webSources.filter((source) => source.imageUrl).map((source) => [resolveMediaUrl(source.imageUrl!), source.url]),
+  )
+  const components = webSources.length === 0 ? mdComponents : {
+    ...mdComponents,
+    a: ({ href, children, node }: { href?: string; children?: ReactNode; node?: any }) =>
+      renderMessageLink(href, children, node, sourceByImage),
+    img: ({ src, alt }: { src?: string; alt?: string }) =>
+      renderMessageImage(src, alt, sourceByImage.get(resolveMediaUrl(String(src || '')))),
+  }
 
   return (
     <div className="chat-formatted-body">
@@ -477,7 +726,7 @@ export function renderFormattedMessage(text: string): ReactNode {
           )
         }
         return (
-          <ReactMarkdown key={`md-${i}`} remarkPlugins={[remarkGfm]} components={mdComponents as Components}>
+          <ReactMarkdown key={`md-${i}`} remarkPlugins={[remarkGfm]} components={components as Components}>
             {normalizeListMarkers(segment.value)}
           </ReactMarkdown>
         )

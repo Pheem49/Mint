@@ -9,7 +9,8 @@ import {
   type RefObject,
 } from 'react'
 import { SLASH_COMMANDS, type SlashCommand } from '../constants/slashCommands'
-import { listLearnedSkills, type LearnedSkill } from '@/tauri'
+import { catalogPlatform } from '../platform'
+import type { LearnedSkill } from '../types'
 
 /** Parent calls `handleKeyDown` from the textarea's onKeyDown; a `true` return
  *  means the menu consumed the key and the caller should stop. */
@@ -81,7 +82,7 @@ const SlashSuggestions = forwardRef<SlashSuggestionsHandle, Props>(function Slas
   useEffect(() => {
     if (mode !== 'skill') return
     let alive = true
-    listLearnedSkills(workspacePath)
+    catalogPlatform.listLearnedSkills(workspacePath)
       .then((res) => {
         if (alive && Array.isArray(res)) setSkills(res)
       })

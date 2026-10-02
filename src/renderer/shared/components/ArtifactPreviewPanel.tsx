@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import { readWorkspaceFile } from '@/tauri'
+import { runtimePlatform } from '../platform'
 import { renderFormattedMessage } from '../utils/markdown'
 import { ChatCodeBlock } from './ChatCodeBlock'
 
@@ -72,7 +72,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
     setLoading(true)
     setError(null)
     try {
-      const text = await readWorkspaceFile(filePath, workspacePath)
+      const text = await runtimePlatform.readWorkspaceFile(filePath, workspacePath)
       setContent(text)
     } catch (err: any) {
       // If content was already supplied in artifact, fallback to it
@@ -162,7 +162,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
               height: '24px',
               borderRadius: 'var(--radius-xs, 4px)',
               background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
-              color: 'var(--accent)',
+              color: 'var(--interactive-fg)',
               fontSize: '0.68rem',
               fontWeight: 700,
               flexShrink: 0,
@@ -376,7 +376,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
           <button
             type="button"
             onClick={onClose}
-            title="Close Preview Panel"
+            title="Close preview Panel"
             style={{
               background: 'none',
               border: 'none',

@@ -139,6 +139,10 @@ pub enum SlashEffect {
     PlanModeChanged {
         enabled: bool,
     },
+    ThinkingChanged {
+        enabled: bool,
+        effort: String,
+    },
 }
 
 #[derive(serde::Serialize)]
@@ -206,6 +210,10 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         "/clear" => SlashResponse::Applied {
             markdown: "🧹 Conversation history cleared.".into(),
             effects: vec![SlashEffect::HistoryCleared],
+        },
+        "/thought" => SlashResponse::Applied {
+            markdown: "Thought process can be viewed in the collapsible **Thinking** accordion on Desktop & Web, or by pressing `Ctrl+T` / running `/thought` in the CLI.".into(),
+            effects: vec![],
         },
 
         "/autoskill" => cmd_bool_toggle(
@@ -280,6 +288,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         },
 
         "/models" => cmd_models(rest, config),
+        "/thinking" | "/think" => cmd_thinking(rest, config),
         "/temperature" | "/temp" => cmd_temperature(rest, config),
         // `/searchProvider` is a documented camelCase alias (see UNDOCUMENTED_ALIASES).
         "/search-provider" | "/searchprovider" => cmd_extra_provider(
@@ -641,16 +650,25 @@ fn cmd_models(rest: &str, config: &mut MintConfig) -> SlashResponse {
     if model.is_none() {
         let options = models::model_options_for_provider(config, provider);
         if !options.is_empty() {
+            let mut choices: Vec<SlashChoice> = options
+                .into_iter()
+                .map(|m| {
+                    let label = if models::is_free_model(&m) {
+                        format!("{m} [FREE]")
+                    } else {
+                        m.clone()
+                    };
+                    SlashChoice { label, value: m }
+                })
+                .collect();
+            choices.push(SlashChoice {
+                label: "[Custom] Enter custom model ID...".into(),
+                value: "__action:custom".into(),
+            });
             return SlashResponse::NeedsChoice {
                 command: format!("/models {provider}"),
                 title: format!("Select {provider} model"),
-                options: options
-                    .into_iter()
-                    .map(|m| SlashChoice {
-                        label: m.clone(),
-                        value: m,
-                    })
-                    .collect(),
+                options: choices,
             };
         }
     }
@@ -820,6 +838,139 @@ fn cmd_temperature_status(config: &MintConfig) -> SlashResponse {
     );
 
     message(md)
+}
+
+fn capitalize_effort(s: &str) -> String {
+    if s == "extra_high" {
+        return "Extra High".into();
+    }
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+    }
+}
+
+fn cmd_thinking(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    let model = config.active_model().to_string();
+    let supported = config.is_thinking_supported();
+    let (current_enabled, current_effort) = config.resolved_thinking();
+    let raw = rest.trim().to_ascii_lowercase();
+
+    if raw.is_empty() {
+        let status_label = if !supported {
+            "Not supported by active model".to_string()
+        } else if current_enabled {
+            format!("ON (Effort: {})", capitalize_effort(current_effort))
+        } else {
+            "OFF".to_string()
+        };
+
+        let mut choices = Vec::new();
+        if current_enabled {
+            choices.push(SlashChoice {
+                label: "Turn Thinking OFF".into(),
+                value: "off".into(),
+            });
+        } else {
+            choices.push(SlashChoice {
+                label: "Turn Thinking ON".into(),
+                value: "on".into(),
+            });
+        }
+        for eff in &["Low", "Medium", "High", "Extra High"] {
+            let val = eff.to_ascii_lowercase().replace(' ', "_");
+            let is_sel = current_enabled && current_effort.to_ascii_lowercase() == val;
+            choices.push(SlashChoice {
+                label: if is_sel {
+                    format!("Effort: {eff} ✓")
+                } else {
+                    format!("Effort: {eff}")
+                },
+                value: val,
+            });
+        }
+
+        return SlashResponse::NeedsChoice {
+            command: "/thinking".into(),
+            title: format!("🧠 Thinking Configuration ({model}): {status_label}"),
+            options: choices,
+        };
+    }
+
+    if raw == "status" {
+        let status_label = if !supported {
+            "⚠️ Thinking is **not supported** by the current active model.".to_string()
+        } else if current_enabled {
+            format!(
+                "✅ Thinking is **ON** (Effort: **{}**)",
+                capitalize_effort(current_effort)
+            )
+        } else {
+            "⏸️ Thinking is **OFF**".to_string()
+        };
+        return message(format!(
+            "🧠 **Thinking Status**\n\n- Active Model: `{model}`\n- Supported: **{supported}**\n- State: {status_label}\n\nUsage: `/thinking [on|off|low|medium|high|extra_high]`"
+        ));
+    }
+
+    let parts: Vec<&str> = raw.split_whitespace().collect();
+    let mut new_enabled = current_enabled;
+    let mut new_effort = current_effort.to_string();
+
+    for p in parts {
+        match p {
+            "on" | "enable" | "true" => new_enabled = true,
+            "off" | "disable" | "false" => new_enabled = false,
+            "low" => {
+                new_effort = "low".into();
+                new_enabled = true;
+            }
+            "medium" | "med" => {
+                new_effort = "medium".into();
+                new_enabled = true;
+            }
+            "high" => {
+                new_effort = "high".into();
+                new_enabled = true;
+            }
+            "extra_high" | "extra" | "extra-high" | "max" => {
+                new_effort = "extra_high".into();
+                new_enabled = true;
+            }
+            _ => {}
+        }
+    }
+
+    config.set_model_thinking(&model, new_enabled, &new_effort);
+    config.thinking_enabled = new_enabled;
+    config.thinking_effort = new_effort.clone();
+
+    let text = if !supported {
+        format!(
+            "🧠 Updated thinking preference for `{model}` to **{}** (Effort: **{}**).\n*Note: `{model}` may not natively emit reasoning tokens.*",
+            if new_enabled { "ON" } else { "OFF" },
+            capitalize_effort(&new_effort)
+        )
+    } else if new_enabled {
+        format!(
+            "🧠 Thinking **ON** for `{model}` (Effort: **{}**).",
+            capitalize_effort(&new_effort)
+        )
+    } else {
+        format!("🧠 Thinking **OFF** for `{model}`.")
+    };
+
+    SlashResponse::Applied {
+        markdown: text,
+        effects: vec![
+            SlashEffect::ConfigChanged,
+            SlashEffect::ThinkingChanged {
+                enabled: new_enabled,
+                effort: new_effort,
+            },
+        ],
+    }
 }
 
 fn cmd_temperature(rest: &str, config: &mut MintConfig) -> SlashResponse {
@@ -1069,21 +1220,175 @@ async fn cmd_models_async(rest: &str, config: &mut MintConfig) -> SlashResponse 
         None => (rest.trim(), None),
     };
 
-    // Provider given but no model yet — offer the model picker using live fetch first.
-    if model.is_none() {
-        let options = models::model_options_for_provider_async(config, provider).await;
-        if !options.is_empty() {
-            return SlashResponse::NeedsChoice {
-                command: format!("/models {provider}"),
-                title: format!("Select {provider} model"),
-                options: options
+    let is_action_all = model == Some("__action:all");
+    let is_action_free = model == Some("__action:free");
+    let search_query = model.and_then(|m| m.strip_prefix("__action:search:"));
+
+    // Provider given but no model yet, or an action requested — offer model picker.
+    if model.is_none() || is_action_all || is_action_free || search_query.is_some() {
+        let all_options = models::model_options_for_provider_async(config, provider).await;
+        if !all_options.is_empty() {
+            if let Some(query) = search_query {
+                let q_lower = query.trim().to_lowercase();
+                let matched: Vec<String> = all_options
                     .into_iter()
-                    .map(|m| SlashChoice {
-                        label: m.clone(),
-                        value: m,
-                    })
-                    .collect(),
-            };
+                    .filter(|m| m.to_lowercase().contains(&q_lower))
+                    .collect();
+                if matched.is_empty() {
+                    return message(format!(
+                        "No models found matching \"{query}\" for provider {provider}."
+                    ));
+                }
+                return SlashResponse::NeedsChoice {
+                    command: format!("/models {provider}"),
+                    title: format!(
+                        "Search results for \"{query}\" in {provider} ({})",
+                        matched.len()
+                    ),
+                    options: matched
+                        .into_iter()
+                        .map(|m| {
+                            let label = if models::is_free_model(&m) {
+                                format!("{m} [FREE]")
+                            } else {
+                                m.clone()
+                            };
+                            SlashChoice { label, value: m }
+                        })
+                        .collect(),
+                };
+            }
+
+            if is_action_free {
+                let free_models: Vec<String> = all_options
+                    .into_iter()
+                    .filter(|m| models::is_free_model(m))
+                    .collect();
+                if free_models.is_empty() {
+                    return message(format!("No free models found for provider {provider}."));
+                }
+                return SlashResponse::NeedsChoice {
+                    command: format!("/models {provider}"),
+                    title: format!("Free {provider} models ({})", free_models.len()),
+                    options: free_models
+                        .into_iter()
+                        .map(|m| SlashChoice {
+                            label: format!("{m} [FREE]"),
+                            value: m,
+                        })
+                        .collect(),
+                };
+            }
+
+            if is_action_all {
+                return SlashResponse::NeedsChoice {
+                    command: format!("/models {provider}"),
+                    title: format!("All {provider} models ({})", all_options.len()),
+                    options: all_options
+                        .into_iter()
+                        .map(|m| {
+                            let label = if models::is_free_model(&m) {
+                                format!("{m} [FREE]")
+                            } else {
+                                m.clone()
+                            };
+                            SlashChoice { label, value: m }
+                        })
+                        .collect(),
+                };
+            }
+
+            // Normal provider selection menu
+            let has_free = all_options.iter().any(|m| models::is_free_model(m));
+            let total_count = all_options.len();
+
+            let mut choices: Vec<SlashChoice> = Vec::new();
+
+            if total_count > 8 || provider == "openrouter" {
+                let popular_presets = models::popular_models_for_provider(provider);
+                let mut added_popular = 0;
+                for pop in popular_presets {
+                    if all_options.iter().any(|m| m == pop) {
+                        let label = if models::is_free_model(pop) {
+                            format!("{pop} [FREE]")
+                        } else {
+                            pop.to_string()
+                        };
+                        choices.push(SlashChoice {
+                            label,
+                            value: pop.to_string(),
+                        });
+                        added_popular += 1;
+                    }
+                }
+
+                if added_popular == 0 {
+                    for m in all_options.iter().take(6) {
+                        let label = if models::is_free_model(m) {
+                            format!("{m} [FREE]")
+                        } else {
+                            m.clone()
+                        };
+                        choices.push(SlashChoice {
+                            label,
+                            value: m.clone(),
+                        });
+                    }
+                }
+
+                choices.push(SlashChoice {
+                    label: "[Search] Filter models by keyword...".into(),
+                    value: "__action:search".into(),
+                });
+                if has_free {
+                    choices.push(SlashChoice {
+                        label: "[Free] Browse free models only (:free)".into(),
+                        value: "__action:free".into(),
+                    });
+                }
+                choices.push(SlashChoice {
+                    label: format!("[All] Browse all {total_count} models..."),
+                    value: "__action:all".into(),
+                });
+                choices.push(SlashChoice {
+                    label: "[Custom] Enter custom model ID...".into(),
+                    value: "__action:custom".into(),
+                });
+
+                return SlashResponse::NeedsChoice {
+                    command: format!("/models {provider}"),
+                    title: format!("Select {provider} model"),
+                    options: choices,
+                };
+            } else {
+                for m in &all_options {
+                    let label = if models::is_free_model(m) {
+                        format!("{m} [FREE]")
+                    } else {
+                        m.clone()
+                    };
+                    choices.push(SlashChoice {
+                        label,
+                        value: m.clone(),
+                    });
+                }
+                choices.push(SlashChoice {
+                    label: "[Custom] Enter custom model ID...".into(),
+                    value: "__action:custom".into(),
+                });
+
+                return SlashResponse::NeedsChoice {
+                    command: format!("/models {provider}"),
+                    title: format!("Select {provider} model"),
+                    options: choices,
+                };
+            }
+        }
+    }
+
+    if let Some(m) = model {
+        if m.starts_with("__action:") {
+            return SlashResponse::NotHandled;
         }
     }
 
@@ -1809,7 +2114,38 @@ fn cmd_link(rest: &str) -> SlashResponse {
             Ok(false) => error(format!("No linked folder named `{args}`.")),
             Err(e) => error(e),
         },
-        _ => error("Usage: /link [list] | add <name> | <path> | <desc> | remove <name>"),
+        "refresh" if !args.is_empty() => match crate::refresh_linked_folder(args) {
+            Ok(status) => message(format!(
+                "Indexed {} files in `{args}`.",
+                status.indexed_files
+            )),
+            Err(e) => error(e),
+        },
+        "notes" if !args.is_empty() => match crate::list_linked_folder_notes(args) {
+            Ok(notes) if notes.is_empty() => message(format!("No saved notes in `{args}`.")),
+            Ok(notes) => message(md_list(
+                &notes
+                    .iter()
+                    .map(|n| format!("`{}` — {} — {}", n.created_at, n.status, n.path))
+                    .collect::<Vec<_>>(),
+            )),
+            Err(e) => error(e),
+        },
+        "save" => {
+            let Some((name, content)) = args.split_once('|') else {
+                return error("Usage: /link save <name> | <text>");
+            };
+            match crate::save_linked_folder_note(name.trim(), content.trim()) {
+                Ok(note) if note.status == "saved" => {
+                    message(format!("Saved note to `{}`: `{}`", name.trim(), note.path))
+                }
+                Ok(note) => error(note.error.unwrap_or_else(|| "note was not saved".into())),
+                Err(e) => error(e),
+            }
+        }
+        _ => error(
+            "Usage: /link [list] | add <name> | <path> | <desc> | remove <name> | refresh <name> | notes <name> | save <name> | <text>",
+        ),
     }
 }
 
@@ -2560,6 +2896,118 @@ mod tests {
                 assert!(markdown.contains("code completion"));
             }
             other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+    }
+
+    #[test]
+    fn thinking_slash_command_inspection_override_and_reset() {
+        let mut cfg = MintConfig::default();
+        cfg.ai_provider = "anthropic".into();
+        cfg.anthropic_model = "claude-3-7-sonnet".into();
+
+        // 1. Without args: interactive menu
+        match execute(&req("/thinking"), &mut cfg) {
+            SlashResponse::NeedsChoice { options, .. } => {
+                assert!(!options.is_empty());
+            }
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
+        }
+
+        // 2. Set effort to High
+        match execute(&req("/thinking high"), &mut cfg) {
+            SlashResponse::Applied { effects, markdown } => {
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+                assert!(effects.contains(&SlashEffect::ThinkingChanged {
+                    enabled: true,
+                    effort: "high".into()
+                }));
+                assert!(markdown.contains("High"));
+                let (enabled, effort) = cfg.resolved_thinking();
+                assert!(enabled);
+                assert_eq!(effort, "high");
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 3. Turn thinking off
+        match execute(&req("/thinking off"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(effects.contains(&SlashEffect::ThinkingChanged {
+                    enabled: false,
+                    effort: "high".into()
+                }));
+                let (enabled, _) = cfg.resolved_thinking();
+                assert!(!enabled);
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 4. Status inspection
+        match execute(&req("/thinking status"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.to_ascii_uppercase().contains("OFF"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 5. Non-reasoning model accepts preference with advisory note
+        cfg.ai_provider = "openai".into();
+        cfg.openai_model = "gpt-4o".into();
+        match execute(&req("/thinking on"), &mut cfg) {
+            SlashResponse::Applied { markdown, .. } => {
+                assert!(markdown.contains("may not natively emit reasoning tokens"));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+    }
+
+    #[tokio::test]
+    async fn models_slash_command_actions_and_options() {
+        let mut cfg = MintConfig::default();
+        // 1. /models openrouter offers popular models and action shortcuts
+        match execute_async(&req("/models openrouter"), &mut cfg).await {
+            SlashResponse::NeedsChoice {
+                command, options, ..
+            } => {
+                assert_eq!(command, "/models openrouter");
+                assert!(options.iter().any(|o| o.value == "__action:search"));
+                assert!(options.iter().any(|o| o.value == "__action:all"));
+                assert!(options.iter().any(|o| o.value == "__action:custom"));
+            }
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
+        }
+
+        // 2. /models openrouter __action:all returns all models
+        match execute_async(&req("/models openrouter __action:all"), &mut cfg).await {
+            SlashResponse::NeedsChoice { title, options, .. } => {
+                assert!(title.contains("All openrouter models"));
+                assert!(!options.is_empty());
+            }
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
+        }
+
+        // 3. /models openrouter __action:search:gpt filters models
+        match execute_async(&req("/models openrouter __action:search:gpt"), &mut cfg).await {
+            SlashResponse::NeedsChoice { options, .. } => {
+                assert!(
+                    options
+                        .iter()
+                        .all(|o| o.value.to_lowercase().contains("gpt"))
+                );
+            }
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
     }
 }

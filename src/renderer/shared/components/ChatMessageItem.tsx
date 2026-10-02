@@ -1,14 +1,13 @@
 import React, { useMemo } from 'react'
 import { renderFormattedMessage, renderCopyIcon, renderSpeakerIcon } from '../utils/markdown'
 import { fallbackNotice } from '../utils/providers'
-import { ThinkingBlock } from './ThinkingBlock'
-import { thoughtsFrom, hasAgentToolActivity } from '../agentProgress'
 import WeatherCard from './WeatherCard'
 import StockCard from './StockCard'
 import CalculationCard from './CalculationCard'
 import ImageSearchCard from './ImageSearchCard'
 import ImageGenCard from './ImageGenCard'
 import { parseUtcDate } from '../utils/ui'
+import { parseWebSearchSources } from '../utils/agentActivity'
 
 export interface ChatMessageItemProps {
   interaction: any
@@ -55,10 +54,12 @@ const ChatMessageItem = React.memo(
       return renderFormattedMessage(interaction.userText)
     }, [interaction.userText])
 
+    const progress = agentActivitySnapshots[String(interaction.id)] ?? interaction.agentActivity ?? []
+    const webSources = useMemo(() => parseWebSearchSources(progress), [progress])
     const memoizedAiContent = useMemo(() => {
       if (!interaction.aiText) return null
-      return renderFormattedMessage(interaction.aiText)
-    }, [interaction.aiText])
+      return renderFormattedMessage(interaction.aiText, webSources)
+    }, [interaction.aiText, webSources])
 
     if (isSystemEvent) {
       const rawText = interaction.userText || ''
@@ -77,12 +78,9 @@ const ChatMessageItem = React.memo(
       )
     }
 
-    const progress = agentActivitySnapshots[String(interaction.id)] ?? interaction.agentActivity ?? []
-    const thoughts = thoughtsFrom(progress)
     const isUserCopied = copiedId === `user-${interaction.id}`
     const isAiCopied = copiedId === interaction.id
     const isSpeaking = speakingText === interaction.aiText
-    const isExpanded = thinkingExpanded[String(interaction.id)] ?? false
 
     const fallbackWeatherData = useMemo(() => {
       if (interaction.aiText && (interaction.aiText.includes('```weather_json') || interaction.aiText.includes('```weather-json'))) {
@@ -210,16 +208,13 @@ const ChatMessageItem = React.memo(
         )}
         <div className="message ai-message">
           <div className="bubble-wrapper">
-            {renderCompletedActivity(interaction)}
-            {renderFileChanges(interaction)}
-            <ThinkingBlock
-              blockKey={String(interaction.id)}
-              thoughts={thoughts}
-              expanded={isExpanded}
-              onExpandedChange={onThinkingExpandedChange}
-              showEmptyHint={hasAgentToolActivity(progress) && thoughts.length === 0}
-            />
+            {interaction.status === 'completed' && renderCompletedActivity(interaction)}
+            {interaction.status === 'completed' && renderFileChanges(interaction)}
             <div className="message-bubble">
+              {interaction.status === 'queued' && <span>Queued for this session…</span>}
+              {interaction.status === 'running' && <span>Mint is responding…</span>}
+              {interaction.status === 'failed' && <span>This turn failed. Send the prompt again to retry.</span>}
+              {interaction.status === 'interrupted' && <span>This turn was interrupted. Send the prompt again to retry.</span>}
               {fallbackWeatherData && <WeatherCard data={fallbackWeatherData} />}
               {fallbackStockData && <StockCard data={fallbackStockData} />}
               {fallbackCalcData && <CalculationCard data={fallbackCalcData} />}
@@ -229,15 +224,15 @@ const ChatMessageItem = React.memo(
             </div>
             {renderWebSearchSources(interaction)}
             <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span className="provider-model-chip" data-provider={(interaction.provider || '').toLowerCase()} title={`${interaction.provider} • ${interaction.model}`}>
+              {interaction.status === 'completed' && <span className="provider-model-chip" data-provider={(interaction.provider || '').toLowerCase()} title={`${interaction.provider} • ${interaction.model}`}>
                 <span className="provider-chip-dot" aria-hidden="true" />
                 <span className="provider-chip-name">{interaction.provider}</span>
                 <span className="provider-chip-divider">/</span>
                 <span className="provider-chip-model">{interaction.model}</span>
-              </span>
+              </span>}
               {fallbackNotice(interaction) && <span className="provider-fallback-notice">{fallbackNotice(interaction)}</span>}
               <span className="message-timestamp">{parseUtcDate(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-              <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
+              {interaction.status === 'completed' && <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
                 <button
                   type="button"
                   className={`msg-action-btn copy-btn ${isAiCopied ? 'is-copied' : ''}`}
@@ -254,7 +249,7 @@ const ChatMessageItem = React.memo(
                 >
                   {renderSpeakerIcon(isSpeaking)}
                 </button>
-              </div>
+              </div>}
             </div>
           </div>
         </div>
@@ -264,7 +259,7 @@ const ChatMessageItem = React.memo(
   (prevProps, nextProps) => {
     const p = prevProps.interaction
     const n = nextProps.interaction
-    if (p.id !== n.id || p.aiText !== n.aiText || p.userText !== n.userText || p.createdAt !== n.createdAt) {
+    if (p.id !== n.id || p.aiText !== n.aiText || p.userText !== n.userText || p.createdAt !== n.createdAt || p.status !== n.status || p.agentActivity !== n.agentActivity) {
       return false
     }
 
@@ -283,6 +278,10 @@ const ChatMessageItem = React.memo(
     const prevExpanded = prevProps.thinkingExpanded[String(p.id)] ?? false
     const nextExpanded = nextProps.thinkingExpanded[String(n.id)] ?? false
     if (prevExpanded !== nextExpanded) return false
+
+    const prevExtExpanded = prevProps.thinkingExpanded[`extended-${p.id}`] ?? false
+    const nextExtExpanded = nextProps.thinkingExpanded[`extended-${n.id}`] ?? false
+    if (prevExtExpanded !== nextExtExpanded) return false
 
     const prevOpenActivity = prevProps.openActivityIds?.[String(p.id)] ?? false
     const nextOpenActivity = nextProps.openActivityIds?.[String(n.id)] ?? false

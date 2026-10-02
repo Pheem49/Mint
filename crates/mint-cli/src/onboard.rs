@@ -1,3 +1,5 @@
+const ANSI_BLUE: &str = crate::terminal_theme::ANSI_BLUE;
+
 use anyhow::{Result, bail};
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -92,9 +94,9 @@ async fn fetch_live_models_with_notice(api_key: &str) -> Vec<String> {
 pub async fn run() -> Result<()> {
     let mut config = load_config()?;
 
-    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("{ANSI_BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("\x1b[32m       Mint CLI Onboarding Wizard\x1b[0m");
-    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("{ANSI_BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!("Welcome to Mint! Let's get your workspace configured.");
     println!();
 
@@ -419,7 +421,7 @@ pub async fn run() -> Result<()> {
 
     // Anthropic
     if is_selected("anthropic", &services) {
-        println!("\n\x1b[36m--- Anthropic (Claude) API ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Anthropic (Claude) API ---\x1b[0m");
         config.anthropic_api_key =
             prompt_sensitive("Anthropic API Key", &config.anthropic_api_key)?;
         let anthropic_models = fetch_models_with_notice(&config, "anthropic").await;
@@ -435,7 +437,7 @@ pub async fn run() -> Result<()> {
 
     // OpenAI
     if is_selected("openai", &services) {
-        println!("\n\x1b[36m--- OpenAI API ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- OpenAI API ---\x1b[0m");
         config.openai_api_key = prompt_sensitive("OpenAI API Key", &config.openai_api_key)?;
         let openai_models = fetch_models_with_notice(&config, "openai").await;
         config.openai_model = prompt_select_or_custom(
@@ -450,7 +452,7 @@ pub async fn run() -> Result<()> {
 
     // OpenRouter
     if is_selected("openrouter", &services) {
-        println!("\n\x1b[36m--- OpenRouter API ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- OpenRouter API ---\x1b[0m");
         println!(
             "\x1b[90mOpenRouter model uses a provider/model slug, for example: openai/gpt-4o-mini, anthropic/claude-3.5-sonnet, google/gemini-2.5-flash, meta-llama/llama-3.3-70b-instruct, mistralai/mistral-large\x1b[0m"
         );
@@ -469,7 +471,7 @@ pub async fn run() -> Result<()> {
 
     // DeepSeek
     if is_selected("deepseek", &services) {
-        println!("\n\x1b[36m--- DeepSeek API ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- DeepSeek API ---\x1b[0m");
         println!(
             "\x1b[90mDeepSeek uses OpenAI-compatible model names. Prefer deepseek-v4-flash or deepseek-v4-pro; deepseek-chat and deepseek-reasoner are compatibility aliases scheduled for deprecation on 2026-07-24.\x1b[0m"
         );
@@ -487,7 +489,7 @@ pub async fn run() -> Result<()> {
 
     // Hugging Face
     if is_selected("huggingface", &services) {
-        println!("\n\x1b[36m--- Hugging Face API ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Hugging Face API ---\x1b[0m");
         config.hf_api_key = prompt_sensitive("Hugging Face API Key", &config.hf_api_key)?;
         config.hf_model = prompt_select_or_custom(
             "Hugging Face Model",
@@ -501,7 +503,7 @@ pub async fn run() -> Result<()> {
 
     // Local OpenAI
     if is_selected("local_openai", &services) {
-        println!("\n\x1b[36m--- Local OpenAI (e.g. LM Studio) ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Local OpenAI (e.g. LM Studio) ---\x1b[0m");
         config.local_api_base_url =
             prompt_input("Local OpenAI Base URL", Some(&config.local_api_base_url))?;
         config.local_model_name = prompt_input("Local Model Name", Some(&config.local_model_name))?;
@@ -511,7 +513,7 @@ pub async fn run() -> Result<()> {
 
     // Ollama
     if is_selected("ollama", &services) {
-        println!("\n\x1b[36m--- Ollama ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Ollama ---\x1b[0m");
         config.ollama_host = prompt_input("Ollama Host", Some(&config.ollama_host))?;
         // Get the server up first, so the model list below can actually see it.
         ensure_ollama_serving(&config.ollama_host);
@@ -540,7 +542,7 @@ pub async fn run() -> Result<()> {
 
     // Google Search
     if is_selected("google_search", &services) {
-        println!("\n\x1b[36m--- Google Search API ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Google Search API ---\x1b[0m");
         let current_key = config
             .extra
             .get("googleSearchApiKey")
@@ -573,7 +575,7 @@ pub async fn run() -> Result<()> {
 
     // Brave Search
     if is_selected("brave_search", &services) {
-        println!("\n\x1b[36m--- Brave Search API ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Brave Search API ---\x1b[0m");
         let current_key = config
             .extra
             .get("braveSearchApiKey")
@@ -593,7 +595,7 @@ pub async fn run() -> Result<()> {
 
     // SearXNG
     if is_selected("searxng", &services) {
-        println!("\n\x1b[36m--- SearXNG (self-hosted) ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- SearXNG (self-hosted) ---\x1b[0m");
         let current_url = config
             .extra
             .get("searxngBaseUrl")
@@ -645,7 +647,7 @@ pub async fn run() -> Result<()> {
         .collect();
 
         let provider = if configured.len() > 1 {
-            println!("\n\x1b[36m--- Preferred Search Provider ---\x1b[0m");
+            println!("\n{ANSI_BLUE}--- Preferred Search Provider ---\x1b[0m");
             let current = config
                 .extra
                 .get("searchProvider")
@@ -681,7 +683,7 @@ pub async fn run() -> Result<()> {
 
     // Telegram Bot
     if is_selected("telegram", &services) {
-        println!("\n\x1b[36m--- Telegram Bot Bridge ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Telegram Bot Bridge ---\x1b[0m");
         let current_token = config
             .extra
             .get("telegramBotToken")
@@ -705,7 +707,7 @@ pub async fn run() -> Result<()> {
 
     // Discord Bot
     if is_selected("discord", &services) {
-        println!("\n\x1b[36m--- Discord Bot Bridge ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Discord Bot Bridge ---\x1b[0m");
         let current_token = config
             .extra
             .get("discordBotToken")
@@ -739,7 +741,7 @@ pub async fn run() -> Result<()> {
 
     // Slack Bot
     if is_selected("slack", &services) {
-        println!("\n\x1b[36m--- Slack Bot Bridge ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Slack Bot Bridge ---\x1b[0m");
         let current_token = config
             .extra
             .get("slackBotToken")
@@ -773,7 +775,7 @@ pub async fn run() -> Result<()> {
 
     // LINE Bot
     if is_selected("line", &services) {
-        println!("\n\x1b[36m--- LINE Bot Bridge ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- LINE Bot Bridge ---\x1b[0m");
         let current_token = config
             .extra
             .get("lineChannelAccessToken")
@@ -807,7 +809,7 @@ pub async fn run() -> Result<()> {
 
     // WhatsApp Cloud
     if is_selected("whatsapp", &services) {
-        println!("\n\x1b[36m--- WhatsApp Cloud Bridge ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- WhatsApp Cloud Bridge ---\x1b[0m");
         let current_token = config
             .extra
             .get("whatsappCloudAccessToken")
@@ -863,7 +865,7 @@ pub async fn run() -> Result<()> {
     // has no official bot API, so unlike the other bridges here Mint is the
     // one polling a REST endpoint rather than receiving a webhook/socket push)
     if is_selected("signal", &services) {
-        println!("\n\x1b[36m--- Signal Bridge ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Signal Bridge ---\x1b[0m");
         println!(
             "Needs a self-hosted signal-cli-rest-api instance with a number already \
              linked/registered: https://github.com/bbernhard/signal-cli-rest-api"
@@ -906,7 +908,7 @@ pub async fn run() -> Result<()> {
     // plugin — see `mint gmail auth` — rather than asking for separate
     // IMAP/SMTP credentials)
     if is_selected("email", &services) {
-        println!("\n\x1b[36m--- Email Bridge (via Gmail) ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Email Bridge (via Gmail) ---\x1b[0m");
         println!(
             "Reuses the same Gmail OAuth connection as the `gmail` plugin. Needs a \
              Google Cloud OAuth client (Client ID/Secret) — see \
@@ -960,7 +962,7 @@ pub async fn run() -> Result<()> {
 
     // NanoBanana (Gemini Images)
     if is_selected("img_nanobanana", &services) {
-        println!("\n\x1b[36m--- Google NanoBanana (Gemini Images) ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Google NanoBanana (Gemini Images) ---\x1b[0m");
         println!(
             "\x1b[90mUses the same Gemini API key as Step 1. Select the image generation model.\x1b[0m"
         );
@@ -975,7 +977,7 @@ pub async fn run() -> Result<()> {
 
     // DALL·E
     if is_selected("img_dalle", &services) {
-        println!("\n\x1b[36m--- OpenAI DALL·E ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- OpenAI DALL·E ---\x1b[0m");
         println!(
             "\x1b[90mUses the same OpenAI API key. DALL·E 3 supports only 1 image per request; DALL·E 2 supports up to 10.\x1b[0m"
         );
@@ -990,7 +992,7 @@ pub async fn run() -> Result<()> {
 
     // Stability AI
     if is_selected("img_stability", &services) {
-        println!("\n\x1b[36m--- Stability AI ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Stability AI ---\x1b[0m");
         println!(
             "\x1b[90mGet your API key at https://platform.stability.ai/. Supports SD3.5 Large, SD3 Medium, and Stable Image Core.\x1b[0m"
         );
@@ -1009,7 +1011,7 @@ pub async fn run() -> Result<()> {
 
     // Ideogram
     if is_selected("img_ideogram", &services) {
-        println!("\n\x1b[36m--- Ideogram ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Ideogram ---\x1b[0m");
         println!(
             "\x1b[90mGet your API key at https://ideogram.ai/api. Supports V_3, V_2, and V_2_TURBO.\x1b[0m"
         );
@@ -1027,7 +1029,7 @@ pub async fn run() -> Result<()> {
 
     // Replicate
     if is_selected("img_replicate", &services) {
-        println!("\n\x1b[36m--- Replicate ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Replicate ---\x1b[0m");
         println!(
             "\x1b[90mGet your API token at https://replicate.com/account/api-tokens. Works with FLUX, SDXL, and any public image model.\x1b[0m"
         );
@@ -1046,7 +1048,7 @@ pub async fn run() -> Result<()> {
 
     // Black Forest Labs (FLUX API)
     if is_selected("img_bfl", &services) {
-        println!("\n\x1b[36m--- Black Forest Labs (FLUX API) ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Black Forest Labs (FLUX API) ---\x1b[0m");
         println!(
             "\x1b[90mGet your API key at https://api.bfl.ml. Supports flux-pro-1.1, flux-pro-1.1-ultra, flux-dev, and flux-pro-1.0-fill.\x1b[0m"
         );
@@ -1064,7 +1066,7 @@ pub async fn run() -> Result<()> {
 
     // Google Veo (Gemini Videos)
     if is_selected("vid_veo", &services) {
-        println!("\n\x1b[36m--- Google Veo (Gemini Videos) ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Google Veo (Gemini Videos) ---\x1b[0m");
         println!(
             "\x1b[90mUses the same Gemini API key as Step 1. Select the video generation model.\x1b[0m"
         );
@@ -1099,7 +1101,7 @@ pub async fn run() -> Result<()> {
     }
 
     if is_selected("gemini_live", &services) {
-        println!("\n\x1b[36m--- Realtime Live Model (Gemini Live) ---\x1b[0m");
+        println!("\n{ANSI_BLUE}--- Realtime Live Model (Gemini Live) ---\x1b[0m");
         println!(
             "\x1b[90mUses the same Gemini API key as Step 1. Select the model used for realtime voice conversations.\x1b[0m"
         );
@@ -1152,7 +1154,7 @@ fn print_services(services: &[OnboardService], cursor: usize) {
         };
         if i == cursor {
             println!(
-                "    \x1b[36m❯\x1b[0m {} \x1b[36m{}\x1b[0m",
+                "    {ANSI_BLUE}❯\x1b[0m {} {ANSI_BLUE}{}\x1b[0m",
                 checkbox, svc.name
             );
         } else {
@@ -1503,7 +1505,7 @@ fn ensure_ollama_serving(host: &str) {
 pub(crate) fn print_select_options(options: &[String], cursor: usize) {
     for (i, option) in options.iter().enumerate() {
         if i == cursor {
-            println!("  \x1b[36m❯\x1b[0m \x1b[36m{}\x1b[0m", option);
+            println!("  {ANSI_BLUE}❯\x1b[0m {ANSI_BLUE}{}\x1b[0m", option);
         } else {
             println!("    {}", option);
         }

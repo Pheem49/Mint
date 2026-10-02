@@ -114,6 +114,16 @@ pub enum LinkCommand {
     Remove {
         name: String,
     },
+    Refresh {
+        name: String,
+    },
+    Notes {
+        name: String,
+    },
+    Save {
+        name: String,
+        text: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -337,6 +347,24 @@ pub fn handle_link(command: LinkCommand) -> Result<()> {
                     "not found"
                 }
             )
+        }
+        LinkCommand::Refresh { name } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&mint_core::refresh_linked_folder(&name)?)?
+            );
+        }
+        LinkCommand::Notes { name } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&mint_core::list_linked_folder_notes(&name)?)?
+            );
+        }
+        LinkCommand::Save { name, text } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&mint_core::save_linked_folder_note(&name, &text)?)?
+            );
         }
     }
     Ok(())

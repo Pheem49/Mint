@@ -4,7 +4,7 @@ import { MCP_REGISTRY, type McpRegistryEntry } from '../constants/mcpRegistry'
 import { renderMcpSvgIcon } from '../constants/plugins'
 
 /**
- * The "pick a known MCP server" list shown in the MCP Catalog modal (and inline
+ * The "pick a known MCP server" list shown in the MCP catalog modal (and inline
  * above the Settings › Plugins Add form). Selecting an entry prompts for any
  * `argInputs` it declares, then calls `onPick` with the entry and those values;
  * the host fills the Add form's command / args / env state. Styled with the

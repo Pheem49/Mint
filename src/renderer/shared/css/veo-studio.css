@@ -58,7 +58,7 @@
 }
 
 .veo-studio-header-title svg {
-  color: var(--accent);
+  color: var(--interactive-fg);
   flex-shrink: 0;
 }
 
@@ -69,11 +69,11 @@
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.03em;
-  text-transform: uppercase;
+  text-transform: none;
   margin-left: 4px;
 }
 
@@ -141,7 +141,7 @@
   font-size: 0.76rem;
   font-weight: 500;
   letter-spacing: 0.02em;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .veo-studio-label-hint {
@@ -309,7 +309,7 @@
   border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border: 1px solid var(--accent);
-  color: var(--accent);
+  color: var(--interactive-fg);
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
@@ -352,7 +352,7 @@
 
 .veo-mode-btn.is-active {
   background: var(--panel-raised, #343436);
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
   font-weight: 600;
   box-shadow: 0 1px 4px rgba(0,0,0,0.4);
 }
@@ -421,7 +421,7 @@
   border-radius: var(--radius-lg);
   background: var(--accent);
   border: 1px solid var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 0.90rem;
   font-weight: 600;
   cursor: pointer;
@@ -647,12 +647,13 @@
 .veo-studio-action-btn--primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
 }
 
 .veo-studio-action-btn--primary:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+  color: var(--text-on-accent);
 }
 
 /* ── Meta info ───────────────────────────────────────────── */
@@ -701,7 +702,7 @@
   color: var(--text-soft);
   font-size: 0.78rem;
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.04em;
 }
 
@@ -714,7 +715,7 @@
   padding: 0 5px;
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent-hover);
+  color: var(--interactive-fg-hover);
   font-size: 0.72rem;
   font-weight: 700;
 }
@@ -784,7 +785,7 @@
 
 .veo-studio-tab.is-active {
   background: var(--accent-subtle, rgba(100,200,150,0.12));
-  color: var(--accent, #4ade80);
+  color: var(--interactive-fg);
   border-color: var(--accent-muted, rgba(100,200,150,0.25));
 }
 
@@ -871,7 +872,7 @@
   gap: 7px;
   font-size: 0.82rem;
   font-weight: 600;
-  color: var(--accent, #4ade80);
+  color: var(--interactive-fg);
   margin-bottom: 4px;
 }
 
@@ -943,7 +944,7 @@
 }
 
 .veo-editor-log-entry.is-success {
-  color: var(--accent, #4ade80);
+  color: var(--interactive-fg);
 }
 
 .veo-editor-log-entry.is-error {
@@ -994,7 +995,7 @@
 }
 
 .veo-studio-fablemint-notice p a {
-  color: var(--accent);
+  color: var(--interactive-fg);
 }
 
 .veo-studio-fablemint-notice p code,
@@ -1040,7 +1041,7 @@
   height: 22px;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 0.75rem;
   font-weight: 700;
 }

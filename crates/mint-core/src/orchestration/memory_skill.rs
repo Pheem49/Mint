@@ -181,7 +181,9 @@ pub(crate) fn append_memory_context(
         *system_prompt = format!("{}\n\nRemembered facts:\n{}", system_prompt.trim(), facts);
     }
 
-    if let Ok(mut interactions) = memory.recent_interactions_for_chat(chat_id, CONTEXT_LIMIT) {
+    if let Ok(mut interactions) =
+        memory.recent_completed_interactions_for_chat(chat_id, CONTEXT_LIMIT)
+    {
         interactions.reverse();
         let transcript = interactions
             .into_iter()
@@ -318,6 +320,7 @@ Worth saving:
         messages: None,
         tools: None,
         temperature: config.temperature,
+        ..Default::default()
     };
 
     let response = send_chat(config, &request).await?;
@@ -546,6 +549,7 @@ Example response:
         messages: None,
         tools: None,
         temperature: config.temperature,
+        ..Default::default()
     };
 
     // Send the chat request to LLM
@@ -905,6 +909,7 @@ Emit at most {MAX_FACT_OPS_PER_TURN} ops."#
         messages: None,
         tools: None,
         temperature: config.temperature,
+        ..Default::default()
     };
 
     let response = send_chat(config, &request).await?;

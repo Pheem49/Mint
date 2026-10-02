@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Images } from 'lucide-react'
 import { resolveMediaUrl } from '../utils/markdown'
 
@@ -25,51 +25,45 @@ function ImageTile({ image }: { image: ImageSearchHit }) {
   if (broken || !src) {
     return null
   }
+  const sourceUrl = /^https?:\/\//.test(image.sourceUrl) ? image.sourceUrl : image.imageUrl
 
   return (
-    <a
-      href={image.sourceUrl || image.imageUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      title={image.title}
+    <div
       style={{
         position: 'relative',
         display: 'block',
         borderRadius: '10px',
         overflow: 'hidden',
         aspectRatio: '1 / 1',
-        background: 'rgba(255, 255, 255, 0.04)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
+        background: 'var(--surface-strong)',
+        border: '1px solid var(--border)',
         textDecoration: 'none',
       }}
     >
-      <img
-        src={src}
-        alt={image.title}
-        loading="lazy"
-        referrerPolicy="no-referrer"
-        onError={() => {
-          const fallback = resolveMediaUrl(image.imageUrl)
-          if (src !== fallback && fallback) {
-            setSrc(fallback)
-          } else {
-            setBroken(true)
-          }
-        }}
-        style={{
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          display: 'block',
-        }}
-      />
+      <a href={sourceUrl} target="_blank" rel="noopener noreferrer" title={image.title} style={{ display: 'block', width: '100%', height: '100%' }}>
+        <img
+          src={src}
+          alt={image.title}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => {
+            const fallback = resolveMediaUrl(image.imageUrl)
+            if (src !== fallback && fallback) {
+              setSrc(fallback)
+            } else {
+              setBroken(true)
+            }
+          }}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      </a>
       {image.title && (
         <div
           style={{
             position: 'absolute',
             left: 0,
             right: 0,
-            bottom: 0,
+            bottom: 24,
             padding: '6px 8px',
             fontSize: '11px',
             lineHeight: 1.3,
@@ -78,55 +72,82 @@ function ImageTile({ image }: { image: ImageSearchHit }) {
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
+            pointerEvents: 'none',
           }}
         >
           {image.title}
         </div>
       )}
-    </a>
+      <a
+        href={resolveMediaUrl(image.imageUrl)}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ position: 'absolute', right: 6, bottom: 5, zIndex: 1, padding: '2px 5px', borderRadius: 4, background: 'var(--surface-strong)', color: 'var(--interactive-fg-hover)', fontSize: 10 }}
+      >
+        View full image
+      </a>
+    </div>
   )
 }
 
 export default function ImageSearchCard({ data }: { data: ImageSearchData }) {
   const images = (data?.images ?? []).filter((img) => img.thumbnailUrl || img.imageUrl)
 
+  const [isDark, setIsDark] = useState(
+    () => (document.documentElement.getAttribute('data-theme') || 'dark') !== 'light'
+  )
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDark((document.documentElement.getAttribute('data-theme') || 'dark') !== 'light')
+    })
+    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] })
+    return () => observer.disconnect()
+  }, [])
+
+  const cardBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.04)'
+  const cardBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.12)'
+  const cardText = isDark ? '#f8fafc' : '#0f172a'
+  const labelColor = isDark ? 'rgba(255,255,255,0.6)' : '#64748b'
+  const queryColor = isDark ? 'rgba(255,255,255,0.8)' : '#334155'
+  const emptyColor = isDark ? 'rgba(255,255,255,0.5)' : '#94a3b8'
+
   return (
     <div
       style={{
-        background: 'rgba(255, 255, 255, 0.03)',
+        background: cardBg,
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
-        color: '#f8fafc',
+        color: cardText,
         borderRadius: '12px',
         padding: '16px 20px',
         margin: '12px 0',
-        boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.2)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
+        boxShadow: isDark ? '0 8px 32px 0 rgba(0,0,0,0.2)' : '0 4px 20px 0 rgba(15,23,42,0.08)',
+        border: `1px solid ${cardBorder}`,
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}
     >
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-        <Images size={16} strokeWidth={2} style={{ opacity: 0.9 }} />
+        <Images size={16} strokeWidth={2} style={{ opacity: 0.9, color: labelColor }} />
         <span
           style={{
             fontSize: '11px',
             fontWeight: 700,
             letterSpacing: '0.8px',
-            color: 'rgba(255, 255, 255, 0.6)',
+            color: labelColor,
           }}
         >
           IMAGE SEARCH
         </span>
         {data?.query && (
-          <span style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.8)' }}>
+          <span style={{ fontSize: '13px', color: queryColor }}>
             &ldquo;{data.query}&rdquo;
           </span>
         )}
       </div>
 
       {images.length === 0 ? (
-        <div style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.5)' }}>
+        <div style={{ fontSize: '13px', color: emptyColor }}>
           No images found.
         </div>
       ) : (

@@ -16,33 +16,38 @@ use mint_core::browser::{
 };
 
 use desktop::{
-    ActionResult, CaptureRect, DesktopAction, capture_screen, close_window, emit_to_main,
-    execute_action, hide_window, integration_status, open_desktop_window, position_widget,
-    resize_window, translate_screen_region,
+    ActionResult, CaptureRect, DesktopAction, capture_screen, capture_translation_region,
+    close_window, emit_to_main, execute_action, hide_window, integration_status,
+    open_desktop_window, position_widget, resize_window, translate_captured_region,
+    translate_screen_region,
 };
 use events::start_system_events;
 use headless::{run_next_task, start_headless_queue};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 use tokio::sync::oneshot;
 
 use integrations::{channel_inventory, list_plugins};
 use mint_core::{
-    AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, AuthUser, ChatRequest,
-    ChatResponse, ChatSession, CodeEdit, CodeEditProposal, CronJob, CronJobDraft, CronStore,
-    GeminiLiveEvent, GeminiLiveHandle, ImageGenRequest, InteractionMemory, LinkedFolder,
-    LinkedFolderDraft, MemoryStore, MicRecordingHandle, MintConfig, PictureEntry,
-    SubagentDefinition, SubagentDraft, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport,
-    apply_code_edits, classify_shell_command, config_path, delete_saved_picture,
-    delete_subagent as core_delete_subagent, get_user, google_tts_urls, list_saved_pictures,
-    list_subagents as core_list_subagents, load_config, login_user, orchestrate_agent_loop,
-    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback, propose_code_edits,
+    AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, AuthUser, BranchInfo,
+    ChatRequest, ChatResponse, ChatSession, CodeEdit, CodeEditProposal, ConversationChanges,
+    ConversationSnapshot, CronJob, CronJobDraft, CronStore, GeminiLiveEvent, GeminiLiveHandle,
+    ImageGenRequest, InteractionMemory, LinkedFolder, LinkedFolderDraft, MemoryStore,
+    MicRecordingHandle, MintConfig, PictureEntry, SubagentDefinition, SubagentDraft, TtsUrl,
+    VideoGenRequest, VideoGenResponse, WeatherReport, apply_code_edits, classify_shell_command,
+    config_path, delete_saved_picture, delete_subagent as core_delete_subagent, get_user,
+    google_tts_urls, list_saved_pictures, list_subagents as core_list_subagents, load_config,
+    login_user, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
+    orchestrate_chat_with_fallback, propose_code_edits,
     reauth_mcp_server as core_reauth_mcp_server, register_user, save_avatar_file, save_chat_images,
     save_config, save_subagent as core_save_subagent, start_channels, start_cron_scheduler,
     start_gemini_live_session as core_start_gemini_live_session,
     start_recording as core_start_mic_recording, stop_recording as core_stop_mic_recording,
     transcribe_recording as core_transcribe_mic_recording, update_profile, weather,
+    with_turn_start_listener,
 };
 use plugins::execute_plugin;
 
@@ -60,6 +65,397 @@ pub struct MicRecordingState {
     pub active: Mutex<Option<MicRecordingHandle>>,
 }
 
+#[derive(Default)]
+struct TerminalSessions {
+    sessions: std::sync::Arc<Mutex<HashMap<String, std::sync::Arc<TerminalSession>>>>,
+}
+
+struct TerminalSession {
+    writer: Mutex<Box<dyn Write + Send>>,
+    pty: Mutex<Box<dyn MasterPty + Send>>,
+    child: Mutex<Box<dyn Child + Send + Sync>>,
+}
+
+impl Drop for TerminalSessions {
+    fn drop(&mut self) {
+        if let Ok(sessions) = self.sessions.lock() {
+            for session in sessions.values() {
+                if let Ok(mut child) = session.child.lock() {
+                    let _ = child.kill();
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalOutput {
+    session_id: String,
+    data: String,
+}
+
+fn terminal_shell() -> String {
+    #[cfg(windows)]
+    {
+        std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".into())
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
+    }
+}
+
+#[tauri::command]
+fn start_interactive_terminal(
+    app: AppHandle,
+    state: tauri::State<'_, TerminalSessions>,
+    cwd: Option<String>,
+) -> Result<String, String> {
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 28,
+            cols: 100,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| format!("Could not create terminal: {error}"))?;
+    let mut command = CommandBuilder::new(terminal_shell());
+    command.env("TERM", "xterm-256color");
+    if let Some(path) = cwd.filter(|path| std::path::Path::new(path).is_dir()) {
+        command.cwd(path);
+    }
+    let child = pair
+        .slave
+        .spawn_command(command)
+        .map_err(|error| format!("Could not start shell: {error}"))?;
+    drop(pair.slave);
+
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| format!("Could not read terminal output: {error}"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|error| format!("Could not write to terminal: {error}"))?;
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let session = std::sync::Arc::new(TerminalSession {
+        writer: Mutex::new(writer),
+        pty: Mutex::new(pair.master),
+        child: Mutex::new(child),
+    });
+    state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state is unavailable".to_string())?
+        .insert(session_id.clone(), session.clone());
+
+    let output_app = app.clone();
+    let output_id = session_id.clone();
+    let sessions = state.sessions.clone();
+    std::thread::spawn(move || {
+        let mut reader = reader;
+        let mut buffer = [0_u8; 8192];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(length) => {
+                    let _ = output_app.emit(
+                        "terminal-output",
+                        TerminalOutput {
+                            session_id: output_id.clone(),
+                            data: BASE64.encode(&buffer[..length]),
+                        },
+                    );
+                }
+            }
+        }
+        let exit_code = session
+            .child
+            .lock()
+            .ok()
+            .and_then(|mut child| child.wait().ok())
+            .map(|status| status.exit_code());
+        if let Ok(mut sessions) = sessions.lock() {
+            sessions.remove(&output_id);
+        }
+        let _ = output_app.emit(
+            "terminal-exit",
+            serde_json::json!({
+                "sessionId": output_id,
+                "exitCode": exit_code,
+            }),
+        );
+    });
+
+    Ok(session_id)
+}
+
+#[tauri::command]
+fn write_interactive_terminal(
+    state: tauri::State<'_, TerminalSessions>,
+    session_id: String,
+    data: String,
+) -> Result<(), String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state is unavailable".to_string())?;
+    let session = sessions
+        .get(&session_id)
+        .ok_or("Terminal session was not found")?;
+    session
+        .writer
+        .lock()
+        .map_err(|_| "Terminal input is unavailable".to_string())?
+        .write_all(data.as_bytes())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn resize_interactive_terminal(
+    state: tauri::State<'_, TerminalSessions>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state is unavailable".to_string())?;
+    let session = sessions
+        .get(&session_id)
+        .ok_or("Terminal session was not found")?;
+    session
+        .pty
+        .lock()
+        .map_err(|_| "Terminal is unavailable".to_string())?
+        .resize(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn stop_interactive_terminal(
+    state: tauri::State<'_, TerminalSessions>,
+    session_id: String,
+) -> Result<(), String> {
+    let session = state
+        .sessions
+        .lock()
+        .map_err(|_| "Terminal state is unavailable".to_string())?
+        .remove(&session_id)
+        .ok_or("Terminal session was not found")?;
+    session
+        .child
+        .lock()
+        .map_err(|_| "Terminal process is unavailable".to_string())?
+        .kill()
+        .map_err(|error| error.to_string())
+}
+
+#[allow(dead_code)]
+const MINT_BROWSER_SHELL_HEIGHT: u32 = 92;
+const MINT_BROWSER_SUGGESTIONS_HEIGHT: u32 = 164;
+static MINT_BROWSER_SUGGESTION_QUERY: LazyLock<Mutex<String>> =
+    LazyLock::new(|| Mutex::new(String::new()));
+static PENDING_TRANSLATION_PREVIEW: LazyLock<Mutex<Option<String>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+fn position_mint_browser_suggestions(app: &AppHandle) -> Result<(), String> {
+    let browser = app
+        .get_window("mint-browser")
+        .ok_or("Mint Browser is not open")?;
+    let popup = app
+        .get_webview_window("mint-browser-suggestions")
+        .ok_or("Mint Browser suggestions are not open")?;
+    let position = browser
+        .inner_position()
+        .map_err(|error| error.to_string())?;
+    let size = browser.inner_size().map_err(|error| error.to_string())?;
+    let popup_width = size.width.saturating_sub(164).max(320);
+    popup
+        .set_position(tauri::PhysicalPosition::new(
+            position.x + 114,
+            position.y + 86,
+        ))
+        .map_err(|error| error.to_string())?;
+    popup
+        .set_size(tauri::PhysicalSize::new(
+            popup_width,
+            MINT_BROWSER_SUGGESTIONS_HEIGHT,
+        ))
+        .map_err(|error| error.to_string())
+}
+
+#[allow(dead_code)]
+fn position_mint_browser_shell(app: &AppHandle) -> Result<(), String> {
+    let browser = app
+        .get_window("mint-browser")
+        .ok_or("Mint Browser is not open")?;
+    let shell = app
+        .get_window("mint-browser-shell-window")
+        .ok_or("Mint Browser toolbar is not open")?;
+    let position = browser
+        .inner_position()
+        .map_err(|error| error.to_string())?;
+    let size = browser.inner_size().map_err(|error| error.to_string())?;
+    shell
+        .set_position(tauri::PhysicalPosition::new(position.x, position.y))
+        .map_err(|error| error.to_string())?;
+    shell
+        .set_size(tauri::PhysicalSize::new(
+            size.width,
+            MINT_BROWSER_SHELL_HEIGHT,
+        ))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn open_mint_browser(app: AppHandle, url: String) -> Result<(), String> {
+    let target_url = if url.trim().is_empty() {
+        "https://www.google.com".to_string()
+    } else {
+        let trimmed = url.trim();
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            trimmed.to_string()
+        } else {
+            format!("https://{trimmed}")
+        }
+    };
+
+    let mut config = load_config().map_err(|e| e.to_string())?;
+    if mint_core::enable_browser_tools(&mut config) {
+        let _ = mint_core::save_config(&config);
+    }
+
+    mint_core::spawn_automation_browser_with_url(&config, Some(&target_url)).await?;
+    let _ = app.emit("mint-browser-address", target_url.as_str());
+    Ok(())
+}
+
+#[tauri::command]
+fn close_mint_browser(app: AppHandle) -> Result<(), String> {
+    if let Some(popup) = app.get_webview_window("mint-browser-suggestions") {
+        let _ = popup.close();
+    }
+    if let Some(shell) = app.get_window("mint-browser-shell-window") {
+        let _ = shell.close();
+    }
+    if let Some(browser) = app.get_window("mint-browser") {
+        browser.close().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn show_mint_browser_suggestions(app: AppHandle, query: String) -> Result<(), String> {
+    *MINT_BROWSER_SUGGESTION_QUERY
+        .lock()
+        .map_err(|_| "Suggestion query is unavailable".to_string())? = query.clone();
+
+    let popup = if let Some(popup) = app.get_webview_window("mint-browser-suggestions") {
+        popup
+    } else {
+        tauri::webview::WebviewWindowBuilder::new(
+            &app,
+            "mint-browser-suggestions",
+            tauri::WebviewUrl::App("index.html?mint-browser-suggestions=1".into()),
+        )
+        .title("Mint Browser Suggestions")
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .focused(false)
+        .visible(false)
+        .build()
+        .map_err(|error| format!("Could not open browser suggestions: {error}"))?
+    };
+
+    position_mint_browser_suggestions(&app)?;
+    let _ = app.emit_to(
+        "mint-browser-suggestions",
+        "mint-browser-suggestions-update",
+        query,
+    );
+    popup.show().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn hide_mint_browser_suggestions(app: AppHandle) -> Result<(), String> {
+    if let Some(popup) = app.get_webview_window("mint-browser-suggestions") {
+        popup.hide().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_mint_browser_suggestion_query() -> Result<String, String> {
+    MINT_BROWSER_SUGGESTION_QUERY
+        .lock()
+        .map(|query| query.clone())
+        .map_err(|_| "Suggestion query is unavailable".to_string())
+}
+
+#[tauri::command]
+async fn navigate_mint_browser(app: AppHandle, url: String) -> Result<(), String> {
+    let target_url = if url.trim().is_empty() {
+        "https://www.google.com".to_string()
+    } else {
+        let trimmed = url.trim();
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            trimmed.to_string()
+        } else {
+            format!("https://{trimmed}")
+        }
+    };
+
+    if let Ok(config) = load_config() {
+        if mint_core::is_browser_running(&config).await {
+            let _ = mint_core::browser::ensure_page_open(&config).await;
+            let _ = mint_core::browser::navigate(&config, &target_url).await;
+        }
+    }
+    if let Some(page) = app.get_webview("mint-browser-page") {
+        if let Ok(parsed) = tauri::Url::parse(&target_url) {
+            let _ = page.navigate(parsed);
+        }
+    }
+    let _ = app.emit("mint-browser-address", target_url.as_str());
+    Ok(())
+}
+
+#[tauri::command]
+fn browser_go_back(app: AppHandle) -> Result<(), String> {
+    if let Some(page) = app.get_webview("mint-browser-page") {
+        let _ = page.eval("history.back()");
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn browser_go_forward(app: AppHandle) -> Result<(), String> {
+    if let Some(page) = app.get_webview("mint-browser-page") {
+        let _ = page.eval("history.forward()");
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn browser_reload(app: AppHandle) -> Result<(), String> {
+    if let Some(page) = app.get_webview("mint-browser-page") {
+        let _ = page.reload();
+    }
+    Ok(())
+}
+
 static COUNTER: AtomicU64 = AtomicU64::new(1);
 use proactive::{
     record_behavior, set_enabled as set_proactive_enabled, start_loop as start_proactive_loop,
@@ -67,7 +463,7 @@ use proactive::{
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use system::{SmartContext, smart_context};
 use tauri::{
@@ -95,37 +491,19 @@ struct RuntimeStatus {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkspaceTreeEntry {
-    name: String,
-    path: String,
-    kind: &'static str,
-    children: Vec<WorkspaceTreeEntry>,
-}
-
-#[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum DesktopStreamEvent {
-    Chunk { chunk: String },
-    Progress { progress: AgentProgress },
+    Started {
+        #[serde(rename = "interactionId")]
+        interaction_id: i64,
+    },
+    Chunk {
+        chunk: String,
+    },
+    Progress {
+        progress: AgentProgress,
+    },
 }
-const WORKSPACE_TREE_MAX_DEPTH: usize = 9;
-const WORKSPACE_TREE_MAX_CHILDREN: usize = 400;
-const WORKSPACE_TREE_COLLAPSED_DIRS: &[&str] = &[
-    ".antigravitycli",
-    ".cargo_home",
-    ".git",
-    ".rustup",
-    ".rustup_copy",
-    ".rustup_home",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "out",
-    "target",
-];
-
 #[tauri::command]
 fn get_runtime_status() -> Result<RuntimeStatus, String> {
     let config = load_config().map_err(|error| error.to_string())?;
@@ -143,10 +521,98 @@ fn get_runtime_status() -> Result<RuntimeStatus, String> {
 }
 
 #[tauri::command]
-async fn get_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, String> {
-    tokio::task::spawn_blocking(move || build_workspace_tree(path))
+async fn get_workspace_snapshot(
+    operation: mint_core::workspace::WorkspaceOperation,
+) -> Result<mint_core::workspace::WorkspaceSnapshot, String> {
+    tokio::task::spawn_blocking(move || mint_core::workspace::snapshot(&operation))
         .await
         .map_err(|error| format!("workspace tree task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn get_git_branch_info(workspace_path: String) -> Result<BranchInfo, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = workspace_root(Some(&workspace_path))?;
+        mint_core::read_branch_info(&root)
+    })
+    .await
+    .map_err(|error| format!("git branch task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn switch_git_branch(
+    workspace_path: String,
+    branch: String,
+    confirmed_dirty_workspace: bool,
+) -> Result<mint_core::BranchChangeOutcome, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = workspace_root(Some(&workspace_path))?;
+        mint_core::change_branch(
+            &root,
+            &mint_core::BranchChange::Switch { branch },
+            confirmed_dirty_workspace,
+        )
+    })
+    .await
+    .map_err(|error| format!("git switch task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn create_git_branch(
+    workspace_path: String,
+    branch: String,
+    confirmed_dirty_workspace: bool,
+) -> Result<mint_core::BranchChangeOutcome, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = workspace_root(Some(&workspace_path))?;
+        mint_core::change_branch(
+            &root,
+            &mint_core::BranchChange::Create { branch },
+            confirmed_dirty_workspace,
+        )
+    })
+    .await
+    .map_err(|error| format!("create branch task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn checkout_remote_git_branch(
+    workspace_path: String,
+    remote_branch: String,
+    confirmed_dirty_workspace: bool,
+) -> Result<mint_core::BranchChangeOutcome, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = workspace_root(Some(&workspace_path))?;
+        mint_core::change_branch(
+            &root,
+            &mint_core::BranchChange::Track { remote_branch },
+            confirmed_dirty_workspace,
+        )
+    })
+    .await
+    .map_err(|error| format!("remote branch task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn get_git_graph(workspace_path: String) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = workspace_root(Some(&workspace_path))?;
+        mint_core::read_graph(&root, 120)
+    })
+    .await
+    .map_err(|error| format!("git graph task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn get_workspace_git_diff(
+    workspace_path: String,
+) -> Result<Vec<mint_core::WorkspaceFileChange>, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = workspace_root(Some(&workspace_path))?;
+        mint_core::read_workspace_git_diff(&root)
+    })
+    .await
+    .map_err(|error| format!("git diff task failed: {error}"))?
 }
 
 /// Re-runs a configured MCP server's OAuth login in the foreground (fixes an
@@ -183,10 +649,9 @@ async fn test_mcp_connection(
 
 /// Fetch the live model list for `provider` from its API.
 ///
-/// Returns the dynamic list on success, or the static preset fallback if the
-/// network is unavailable or the API key is absent/invalid. This is the bridge
-/// used by the Desktop Settings UI's model-picker dropdowns so they always show
-/// up-to-date models without a hardcoded list.
+/// Returns the provider list with the same preset fallback policy
+/// used by the CLI picker. The UI form can supply an API key not yet saved to
+/// config.
 #[tauri::command]
 async fn fetch_provider_models(
     provider: String,
@@ -194,21 +659,15 @@ async fn fetch_provider_models(
     base_url: Option<String>,
 ) -> Result<Vec<String>, String> {
     let config = load_config().map_err(|e| e.to_string())?;
-    let dynamic = mint_core::slash::model_fetcher::fetch_provider_models(
-        &provider,
-        &api_key,
-        base_url.as_deref(),
+    Ok(
+        mint_core::slash::models::model_options_for_provider_with_credentials_async(
+            &config,
+            &provider,
+            &api_key,
+            base_url.as_deref(),
+        )
+        .await,
     )
-    .await;
-
-    if !dynamic.is_empty() {
-        Ok(dynamic)
-    } else {
-        // Fallback to static presets so the UI is never empty.
-        Ok(mint_core::slash::models::model_options_for_provider(
-            &config, &provider,
-        ))
-    }
 }
 
 /// Returns the dynamic list of image models for the specified provider on success,
@@ -295,37 +754,24 @@ async fn fetch_gemini_live_models(api_key: String) -> Result<Vec<String>, String
 }
 
 #[tauri::command]
-async fn create_workspace_file(path: String) -> Result<(), String> {
-    std::fs::write(&path, "").map_err(|error| error.to_string())
+async fn create_workspace_file(
+    operation: mint_core::workspace::WorkspaceOperation,
+) -> Result<mint_core::workspace::WorkspaceSnapshot, String> {
+    mint_core::workspace::create_file(&operation)
 }
 
 #[tauri::command]
-async fn create_workspace_folder(path: String) -> Result<(), String> {
-    std::fs::create_dir_all(&path).map_err(|error| error.to_string())
+async fn create_workspace_folder(
+    operation: mint_core::workspace::WorkspaceOperation,
+) -> Result<mint_core::workspace::WorkspaceSnapshot, String> {
+    mint_core::workspace::create_folder(&operation)
 }
 
 #[tauri::command]
-async fn delete_workspace_item(path: String) -> Result<(), String> {
-    let path_buf = std::path::PathBuf::from(path);
-    if path_buf.is_dir() {
-        std::fs::remove_dir_all(path_buf).map_err(|error| error.to_string())
-    } else {
-        std::fs::remove_file(path_buf).map_err(|error| error.to_string())
-    }
-}
-
-fn build_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, String> {
-    let root = workspace_root(path.as_deref())?;
-    let name = root
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| root.display().to_string());
-    Ok(WorkspaceTreeEntry {
-        name,
-        path: root.display().to_string(),
-        kind: "directory",
-        children: workspace_children(&root, &root, 0)?,
-    })
+async fn delete_workspace_item(
+    operation: mint_core::workspace::WorkspaceOperation,
+) -> Result<mint_core::workspace::WorkspaceSnapshot, String> {
+    mint_core::workspace::delete(&operation)
 }
 
 #[tauri::command]
@@ -378,54 +824,6 @@ fn workspace_root(path: Option<&str>) -> Result<PathBuf, String> {
         return Err(format!("workspace is not a directory: {}", root.display()));
     }
     Ok(root)
-}
-
-fn workspace_children(
-    root: &Path,
-    directory: &Path,
-    depth: usize,
-) -> Result<Vec<WorkspaceTreeEntry>, String> {
-    if depth >= WORKSPACE_TREE_MAX_DEPTH {
-        return Ok(Vec::new());
-    }
-
-    let mut entries = fs::read_dir(directory)
-        .map_err(|error| error.to_string())?
-        .flatten()
-        .filter_map(|entry| {
-            let file_type = entry.file_type().ok()?;
-            if file_type.is_symlink() {
-                return None;
-            }
-            let name = entry.file_name().to_string_lossy().to_string();
-            Some((name, entry.path(), file_type.is_dir()))
-        })
-        .collect::<Vec<_>>();
-
-    entries.sort_by(|left, right| right.2.cmp(&left.2).then_with(|| left.0.cmp(&right.0)));
-    entries.truncate(WORKSPACE_TREE_MAX_CHILDREN);
-
-    entries
-        .into_iter()
-        .map(|(name, path, is_dir)| {
-            let relative = path
-                .strip_prefix(root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .to_string();
-            let children = if is_dir && !WORKSPACE_TREE_COLLAPSED_DIRS.contains(&name.as_str()) {
-                workspace_children(root, &path, depth + 1)?
-            } else {
-                Vec::new()
-            };
-            Ok(WorkspaceTreeEntry {
-                name,
-                path: relative,
-                kind: if is_dir { "directory" } else { "file" },
-                children,
-            })
-        })
-        .collect()
 }
 
 #[tauri::command]
@@ -553,6 +951,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
     let plan_mode = request.plan_mode;
 
     let app_clone = app.clone();
+    let approval_chat_id = request.chat_id.clone().unwrap_or_default();
     let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         let (tx, rx) = oneshot::channel();
         let token = format!("tok-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
@@ -565,7 +964,8 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
                 "tool-approval-requested",
                 serde_json::json!({
                     "token": token,
-                    "approval": approval
+                    "approval": approval,
+                    "chatId": approval_chat_id
                 }),
             )
             .map_err(|e| e.to_string())?;
@@ -640,7 +1040,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
         model: res.model,
         text: res.summary,
         fallback_provider: res.fallback,
-        fallback_reason: None,
+        fallback_reason: res.fallback_reason,
         tool_calls: None,
         stop_reason: None,
         total_tokens: None,
@@ -678,12 +1078,28 @@ async fn stream_chat_message(
         clean_request.message = request.message.strip_prefix("/chat ").unwrap().to_owned();
         let config_clone = config.clone();
         let on_event_clone = on_event.clone();
+        let on_event_started = on_event.clone();
         let chat_id_str = request.chat_id.clone().unwrap_or_default();
 
         let join_handle = tokio::spawn(async move {
-            orchestrate_chat_stream_with_fallback(&config_clone, &clean_request, move |chunk| {
-                let _ = on_event_clone.send(DesktopStreamEvent::Chunk { chunk });
-            })
+            let expected_chat_id = clean_request
+                .chat_id
+                .clone()
+                .unwrap_or_else(|| mint_core::DEFAULT_CONVERSATION_ID.to_owned());
+            with_turn_start_listener(
+                expected_chat_id,
+                move |id| {
+                    let _ =
+                        on_event_started.send(DesktopStreamEvent::Started { interaction_id: id });
+                },
+                orchestrate_chat_stream_with_fallback(
+                    &config_clone,
+                    &clean_request,
+                    move |chunk| {
+                        let _ = on_event_clone.send(DesktopStreamEvent::Chunk { chunk });
+                    },
+                ),
+            )
             .await
         });
 
@@ -724,6 +1140,7 @@ async fn stream_chat_message(
     let plan_mode = request.plan_mode;
 
     let app_clone = app.clone();
+    let approval_chat_id = request.chat_id.clone().unwrap_or_default();
     let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         let (tx, rx) = oneshot::channel();
         let token = format!("tok-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
@@ -736,7 +1153,8 @@ async fn stream_chat_message(
                 "tool-approval-requested",
                 serde_json::json!({
                     "token": token,
-                    "approval": approval
+                    "approval": approval,
+                    "chatId": approval_chat_id
                 }),
             )
             .map_err(|e| e.to_string())?;
@@ -757,20 +1175,12 @@ async fn stream_chat_message(
     };
 
     let on_event_clone = on_event.clone();
+    let on_event_started = on_event.clone();
     let chunk_app = app.clone();
-    let on_chunk = move |summary: String| {
+    let on_chunk = move |chunk: String| {
         let bridge = chunk_app.state::<mint_core::avatar_bridge::AvatarBridge>();
         bridge.on_talking(true);
-        let chars: Vec<char> = summary.chars().collect();
-        let mut i = 0;
-        while i < chars.len() {
-            let end = (i + 4).min(chars.len());
-            let chunk: String = chars[i..end].iter().collect();
-            let _ = on_event_clone.send(DesktopStreamEvent::Chunk { chunk });
-            i = end;
-            std::thread::sleep(std::time::Duration::from_millis(15));
-        }
-        bridge.on_talking(false);
+        let _ = on_event_clone.send(DesktopStreamEvent::Chunk { chunk });
     };
 
     let chat_id_str = request.chat_id.clone().unwrap_or_default();
@@ -785,22 +1195,31 @@ async fn stream_chat_message(
     let pinned_mcp_server_clone = request.pinned_mcp_server.clone();
 
     let join_handle = tokio::spawn(async move {
-        orchestrate_agent_loop(
-            &config_clone,
-            &message_clone,
-            &root_clone,
-            image_data_uri_clone,
-            audio_data_uri_clone,
-            video_data_uri_clone,
-            chat_id_clone.as_deref(),
-            agent_id_clone.as_deref(),
-            None,
-            pinned_mcp_server_clone.as_deref(),
-            fast_mode,
-            plan_mode,
-            approve_cb,
-            progress_cb,
-            on_chunk,
+        let expected_chat_id = chat_id_clone
+            .clone()
+            .unwrap_or_else(|| mint_core::DEFAULT_CONVERSATION_ID.to_owned());
+        with_turn_start_listener(
+            expected_chat_id,
+            move |id| {
+                let _ = on_event_started.send(DesktopStreamEvent::Started { interaction_id: id });
+            },
+            orchestrate_agent_loop(
+                &config_clone,
+                &message_clone,
+                &root_clone,
+                image_data_uri_clone,
+                audio_data_uri_clone,
+                video_data_uri_clone,
+                chat_id_clone.as_deref(),
+                agent_id_clone.as_deref(),
+                None,
+                pinned_mcp_server_clone.as_deref(),
+                fast_mode,
+                plan_mode,
+                approve_cb,
+                progress_cb,
+                on_chunk,
+            ),
         )
         .await
     });
@@ -847,7 +1266,7 @@ async fn stream_chat_message(
         model: res.model,
         text: res.summary,
         fallback_provider: res.fallback,
-        fallback_reason: None,
+        fallback_reason: res.fallback_reason,
         tool_calls: None,
         stop_reason: None,
         total_tokens: None,
@@ -890,6 +1309,7 @@ async fn start_gemini_live_session(
     let session_id = format!("gemini-live-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
 
     let app_clone = app.clone();
+    let approval_chat_id = chat_id.clone();
     let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         let (tx, rx) = oneshot::channel();
         let token = format!("tok-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
@@ -902,7 +1322,8 @@ async fn start_gemini_live_session(
                 "tool-approval-requested",
                 serde_json::json!({
                     "token": token,
-                    "approval": approval
+                    "approval": approval,
+                    "chatId": approval_chat_id
                 }),
             )
             .map_err(|e| e.to_string())?;
@@ -1032,6 +1453,16 @@ fn save_system_interaction(
 }
 
 #[tauri::command]
+fn update_chat_session_workspace(
+    chat_id: String,
+    workspace_path: Option<String>,
+) -> Result<(), String> {
+    MemoryStore::open_default()
+        .and_then(|memory| memory.set_chat_session_workspace(&chat_id, workspace_path.as_deref()))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_recent_interactions(
     limit: Option<usize>,
     chat_id: Option<String>,
@@ -1045,6 +1476,28 @@ fn get_recent_interactions(
     );
     MemoryStore::open_default()
         .and_then(|memory| memory.recent_interactions_for_chat(&scoped_chat_id, limit.unwrap_or(5)))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_conversation_snapshot(
+    chat_id: String,
+    before_id: Option<i64>,
+    limit: Option<usize>,
+) -> Result<ConversationSnapshot, String> {
+    MemoryStore::open_default()
+        .and_then(|memory| memory.conversation_snapshot(&chat_id, before_id, limit.unwrap_or(50)))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_conversation_changes(
+    chat_id: String,
+    after: i64,
+    limit: Option<usize>,
+) -> Result<ConversationChanges, String> {
+    MemoryStore::open_default()
+        .and_then(|memory| memory.conversation_changes(&chat_id, after, limit.unwrap_or(100)))
         .map_err(|error| error.to_string())
 }
 
@@ -1365,6 +1818,56 @@ fn remove_linked_folder(name: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+fn linked_folder_status(name: String) -> Result<mint_core::LinkedFolderStatus, String> {
+    mint_core::linked_folder_status(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn refresh_linked_folder(name: String) -> Result<mint_core::LinkedFolderStatus, String> {
+    mint_core::refresh_linked_folder(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_linked_folder_notes(name: String) -> Result<Vec<mint_core::LinkedFolderNote>, String> {
+    mint_core::list_linked_folder_notes(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_linked_folder_note(name: String, id: String) -> Result<String, String> {
+    mint_core::read_linked_folder_note(&name, &id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_linked_folder_note(
+    name: String,
+    content: String,
+) -> Result<mint_core::LinkedFolderNote, String> {
+    mint_core::save_linked_folder_note(&name, &content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_linked_folder_note(name: String, id: String) -> Result<(), String> {
+    let note = mint_core::list_linked_folder_notes(&name)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|note| note.id == id && note.status == "saved")
+        .ok_or_else(|| "note not found".to_string())?;
+    mint_core::read_linked_folder_note(&name, &id).map_err(|e| e.to_string())?;
+    #[cfg(target_os = "linux")]
+    let mut command = Command::new("xdg-open");
+    #[cfg(target_os = "macos")]
+    let mut command = Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("rundll32");
+        command.arg("url.dll,FileProtocolHandler");
+        command
+    };
+    command.arg(note.path).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn clear_chat_history(chat_id: Option<String>) -> Result<usize, String> {
     MemoryStore::open_default()
         .and_then(|memory| {
@@ -1618,6 +2121,14 @@ fn read_workspace_file(path: String, workspace_path: Option<String>) -> Result<S
 
 #[tauri::command]
 fn open_window(app: AppHandle, kind: String) -> Result<(), String> {
+    if kind == "main" {
+        let window = app
+            .get_webview_window("main")
+            .ok_or_else(|| "main window is unavailable".to_string())?;
+        window.show().map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
     open_desktop_window(&app, &kind)?;
     if kind == "widget" {
         position_widget(&app);
@@ -1632,7 +2143,14 @@ fn hide_desktop_window(app: AppHandle, label: String) -> Result<(), String> {
 
 #[tauri::command]
 fn close_desktop_window(app: AppHandle, label: String) -> Result<(), String> {
-    close_window(&app, &label)
+    close_window(&app, &label)?;
+    if label == "screen-picker" {
+        if let Some(main) = app.get_webview_window("main") {
+            main.show().map_err(|error| error.to_string())?;
+            main.set_focus().map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1676,6 +2194,19 @@ fn capture_silent_screen() -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn capture_chat_screen(app: AppHandle) -> Result<String, String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is unavailable".to_string())?;
+    window.hide().map_err(|error| error.to_string())?;
+    tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+    let captured = tokio::task::spawn_blocking(capture_screen).await;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    captured.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn read_clipboard_image() -> Result<String, String> {
     desktop::read_clipboard_image()
 }
@@ -1684,6 +2215,22 @@ fn read_clipboard_image() -> Result<String, String> {
 async fn translate_capture_region(rect: CaptureRect) -> Result<String, String> {
     let config = load_config().map_err(|error| error.to_string())?;
     translate_screen_region(&config, rect).await
+}
+
+#[tauri::command]
+async fn capture_translation_frame(rect: CaptureRect) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || capture_translation_region(rect))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn translate_captured_frame(
+    image: String,
+    target_language: String,
+) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    translate_captured_region(&config, &image, &target_language).await
 }
 
 #[tauri::command]
@@ -1697,41 +2244,77 @@ async fn get_browser_tabs() -> Result<Vec<BrowserTab>, String> {
 }
 
 #[tauri::command]
-async fn navigate_browser(url: String) -> Result<String, String> {
-    browser_navigate(&load_config().map_err(|error| error.to_string())?, &url).await
+async fn navigate_browser(url: String, tab_id: Option<String>) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    mint_core::browser::with_tab(&config, tab_id.as_deref(), browser_navigate(&config, &url))
+        .await?
 }
 
 #[tauri::command]
-async fn read_browser_page() -> Result<String, String> {
-    read_page_text(&load_config().map_err(|error| error.to_string())?).await
+async fn read_browser_page(tab_id: Option<String>) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    mint_core::browser::with_tab(&config, tab_id.as_deref(), read_page_text(&config)).await?
 }
 
 #[tauri::command]
-async fn click_browser_selector(selector: String) -> Result<String, String> {
-    browser_click(
-        &load_config().map_err(|error| error.to_string())?,
-        &selector,
+async fn click_browser_selector(
+    selector: String,
+    tab_id: Option<String>,
+) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    mint_core::browser::with_tab(
+        &config,
+        tab_id.as_deref(),
+        browser_click(&config, &selector),
     )
-    .await
+    .await?
 }
 #[tauri::command]
-async fn type_in_browser(selector: String, text: String) -> Result<String, String> {
-    mint_core::browser::type_text(
-        &load_config().map_err(|error| error.to_string())?,
-        &selector,
-        &text,
+async fn type_in_browser(
+    selector: String,
+    text: String,
+    tab_id: Option<String>,
+) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    mint_core::browser::with_tab(
+        &config,
+        tab_id.as_deref(),
+        mint_core::browser::type_text(&config, &selector, &text),
     )
-    .await
+    .await?
 }
+
 #[tauri::command]
-fn start_screen_capture(app: AppHandle) -> Result<(), String> {
-    open_desktop_window(&app, "screen-picker")
+fn start_screen_capture(app: AppHandle, image: String) -> Result<(), String> {
+    *PENDING_TRANSLATION_PREVIEW
+        .lock()
+        .map_err(|_| "translation preview is unavailable".to_string())? = Some(image);
+    let main = app.get_webview_window("main");
+    if let Some(window) = &main {
+        window.hide().map_err(|error| error.to_string())?;
+    }
+    if let Err(error) = open_desktop_window(&app, "screen-picker") {
+        if let Some(window) = main {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn take_screen_capture_preview() -> Result<Option<String>, String> {
+    Ok(PENDING_TRANSLATION_PREVIEW
+        .lock()
+        .map_err(|_| "translation preview is unavailable".to_string())?
+        .take())
 }
 
 #[tauri::command]
 fn submit_screen_selection(app: AppHandle, image: String) {
     emit_to_main(&app, "vision-ready", image);
-    let _ = close_window(&app, "screen-picker");
+    let _ = close_desktop_window(app, "screen-picker".into());
 }
 
 #[tauri::command]
@@ -1892,6 +2475,7 @@ pub fn run() {
         })
         .manage(GeminiLiveState::default())
         .manage(MicRecordingState::default())
+        .manage(TerminalSessions::default())
         .manage(mint_core::avatar_bridge::AvatarBridge::new(
             load_config()
                 .map(|c| mint_core::avatar_bridge::AvatarBridgeConfig::from_mint_config(&c))
@@ -1922,6 +2506,19 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            start_interactive_terminal,
+            write_interactive_terminal,
+            resize_interactive_terminal,
+            stop_interactive_terminal,
+            open_mint_browser,
+            close_mint_browser,
+            show_mint_browser_suggestions,
+            hide_mint_browser_suggestions,
+            get_mint_browser_suggestion_query,
+            navigate_mint_browser,
+            browser_go_back,
+            browser_go_forward,
+            browser_reload,
             get_runtime_status,
             detect_system_tools,
             reauth_mcp_server,
@@ -1931,7 +2528,13 @@ pub fn run() {
             fetch_image_provider_models,
             fetch_video_provider_models,
             fetch_gemini_live_models,
-            get_workspace_tree,
+            get_workspace_snapshot,
+            get_git_branch_info,
+            switch_git_branch,
+            create_git_branch,
+            checkout_remote_git_branch,
+            get_git_graph,
+            get_workspace_git_diff,
             create_workspace_file,
             create_workspace_folder,
             delete_workspace_item,
@@ -1955,6 +2558,8 @@ pub fn run() {
             stop_mic_recording_and_transcribe,
             submit_tool_approval,
             get_recent_interactions,
+            get_conversation_snapshot,
+            get_conversation_changes,
             save_interaction_agent_activity,
             list_chat_sessions,
             delete_chat_session,
@@ -1982,6 +2587,12 @@ pub fn run() {
             list_linked_folders,
             add_linked_folder,
             remove_linked_folder,
+            linked_folder_status,
+            refresh_linked_folder,
+            list_linked_folder_notes,
+            read_linked_folder_note,
+            save_linked_folder_note,
+            open_linked_folder_note,
             list_pictures,
             delete_picture,
             save_pictures,
@@ -2003,8 +2614,11 @@ pub fn run() {
             get_integration_inventory,
             run_native_plugin,
             capture_silent_screen,
+            capture_chat_screen,
             read_clipboard_image,
             translate_capture_region,
+            capture_translation_frame,
+            translate_captured_frame,
             get_smart_context,
             get_browser_tabs,
             navigate_browser,
@@ -2012,6 +2626,7 @@ pub fn run() {
             click_browser_selector,
             type_in_browser,
             start_screen_capture,
+            take_screen_capture_preview,
             submit_screen_selection,
             submit_spotlight,
             set_ai_state,
@@ -2019,7 +2634,8 @@ pub fn run() {
             save_behavior_context,
             run_next_queued_task,
             exit_app,
-            save_system_interaction
+            save_system_interaction,
+            update_chat_session_workspace
         ])
         .build(tauri::generate_context!())
         .expect("error while running Mint desktop")

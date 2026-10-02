@@ -233,6 +233,11 @@ pub async fn translate_screen_region(
     config: &mint_core::MintConfig,
     rect: CaptureRect,
 ) -> Result<String, String> {
+    let image = capture_translation_region(rect)?;
+    translate_captured_region(config, &image, "Thai").await
+}
+
+pub fn capture_translation_region(rect: CaptureRect) -> Result<String, String> {
     let bytes = capture_screen_bytes()?;
     let image = image::load_from_memory(&bytes).map_err(|error| error.to_string())?;
     if rect.width == 0 || rect.height == 0 || rect.x >= image.width() || rect.y >= image.height() {
@@ -245,6 +250,30 @@ pub async fn translate_screen_region(
     cropped
         .write_to(&mut jpeg, ImageFormat::Jpeg)
         .map_err(|error| error.to_string())?;
+    Ok(format!(
+        "data:image/jpeg;base64,{}",
+        STANDARD.encode(jpeg.into_inner())
+    ))
+}
+
+pub async fn translate_captured_region(
+    config: &mint_core::MintConfig,
+    image_data_uri: &str,
+    target_language: &str,
+) -> Result<String, String> {
+    let target_language = target_language.trim();
+    if target_language.is_empty()
+        || target_language.len() > 64
+        || target_language.chars().any(char::is_control)
+    {
+        return Err("choose a valid target language".into());
+    }
+    let encoded = image_data_uri
+        .strip_prefix("data:image/jpeg;base64,")
+        .ok_or_else(|| "translation image must be a JPEG data URI".to_string())?;
+    if encoded.is_empty() || encoded.len() > 14_000_000 {
+        return Err("translation image is empty or too large".into());
+    }
     let api_key = if config.api_key.trim().is_empty() {
         std::env::var("GEMINI_API_KEY").unwrap_or_default()
     } else {
@@ -262,8 +291,8 @@ pub async fn translate_screen_region(
             "contents": [{
                 "role": "user",
                 "parts": [
-                    { "text": "Translate visible text in this image into Thai. Return only the translated text. If there is no readable text, return an empty string." },
-                    { "inlineData": { "mimeType": "image/jpeg", "data": STANDARD.encode(jpeg.into_inner()) } }
+                    { "text": format!("Translate only the readable text visible in this image into {target_language}. Return only the translation, preserving line breaks. If there is no readable text, return an empty string.") },
+                    { "inlineData": { "mimeType": "image/jpeg", "data": encoded } }
                 ]
             }]
         }))
@@ -298,6 +327,8 @@ pub(crate) fn capture_screen_bytes() -> Result<Vec<u8>, String> {
     ];
     let mut attempted = Vec::new();
     for (program, args) in commands {
+        // A failed capture must never reuse a screenshot left by an earlier attempt.
+        let _ = fs::remove_file(&path);
         attempted.push(program);
         let result = Command::new(program)
             .args(&args)

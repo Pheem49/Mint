@@ -135,71 +135,11 @@ export async function createTrimmedImagePreview(dataUri: string): Promise<string
   return previewCanvas.toDataURL('image/png')
 }
 
-export const lightenColor = (hex: string, amount: number): string => {
-  const clean = hex.replace('#', '')
-  if (clean.length !== 6) return hex
-  const num = parseInt(clean, 16)
-  const r = Math.min(255, (num >> 16) + amount)
-  const g = Math.min(255, ((num >> 8) & 0x00FF) + amount)
-  const b = Math.min(255, (num & 0x0000FF) + amount)
-  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
-}
-
-export const hexToRgb = (hex: string): { r: number; g: number; b: number } => {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
-  return result ? {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16),
-  } : { r: 15, g: 23, b: 42 }
-}
+import { applyTheme, hexToRgb, lightenColor, getContrastText } from '../theme/themeManager'
+export { hexToRgb, lightenColor, getContrastText }
 
 export const applyThemeStyles = (cfg: any): void => {
-  const theme = cfg.theme || 'dark'
-  const accentColor = cfg.accentColor || '#ffffffff'
-  const systemTextColor = cfg.systemTextColor || '#f8fafc'
-  const rgb = hexToRgb(accentColor)
-
-  document.documentElement.setAttribute('data-theme', theme)
-  document.documentElement.style.setProperty('--accent', accentColor)
-  document.documentElement.style.setProperty('--accent-hover', lightenColor(accentColor, 20))
-  document.documentElement.style.setProperty('--accent-glow', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.35)`)
-  document.documentElement.style.setProperty('--accent-subtle', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)`)
-  document.documentElement.style.setProperty('--accent-border', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3)`)
-  const chatTextColor = cfg.chatTextColor || systemTextColor
-  document.documentElement.style.setProperty('--text-main', systemTextColor)
-  document.documentElement.style.setProperty('--text-chat', chatTextColor)
-  document.documentElement.style.setProperty('--glass-blur', cfg.glassBlur || 'blur(16px)')
-  document.body.style.fontFamily = cfg.fontFamily || "'Outfit', sans-serif"
-  document.documentElement.style.fontSize = cfg.fontSize || '18px'
-
-  if (theme === 'custom') {
-    if (cfg.customBgStart && cfg.customBgEnd) {
-      document.documentElement.style.setProperty('--bg-color', cfg.customBgStart)
-      document.documentElement.style.setProperty('--bg-gradient', `linear-gradient(135deg, ${cfg.customBgStart} 0%, ${cfg.customBgEnd} 100%)`)
-    }
-    if (cfg.customPanelBg) {
-      const rgb = hexToRgb(cfg.customPanelBg)
-      document.documentElement.style.setProperty('--panel-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.75)`)
-      document.documentElement.style.setProperty('--panel-raised', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.82)`)
-      document.documentElement.style.setProperty('--panel-soft', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.46)`)
-      document.documentElement.style.setProperty('--chrome-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.88)`)
-      document.documentElement.style.setProperty('--surface-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.62)`)
-      document.documentElement.style.setProperty('--surface-strong', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.86)`)
-      document.documentElement.style.setProperty('--input-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.72)`)
-    }
-    return
-  }
-
-  ;[
-    '--bg-color',
-    '--bg-gradient',
-    '--panel-bg',
-    '--panel-raised',
-    '--panel-soft',
-    '--chrome-bg',
-    '--surface-bg',
-    '--surface-strong',
-    '--input-bg',
-  ].forEach((prop) => document.documentElement.style.removeProperty(prop))
+  applyTheme(cfg)
 }
+
+

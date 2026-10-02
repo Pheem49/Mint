@@ -1,14 +1,9 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import type { AuthUser } from '../types'
-import {
-  APP_ICON_PATH,
-  authGetCurrentUser,
-  authLogin,
-  authLogout,
-  authRegister,
-  resolveAvatarUrl,
-} from '@/tauri'
+import { authPlatform, runtimePlatform } from '../platform'
 import '../css/auth-gate.css'
+
+const { authGetCurrentUser, authLogin, authLogout, authRegister, resolveAvatarUrl } = authPlatform
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -126,7 +121,7 @@ function AuthForm({ onSuccess }: { onSuccess: (user: AuthUser) => void }) {
   return (
     <div className="auth-gate-overlay">
       <form className="auth-gate-card" onSubmit={handleSubmit}>
-        <img src={APP_ICON_PATH} alt="" className="auth-gate-logo" />
+        <img src={runtimePlatform.appIconPath()} alt="" className="auth-gate-logo" />
         <h1 className="auth-gate-title">
           {mode === 'login' ? 'Sign in to Mint' : 'Create your Mint account'}
         </h1>

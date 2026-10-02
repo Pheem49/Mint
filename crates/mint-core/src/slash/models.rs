@@ -39,6 +39,36 @@ pub const OPENROUTER_MODEL_PRESETS: &[&str] = &[
     "deepseek/deepseek-v4-pro",
 ];
 
+pub const OPENROUTER_POPULAR_MODELS: &[&str] = &[
+    "anthropic/claude-3.7-sonnet",
+    "anthropic/claude-3.5-sonnet",
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "deepseek/deepseek-r1",
+    "deepseek/deepseek-chat",
+    "google/gemini-2.5-flash",
+    "google/gemini-2.5-pro",
+    "meta-llama/llama-3.3-70b-instruct",
+    "qwen/qwen-2.5-72b-instruct",
+];
+
+pub fn is_free_model(model_id: &str) -> bool {
+    let lower = model_id.to_ascii_lowercase();
+    lower.ends_with(":free") || lower.contains(":free")
+}
+
+pub fn popular_models_for_provider(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "openrouter" => OPENROUTER_POPULAR_MODELS,
+        "gemini" => GEMINI_MODEL_PRESETS,
+        "anthropic" => ANTHROPIC_MODEL_PRESETS,
+        "openai" => OPENAI_MODEL_PRESETS,
+        "deepseek" => DEEPSEEK_MODEL_PRESETS,
+        "huggingface" => HUGGINGFACE_MODEL_PRESETS,
+        _ => &[],
+    }
+}
+
 pub const DEEPSEEK_MODEL_PRESETS: &[&str] = &["deepseek-chat", "deepseek-reasoner"];
 
 pub const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
@@ -123,8 +153,6 @@ pub fn model_options_for_provider(config: &MintConfig, provider: &str) -> Vec<St
 ///
 /// Results are cached for 1 hour inside [`super::model_fetcher`].
 pub async fn model_options_for_provider_async(config: &MintConfig, provider: &str) -> Vec<String> {
-    use super::model_fetcher;
-
     // Resolve the API key and optional base URL for this provider.
     let (api_key, base_url): (&str, Option<&str>) = match provider {
         "gemini" => (&config.api_key, None),
@@ -137,18 +165,46 @@ pub async fn model_options_for_provider_async(config: &MintConfig, provider: &st
         _ => return model_options_for_provider(config, provider),
     };
 
+    model_options_for_provider_with_credentials_async(config, provider, api_key, base_url).await
+}
+
+/// Fetch using credentials supplied by a UI form, then apply the same preset
+/// fallback policy used by the CLI picker.
+pub async fn model_options_for_provider_with_credentials_async(
+    config: &MintConfig,
+    provider: &str,
+    api_key: &str,
+    base_url: Option<&str>,
+) -> Vec<String> {
+    use super::model_fetcher;
+
     let dynamic = model_fetcher::fetch_provider_models(provider, api_key, base_url).await;
     if !dynamic.is_empty() {
-        // Merge: put dynamic list first, then append any presets not already present.
-        let mut merged = dynamic;
-        for preset in model_options_for_provider(config, provider) {
-            if !merged.contains(&preset) {
-                merged.push(preset);
-            }
-        }
-        merged
+        dynamic
     } else {
         // Network/auth error → fall back to static presets.
         model_options_for_provider(config, provider)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_free_model() {
+        assert!(is_free_model("deepseek/deepseek-v4-flash-0731:free"));
+        assert!(is_free_model("meta-llama/llama-3.3-70b-instruct:free"));
+        assert!(is_free_model("qwen/qwen3.8-27b:free"));
+        assert!(!is_free_model("anthropic/claude-3.7-sonnet"));
+        assert!(!is_free_model("openai/gpt-4o"));
+    }
+
+    #[test]
+    fn test_openrouter_popular_models_list() {
+        assert!(OPENROUTER_POPULAR_MODELS.contains(&"anthropic/claude-3.7-sonnet"));
+        assert!(OPENROUTER_POPULAR_MODELS.contains(&"openai/gpt-4o"));
+        assert!(OPENROUTER_POPULAR_MODELS.contains(&"deepseek/deepseek-r1"));
+        assert!(OPENROUTER_POPULAR_MODELS.contains(&"google/gemini-2.5-flash"));
     }
 }

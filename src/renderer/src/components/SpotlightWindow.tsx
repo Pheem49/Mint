@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import '../css/spotlight.css'
 import { evaluateArithmetic } from '../calculator'
 
 const COMMANDS = [

@@ -3,6 +3,17 @@ target/
 bin/
 rustc_checker.py
 
+# Ignore desktop-only build output & sources
+out/renderer/
+src-tauri/
+flatpak/
+benchmarks/
+/assets/
+.github/
+
+# Ignore large 3D/Live2D model assets not needed by web/cli npm package
+**/models/Shiroko_Model/
+
 # Ignore local configuration and developer tools
 .agents/
 .antigravitycli/

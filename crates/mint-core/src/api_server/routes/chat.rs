@@ -33,6 +33,10 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 pinned_mcp_server: Option<String>,
                 #[serde(default)]
                 temperature: Option<f64>,
+                #[serde(default)]
+                thinking_enabled: Option<bool>,
+                #[serde(default)]
+                thinking_effort: Option<String>,
             }
 
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
@@ -52,6 +56,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                     messages: None,
                     tools: None,
                     temperature: req.temperature.or(config.temperature),
+                    thinking_enabled: req.thinking_enabled,
+                    thinking_effort: req.thinking_effort,
+                    ..Default::default()
                 };
                 let mut chat_req = match chat_req.with_document_context(&config) {
                     Ok(req) => req,
@@ -200,6 +207,10 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 pinned_mcp_server: Option<String>,
                 #[serde(default)]
                 temperature: Option<f64>,
+                #[serde(default)]
+                thinking_enabled: Option<bool>,
+                #[serde(default)]
+                thinking_effort: Option<String>,
             }
 
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
@@ -219,6 +230,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                     messages: None,
                     tools: None,
                     temperature: req.temperature.or(config.temperature),
+                    thinking_enabled: req.thinking_enabled,
+                    thinking_effort: req.thinking_effort,
+                    ..Default::default()
                 };
                 let mut chat_req = match chat_req.with_document_context(&config) {
                     Ok(req) => req,
@@ -284,10 +298,18 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             let config_clone = config.clone();
                             let chat_req_clone = chat_req.clone();
                             let tx_done = tx.clone();
+                            let tx_started = tx.clone();
                             let chat_id_str = chat_req.chat_id.clone().unwrap_or_default();
                             let auth_label_clone = auth_label.clone();
                             let join_handle = tokio::spawn(async move {
-                                let result = orchestrate_chat_stream_with_fallback(
+                                let expected_chat_id = chat_req_clone
+                                    .chat_id
+                                    .clone()
+                                    .unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
+                                let result = crate::with_turn_start_listener(expected_chat_id, move |id| {
+                                    let event = serde_json::json!({ "type": "started", "interactionId": id });
+                                    let _ = tx_started.send(format!("{}\n", event));
+                                }, orchestrate_chat_stream_with_fallback(
                                     &config_clone,
                                     &chat_req_clone,
                                     move |chunk| {
@@ -300,7 +322,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                             let _ = tx_chunk_inner.send(format!("{}\n", json_val));
                                         }
                                     },
-                                )
+                                ))
                                 .await;
 
                                 match result {
@@ -393,6 +415,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             let agent_id = chat_req.agent_id.clone();
                             let pinned_mcp_server = chat_req.pinned_mcp_server.clone();
                             let tx_approval = tx.clone();
+                            let tx_started = tx.clone();
 
                             let join_handle = tokio::spawn(async move {
                                 // Real (not auto-deny) approval flow: the request-payload
@@ -421,7 +444,10 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                     })
                                     .unwrap_or(ApprovalOutcome::Denied))
                                 };
-                                let result = orchestrate_agent_loop(
+                                let result = crate::with_turn_start_listener(agent_scoped_chat_id.clone(), move |id| {
+                                    let event = serde_json::json!({ "type": "started", "interactionId": id });
+                                    let _ = tx_started.send(format!("{}\n", event));
+                                }, orchestrate_agent_loop(
                                     &config_clone,
                                     &message,
                                     &root,
@@ -437,7 +463,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                     approve_cb,
                                     progress_cb,
                                     on_chunk,
-                                )
+                                ))
                                 .await;
 
                                 match result {
@@ -447,7 +473,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                             model: res.model,
                                             text: res.summary,
                                             fallback_provider: res.fallback,
-                                            fallback_reason: None,
+                                            fallback_reason: res.fallback_reason,
                                             tool_calls: None,
                                             stop_reason: None,
                                             total_tokens: None,

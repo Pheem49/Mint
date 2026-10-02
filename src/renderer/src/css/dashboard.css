@@ -1,0 +1,11 @@
+/* Loaded with the lazy desktop dashboard, not with the application bootstrap. */
+@import './app-shell.css';
+@import './chat.css';
+@import './sidebar-workspace.css';
+@import './misc.css';
+@import '../../shared/css/file-changes.css';
+@import '../../shared/css/code-review.css';
+@import './desktop-tools.css';
+@import '../../shared/css/agent-observability.css';
+@import '../../shared/css/model-selector.css';
+@import '../../shared/css/chat-ui-cards.css';

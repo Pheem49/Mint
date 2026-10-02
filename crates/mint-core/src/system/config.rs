@@ -37,10 +37,16 @@ pub enum ConfigError {
     },
 }
 
+fn missing_tui_theme() -> String {
+    String::new()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct MintConfig {
     pub theme: String,
+    #[serde(default = "missing_tui_theme")]
+    pub tui_theme: String,
     pub accent_color: String,
     pub language: String,
     pub assistant_mode: String,
@@ -88,6 +94,15 @@ pub struct MintConfig {
     /// Optional per-model temperature overrides, keyed by model id (e.g. "deepseek-chat" => 0.65).
     #[serde(default)]
     pub model_temperatures: std::collections::HashMap<String, f64>,
+    /// Whether thinking / reasoning is globally enabled by default.
+    #[serde(default = "default_true")]
+    pub thinking_enabled: bool,
+    /// Default thinking effort: "low" | "medium" | "high" | "extra_high".
+    #[serde(default = "default_thinking_effort")]
+    pub thinking_effort: String,
+    /// Per-model thinking configuration overrides, keyed by model id.
+    #[serde(default)]
+    pub model_thinking_configs: std::collections::HashMap<String, ModelThinkingConfig>,
     /// Active image-generation provider: "nanobanana" | "dalle" | "stability" | "ideogram" | "replicate"
     pub image_gen_provider: String,
     pub dalle_model: String,
@@ -171,6 +186,22 @@ pub struct MintConfig {
     pub avatar_signal_disabled: bool,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_thinking_effort() -> String {
+    "medium".into()
+}
+
+/// Thinking/reasoning configuration for a specific model.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelThinkingConfig {
+    pub enabled: bool,
+    pub effort: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -321,6 +352,9 @@ pub struct CustomProvider {
     pub id: String,
     /// Human-readable name shown in the UI.
     pub display_name: String,
+    /// Optional custom provider logo stored as a small image data URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logo_data_url: Option<String>,
     /// Base URL of the OpenAI-compatible endpoint, e.g. `"http://localhost:20128/v1"`.
     pub base_url: String,
     /// API key sent as `Authorization: Bearer <key>`. Empty = no auth header.
@@ -347,6 +381,7 @@ impl Default for MintConfig {
         ];
         Self {
             theme: "dark".into(),
+            tui_theme: "dark".into(),
             accent_color: "#10b981".into(),
             language: "th-TH".into(),
             assistant_mode: "chat".into(),
@@ -383,6 +418,9 @@ impl Default for MintConfig {
             bfl_model: "flux-pro-1.1".into(),
             temperature: None,
             model_temperatures: std::collections::HashMap::new(),
+            thinking_enabled: true,
+            thinking_effort: "medium".into(),
+            model_thinking_configs: std::collections::HashMap::new(),
             show_desktop_widget: true,
             safety_enabled: true,
             sandbox_mode: "prefer".into(),
@@ -690,6 +728,118 @@ impl MintConfig {
         }
     }
 
+    /// Returns whether thinking/reasoning is supported by a given provider & model.
+    pub fn is_thinking_supported_for_model(provider: &str, model: &str) -> bool {
+        let p = provider.to_ascii_lowercase();
+        let m = model.to_ascii_lowercase();
+        if p == "gemini" {
+            return m.contains("2.5")
+                || m.contains("2.0")
+                || m.contains("3.")
+                || m.contains("thinking");
+        }
+        if p == "anthropic" {
+            return m.contains("3-7")
+                || m.contains("3.7")
+                || m.contains("sonnet-5")
+                || m.contains("opus-5")
+                || m.contains("sonnet-4")
+                || m.contains("opus-4");
+        }
+        if p == "openai" || p == "local_openai" {
+            return m.starts_with("o1")
+                || m.starts_with("o3")
+                || m.contains("thinking")
+                || m.contains("reason")
+                || m.contains("gpt-5");
+        }
+        if p == "deepseek" {
+            return m.contains("reasoner") || m.contains("r1") || m.contains("deepseek");
+        }
+        if p == "openrouter" {
+            return m.contains("o1")
+                || m.contains("o3")
+                || m.contains("thinking")
+                || m.contains("reason")
+                || m.contains("r1")
+                || m.contains("qwq")
+                || m.contains("glm")
+                || m.contains("deepseek");
+        }
+        if p == "ollama" {
+            return m.contains("r1")
+                || m.contains("qwq")
+                || m.contains("thinking")
+                || m.contains("deepseek");
+        }
+        false
+    }
+
+    /// Returns whether the active model supports thinking/reasoning.
+    pub fn is_thinking_supported(&self) -> bool {
+        Self::is_thinking_supported_for_model(&self.ai_provider, self.active_model())
+    }
+
+    /// Resolves thinking enabled state for a model.
+    pub fn resolved_thinking_enabled_for_model(&self, provider: &str, model: &str) -> bool {
+        let model_clean = model.trim();
+        if let Some(cfg) = self.model_thinking_configs.get(model_clean) {
+            return cfg.enabled;
+        }
+        let lower = model_clean.to_ascii_lowercase();
+        for (k, v) in &self.model_thinking_configs {
+            if k.to_ascii_lowercase() == lower {
+                return v.enabled;
+            }
+        }
+        // If not explicitly configured, enable by default only if model supports it
+        if Self::is_thinking_supported_for_model(provider, model) {
+            self.thinking_enabled
+        } else {
+            false
+        }
+    }
+
+    /// Resolves thinking effort for a model ("low", "medium", "high", "extra_high").
+    pub fn resolved_thinking_effort_for_model(&self, model: &str) -> &str {
+        let model_clean = model.trim();
+        if let Some(cfg) = self.model_thinking_configs.get(model_clean) {
+            return &cfg.effort;
+        }
+        let lower = model_clean.to_ascii_lowercase();
+        for (k, v) in &self.model_thinking_configs {
+            if k.to_ascii_lowercase() == lower {
+                return &v.effort;
+            }
+        }
+        if self.thinking_effort.is_empty() {
+            "medium"
+        } else {
+            &self.thinking_effort
+        }
+    }
+
+    /// Returns (enabled, effort) for the currently active model.
+    pub fn resolved_thinking(&self) -> (bool, &str) {
+        let model = self.active_model();
+        (
+            self.resolved_thinking_enabled_for_model(&self.ai_provider, model),
+            self.resolved_thinking_effort_for_model(model),
+        )
+    }
+
+    /// Sets thinking enabled and effort for a specific model id.
+    pub fn set_model_thinking(&mut self, model: &str, enabled: bool, effort: &str) {
+        let model_key = model.trim().to_string();
+        self.model_thinking_configs.insert(
+            model_key,
+            ModelThinkingConfig {
+                enabled,
+                effort: effort.trim().to_ascii_lowercase(),
+            },
+        );
+    }
+
     /// Sets the active provider and model, saves the configuration to disk, and logs a system event interaction.
     pub fn set_active_model(
         &mut self,
@@ -935,6 +1085,12 @@ fn load_config_from(path: &Path) -> Result<MintConfig, ConfigError> {
             path: path.to_path_buf(),
             source,
         })?;
+    if config.tui_theme.is_empty() {
+        config.tui_theme = match config.theme.as_str() {
+            "system" | "light" => config.theme.clone(),
+            _ => "dark".to_owned(),
+        };
+    }
     for (key, value) in runtime_extra_defaults() {
         config.extra.entry(key).or_insert(value);
     }
@@ -1360,6 +1516,26 @@ mod tests {
     }
 
     #[test]
+    fn custom_provider_logo_survives_config_round_trip() {
+        let logo = "data:image/png;base64,aGVsbG8=";
+        let mut value = serde_json::to_value(MintConfig::default()).unwrap();
+        value["customProviders"] = serde_json::json!([{
+            "id": "test-provider",
+            "displayName": "Test Provider",
+            "baseUrl": "https://example.test/v1",
+            "apiKey": "",
+            "models": [],
+            "headers": [],
+            "logoDataUrl": logo,
+        }]);
+
+        let parsed: MintConfig = serde_json::from_value(value).unwrap();
+        let round_tripped = serde_json::to_value(parsed).unwrap();
+
+        assert_eq!(round_tripped["customProviders"][0]["logoDataUrl"], logo);
+    }
+
+    #[test]
     fn config_preserves_fields_that_have_not_migrated_yet() {
         let config: MintConfig =
             serde_json::from_str(r#"{"aiProvider":"gemini","pluginGmailEnabled":true}"#).unwrap();
@@ -1404,6 +1580,7 @@ mod tests {
             custom_providers: vec![CustomProvider {
                 id: "myprovider".into(),
                 display_name: "My Provider".into(),
+                logo_data_url: None,
                 base_url: "http://localhost:20128/v1".into(),
                 api_key: "sk-abc".into(),
                 models: vec![CustomProviderModel {
@@ -1582,5 +1759,58 @@ mod tests {
         config.ai_provider = "deepseek".into();
         config.deepseek_model = "deepseek-chat".into();
         assert_eq!(config.resolved_temperature(), 0.6);
+    }
+
+    #[test]
+    fn test_thinking_configuration_and_resolution() {
+        let mut config = MintConfig::default();
+
+        // Support checks
+        assert!(MintConfig::is_thinking_supported_for_model(
+            "anthropic",
+            "claude-3-7-sonnet"
+        ));
+        assert!(MintConfig::is_thinking_supported_for_model(
+            "gemini",
+            "gemini-2.5-pro"
+        ));
+        assert!(MintConfig::is_thinking_supported_for_model(
+            "openai", "o3-mini"
+        ));
+        assert!(MintConfig::is_thinking_supported_for_model(
+            "deepseek",
+            "deepseek-reasoner"
+        ));
+        assert!(!MintConfig::is_thinking_supported_for_model(
+            "openai", "gpt-4o"
+        ));
+        assert!(!MintConfig::is_thinking_supported_for_model(
+            "anthropic",
+            "claude-3-5-haiku"
+        ));
+
+        // Global default resolution
+        config.ai_provider = "anthropic".into();
+        config.anthropic_model = "claude-3-7-sonnet".into();
+        let (enabled, effort) = config.resolved_thinking();
+        assert!(enabled);
+        assert_eq!(effort, "medium");
+
+        // Per-model override
+        config.set_model_thinking("claude-3-7-sonnet", true, "high");
+        let (enabled, effort) = config.resolved_thinking();
+        assert!(enabled);
+        assert_eq!(effort, "high");
+
+        // Turning thinking off for model
+        config.set_model_thinking("claude-3-7-sonnet", false, "high");
+        let (enabled, _) = config.resolved_thinking();
+        assert!(!enabled);
+
+        // Unsupported model always resolves enabled to false
+        config.ai_provider = "openai".into();
+        config.openai_model = "gpt-4o".into();
+        let (enabled, _) = config.resolved_thinking();
+        assert!(!enabled);
     }
 }

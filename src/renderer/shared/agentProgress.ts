@@ -6,19 +6,152 @@
 import type { AgentProgress, InteractionMemory, DiffHunk, FileChange } from './types'
 export type { AgentProgress, InteractionMemory }
 
+export function isInternalCot(text: string): boolean {
+  const trimmed = text.trim()
+  if (trimmed.startsWith('<think>') || trimmed.includes('</think>')) {
+    return true
+  }
+  const lineCount = trimmed.split('\n').length
+  const charCount = trimmed.length
+  if (trimmed.includes('\n\n') || lineCount > 2 || charCount > 180) {
+    return true
+  }
+  const lower = trimmed.toLowerCase()
+  if (
+    lower.startsWith('the user ') ||
+    lower.startsWith("let's think") ||
+    lower.startsWith('let me analyze') ||
+    lower.startsWith('per rule') ||
+    lower.startsWith('note the ') ||
+    lower.includes('thinking process:')
+  ) {
+    return true
+  }
+  return false
+}
+
+/** Short inline agent notes (excluding long chain-of-thought). */
 export function thoughtsFrom(progress: AgentProgress[]): string[] {
   return progress
     .filter((event) => event.type === 'Thought')
     .map((event) => (event as Extract<AgentProgress, { type: 'Thought' }>).data.thought)
-    .filter(Boolean)
+    .filter((t) => Boolean(t) && !isInternalCot(t))
+}
+
+/** Extended reasoning / chain-of-thought from the model's API thinking tokens or <think> tags. */
+export function extendedThoughtsFrom(progress: AgentProgress[]): string[] {
+  const extended: string[] = []
+  for (const event of progress) {
+    if (event.type === 'ThinkingDelta') {
+      if (event.data.delta?.trim()) extended.push(event.data.delta)
+    } else if (event.type === 'ExtendedThinking') {
+      if (event.data.thought?.trim()) extended.push(event.data.thought)
+    } else if (event.type === 'Thought' && event.data.thought && isInternalCot(event.data.thought)) {
+      extended.push(event.data.thought)
+    }
+  }
+  return extended
 }
 
 export function trimAgentProgress(progress: AgentProgress[], maxNonThought = 20): AgentProgress[] {
   if (progress.length === 0) return progress
   const keptNonThought = new Set(
-    progress.filter((event) => event.type !== 'Thought').slice(-maxNonThought),
+    progress
+      .filter((event) => event.type !== 'Thought' && event.type !== 'ThinkingDelta' && event.type !== 'ExtendedThinking')
+      .slice(-maxNonThought),
   )
-  return progress.filter((event) => event.type === 'Thought' || keptNonThought.has(event))
+  return progress.filter(
+    (event) =>
+      event.type === 'Thought' ||
+      event.type === 'ThinkingDelta' ||
+      event.type === 'ExtendedThinking' ||
+      keptNonThought.has(event),
+  )
+}
+
+/** Fold live reasoning deltas into one replaceable record per model step. */
+export function reduceLiveAgentProgress(
+  current: AgentProgress[],
+  event: AgentProgress,
+): AgentProgress[] {
+  if (event.type === 'ThinkingDelta') {
+    const index = current.findIndex(
+      (item) => item.type === 'ThinkingDelta' && item.data.id === event.data.id,
+    )
+    if (index < 0) return trimAgentProgress([...current, event])
+    const next = current.slice()
+    const previous = next[index] as Extract<AgentProgress, { type: 'ThinkingDelta' }>
+    next[index] = {
+      type: 'ThinkingDelta',
+      data: {
+        id: event.data.id,
+        delta: `${previous.data.delta}${event.data.delta}`,
+        elapsed_ms: event.data.elapsed_ms,
+      },
+    }
+    return next
+  }
+
+  if (event.type === 'ExtendedThinking' && event.data.id) {
+    const index = current.findIndex(
+      (item) => item.type === 'ThinkingDelta' && item.data.id === event.data.id,
+    )
+    if (index >= 0) {
+      const next = current.slice()
+      next[index] = event
+      return trimAgentProgress(next)
+    }
+  }
+  return trimAgentProgress([...current, event])
+}
+
+export function reduceLiveAgentProgressBatch(
+  current: AgentProgress[],
+  events: AgentProgress[],
+): AgentProgress[] {
+  return events.reduce(reduceLiveAgentProgress, current)
+}
+
+/** Remove transport-only deltas before activity is stored in conversation history. */
+export function compactAgentProgressForPersistence(progress: AgentProgress[]): AgentProgress[] {
+  const completedIds = new Set(
+    progress
+      .filter((event): event is Extract<AgentProgress, { type: 'ExtendedThinking' }> => event.type === 'ExtendedThinking')
+      .map((event) => event.data.id)
+      .filter((id): id is string => Boolean(id)),
+  )
+  const result: AgentProgress[] = []
+  const interrupted = new Map<string, Extract<AgentProgress, { type: 'ThinkingDelta' }>>()
+  for (const event of progress) {
+    if (event.type === 'ThinkingDelta') {
+      if (!completedIds.has(event.data.id)) {
+        const previous = interrupted.get(event.data.id)
+        interrupted.set(event.data.id, previous
+          ? {
+              type: 'ThinkingDelta',
+              data: {
+                id: event.data.id,
+                delta: `${previous.data.delta}${event.data.delta}`,
+                elapsed_ms: event.data.elapsed_ms,
+              },
+            }
+          : event)
+      }
+      continue
+    }
+    result.push(event)
+  }
+  for (const event of interrupted.values()) {
+    result.push({
+      type: 'ExtendedThinking',
+      data: {
+        id: event.data.id,
+        thought: event.data.delta,
+        elapsed_ms: event.data.elapsed_ms,
+      },
+    })
+  }
+  return result
 }
 
 export function hasAgentToolActivity(progress: AgentProgress[]): boolean {
@@ -149,4 +282,36 @@ export function parseFileChangesFromProgress(progress: AgentProgress[]): FileCha
   }
 
   return Array.from(changes.values())
+}
+
+/**
+ * Combine file changes from multiple agent turns into one conversation-level
+ * review. Keeping this fold next to the parser means every surface (chat,
+ * desktop review, and future exports) gets the same aggregation semantics.
+ */
+export function mergeFileChanges(changeGroups: FileChange[][]): FileChange[] {
+  const merged = new Map<string, FileChange>()
+
+  for (const changes of changeGroups) {
+    for (const change of changes) {
+      const existing = merged.get(change.path)
+      if (!existing) {
+        merged.set(change.path, {
+          path: change.path,
+          created: change.created,
+          additions: change.additions,
+          deletions: change.deletions,
+          hunks: [...change.hunks],
+        })
+        continue
+      }
+
+      existing.created = existing.created || change.created
+      existing.additions += change.additions
+      existing.deletions += change.deletions
+      existing.hunks.push(...change.hunks)
+    }
+  }
+
+  return Array.from(merged.values())
 }

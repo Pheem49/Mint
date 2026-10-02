@@ -75,6 +75,9 @@ interface Window {
   };
   widgetAPI: {
     onStateChange: (callback: (state: any) => void) => void;
+    openChat: () => Promise<void>;
+    setVisible: (visible: boolean) => Promise<void>;
+    startDragging: () => Promise<void>;
   };
 }
 

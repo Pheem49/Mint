@@ -21,6 +21,7 @@ mod plugins_cli;
 mod setup;
 mod skills;
 mod subagent_wizard;
+pub(crate) mod terminal_theme;
 mod updater;
 
 pub use commands::Command;
@@ -29,12 +30,13 @@ pub use interactive::{
     run_interactive_chat, run_interactive_chat_with_options,
 };
 
-pub const RESET: &str = "\x1b[0m";
-pub const MINT: &str = "\x1b[32m";
-pub const BLUE: &str = "\x1b[38;2;78;201;216m";
-pub const DIM: &str = "\x1b[90m";
-pub const ERROR: &str = "\x1b[31m";
-pub const WARN: &str = "\x1b[33m";
+pub const RESET: &str = terminal_theme::ANSI_RESET;
+pub const BOLD: &str = terminal_theme::ANSI_BOLD;
+pub const MINT: &str = terminal_theme::ANSI_ACCENT;
+pub const BLUE: &str = terminal_theme::ANSI_BLUE;
+pub const DIM: &str = terminal_theme::ANSI_MUTED;
+pub const ERROR: &str = terminal_theme::ANSI_ERROR;
+pub const WARN: &str = terminal_theme::ANSI_WARNING;
 
 pub(crate) async fn run_code_agent_with_saved_image(
     task: &str,
@@ -46,16 +48,29 @@ pub(crate) async fn run_code_agent_with_saved_image(
 ) -> Result<(Vec<String>, Option<String>)> {
     let sent_image = image_data_uri.clone();
     let sent_video = video_data_uri.clone();
+    let tui_handle = options.tui.clone();
     // Follow-up messages the user typed into the queueing box while this
     // turn was still running (see `agent::run_code_agent_with_options`)
     // land here; the caller is responsible for dispatching them. On error
     // the queue is dropped along with the interrupted turn.
     let queue = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    // The box's leftover, not-yet-submitted text (typed but no Enter yet) at
-    // the moment the turn ended — same idea as `queue` above, but for the one
-    // partial entry that was never confirmed, so the caller can hand it back
-    // as the next prompt's starting text instead of dropping it silently.
     let draft = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let target_chat_id = options
+        .chat_id
+        .clone()
+        .unwrap_or_else(|| mint_core::CHAT_CLI_ID.to_string());
+    if mint_core::is_cli_chat_id(&target_chat_id)
+        && let Ok(memory) = mint_core::MemoryStore::open_default()
+    {
+        let branch = mint_core::git::get_current_branch(current_dir);
+        let lang = mint_core::git::detect_project_language(current_dir);
+        let _ = memory.register_cli_session(
+            &target_chat_id,
+            Some(&current_dir.to_string_lossy()),
+            branch.as_deref(),
+            lang.as_deref(),
+        );
+    }
     let result = agent::run_code_agent_with_options(
         task,
         current_dir,
@@ -68,16 +83,12 @@ pub(crate) async fn run_code_agent_with_saved_image(
     )
     .await;
     result?;
-    // This turn just committed a row to the workspace-scoped "cli" chat_id
-    // (see `scoped_chat_id`) — raise live_sync's watermark past it so the
-    // next poll tick doesn't mistake the user's own just-sent message for
-    // one that arrived from another surface (web/desktop).
+    // This turn just committed a row to the session's chat_id
+    // — raise live_sync's watermark past it so the next poll tick doesn't mistake
+    // the user's own just-sent message for one that arrived from another surface.
     if let Ok(memory) = mint_core::MemoryStore::open_default()
         && let Ok(rows) = memory.recent_interactions_for_chat(
-            &mint_core::scoped_chat_id(
-                mint_core::CHAT_CLI_ID,
-                Some(&current_dir.to_string_lossy()),
-            ),
+            &mint_core::scoped_chat_id(&target_chat_id, Some(&current_dir.to_string_lossy())),
             1,
         )
         && let Some(row) = rows.first()
@@ -85,8 +96,8 @@ pub(crate) async fn run_code_agent_with_saved_image(
         mint_core::live_sync::note_own_interaction(row.id);
     }
     // Save any attached images and videos that were sent with the task
-    image::save_sent_image_after_send(sent_image.as_deref(), task);
-    image::save_sent_image_after_send(sent_video.as_deref(), task);
+    image::save_sent_image_after_send(sent_image.as_deref(), task, tui_handle.as_ref());
+    image::save_sent_image_after_send(sent_video.as_deref(), task, tui_handle.as_ref());
     let queued = queue
         .lock()
         .map(|mut q| std::mem::take(&mut *q))
@@ -160,6 +171,8 @@ pub(crate) async fn run_oneshot_agent_task(
         plan_mode,
         queueing: false,
         pinned_mcp_server,
+        chat_id: None,
+        tui: None,
     };
 
     let queue = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -199,7 +212,7 @@ pub(crate) async fn run_oneshot_agent_task(
         mint_core::live_sync::note_own_interaction(row.id);
     }
 
-    image::save_sent_image_after_send(image_data_uri.as_deref(), task);
+    image::save_sent_image_after_send(image_data_uri.as_deref(), task, None);
     Ok(())
 }
 
@@ -250,9 +263,21 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub plan: bool,
 
+    /// Explicitly use the full-screen interactive chat interface
+    #[arg(long, global = true, conflicts_with = "classic")]
+    pub tui: bool,
+
+    /// Use the classic scrolling interactive interface
+    #[arg(long, global = true, conflicts_with = "tui")]
+    pub classic: bool,
+
     /// Attach an image file to the prompt
     #[arg(long, global = true)]
     pub image: Option<PathBuf>,
+
+    /// Resume a previous conversation session, or open the interactive session picker
+    #[arg(short = 'r', long, global = true)]
+    pub resume: Option<Option<String>>,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -266,7 +291,7 @@ pub struct Cli {
 fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = crossterm::terminal::disable_raw_mode();
+        interactive::restore_terminal();
         log_panic_to_file(&info.to_string());
         default_hook(info);
     }));
@@ -327,7 +352,22 @@ async fn main() -> Result<()> {
             } else {
                 mint_core::channels::start_channels();
                 mint_core::start_cron_scheduler();
-                run_interactive_chat_with_options(cli.model, cli.fast, cli.plan).await?;
+                let resume_id = if let Some(ref r_opt) = cli.resume {
+                    match r_opt {
+                        Some(id) => Some(id.clone()),
+                        None => Some("__prompt__".to_string()),
+                    }
+                } else {
+                    None
+                };
+                interactive::run_interactive_chat_with_session(
+                    cli.model,
+                    cli.fast,
+                    cli.plan,
+                    resume_id,
+                    !cli.classic,
+                )
+                .await?;
             }
         }
         Some(cmd) => {
@@ -359,6 +399,27 @@ mod cli_tests {
         let cli = Cli::try_parse_from(["mint", "explain this function"]).unwrap();
         assert!(cli.command.is_none());
         assert_eq!(cli.prompt, vec!["explain this function"]);
+    }
+
+    #[test]
+    fn parse_tui_flag() {
+        let cli = Cli::try_parse_from(["mint", "--tui"]).unwrap();
+        assert!(cli.tui);
+        assert!(!cli.classic);
+        assert!(cli.command.is_none());
+        assert!(cli.prompt.is_empty());
+    }
+
+    #[test]
+    fn parse_classic_flag() {
+        let cli = Cli::try_parse_from(["mint", "--classic"]).unwrap();
+        assert!(cli.classic);
+        assert!(!cli.tui);
+    }
+
+    #[test]
+    fn tui_and_classic_conflict() {
+        assert!(Cli::try_parse_from(["mint", "--tui", "--classic"]).is_err());
     }
 
     #[test]

@@ -125,7 +125,12 @@ pub(crate) fn log_api_err(context: &str, error: &dyn std::fmt::Display) {
 mod routes;
 
 pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    start_api_server_on(SocketAddr::from(([0, 0, 0, 0], port))).await
+}
+
+/// Serve the API on a caller-selected interface. Tailnet web mode uses
+/// loopback so only its local web proxy can reach the API directly.
+pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error> {
     let listener = TcpListener::bind(addr).await?;
     // API server banner removed to prevent duplicate output
 
@@ -288,6 +293,11 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                 && route != "/api/action"
                 && route != "/api/config"
                 && route != "/api/gemini-live"
+                && route != "/api/interactions"
+                && route != "/api/conversation-snapshot"
+                && route != "/api/conversation-changes"
+                && route != "/api/status"
+                && route != "/api/chat-sessions"
             {
                 log_api_req(method, route, "200 OK", Some(&auth_label));
             }
@@ -485,7 +495,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
-                                ("GET", "/api/interactions") => {
+                                ("GET", "/api/interactions" | "/api/conversation-snapshot" | "/api/conversation-changes") => {
                     routes::sessions::execute(
                         routes::RequestCtx {
                             method,
@@ -742,6 +752,15 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         socket,
                     )
                     .await;
+                }
+                                ("GET" | "POST", route) if route.starts_with("/api/linked-folders/") => {
+                    routes::linked_folders::execute(
+                        routes::RequestCtx {
+                            method, route, query, body,
+                            request_str: &request_str, request_bytes: &request_bytes,
+                            header_end, auth_label: auth_label.clone(),
+                        }, socket,
+                    ).await;
                 }
                                 ("POST", "/api/linked-folders") => {
                     routes::linked_folders::execute(
@@ -1308,7 +1327,7 @@ async fn run_web_agent_loop(
         model: result.model,
         text: result.summary,
         fallback_provider: result.fallback,
-        fallback_reason: None,
+        fallback_reason: result.fallback_reason,
         tool_calls: None,
         stop_reason: None,
         total_tokens: None,

@@ -1,17 +1,11 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
+import '../css/veo-studio.css'
 import { getActiveModel, setActiveModel, subscribeModelChange } from '../utils/modelManager'
-import {
-  generateVideo,
-  getVideoGenProviders,
-  fetchVideoProviderModels,
-  convertFileSrc,
-  getProfileValue,
-  setProfileValue,
-  type VideoGenRequest,
-  type VideoGenResponse,
-  type VideoGenProviders,
-  type VideoGenEntry,
-} from '@/tauri'
+import { catalogPlatform, mediaPlatform } from '../platform'
+import type { VideoGenRequest, VideoGenResponse, VideoGenProviders, VideoGenEntry } from '../types'
+
+const { generateVideo, getVideoGenProviders, fetchVideoProviderModels, convertFileSrc } = mediaPlatform
+const { getProfileValue, setProfileValue } = catalogPlatform
 
 type AspectRatio = '16:9' | '9:16' | '1:1'
 type Duration = 5 | 8
@@ -19,14 +13,13 @@ type Duration = 5 | 8
 interface VeoStudioPanelProps {
   view: string
   onSendToChat?: (prompt: string) => void
-  onToggleMobileSidebar?: () => void
 }
 
 import { VIDEO_ASPECT_RATIOS, VIDEO_STYLE_PRESETS } from '../constants/studio'
 
-const ASPECT_OPTIONS = VIDEO_ASPECT_RATIOS
+const ASPECT_Options = VIDEO_ASPECT_RATIOS
 
-const DURATION_OPTIONS: { value: Duration; label: string }[] = [
+const DURATION_Options: { value: Duration; label: string }[] = [
   { value: 5, label: '5s' },
   { value: 8, label: '8s' },
 ]
@@ -75,7 +68,7 @@ function VideoSkeletonCard() {
   )
 }
 
-export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSidebar }: VeoStudioPanelProps) {
+export default function VeoStudioPanel({ view, onSendToChat }: VeoStudioPanelProps) {
   const [prompt, setPrompt] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
   const [showNegative, setShowNegative] = useState(false)
@@ -230,15 +223,6 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
       {/* Header */}
       <header className="veo-studio-header">
         <div className="veo-studio-header-title">
-          <button
-            className="mobile-menu-btn"
-            type="button"
-            onClick={onToggleMobileSidebar}
-            aria-label="Toggle menu"
-            style={{ marginRight: '8px' }}
-          >
-            ☰
-          </button>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <polygon points="23 7 16 12 23 17 23 7" />
             <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
@@ -402,7 +386,7 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
             <div className="veo-studio-field">
               <span className="veo-studio-label">Aspect ratio</span>
               <div className="veo-studio-aspect-group" role="radiogroup" aria-label="Aspect ratio">
-                {ASPECT_OPTIONS.map(({ value, label, icon }) => (
+                {ASPECT_Options.map(({ value, label, icon }) => (
                   <button
                     key={value}
                     type="button"
@@ -424,7 +408,7 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
             <div className="veo-studio-field">
               <span className="veo-studio-label">Duration</span>
               <div className="veo-studio-duration-group" role="radiogroup" aria-label="Video duration">
-                {DURATION_OPTIONS.map(({ value, label }) => (
+                {DURATION_Options.map(({ value, label }) => (
                   <button
                     key={value}
                     type="button"
@@ -558,7 +542,7 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
                               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                                 <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
                               </svg>
-                              Send to Chat
+                              Send to chat
                             </button>
                           )}
                         </div>
@@ -592,7 +576,7 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
                   <polygon points="23 7 16 12 23 17 23 7" />
                   <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
                 </svg>
-                <span>Video History</span>
+                <span>Video history</span>
                 <span className="veo-studio-history-badge">{historyVideos.length}</span>
               </div>
             </div>

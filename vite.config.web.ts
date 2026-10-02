@@ -41,6 +41,7 @@ export default defineConfig({
     port: 9000,
     host: true,
     strictPort: true,
+    allowedHosts: process.env.MINT_TAILSCALE_HOST ? [process.env.MINT_TAILSCALE_HOST] : undefined,
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:3000',

@@ -18,6 +18,7 @@ futures-util.workspace = true
 hmac.workspace = true
 image.workspace = true
 mint-core = { path = "../crates/mint-core" }
+portable-pty = "0.9"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -26,13 +27,14 @@ sha2.workspace = true
 # spotlight/widget overlays and the main window all set `transparent`); it is a
 # no-op on other platforms. It also rules out Mac App Store distribution, which
 # is fine — macOS ships as a notarization-optional `.dmg`.
-tauri = { version = "2", features = ["protocol-asset", "tray-icon", "macos-private-api"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "macos-private-api", "unstable"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
 tokio.workspace = true
 tokio-tungstenite.workspace = true
+uuid.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
 webkit2gtk = "2.0"

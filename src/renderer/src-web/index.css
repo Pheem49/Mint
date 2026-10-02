@@ -1,23 +1,4 @@
-@import './css/app-shell.css';
-@import './css/chat.css';
-@import './css/sidebar-workspace.css';
-@import './css/model.css';
-@import './css/pictures.css';
-@import './css/misc.css';
-@import './css/settings/base.css';
-@import '../shared/css/settings/general.css';
-@import '../shared/css/settings/profile.css';
-@import '../shared/css/settings/automation.css';
-@import '../shared/css/settings/theme.css';
-@import '../shared/css/settings/plugins.css';
-@import '../shared/css/settings/agents.css';
-@import '../shared/css/settings/shortcuts.css';
-@import './css/spotlight.css';
-@import './css/widget.css';
-@import '../shared/css/image-studio.css';
-@import '../shared/css/veo-studio.css';
-@import '../shared/css/agent-observability.css';
-@import '../shared/css/model-selector.css';
+@import '../shared/theme/tokens.css';
 
 * {
   box-sizing: border-box;
@@ -33,7 +14,9 @@ body, html, #root {
 }
 
 body, html {
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-family: 'Prompt', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button, textarea {
@@ -62,7 +45,7 @@ button {
 .chat-mention {
   background: color-mix(in srgb, var(--accent, #10b981) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent, #10b981) 25%, transparent);
-  color: var(--accent, #34d399);
+  color: var(--interactive-fg);
   padding: 2px 6px;
   border-radius: 6px;
   font-weight: 500;
@@ -71,13 +54,23 @@ button {
   margin: 0 2px;
 }
 
+.chat-ui-grid-item:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  box-shadow: 0 6px 20px -4px rgba(0, 0, 0, 0.3);
+}
+
+.chat-ui-feature-item:hover {
+  border-color: rgba(255, 255, 255, 0.18) !important;
+}
+
 /* Minimalist AI Workspace (Claude / Cursor style) Code Block */
 .chat-code-block-container {
   display: flex;
   flex-direction: column;
   background: var(--panel-soft, #121214);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  border-radius: 9px;
+  border-radius: 16px;
   margin: 12px 0;
   overflow: hidden;
   box-shadow: var(--shadow-sm, 0 4px 16px rgba(0, 0, 0, 0.18));
@@ -146,11 +139,11 @@ button {
 }
 
 .chat-code-copy-btn.is-copied {
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
 }
 
 .chat-code-copy-btn.is-copied .chat-code-btn-label {
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
 }
 
 .chat-code-btn-label {
@@ -167,7 +160,7 @@ button {
 
 .chat-code-block-body code {
   font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.84rem;
+  font-size: 13px;
   line-height: 1.6;
   white-space: pre;
   color: var(--text-chat, var(--text-main, #e2e8f0));
@@ -270,20 +263,34 @@ button {
 }
 
 .chat-bold-highlight {
-  color: var(--text-chat, var(--text-main)) !important;
+  color: var(--text-chat, var(--text-main, inherit));
+  font-weight: 600;
 }
+/* Code Syntax Highlighting (Driven by tokens.css) */
+.token-string { color: var(--syntax-string); }
+.token-flag { color: var(--syntax-flag); }
+.token-comment { color: var(--syntax-comment); }
+.token-number { color: var(--syntax-number); }
+.token-variable { color: var(--syntax-variable); }
+.token-property { color: var(--syntax-property); }
+.token-function { color: var(--syntax-function); }
+.token-type { color: var(--syntax-type); }
+.token-boolean { color: var(--syntax-boolean); }
+.token-operator { color: var(--syntax-operator); }
+.token-punctuation { color: var(--syntax-punctuation); }
 
-/* Tech Pill Inline Code */
+/* Tech Pill Inline Code (ChatGPT style) */
 .chat-inline-code {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--text-chat, var(--text-main, #e2e8f0));
-  padding: 1.5px 6px;
-  border-radius: 5px;
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  padding: 2px 7px;
+  border-radius: var(--radius-sm, 6px);
   font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.85em;
+  font-size: 0.86em;
+  font-weight: 500;
   letter-spacing: -0.01em;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-sm);
   display: inline-block;
   vertical-align: baseline;
 }
@@ -293,9 +300,9 @@ button {
   overflow-x: auto;
   margin: 14px 0;
   width: 100%;
-  border-radius: 8px;
-  border: 1px solid var(--border-light);
-  background: var(--panel-bg);
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
   box-shadow: var(--shadow-sm);
 }
 
@@ -310,16 +317,16 @@ button {
 .chat-table th {
   padding: 12px 16px;
   font-weight: 700;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--text-main) 5%, transparent);
-  border-bottom: 2px solid var(--border-light);
+  color: var(--interactive-fg);
+  background: var(--bg-surface-soft);
+  border-bottom: 2px solid var(--border-default);
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
 .chat-table td {
   padding: 12px 16px;
-  color: var(--text-main, #e2e8f0);
-  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .chat-table tbody tr {
@@ -327,59 +334,9 @@ button {
 }
 
 .chat-table tbody tr:hover {
-  background: color-mix(in srgb, var(--text-main) 4%, transparent);
+  background: var(--bg-surface-hover);
 }
 
 .chat-table tbody tr:last-child td {
   border-bottom: none;
-}
-
-/* Sidebar More Popover Menu Styles */
-.sidebar-more-container {
-  position: relative;
-  width: 100%;
-  margin-bottom: 12px;
-}
-
-.sidebar-more-popover {
-  position: absolute;
-  left: 100%;
-  top: 0;
-  margin-left: 8px;
-  z-index: 1000;
-  background: var(--surface-strong, #1e293b);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  border-radius: 8px;
-  padding: 6px;
-  min-width: 160px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-.sidebar-more-popover .popover-item {
-  width: 100%;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-soft, #94a3b8);
-  cursor: pointer;
-  padding: 0 10px;
-  text-align: left;
-  font: inherit;
-  font-size: 0.9rem;
-  transition: background 0.16s ease, color 0.16s ease;
-}
-
-.sidebar-more-popover .popover-item:hover,
-.sidebar-more-popover .popover-item.active {
-  background: var(--surface-main, #334155);
-  color: var(--text-main, #f8fafc);
 }

@@ -4,6 +4,7 @@
  * Shared by both Desktop and Web ChatPanel — do NOT duplicate this.
  */
 import type { AgentProgress } from '../types'
+import { isInternalCot } from '../agentProgress'
 
 export interface AgentActivity {
   label: string
@@ -26,10 +27,18 @@ export interface AgentActivityGroup {
   items: AgentActivity[]
 }
 
+export type TimelineItem =
+  | { id: string; kind: 'activity'; activity: AgentActivity }
+  | { id: string; kind: 'group'; group: AgentActivityGroup }
+  | { id: string; kind: 'thought'; thought: string }
+  | { id: string; kind: 'extendedThinking'; thought: string; streaming?: boolean; elapsedMs?: number }
+
 export interface AgentActivityView {
   summary: string
   items: AgentActivity[]
   groups?: AgentActivityGroup[]
+  /** Unified chronological list of thoughts, extended thinking, and tool activities. */
+  timeline?: TimelineItem[]
 }
 
 function activityDetail(input: Record<string, unknown>, key: string): string {
@@ -234,7 +243,7 @@ function finalizeGroup(group: AgentActivityGroup): AgentActivityGroup {
     group.title = `Searched web (${count} queries)`
   } else {
     const readableAction = action.replaceAll('_', ' ')
-    group.title = `Executed ${count} ${readableAction} steps`
+    group.title = `Executed ${count} ${readableAction}`
   }
 
   return group
@@ -242,9 +251,46 @@ function finalizeGroup(group: AgentActivityGroup): AgentActivityGroup {
 
 export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
   const activities: AgentActivity[] = []
+  const timeline: TimelineItem[] = []
+  let currentGroup: AgentActivityGroup | null = null
+  let nextId = 0
+
+  const flushGroup = () => {
+    if (!currentGroup) return
+    const finalized = finalizeGroup(currentGroup)
+    if (finalized.count > 1) {
+      timeline.push({ id: finalized.id, kind: 'group', group: finalized })
+    } else if (finalized.items.length === 1) {
+      timeline.push({ id: finalized.id, kind: 'activity', activity: finalized.items[0] })
+    }
+    currentGroup = null
+  }
+
   for (const event of progress) {
     if (event.type === 'ToolStart') {
-      activities.push(describeTool(event.data.action, event.data.input))
+      const item = describeTool(event.data.action, event.data.input)
+      activities.push(item)
+
+      const actionKey = item.action || item.label
+      if (!currentGroup || currentGroup.action !== actionKey) {
+        flushGroup()
+        currentGroup = {
+          id: `timeline-group-${nextId++}-${actionKey}`,
+          action: actionKey,
+          label: item.label,
+          kind: item.kind,
+          title: item.target,
+          count: 1,
+          state: item.state,
+          items: [item],
+        }
+      } else {
+        currentGroup.items.push(item)
+        currentGroup.count += 1
+        if (item.state === 'active') {
+          currentGroup.state = 'active'
+        }
+      }
     } else if (event.type === 'ToolEnd') {
       for (let index = activities.length - 1; index >= 0; index -= 1) {
         if (activities[index].state !== 'active') continue
@@ -256,15 +302,64 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
         }
         break
       }
+      if (currentGroup) {
+        const hasActive = currentGroup.items.some((it) => it.state === 'active')
+        const hasDone = currentGroup.items.some((it) => it.state === 'done')
+        const hasError = currentGroup.items.some((it) => it.state === 'error')
+        const hasRetry = currentGroup.items.some((it) => it.state === 'retry')
+        currentGroup.state = hasActive ? 'active' : hasDone ? 'done' : hasRetry ? 'retry' : hasError ? 'error' : 'done'
+      }
+    } else if (event.type === 'Thought') {
+      const text = event.data?.thought?.trim()
+      if (text) {
+        flushGroup()
+        const isCot = isInternalCot(text)
+        const kind = isCot ? 'extendedThinking' : 'thought'
+        const lastItem = timeline[timeline.length - 1]
+        if (lastItem && 'thought' in lastItem && lastItem.thought === text) {
+          if (lastItem.kind === 'extendedThinking' && kind === 'thought') {
+            timeline[timeline.length - 1] = { id: lastItem.id, kind, thought: text }
+          }
+        } else if (!lastItem || lastItem.kind !== kind || ('thought' in lastItem && lastItem.thought !== text)) {
+          timeline.push({ id: `thought-${nextId++}`, kind, thought: text })
+        }
+      }
+    } else if (event.type === 'ThinkingDelta') {
+      const text = event.data?.delta
+      if (text) {
+        flushGroup()
+        timeline.push({
+          id: event.data.id,
+          kind: 'extendedThinking',
+          thought: text,
+          streaming: true,
+          elapsedMs: event.data.elapsed_ms,
+        })
+      }
+    } else if (event.type === 'ExtendedThinking') {
+      const text = event.data?.thought?.trim()
+      if (text) {
+        flushGroup()
+        const lastItem = timeline[timeline.length - 1]
+        if (!lastItem || lastItem.kind !== 'extendedThinking' || ('thought' in lastItem && lastItem.thought !== text)) {
+          timeline.push({
+            id: event.data.id || `ext-thought-${nextId++}`,
+            kind: 'extendedThinking',
+            thought: text,
+            streaming: false,
+            elapsedMs: event.data.elapsed_ms,
+          })
+        }
+      }
     }
   }
+
+  flushGroup()
 
   const runSucceeded = progress.some(
     (e) => e.type === 'RunCompleted' && (e.data?.summary?.outcome === 'SUCCESS' || e.data?.summary?.outcome === 'success')
   )
 
-  // Mark intermediate errors as 'retry' if the agent continued running or succeeded later,
-  // or if the overall run succeeded (meaning the trailing error was non-fatal/recovered)
   for (let i = 0; i < activities.length; i++) {
     if (activities[i].state === 'error') {
       const hasSubsequentSuccessOrActive = activities.slice(i + 1).some(
@@ -276,8 +371,18 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
     }
   }
 
+  for (const item of timeline) {
+    if (item.kind === 'group') {
+      const hasActive = item.group.items.some((it) => it.state === 'active')
+      const hasDone = item.group.items.some((it) => it.state === 'done')
+      const hasError = item.group.items.some((it) => it.state === 'error')
+      const hasRetry = item.group.items.some((it) => it.state === 'retry')
+      item.group.state = hasActive ? 'active' : hasDone ? 'done' : hasRetry ? 'retry' : hasError ? 'error' : 'done'
+    }
+  }
+
   const items = activities.slice(-25)
-  return { summary: activitySummary(activities), items, groups: groupActivities(items) }
+  return { summary: activitySummary(activities), items, groups: groupActivities(items), timeline: timeline.slice(-60) }
 }
 
 export interface WebSearchSource {
@@ -335,3 +440,19 @@ export function parseWebSearchSources(progress: AgentProgress[]): WebSearchSourc
   return sources
 }
 
+/**
+ * Strips repeated conversation greetings (e.g. "สวัสดีค่ะพี่ภีม 🌿", "Hello...")
+ * from intermediate agent progress notes so only the concrete action note is shown.
+ */
+export function cleanIntermediateThought(text: string): string {
+  if (!text) return ''
+  let cleaned = text.trim()
+  // Strip leading greetings like "สวัสดีค่ะพี่ภีม 🌿", "สวัสดีครับ 🌿", "Hello...", etc.
+  cleaned = cleaned.replace(
+    /^(สวัสดีค่ะ|สวัสดีครับ|หวัดดีค่ะ|หวัดดีครับ|สวัสดี|hello|hi|hey)\s*(พี่[^\s,]+|คุณ[^\s,]+|[^\s,]+)?\s*(🌿|🍃|✨|🌱)?\s*[,—–-]?\s*/i,
+    ''
+  )
+  // Strip leading bullet characters
+  cleaned = cleaned.replace(/^[\s•\-\*]+\s*/, '')
+  return cleaned.trim() || text.trim()
+}

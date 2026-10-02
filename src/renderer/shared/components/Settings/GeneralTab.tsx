@@ -11,6 +11,7 @@ import {
   IMAGE_STUDIO_MODELS,
   IMAGE_GEN_PROVIDER_MODELS,
   VEO_STUDIO_MODELS,
+  getModelMetadata,
 } from '../../constants/models'
 import type {
   CustomProviderConfig,
@@ -20,6 +21,47 @@ import type {
 import { setActiveModel } from '../../utils/modelManager'
 import { providerLabel as aiProviderLabel } from '../../utils/providers'
 import ApiKeyInput from './ApiKeyInput'
+import SearchableModelCombobox from './SearchableModelCombobox'
+import anthropicLogo from '@lobehub/icons-static-svg/icons/anthropic.svg?url'
+import deepseekLogo from '@lobehub/icons-static-svg/icons/deepseek-color.svg?url'
+import geminiLogo from '@lobehub/icons-static-svg/icons/gemini-color.svg?url'
+import huggingFaceLogo from '@lobehub/icons-static-svg/icons/huggingface-color.svg?url'
+import lmStudioLogo from '@lobehub/icons-static-svg/icons/lmstudio.svg?url'
+import ollamaLogo from '@lobehub/icons-static-svg/icons/ollama.svg?url'
+import openAiLogo from '@lobehub/icons-static-svg/icons/openai.svg?url'
+import openRouterLogo from '@lobehub/icons-static-svg/icons/openrouter-color.svg?url'
+
+const settingsProviderLogos: Record<string, { src: string; color?: string }> = {
+  anthropic: { src: anthropicLogo, color: '#d97757' },
+  deepseek: { src: deepseekLogo },
+  gemini: { src: geminiLogo },
+  huggingface: { src: huggingFaceLogo },
+  local_openai: { src: lmStudioLogo, color: '#8b5cf6' },
+  ollama: { src: ollamaLogo, color: '#f3f4f6' },
+  openai: { src: openAiLogo, color: '#10a37f' },
+  openrouter: { src: openRouterLogo },
+}
+
+function SettingsProviderLogo({ provider }: { provider: string }) {
+  const logo = settingsProviderLogos[provider]
+  if (!logo) return null
+
+  if (logo.color) {
+    return (
+      <span
+        className="settings-provider-logo is-monochrome"
+        aria-hidden="true"
+        style={{
+          '--provider-brand-color': logo.color,
+          maskImage: `url("${logo.src}")`,
+          WebkitMaskImage: `url("${logo.src}")`,
+        } as React.CSSProperties}
+      />
+    )
+  }
+
+  return <img className="settings-provider-logo" src={logo.src} alt="" aria-hidden="true" />
+}
 
 // One card per image-gen provider (mirrors the chat "Provider & Model"
 // cards): a model dropdown plus either its own API-key field, or a note
@@ -144,6 +186,7 @@ export default function GeneralTab({
   onSaveWithoutClosing
 }: GeneralTabProps) {
   const [savedProviderId, setSavedProviderId] = React.useState<string | null>(null)
+  const [providerLogoErrors, setProviderLogoErrors] = React.useState<Record<string, string>>({})
   const [openSections, setOpenSections] = React.useState<Record<string, boolean>>({
     ai_routing: true,
     search: false,
@@ -178,6 +221,42 @@ export default function GeneralTab({
       setSavedProviderId(providerId)
       setTimeout(() => setSavedProviderId(null), 2000)
     }
+  }
+
+  const handleProviderLogoChange = (providerId: string, file?: File) => {
+    if (!file) return
+    const supportedTypes = ['image/png', 'image/jpeg', 'image/webp']
+    if (!supportedTypes.includes(file.type)) {
+      setProviderLogoErrors(prev => ({ ...prev, [providerId]: 'Choose a PNG, JPEG, or WebP image.' }))
+      return
+    }
+    if (file.size > 256 * 1024) {
+      setProviderLogoErrors(prev => ({ ...prev, [providerId]: 'The logo must be 256 KB or smaller.' }))
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        setProviderLogoErrors(prev => ({ ...prev, [providerId]: 'Could not read this image.' }))
+        return
+      }
+      const provider = (config.customProviders ?? []).find(item => item.id === providerId)
+      if (!provider) return
+      const updated = (config.customProviders ?? []).map(item =>
+        item.id === providerId ? { ...item, logoDataUrl: reader.result as string } : item
+      )
+      updateField('customProviders', updated)
+      setProviderLogoErrors(prev => {
+        const next = { ...prev }
+        delete next[providerId]
+        return next
+      })
+    }
+    reader.onerror = () => {
+      setProviderLogoErrors(prev => ({ ...prev, [providerId]: 'Could not read this image.' }))
+    }
+    reader.readAsDataURL(file)
   }
 
   const renderCollapsibleSection = (
@@ -238,8 +317,8 @@ export default function GeneralTab({
     <div className="tab-pane active">
       {/* Accordion Quick Control Bar */}
       <div className="accordion-controls">
-        <button type="button" onClick={() => setAllSections(true)}>Expand All</button>
-        <button type="button" onClick={() => setAllSections(false)}>Collapse All</button>
+        <button type="button" onClick={() => setAllSections(true)}>Expand all</button>
+        <button type="button" onClick={() => setAllSections(false)}>Collapse all</button>
       </div>
 
       {/* ── Section 1: AI Routing ── */}
@@ -251,8 +330,8 @@ export default function GeneralTab({
         <>
           <div className="form-grid compact">
             <div className="setting-row stacked">
-              <label>Active Provider</label>
-              <div className="pill-segmented" role="radiogroup" aria-label="Active Provider">
+              <label>Active provider</label>
+              <div className="pill-segmented" role="radiogroup" aria-label="Active provider">
                 {[
                   { id: 'gemini', label: aiProviderLabel('gemini'), title: 'Google Gemini (Cloud)' },
                   { id: 'anthropic', label: aiProviderLabel('anthropic'), title: 'Anthropic Claude' },
@@ -289,7 +368,7 @@ export default function GeneralTab({
               const currentModel = (config.customModelSelections ?? {})[activeId] ?? cp.models[0]?.modelId ?? ''
               return (
                 <div className="setting-row wide">
-                  <label>Active Model</label>
+                  <label>Active model</label>
                   <select
                     value={currentModel}
                     onChange={(e) => updateField('customModelSelections', {
@@ -413,10 +492,10 @@ export default function GeneralTab({
               }
 
               return (
-                <div className="setting-row stacked" style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '8px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                <div className="setting-row stacked setting-feature-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
                     <label style={{ margin: 0, fontWeight: 600, display: 'flex', alignItems: 'baseline', gap: '0.45rem' }}>
-                      <span>Model Temperature</span>
+                      <span>Model temperature</span>
                       {modelDisplayName && (
                         <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>
                           · {modelDisplayName}
@@ -448,13 +527,13 @@ export default function GeneralTab({
                       step="0.05"
                       value={currentTemp}
                       onChange={(e) => handleChange(parseFloat(e.target.value))}
-                      style={{ flex: 1, accentColor: 'var(--accent-color, #10b981)', cursor: 'pointer' }}
+                      style={{ flex: 1, accentColor: 'var(--accent, #10b981)', cursor: 'pointer' }}
                     />
                     <span style={{ fontSize: '0.85rem', minWidth: '2.5rem', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
                       {currentTemp.toFixed(2)}
                     </span>
                   </div>
-                  <span style={{ fontSize: '0.75rem', opacity: 0.75, marginTop: '0.35rem', lineHeight: 1.4 }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', lineHeight: 1.4 }}>
                     Controls sampling entropy for <strong>{modelDisplayName || activeModelRaw}</strong>. {
                       isReasoningOmit
                         ? 'Reasoning models (o1/o3) automatically omit this parameter.'
@@ -468,6 +547,160 @@ export default function GeneralTab({
                 </div>
               )
             })()}
+
+            {/* Thinking / Reasoning Configuration */}
+            {(() => {
+              const activeModelRaw = (() => {
+                if (config.aiProvider === 'gemini') return config.geminiModel || 'gemini-2.5-flash'
+                if (config.aiProvider === 'anthropic') return config.anthropicModel || 'claude-sonnet-5'
+                if (config.aiProvider === 'openai') return config.openaiModel || 'gpt-5.6-luna'
+                if (config.aiProvider === 'openrouter') return config.openrouterModel || 'openai/gpt-5.6-terra'
+                if (config.aiProvider === 'deepseek') return config.deepseekModel || 'deepseek-chat'
+                if (config.aiProvider === 'local_openai') return config.localModelName || 'local-model'
+                if (config.aiProvider === 'ollama') return config.ollamaModel || 'llama3'
+                if (config.aiProvider === 'huggingface') return config.hfModel || 'Qwen/Qwen3.6-27B'
+                return ''
+              })()
+
+              const meta = getModelMetadata(activeModelRaw, config.aiProvider)
+              const modelConfigs = (config.modelThinkingConfigs ?? {}) as Record<string, { enabled?: boolean; effort?: string }>
+              const customModelThinking = activeModelRaw ? modelConfigs[activeModelRaw] : undefined
+              const hasCustomModel = customModelThinking !== undefined
+
+              const isThinkingSupported = meta.supportsThinking
+              const currentEnabled = customModelThinking?.enabled !== undefined
+                ? customModelThinking.enabled
+                : (config.thinkingEnabled ?? true)
+
+              const currentEffort = (customModelThinking?.effort || config.thinkingEffort || 'medium').toLowerCase()
+
+              const handleResetThinking = () => {
+                if (activeModelRaw && modelConfigs[activeModelRaw] !== undefined) {
+                  const updated = { ...modelConfigs }
+                  delete updated[activeModelRaw]
+                  updateField('modelThinkingConfigs', updated)
+                }
+              }
+
+              const handleToggleThinking = (enabled: boolean) => {
+                if (activeModelRaw) {
+                  const updated = {
+                    ...modelConfigs,
+                    [activeModelRaw]: { enabled, effort: currentEffort },
+                  }
+                  updateField('modelThinkingConfigs', updated)
+                }
+                updateField('thinkingEnabled', enabled)
+              }
+
+              const handleEffortChange = (effort: string) => {
+                if (activeModelRaw) {
+                  const updated = {
+                    ...modelConfigs,
+                    [activeModelRaw]: { enabled: currentEnabled, effort },
+                  }
+                  updateField('modelThinkingConfigs', updated)
+                }
+                updateField('thinkingEffort', effort)
+              }
+
+              const effortLabelMap: Record<string, string> = {
+                low: 'Low',
+                medium: 'Medium',
+                high: 'High',
+                extra_high: 'Extra High',
+              }
+
+              return (
+                <div className="setting-row stacked setting-feature-card">
+                  <div className="thinking-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <label className="thinking-card-title" style={{ margin: 0, fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--interactive-fg)' }}>
+                        <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" />
+                        <path d="M9 21h6" />
+                      </svg>
+                      <span>Thinking / Reasoning</span>
+                      {activeModelRaw && (
+                        <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>
+                          · {activeModelRaw.split('/').pop()}
+                        </span>
+                      )}
+                    </label>
+                    <div className="thinking-card-status" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span className="section-current-badge" style={{ fontSize: '0.75rem' }}>
+                        {currentEnabled
+                          ? `Thinking ON (${effortLabelMap[currentEffort] || 'Medium'})${!isThinkingSupported ? ' · Force' : ''}`
+                          : 'Thinking OFF'}
+                      </span>
+                      {hasCustomModel && (
+                        <button
+                          type="button"
+                          className="btn-secondary btn-small"
+                          style={{ padding: '0.15rem 0.45rem', fontSize: '0.75rem' }}
+                          onClick={handleResetThinking}
+                          title={`Reset ${activeModelRaw} thinking configuration`}
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Toggle Row */}
+                  <div className="thinking-card-toggle-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0' }}>
+                    <div>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 500 }}>Enable thinking</span>
+                      <p style={{ margin: '2px 0 0 0', fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                        {isThinkingSupported
+                          ? 'Allow model to output chain-of-thought tokens.'
+                          : currentEnabled
+                          ? 'Chain-of-thought token generation enabled (force toggle).'
+                          : 'Model not flagged as reasoning by default — toggle on to force enable.'}
+                      </p>
+                    </div>
+                    <label className="settings-toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={currentEnabled}
+                        onChange={(e) => handleToggleThinking(e.target.checked)}
+                      />
+                      <span className="settings-toggle-slider"></span>
+                    </label>
+                  </div>
+
+                  {/* Effort Level Row */}
+                  {currentEnabled && (
+                    <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border)' }}>
+                      <div className="thinking-card-effort-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'none', letterSpacing: '0.04em' }}>
+                          Reasoning Effort
+                        </span>
+                        <div className="thinking-card-effort-options" style={{ display: 'flex', gap: '4px' }}>
+                          {(['low', 'medium', 'high', 'extra_high'] as const).map((eff) => (
+                            <button
+                              key={eff}
+                              type="button"
+                              className={`btn-secondary btn-small ${currentEffort === eff ? 'active' : ''}`}
+                              style={{
+                                padding: '0.2rem 0.6rem',
+                                fontSize: '0.75rem',
+                                fontWeight: currentEffort === eff ? 600 : 400,
+                                background: currentEffort === eff ? 'rgba(16, 185, 129, 0.15)' : undefined,
+                                borderColor: currentEffort === eff ? 'var(--accent, #10b981)' : undefined,
+                                color: currentEffort === eff ? 'var(--accent, #10b981)' : undefined,
+                              }}
+                              onClick={() => handleEffortChange(eff)}
+                            >
+                              {effortLabelMap[eff]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
 
           <div className="provider-cards-container">
@@ -475,9 +708,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'gemini' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-                  </svg>
+                  <SettingsProviderLogo provider="gemini" />
                   Google Gemini (Cloud)
                 </div>
                 <div className="provider-card-actions">
@@ -492,7 +723,7 @@ export default function GeneralTab({
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
-                  <label>Gemini Model</label>
+                  <label>Gemini model</label>
                   <select 
                     value={dynamicGeminiModels.includes(config.geminiModel) ? config.geminiModel : 'custom'} 
                     onChange={(e) => updateField('geminiModel', e.target.value)}
@@ -505,7 +736,7 @@ export default function GeneralTab({
                 </div>
                 {(!dynamicGeminiModels.includes(config.geminiModel) || config.geminiModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom Gemini Model</label>
+                    <label>Custom Gemini model</label>
                     <input 
                       type="text" 
                       value={customGemini} 
@@ -529,10 +760,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'anthropic' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4.5 16.5c-1.5 1.26-2.5 3.19-2.5 5.5h20c0-2.31-1-4.24-2.5-5.5"></path>
-                    <path d="M12 2L2 22h20L12 2z"></path>
-                  </svg>
+                  <SettingsProviderLogo provider="anthropic" />
                   Anthropic Claude
                 </div>
                 <div className="provider-card-actions">
@@ -547,7 +775,7 @@ export default function GeneralTab({
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
-                  <label>Anthropic Model</label>
+                  <label>Anthropic model</label>
                   <select 
                     value={dynamicAnthropicModels.includes(config.anthropicModel) ? config.anthropicModel : 'custom'} 
                     onChange={(e) => updateField('anthropicModel', e.target.value)}
@@ -560,7 +788,7 @@ export default function GeneralTab({
                 </div>
                 {(!dynamicAnthropicModels.includes(config.anthropicModel) || config.anthropicModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom Anthropic Model</label>
+                    <label>Custom Anthropic model</label>
                     <input 
                       type="text" 
                       value={customAnthropic} 
@@ -584,11 +812,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'openai' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="2" x2="12" y2="22"></line>
-                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-                  </svg>
+                  <SettingsProviderLogo provider="openai" />
                   OpenAI
                 </div>
                 <div className="provider-card-actions">
@@ -616,7 +840,7 @@ export default function GeneralTab({
                 </div>
                 {(!dynamicOpenAIModels.includes(config.openaiModel) || config.openaiModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom OpenAI Model</label>
+                    <label>Custom OpenAI model</label>
                     <input 
                       type="text" 
                       value={customOpenAI} 
@@ -640,13 +864,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'openrouter' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="16 3 21 3 21 8"></polyline>
-                    <line x1="4" y1="20" x2="21" y2="3"></line>
-                    <polyline points="21 16 21 21 16 21"></polyline>
-                    <line x1="15" y1="15" x2="21" y2="21"></line>
-                    <line x1="4" y1="4" x2="9" y2="9"></line>
-                  </svg>
+                  <SettingsProviderLogo provider="openrouter" />
                   OpenRouter
                 </div>
                 <div className="provider-card-actions">
@@ -662,19 +880,21 @@ export default function GeneralTab({
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>OpenRouter Model</label>
-                  <select
+                  <SearchableModelCombobox
                     value={dynamicOpenRouterModels.includes(config.openrouterModel) ? config.openrouterModel : 'custom'}
-                    onChange={(e) => updateField('openrouterModel', e.target.value)}
-                  >
-                    {dynamicOpenRouterModels.map(model => (
-                      <option key={model} value={model}>{model}</option>
-                    ))}
-                    <option value="custom">Custom...</option>
-                  </select>
+                    models={dynamicOpenRouterModels}
+                    onChange={(val) => updateField('openrouterModel', val)}
+                    onCustomChange={(val) => {
+                      setCustomOpenRouter(val)
+                      updateField('openrouterModel', 'custom')
+                    }}
+                    customValue={customOpenRouter}
+                    placeholder="Select or search OpenRouter model..."
+                  />
                 </div>
                 {(!dynamicOpenRouterModels.includes(config.openrouterModel) || config.openrouterModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom OpenRouter Model</label>
+                    <label>Custom OpenRouter model</label>
                     <input
                       type="text"
                       value={customOpenRouter}
@@ -698,10 +918,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'deepseek' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="11" cy="11" r="8"></circle>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                  </svg>
+                  <SettingsProviderLogo provider="deepseek" />
                   DeepSeek
                 </div>
                 <div className="provider-card-actions">
@@ -729,7 +946,7 @@ export default function GeneralTab({
                 </div>
                 {(!dynamicDeepSeekModels.includes(config.deepseekModel) || config.deepseekModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom DeepSeek Model</label>
+                    <label>Custom DeepSeek model</label>
                     <input
                       type="text"
                       value={customDeepSeek}
@@ -753,12 +970,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'huggingface' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
-                    <line x1="9" y1="9" x2="9.01" y2="9"></line>
-                    <line x1="15" y1="9" x2="15.01" y2="9"></line>
-                  </svg>
+                  <SettingsProviderLogo provider="huggingface" />
                   Hugging Face (Inference API)
                 </div>
                 <div className="provider-card-actions">
@@ -773,7 +985,7 @@ export default function GeneralTab({
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
-                  <label>Hugging Face Model</label>
+                  <label>Hugging Face model</label>
                   <select 
                     value={(HF_MODELS as readonly string[]).includes(config.hfModel) ? config.hfModel : 'custom'} 
                     onChange={(e) => updateField('hfModel', e.target.value)}
@@ -786,7 +998,7 @@ export default function GeneralTab({
                 </div>
                 {(!(HF_MODELS as readonly string[]).includes(config.hfModel) || config.hfModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom Hugging Face Model</label>
+                    <label>Custom Hugging Face model</label>
                     <input 
                       type="text" 
                       value={customHF} 
@@ -796,11 +1008,11 @@ export default function GeneralTab({
                   </div>
                 )}
                 <div className="setting-row">
-                  <label>Hugging Face API Key</label>
+                  <label>Hugging Face API key</label>
                   <ApiKeyInput
                     value={config.hfApiKey}
                     onChange={(value) => updateField('hfApiKey', value)}
-                    placeholder="Enter Hugging Face API Key..."
+                    placeholder="Enter Hugging Face API key..."
                   />
                 </div>
               </div>
@@ -810,11 +1022,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'local_openai' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                    <line x1="8" y1="21" x2="16" y2="21"></line>
-                    <line x1="12" y1="17" x2="12" y2="21"></line>
-                  </svg>
+                  <SettingsProviderLogo provider="local_openai" />
                   LM Studio / Local OpenAI
                 </div>
                 <div className="provider-card-actions">
@@ -867,9 +1075,7 @@ export default function GeneralTab({
             <div className={`provider-card ${config.aiProvider === 'ollama' ? 'active-provider' : ''}`}>
               <div className="provider-card-header">
                 <div className="provider-card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                  </svg>
+                  <SettingsProviderLogo provider="ollama" />
                   Ollama (Local)
                 </div>
                 <div className="provider-card-actions">
@@ -884,7 +1090,7 @@ export default function GeneralTab({
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
-                  <label>Ollama Model</label>
+                  <label>Ollama model</label>
                   <select 
                     value={dynamicOllamaModels.includes(config.ollamaModel) ? config.ollamaModel : 'custom'} 
                     onChange={(e) => updateField('ollamaModel', e.target.value)}
@@ -900,7 +1106,7 @@ export default function GeneralTab({
                 </div>
                 {(!dynamicOllamaModels.includes(config.ollamaModel) || config.ollamaModel === 'custom') && (
                   <div className="setting-row">
-                    <label>Custom Ollama Model</label>
+                    <label>Custom Ollama model</label>
                     <input 
                       type="text" 
                       value={customOllama} 
@@ -910,7 +1116,7 @@ export default function GeneralTab({
                   </div>
                 )}
                 <div className="setting-row">
-                  <label>Ollama Host</label>
+                  <label>Ollama host</label>
                   <input 
                     type="text" 
                     value={config.ollamaHost} 
@@ -953,11 +1159,11 @@ export default function GeneralTab({
             </div>
             <div className="provider-card-body">
               <div className="setting-row">
-                <label>Brave Search API Key</label>
+                <label>Brave Search API key</label>
                 <ApiKeyInput
                   value={config.braveSearchApiKey}
                   onChange={(value) => updateField('braveSearchApiKey', value)}
-                  placeholder="Enter Brave Search API Key..."
+                  placeholder="Enter Brave Search API key..."
                 />
               </div>
             </div>
@@ -985,15 +1191,15 @@ export default function GeneralTab({
             </div>
             <div className="provider-card-body">
               <div className="setting-row">
-                <label>Google Search API Key</label>
+                <label>Google Search API key</label>
                 <ApiKeyInput
                   value={config.googleSearchApiKey}
                   onChange={(value) => updateField('googleSearchApiKey', value)}
-                  placeholder="Enter Google Search API Key..."
+                  placeholder="Enter Google Search API key..."
                 />
               </div>
               <div className="setting-row">
-                <label>Google Search Engine ID (CX)</label>
+                <label>Google Search engine ID (CX)</label>
                 <input
                   type="text"
                   value={config.googleSearchCx}
@@ -1051,7 +1257,7 @@ export default function GeneralTab({
         <>
           <div className="form-grid compact">
             <div className="setting-row stacked">
-              <label>Active Provider</label>
+              <label>Active provider</label>
               <div className="pill-segmented" role="radiogroup" aria-label="Image Provider">
                 {IMAGE_PROVIDERS.map(o => (
                   <button
@@ -1163,7 +1369,7 @@ export default function GeneralTab({
             <div className="provider-card-body">
               <p className="hint">Uses your Gemini API key — no extra key needed.</p>
               <div className="setting-row">
-                <label>Default Veo Model</label>
+                <label>Default Veo model</label>
                 {(() => {
                   const veoOpts = dynamicVideoModels?.veo || VEO_STUDIO_MODELS.veo || []
                   const currentVeoModel = config.veoModel || 'veo-3.1-generate-preview'
@@ -1243,9 +1449,13 @@ export default function GeneralTab({
                 <div key={cpIdx} className={`provider-card ${isActive ? 'active-provider' : ''}`}>
                   <div className="provider-card-header">
                     <div className="provider-card-title">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="3" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14" />
-                      </svg>
+                      {cp.logoDataUrl ? (
+                        <img className="settings-provider-logo custom-provider-logo" src={cp.logoDataUrl} alt="" />
+                      ) : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <circle cx="12" cy="12" r="3" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14" />
+                        </svg>
+                      )}
                       {cp.displayName || cp.id || 'Unnamed Provider'}
                     </div>
                     <div className="provider-card-actions">
@@ -1294,6 +1504,50 @@ export default function GeneralTab({
                         }}
                         placeholder="e.g. DeepSeek"
                       />
+                    </div>
+
+                    <div className="setting-row">
+                      <label>Provider logo (optional)</label>
+                      <div className="custom-provider-logo-picker">
+                        <div className="custom-provider-logo-preview" aria-hidden="true">
+                          {cp.logoDataUrl ? (
+                            <img src={cp.logoDataUrl} alt="" />
+                          ) : (
+                            <span>Logo</span>
+                          )}
+                        </div>
+                        <label className="btn btn-secondary btn-xs custom-provider-logo-select">
+                          {cp.logoDataUrl ? 'Change image' : 'Choose image'}
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            onChange={(event) => {
+                              handleProviderLogoChange(cp.id, event.currentTarget.files?.[0])
+                              event.currentTarget.value = ''
+                            }}
+                          />
+                        </label>
+                        {cp.logoDataUrl && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-xs"
+                            onClick={() => {
+                              updateCp({ logoDataUrl: undefined })
+                              setProviderLogoErrors(prev => {
+                                const next = { ...prev }
+                                delete next[cp.id]
+                                return next
+                              })
+                            }}
+                          >
+                            Remove
+                          </button>
+                        )}
+                        <span className="custom-provider-logo-help">PNG, JPEG, or WebP · max 256 KB</span>
+                        {providerLogoErrors[cp.id] && (
+                          <span className="custom-provider-logo-error" role="alert">{providerLogoErrors[cp.id]}</span>
+                        )}
+                      </div>
                     </div>
 
                     <div className="setting-row">
@@ -1417,11 +1671,11 @@ export default function GeneralTab({
           </div>
           <div className="form-grid single">
             <div className="setting-row">
-              <label>Updater Endpoint</label>
+              <label>Updater endpoint</label>
               <input type="text" value={config.updaterEndpoint} onChange={(e) => updateField('updaterEndpoint', e.target.value)} placeholder="https://updates.example.com/latest.json" />
             </div>
             <div className="setting-row">
-              <label>Updater Public Key</label>
+              <label>Updater public key</label>
               <textarea value={config.updaterPublicKey} onChange={(e) => updateField('updaterPublicKey', e.target.value)} placeholder="Minisign public key" />
             </div>
           </div>
@@ -1442,7 +1696,7 @@ export default function GeneralTab({
         'Configure the mini AI character desktop presence widget.',
         <div className="toggle-row">
           <div>
-            <label>Show Desktop AI Candidate</label>
+            <label>Show Desktop AI candidate</label>
             <p className="hint">Show the mini AI character on your desktop.</p>
           </div>
           <label className="settings-toggle-switch">

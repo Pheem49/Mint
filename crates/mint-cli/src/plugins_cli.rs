@@ -2,6 +2,9 @@
 //! Provides commands for listing, enabling/disabling, configuring API credentials,
 //! and managing OAuth sign-in for all Built-in Plugins.
 
+const ANSI_BLUE: &str = crate::terminal_theme::ANSI_BLUE;
+const ANSI_BLUE_BOLD: &str = crate::terminal_theme::ANSI_BLUE_BOLD;
+
 use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use crossterm::event::{self, Event, KeyCode};
@@ -222,7 +225,7 @@ pub fn list_plugins(config: &MintConfig) -> Result<()> {
             if let Some(st) = matched {
                 if st.connected {
                     format!(
-                        "\x1b[36mConnected ({})\x1b[0m",
+                        "{ANSI_BLUE}Connected ({})\x1b[0m",
                         st.account_email.as_deref().unwrap_or("Yes")
                     )
                 } else {
@@ -342,7 +345,7 @@ async fn login_plugin_oauth(provider: &str) -> Result<()> {
     let (auth_url, _state) = build_auth_url(provider, redirect_uri, client_id.as_deref())
         .ok_or_else(|| anyhow!("Invalid OAuth provider: {provider}"))?;
 
-    println!("\x1b[1;36m🔑 Mint OAuth Sign-In Authorization\x1b[0m");
+    println!("{ANSI_BLUE_BOLD}🔑 Mint OAuth Sign-In Authorization\x1b[0m");
     println!(
         "  Opening browser for provider: \x1b[32m{}\x1b[0m",
         provider
@@ -532,7 +535,7 @@ pub async fn run_interactive_plugins_wizard(config: &mut MintConfig) -> Result<(
     for (plugin, enabled) in &items {
         if *enabled {
             let title = format!(
-                "\x1b[1;36m⚙️ Authentication Setup for {}\x1b[0m",
+                "{ANSI_BLUE_BOLD}⚙️ Authentication Setup for {}\x1b[0m",
                 plugin.name
             );
             if plugin.is_oauth {
@@ -627,7 +630,7 @@ fn prompt_select_option_menu(title: &str, options: &[&str]) -> Result<usize> {
 fn print_select_options_list(options: &[&str], cursor: usize) {
     for (i, option) in options.iter().enumerate() {
         if i == cursor {
-            println!("  \x1b[36m❯\x1b[0m \x1b[36m{}\x1b[0m", option);
+            println!("  {ANSI_BLUE}❯\x1b[0m {ANSI_BLUE}{}\x1b[0m", option);
         } else {
             println!("    {}", option);
         }
@@ -734,7 +737,7 @@ fn print_plugin_checkbox_items(items: &[(&BuiltinPluginInfo, bool)], cursor: usi
         };
         if i == cursor {
             println!(
-                "  \x1b[36m❯\x1b[0m {} \x1b[36m{:<18}\x1b[0m \x1b[90m({})\x1b[0m",
+                "  {ANSI_BLUE}❯\x1b[0m {} {ANSI_BLUE}{:<18}\x1b[0m \x1b[90m({})\x1b[0m",
                 checkbox, plugin.name, plugin.description
             );
         } else {

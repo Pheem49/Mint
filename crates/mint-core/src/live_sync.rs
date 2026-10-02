@@ -37,7 +37,10 @@ const PREVIEW_CHARS: usize = 60;
 
 static LIVE_SYNC_NOTICES: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
-/// Highest `interaction_memories.id` (chat_id = "cli") this process already
+static ACTIVE_CHAT_ID: LazyLock<std::sync::RwLock<String>> =
+    LazyLock::new(|| std::sync::RwLock::new(String::new()));
+
+/// Highest `interaction_memories.id` this process already
 /// accounts for — either because it wrote the row itself (see
 /// [`note_own_interaction`]) or because a previous poll tick already
 /// surfaced it. `-1` until `start_live_sync_poller`'s first tick establishes
@@ -51,6 +54,15 @@ static LAST_SEEN_ID: AtomicI64 = AtomicI64::new(-1);
 /// `read_line_interactive`.
 pub fn take_live_sync_notices() -> Vec<String> {
     std::mem::take(&mut *LIVE_SYNC_NOTICES.lock().unwrap())
+}
+
+/// Dynamically updates the active chat_id being polled by the live sync loop
+/// (e.g. when resuming or switching sessions via `/resume`) and re-seeds the watermark.
+pub fn update_live_sync_chat_id(new_chat_id: &str) {
+    if let Ok(mut lock) = ACTIVE_CHAT_ID.write() {
+        *lock = new_chat_id.to_string();
+    }
+    initialize_watermark(new_chat_id);
 }
 
 /// Raise the watermark to at least `id`. Called by `mint-cli` right after it
@@ -82,30 +94,33 @@ pub fn note_own_interaction(id: i64) {
 /// `mint gateway` or any other headless path that has no prompt loop to
 /// drain notices into.
 pub fn start_live_sync_poller(chat_id: String) {
+    update_live_sync_chat_id(&chat_id);
     if tokio::runtime::Handle::try_current().is_ok() {
-        tokio::spawn(restarting_loop(chat_id));
+        tokio::spawn(restarting_loop());
     } else {
         std::thread::spawn(move || {
             if let Ok(runtime) = tokio::runtime::Runtime::new() {
-                runtime.block_on(restarting_loop(chat_id));
+                runtime.block_on(restarting_loop());
             }
         });
     }
 }
 
-async fn restarting_loop(chat_id: String) {
-    initialize_watermark(&chat_id).await;
+async fn restarting_loop() {
     loop {
-        tick(&chat_id).await;
+        let active_id = ACTIVE_CHAT_ID.read().map(|l| l.clone()).unwrap_or_default();
+        if !active_id.is_empty() {
+            tick(&active_id).await;
+        }
         tokio::time::sleep(POLL_INTERVAL).await;
     }
 }
 
 /// Seeds `LAST_SEEN_ID` from whatever is already in the DB at startup, so
 /// the CLI's own prior history never gets replayed as a "live" notice.
-async fn initialize_watermark(chat_id: &str) {
+fn initialize_watermark(chat_id: &str) {
     if let Ok(memory) = MemoryStore::open_default()
-        && let Ok(latest) = memory.recent_interactions_for_chat(chat_id, 1)
+        && let Ok(latest) = memory.recent_completed_interactions_for_chat(chat_id, 1)
     {
         let start_id = latest.first().map(|row| row.id).unwrap_or(0);
         LAST_SEEN_ID.store(start_id, Ordering::SeqCst);
@@ -121,7 +136,7 @@ async fn tick(chat_id: &str) {
     let Ok(memory) = MemoryStore::open_default() else {
         return;
     };
-    let Ok(rows) = memory.recent_interactions_for_chat(chat_id, POLL_BATCH) else {
+    let Ok(rows) = memory.recent_completed_interactions_for_chat(chat_id, POLL_BATCH) else {
         return;
     };
     let last_seen = LAST_SEEN_ID.load(Ordering::SeqCst);
@@ -140,6 +155,10 @@ async fn tick(chat_id: &str) {
             preview(&row.user_text),
             preview(&row.ai_text)
         ));
+    }
+    if queue.len() > 100 {
+        let excess = queue.len() - 100;
+        queue.drain(..excess);
     }
     drop(queue);
     note_own_interaction(max_id);

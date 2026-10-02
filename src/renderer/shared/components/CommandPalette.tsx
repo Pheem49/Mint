@@ -59,7 +59,7 @@ export function CommandPalette({
     // 1. Commands & Actions
     items.push({
       id: 'cmd-new-chat',
-      title: 'New Chat',
+      title: 'New chat',
       subtitle: 'Start a clean conversation session',
       category: 'Commands',
       icon: '+',
@@ -119,7 +119,7 @@ export function CommandPalette({
       })
       items.push({
         id: 'cmd-mcp',
-        title: 'MCP Catalog & Tools (/mcp)',
+        title: 'MCP catalog & Tools (/mcp)',
         subtitle: 'Configure Model Context Protocol servers',
         category: 'Commands',
         icon: 'MCP',
@@ -130,7 +130,7 @@ export function CommandPalette({
       })
       items.push({
         id: 'cmd-cron',
-        title: 'Scheduled Tasks (/cron)',
+        title: 'Scheduled tasks (/cron)',
         subtitle: 'View and manage recurring background tasks',
         category: 'Commands',
         icon: 'CRN',
@@ -141,7 +141,7 @@ export function CommandPalette({
       })
       items.push({
         id: 'cmd-link',
-        title: 'Linked Folders (/link)',
+        title: 'Linked folders (/link)',
         subtitle: 'Connect external notes and doc directories',
         category: 'Commands',
         icon: 'DIR',
@@ -257,7 +257,7 @@ export function CommandPalette({
       })
       items.push({
         id: 'model-ollama',
-        title: 'Local Ollama Model',
+        title: 'Local Ollama model',
         subtitle: 'Ollama • 100% offline private inference',
         category: 'Models',
         icon: 'OL',
@@ -410,7 +410,7 @@ export function CommandPalette({
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
-            style={{ color: 'var(--accent, #10b981)', flexShrink: 0 }}
+            style={{ color: 'var(--interactive-fg)', flexShrink: 0 }}
           >
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -470,7 +470,7 @@ export function CommandPalette({
                   style={{
                     fontSize: '0.68rem',
                     fontWeight: 700,
-                    textTransform: 'uppercase',
+                    textTransform: 'none',
                     letterSpacing: '0.06em',
                     color: 'var(--text-muted, #6b7280)',
                     padding: '8px 10px 4px 10px',
@@ -585,7 +585,7 @@ export function CommandPalette({
             <span><kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: '3px' }}>↑</kbd> <kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: '3px' }}>↓</kbd> to navigate</span>
             <span><kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: '3px' }}>↵</kbd> to select</span>
           </div>
-          <span>Universal Command Palette</span>
+          <span>Universal command palette</span>
         </div>
       </div>
     </div>

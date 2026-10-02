@@ -15,6 +15,116 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
         auth_label: _auth_label,
     } = ctx;
     match (method, route) {
+        ("GET", route)
+            if route.starts_with("/api/linked-folders/") && route.ends_with("/status") =>
+        {
+            let name = percent_decode(
+                route
+                    .trim_start_matches("/api/linked-folders/")
+                    .trim_end_matches("/status"),
+            );
+            match crate::linked_folder_status(&name) {
+                Ok(status) => {
+                    send_json_response(socket, "200 OK", &json!(status).to_string()).await
+                }
+                Err(err) => {
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        &json!({"error":err.to_string()}).to_string(),
+                    )
+                    .await
+                }
+            }
+        }
+        ("POST", route)
+            if route.starts_with("/api/linked-folders/") && route.ends_with("/refresh") =>
+        {
+            let name = percent_decode(
+                route
+                    .trim_start_matches("/api/linked-folders/")
+                    .trim_end_matches("/refresh"),
+            );
+            match crate::refresh_linked_folder(&name) {
+                Ok(status) => {
+                    send_json_response(socket, "200 OK", &json!(status).to_string()).await
+                }
+                Err(err) => {
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        &json!({"error":err.to_string()}).to_string(),
+                    )
+                    .await
+                }
+            }
+        }
+        ("GET", route)
+            if route.starts_with("/api/linked-folders/") && route.ends_with("/notes") =>
+        {
+            let name = percent_decode(
+                route
+                    .trim_start_matches("/api/linked-folders/")
+                    .trim_end_matches("/notes"),
+            );
+            match crate::list_linked_folder_notes(&name) {
+                Ok(notes) => send_json_response(socket, "200 OK", &json!(notes).to_string()).await,
+                Err(err) => {
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        &json!({"error":err.to_string()}).to_string(),
+                    )
+                    .await
+                }
+            }
+        }
+        ("POST", route)
+            if route.starts_with("/api/linked-folders/") && route.ends_with("/notes") =>
+        {
+            let name = percent_decode(
+                route
+                    .trim_start_matches("/api/linked-folders/")
+                    .trim_end_matches("/notes"),
+            );
+            let content = serde_json::from_str::<serde_json::Value>(body)
+                .ok()
+                .and_then(|v| v.get("content").and_then(|c| c.as_str()).map(str::to_owned))
+                .unwrap_or_default();
+            match crate::save_linked_folder_note(&name, &content) {
+                Ok(note) => send_json_response(socket, "200 OK", &json!(note).to_string()).await,
+                Err(err) => {
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        &json!({"error":err.to_string()}).to_string(),
+                    )
+                    .await
+                }
+            }
+        }
+        ("GET", route)
+            if route.starts_with("/api/linked-folders/") && route.contains("/notes/") =>
+        {
+            let remainder = route.trim_start_matches("/api/linked-folders/");
+            let Some((name, id)) = remainder.split_once("/notes/") else {
+                unreachable!()
+            };
+            match crate::read_linked_folder_note(&percent_decode(name), &percent_decode(id)) {
+                Ok(content) => {
+                    send_json_response(socket, "200 OK", &json!({"content":content}).to_string())
+                        .await
+                }
+                Err(err) => {
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        &json!({"error":err.to_string()}).to_string(),
+                    )
+                    .await
+                }
+            }
+        }
         ("GET", "/api/linked-folders") => {
             let folders = load_config()
                 .ok()
@@ -70,8 +180,13 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             }
         }
 
-        _ => unreachable!(
-            "api_server routed an unhandled route into routes::linked_folders::execute: {method} {route}"
-        ),
+        _ => {
+            send_json_response(
+                socket,
+                "404 Not Found",
+                "{\"error\":\"unknown linked-folder route\"}",
+            )
+            .await
+        }
     }
 }

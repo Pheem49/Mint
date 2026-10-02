@@ -556,6 +556,8 @@ impl AvatarBridge {
                 self.transition(AvatarSignal::emotions(&[("interest", "medium")]), None);
             }
             AgentProgress::Thought { .. } => {}
+            AgentProgress::ThinkingDelta { .. } => {}
+            AgentProgress::ExtendedThinking { .. } => {}
             AgentProgress::WaitingForNetwork { .. } => {}
             AgentProgress::PlanUpdated { .. } => {}
             AgentProgress::RunCompleted { .. } => {}

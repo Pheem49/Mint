@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, memo } from 'react'
 import { createPortal } from 'react-dom'
+import '../css/pictures.css'
 import { type PictureEntry, convertFileSrc, isTauriRuntime, getLocalApiBase, deleteSavedPicture } from '../tauri'
 import type { DashboardView } from './DashboardSidebar'
 
@@ -171,9 +172,9 @@ export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPi
   return (
     <section className={`pictures-library ${view === 'pictures' ? 'is-visible' : ''}`} aria-hidden={view !== 'pictures'}>
       <header className="pictures-header">
-        <div><span className="pictures-kicker">Gallery</span><h2>Saved Pictures</h2></div>
+        <div><span className="pictures-kicker">Gallery</span><h2>Saved pictures</h2></div>
         <div className="pictures-header-actions">
-          <button className="pictures-close-btn" onClick={() => onSetView('chat')}>Close Gallery</button>
+          <button className="pictures-close-btn" onClick={() => onSetView('chat')}>Close gallery</button>
           <button type="button" className="picture-refresh-btn" title="Refresh" onClick={() => onRefreshPictures?.()}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.13 3.36L1 14"/></svg>
           </button>

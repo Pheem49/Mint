@@ -105,7 +105,7 @@ pub enum MentionKind {
 impl MentionKind {
     pub fn badge(&self) -> (&'static str, &'static str) {
         match self {
-            MentionKind::Context => ("[Context]", "\x1b[36m"),
+            MentionKind::Context => ("[Context]", crate::terminal_theme::ANSI_BLUE),
             MentionKind::Plugin => ("[Plugin]", "\x1b[32m"),
             MentionKind::File => ("[File]", "\x1b[33m"),
             MentionKind::Folder => ("[Folder]", "\x1b[34m"),
@@ -519,6 +519,7 @@ pub fn read_line_interactive(
         return Ok(Some(InteractiveInput {
             text: trimmed,
             pasted_image: None,
+            switch_mode: false,
         }));
     }
 
@@ -741,6 +742,19 @@ pub fn read_line_interactive(
                 }
 
                 match key_event.code {
+                    KeyCode::F(6) => {
+                        disable_raw_mode()?;
+                        clear_input_box(cursor_row);
+                        let mut text: String = input_chars.iter().collect();
+                        for (placeholder, content) in &paste_contents {
+                            text = text.replace(placeholder, content);
+                        }
+                        break Some(InteractiveInput {
+                            text,
+                            pasted_image,
+                            switch_mode: true,
+                        });
+                    }
                     KeyCode::Char('c') if ctrl => {
                         if input_chars.is_empty() {
                             if ctrl_c_pressed || ctrl_d_pressed {
@@ -750,6 +764,7 @@ pub fn read_line_interactive(
                                 break Some(InteractiveInput {
                                     text: "/exit".to_string(),
                                     pasted_image: None,
+                                    switch_mode: false,
                                 });
                             } else {
                                 ctrl_c_pressed = true;
@@ -788,13 +803,14 @@ pub fn read_line_interactive(
                         }
                     }
                     KeyCode::Char('d') if ctrl => {
-                        if ctrl_d_pressed || ctrl_c_pressed {
+                        if ctrl_d_pressed {
                             disable_raw_mode()?;
                             clear_input_box(cursor_row);
                             let _ = io::stdout().flush();
                             break Some(InteractiveInput {
                                 text: "/exit".to_string(),
                                 pasted_image: None,
+                                switch_mode: false,
                             });
                         } else {
                             ctrl_d_pressed = true;
@@ -900,6 +916,25 @@ pub fn read_line_interactive(
                     KeyCode::Char('k') if ctrl => {
                         input_chars.truncate(cursor_pos);
                         redraw!();
+                    }
+                    KeyCode::Char('t') if ctrl => {
+                        if let Some(record) = get_last_thought() {
+                            clear_input_box(cursor_row);
+                            disable_raw_mode()?;
+                            let _ = show_thought_viewer(&record.thought, &record.elapsed_str);
+                            redraw_input_box(
+                                &input_chars,
+                                cursor_pos,
+                                placeholder,
+                                model,
+                                path_str,
+                                None,
+                                None,
+                                current_dir,
+                                &mut cursor_row,
+                            );
+                            enable_raw_mode()?;
+                        }
                     }
                     KeyCode::Char(c) if input_chars.len() < 10000 => {
                         input_chars.insert(cursor_pos, c);
@@ -1495,6 +1530,7 @@ pub fn read_line_interactive(
                         break Some(InteractiveInput {
                             text: expanded_str,
                             pasted_image,
+                            switch_mode: false,
                         });
                     }
                     KeyCode::Esc => {

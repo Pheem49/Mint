@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 
 export interface StockData {
@@ -17,6 +17,38 @@ export interface StockData {
 export default function StockCard({ data }: { data: StockData }) {
   const isPositive = data.change >= 0
   const accentColor = isPositive ? '#10b981' : '#ef4444'
+
+  const [isDark, setIsDark] = useState(
+    () => (document.documentElement.getAttribute('data-theme') || 'dark') !== 'light'
+  )
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDark((document.documentElement.getAttribute('data-theme') || 'dark') !== 'light')
+    })
+    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] })
+    return () => observer.disconnect()
+  }, [])
+
+  // Theme-aware color tokens
+  const t = {
+    cardBg: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.04)',
+    cardText: isDark ? '#ffffff' : '#0f172a',
+    cardBorder: isPositive
+      ? isDark ? 'rgba(16,185,129,0.25)' : 'rgba(16,185,129,0.45)'
+      : isDark ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.45)',
+    cardShadow: isDark
+      ? '0 8px 32px 0 rgba(0,0,0,0.2)'
+      : '0 4px 20px 0 rgba(15,23,42,0.08)',
+    tagBg: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.07)',
+    tagColor: isDark ? 'rgba(255,255,255,0.7)' : '#475569',
+    subText: isDark ? 'rgba(255,255,255,0.6)' : '#64748b',
+    divider: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.1)',
+    statBg: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.05)',
+    statBorder: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.1)',
+    statLabel: isDark ? 'rgba(255,255,255,0.55)' : '#64748b',
+    statValue: isDark ? '#ffffff' : '#0f172a',
+  }
 
   const formattedPrice = data.price.toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -40,15 +72,15 @@ export default function StockCard({ data }: { data: StockData }) {
   return (
     <div
       style={{
-        background: 'rgba(255, 255, 255, 0.03)',
+        background: t.cardBg,
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
-        color: '#ffffff',
+        color: t.cardText,
         borderRadius: '12px',
         padding: '16px 20px',
         margin: '12px 0',
-        boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.2)',
-        border: `1px solid ${isPositive ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+        boxShadow: t.cardShadow,
+        border: `1px solid ${t.cardBorder}`,
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}
     >
@@ -56,22 +88,24 @@ export default function StockCard({ data }: { data: StockData }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 800, letterSpacing: '-0.3px' }}>{data.symbol}</h3>
+            <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 800, letterSpacing: '-0.3px', color: t.cardText }}>
+              {data.symbol}
+            </h3>
             <span
               style={{
                 fontSize: '11px',
                 fontWeight: 700,
                 padding: '2px 6px',
                 borderRadius: '4px',
-                background: 'rgba(255, 255, 255, 0.08)',
-                color: 'rgba(255, 255, 255, 0.7)',
-                textTransform: 'uppercase',
+                background: t.tagBg,
+                color: t.tagColor,
+                textTransform: 'none',
               }}
             >
               {currency}
             </span>
           </div>
-          <p style={{ margin: '2px 0 0', fontSize: '13px', opacity: 0.7, fontWeight: 500 }}>{data.name}</p>
+          <p style={{ margin: '2px 0 0', fontSize: '13px', color: t.subText, fontWeight: 500 }}>{data.name}</p>
         </div>
 
         {/* Change Badge */}
@@ -95,9 +129,9 @@ export default function StockCard({ data }: { data: StockData }) {
       </div>
 
       {/* Main Price */}
-      <div style={{ marginBottom: '14px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', paddingBottom: '12px' }}>
+      <div style={{ marginBottom: '14px', borderBottom: `1px solid ${t.divider}`, paddingBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-          <span style={{ fontSize: '36px', fontWeight: 800, letterSpacing: '-1px' }}>
+          <span style={{ fontSize: '36px', fontWeight: 800, letterSpacing: '-1px', color: t.cardText }}>
             {currencySymbol}{formattedPrice}
           </span>
         </div>
@@ -105,28 +139,28 @@ export default function StockCard({ data }: { data: StockData }) {
 
       {/* Stats Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
-        <div style={{ background: 'rgba(255, 255, 255, 0.04)', borderRadius: '8px', padding: '8px 10px', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-          <p style={{ margin: 0, fontSize: '10px', opacity: 0.6, textTransform: 'uppercase' }}>Day High</p>
-          <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700 }}>
+        <div style={{ background: t.statBg, borderRadius: '8px', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
+          <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'none' }}>Day high</p>
+          <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700, color: t.statValue }}>
             {data.dayHigh ? `${currencySymbol}${data.dayHigh.toFixed(2)}` : 'N/A'}
           </p>
         </div>
 
-        <div style={{ background: 'rgba(255, 255, 255, 0.04)', borderRadius: '8px', padding: '8px 10px', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-          <p style={{ margin: 0, fontSize: '10px', opacity: 0.6, textTransform: 'uppercase' }}>Day Low</p>
-          <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700 }}>
+        <div style={{ background: t.statBg, borderRadius: '8px', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
+          <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'none' }}>Day low</p>
+          <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700, color: t.statValue }}>
             {data.dayLow ? `${currencySymbol}${data.dayLow.toFixed(2)}` : 'N/A'}
           </p>
         </div>
 
-        <div style={{ background: 'rgba(255, 255, 255, 0.04)', borderRadius: '8px', padding: '8px 10px', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-          <p style={{ margin: 0, fontSize: '10px', opacity: 0.6, textTransform: 'uppercase' }}>Mkt Cap</p>
-          <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700 }}>{formatLargeNum(data.marketCap)}</p>
+        <div style={{ background: t.statBg, borderRadius: '8px', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
+          <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'none' }}>Market cap</p>
+          <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700, color: t.statValue }}>{formatLargeNum(data.marketCap)}</p>
         </div>
 
-        <div style={{ background: 'rgba(255, 255, 255, 0.04)', borderRadius: '8px', padding: '8px 10px', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
-          <p style={{ margin: 0, fontSize: '10px', opacity: 0.6, textTransform: 'uppercase' }}>Volume</p>
-          <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700 }}>{formatLargeNum(data.volume)}</p>
+        <div style={{ background: t.statBg, borderRadius: '8px', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
+          <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'none' }}>Volume</p>
+          <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700, color: t.statValue }}>{formatLargeNum(data.volume)}</p>
         </div>
       </div>
     </div>

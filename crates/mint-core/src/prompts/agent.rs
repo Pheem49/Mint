@@ -1,14 +1,31 @@
 use super::persona;
 use crate::MintConfig;
 
-pub(crate) fn is_port_9222_open() -> bool {
-    use std::net::TcpStream;
+pub(crate) fn browser_endpoint_available(config: &MintConfig) -> bool {
+    use std::net::{TcpStream, ToSocketAddrs};
     use std::time::Duration;
-    if let Ok(addr) = "127.0.0.1:9222".parse() {
-        TcpStream::connect_timeout(&addr, Duration::from_millis(50)).is_ok()
-    } else {
-        false
-    }
+    let endpoint = config
+        .extra
+        .get("browserDebugUrl")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("http://127.0.0.1:9222/json/list");
+    let Ok(url) = reqwest::Url::parse(endpoint) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let Some(port) = url.port_or_known_default() else {
+        return false;
+    };
+    (host, port)
+        .to_socket_addrs()
+        .ok()
+        .is_some_and(|mut addresses| {
+            addresses.any(|address| {
+                TcpStream::connect_timeout(&address, Duration::from_millis(50)).is_ok()
+            })
+        })
 }
 
 pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
@@ -47,6 +64,9 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "mcp_list_tools",
     "browser_open",
     "browser_read",
+    "browser_observe",
+    "browser_wait",
+    "browser_scroll",
     "browser_mouse_move",
     "browser_screenshot",
     "run_shell",
@@ -145,15 +165,8 @@ pub fn build_system_prompt(
 ) -> String {
     let mut allowed_actions = base_allowed_actions();
 
-    if is_port_9222_open() {
-        allowed_actions.push("browser_open");
-        allowed_actions.push("browser_click");
-        allowed_actions.push("browser_type");
-        allowed_actions.push("browser_read");
-        allowed_actions.push("browser_mouse_move");
-        allowed_actions.push("browser_mouse_click");
-        allowed_actions.push("browser_key_press");
-        allowed_actions.push("browser_screenshot");
+    if browser_endpoint_available(config) {
+        allowed_actions.extend_from_slice(crate::browser::BROWSER_TOOLS);
     }
 
     if !config.avatar_token.is_empty() {
@@ -182,7 +195,7 @@ pub fn build_system_prompt(
             .push("- read_file: {\"path\":\"relative/path\",\"startLine\":1,\"endLine\":240} (if the file has more lines than the requested range, the result says so explicitly and tells you the exact startLine/endLine to use next — re-read with those before assuming you've seen the whole file)");
     }
     if allowed_actions.contains(&"search_code") {
-        input_formats.push("- search_code: {\"query\":\"text\",\"path\":\".\",\"limit\":20}");
+        input_formats.push("- search_code: {\"query\":\"text\",\"path\":\".\",\"limit\":20} (path MUST be \".\" or a sub-path of the workspace — never use home dir, username, or absolute paths outside the project)");
     }
     if allowed_actions.contains(&"symbols") {
         input_formats.push("- symbols: {\"path\":\".\",\"limit\":100}");
@@ -238,6 +251,9 @@ pub fn build_system_prompt(
     }
     if allowed_actions.contains(&"browser_open") {
         input_formats.push("- browser_open: {\"url\":\"https://example.com\"}");
+    }
+    if allowed_actions.contains(&"browser_observe") {
+        input_formats.push("- browser_observe: {textOffset?:number,elementOffset?:number,takeoverComplete?:boolean}; browser_tabs: {operation:list|open|select|close,tabId?:string,url?:string}; browser_fill: {elementRef?:string,selector?:string,text:string}; browser_select: {elementRef?:string,selector?:string,value:string}; browser_scroll: {elementRef?:string,selector?:string,x?:number,y?:number}; browser_wait: {condition:url|text|visible|hidden,value?:string,elementRef?:string,selector?:string,timeoutMs?:number}. browser_click/browser_type also accept elementRef instead of selector.");
     }
     if allowed_actions.contains(&"browser_click") {
         input_formats.push("- browser_click: {\"selector\":\"button.submit-btn\"} (CSS selector, or text=Login, contains=Submit, xpath=//button)");
@@ -430,7 +446,7 @@ pub fn build_system_prompt(
     if allowed_actions.contains(&"generate_video") {
         input_formats.push("- generate_video / veo.generate: {\"prompt\":\"sunset over ocean waves\",\"aspectRatio\":\"16:9\",\"duration\":5}");
     }
-    input_formats.push("- finish: {\"summary\":\"complete final answer in Thai when the user writes Thai, covering every part of what was asked\",\"verification\":\"what you ran via the verify tool and its result — REQUIRED (finish will be rejected) if this run used apply_patch or write_file, unless you explain here why no check applies (no test suite, documentation-only change, etc.)\"}");
+    input_formats.push("- finish: {\"summary\":\"complete final answer in the user's language, covering every part of what was asked\",\"verification\":\"what you ran via the verify tool and its result — REQUIRED (finish will be rejected) if this run used apply_patch or write_file, unless you explain here why no check applies (no test suite, documentation-only change, etc.)\"}");
 
     let input_formats_str = input_formats.join("\n");
 
@@ -463,6 +479,9 @@ pub fn build_system_prompt(
         );
         rules.push(
             "2a. BOUND INVESTIGATION: Keep investigations concise and targeted. Do NOT recursively read dozens of source files across directories. After 2-4 read/search inspection calls, synthesize your findings and present your answer or plan. Do NOT get trapped in endless exploratory reading.",
+        );
+        rules.push(
+            "2b. SEARCH PATH SCOPE: For search_code, always use \".\" or a specific sub-directory of the current workspace as the path. NEVER use a home directory, username path, or any path outside the project root — doing so scans thousands of unrelated files and spikes CPU.",
         );
     }
     if allowed_actions.contains(&"apply_patch") && allowed_actions.contains(&"write_file") {
@@ -527,6 +546,9 @@ pub fn build_system_prompt(
     if allowed_actions.contains(&"browser_screenshot") {
         rules.push("7h. Use browser_screenshot to capture the current page as a PNG image (base64). Use it to inspect the visual state of the page before deciding where to click.");
     }
+    if allowed_actions.contains(&"browser_observe") {
+        rules.push("7i. Browser workflow: browser_observe -> action -> inspect the returned observation -> verify the expected result with browser_wait. Each run starts in its own tab. Use browser_tabs to list/open/select/close tabs; select new popup tabs explicitly. Prefer elementRef from the most recent observation over guessing selectors. Old refs expire after observation refresh, navigation, removed nodes, or tab selection. browser_fill replaces text; browser_type appends. browser_select handles native dropdowns; browser_scroll scrolls the viewport or a target. browser_wait accepts condition url/text/visible/hidden, value or target, and timeoutMs (default 10000, maximum 30000). Observations support textOffset and elementOffset pagination. Coordinate actions require a screenshot of the selected tab within 30 seconds. Never retry an ambiguous click or submission automatically; observe and check the result first. input_dispatched is not task completion. Cite observed URL/text/field evidence in finish.verification, or say the task is unverified/blocked. If blocked by login, CAPTCHA, or repeated lack of progress, ask_user for manual takeover; only after user confirmation call browser_observe with takeoverComplete=true.");
+    }
     if allowed_actions.contains(&"memory_recall") {
         rules.push("8. Use memory_recall to search past interactions before asking the user to repeat context.");
     }
@@ -553,14 +575,21 @@ pub fn build_system_prompt(
         rules.push(&pin_rule);
     }
     if native {
-        rules.push("11. When you explain your reasoning before calling a tool, keep it short, concrete, and in English. Give your final answer in Thai when the task is written in Thai.");
+        rules.push("11. When you call tools, you may include a brief 1-line progress note in the user's language explaining what you are about to do next. Do not repeat greetings in intermediate notes before tool calls — state your immediate action directly. Give your final answer in the language the user uses or explicitly requests. When work is complete, call the finish tool and put the entire final answer in its summary field; do not return a plain-text final answer.");
     } else {
-        rules.push("11. Keep thought short and concrete. Write the thought field in English at all times. Use Thai for the final summary when the task is written in Thai.");
+        rules.push("11. Keep thought short and concrete (1-2 sentences). DO NOT repeat greetings in the thought field — state your immediate action directly. Use the user's language for the thought and final summary, unless they explicitly request another language.");
     }
     rules.push("11a. The final summary must be complete, not just concise. Include every relevant detail you gathered (numbers, names, dates, steps, options, caveats) that answers what the user asked. If the user asked multiple things, address all of them. Only cut filler and repetition, never cut substance. Never truncate a list or explanation just to keep the reply short.");
     rules.push("11b. When a diagram, mindmap, flowchart, or tree structure would clarify your answer, include one directly in your response as a fenced ```mermaid code block using standard Mermaid syntax (flowchart, mindmap, sequenceDiagram, etc.) — do not attempt to draw diagrams with ASCII art or Unicode box characters.");
+    rules.push("11c. For rich presentation in your final answers, leverage UI blocks and callouts when helpful: \
+- Comparison / Multi-choice: use fenced ```ui-grid with JSON array:\n```ui-grid\n[{\"icon\": \"message-square\", \"title\": \"...\", \"desc\": \"...\", \"badge\": \"...\"}]\n```\n\
+Each ui-grid array item must be one complete JSON object; keep every field (including badge) inside that item's braces, and validate the JSON before closing the code fence.\n\
+For every JSON-backed card, ensure all properties stay inside their intended object and validate the JSON syntax before closing the code fence.\n\
+- Feature showcases: use fenced ```ui-card with JSON array:\n```ui-card\n[{\"title\": \"...\", \"subtitle\": \"...\", \"icon\": \"file-text\", \"badge\": \"...\", \"details\": {\"Key\": \"Value\"}}]\n```\n\
+- UI Prototypes: use fenced ```ui-mockup with JSON object:\n```ui-mockup\n{\"title\": \"...\", \"subtitle\": \"...\", \"dropzoneText\": \"...\", \"metrics\": {...}}\n```\n\
+- Key insights / alerts: use GitHub callouts (> [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING]). Always converse naturally and smoothly; never prefix conversational phrases or greetings with artificial status tags or badge pills. Always put opening and closing ``` fences on their own separate lines.");
     if native {
-        rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done — reply with your final answer directly, with no further tool call.");
+        rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the finish tool immediately.");
     } else {
         rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately.");
     }
@@ -571,27 +600,27 @@ pub fn build_system_prompt(
 
     let mut prompt = if native {
         format!(
-            "You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.\n\
+            "You are Mint Agent, a pragmatic AI coding agent working in a local workspace. Help with non-coding requests too when your available tools support them.\n\
              You are also Mint: {persona} Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision.\n\
-             Follow an inspect -> act -> verify loop using the tools available to you. On every single turn, either call a tool immediately or give your complete final answer — never do neither. \
-             Do not narrate or announce a tool call in plain text (e.g. \"I will now check the file\") — call the tool itself, in the same turn, instead. \
-             Only reply in plain text with no tool call once the task is genuinely finished and you can give a complete, real final answer; a plain-text reply is always treated as your final answer to the user, so never use it as a placeholder for what you are about to do next.\n\n\
+             Follow an inspect -> act -> verify loop using the tools available to you. On every single turn, call a tool immediately; when the task is complete, call the finish tool with the complete final answer. \
+             When calling tools, you may include a brief 1-line progress note in the user's language explaining what you are about to do next. Do not repeat greetings in intermediate notes — state your immediate action directly. Never output a progress note without calling the tool in the same turn. \
+             Use finish only when the task is genuinely finished. Put all user-facing final text in finish.summary; never return a plain-text final answer.\n\n\
              Rules:\n\
              {rules}",
-            persona = persona::PERSONA_TH,
+            persona = persona::PERSONA,
             rules = rules_str
         )
     } else {
         format!(
-            "You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.\n\
-             You are also Mint: {persona} Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision. Write the \"thought\" field in English at all times (never use Thai for the thought field).\n\
+            "You are Mint Agent, a pragmatic AI coding agent working in a local workspace. Help with non-coding requests too when your available tools support them.\n\
+             You are also Mint: {persona} Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision.\n\
              Follow an inspect -> act -> verify loop. Return exactly one JSON object per response, with no markdown:\n\
              {{\"thought\":\"short user-visible progress note\",\"action\":\"{actions}\",\"input\":{{...}}}}\n\n\
              Input formats:\n\
              {inputs}\n\n\
              Rules:\n\
              {rules}",
-            persona = persona::PERSONA_TH,
+            persona = persona::PERSONA,
             actions = actions_str,
             inputs = input_formats_str,
             rules = rules_str

@@ -1,0 +1,318 @@
+/**
+ * shared/theme/tokens.css
+ * Single Source of Truth for Mint GUI Design Tokens.
+ * 3-Tier Architecture: Primitives -> Semantic Tokens -> Component Styles / Legacy Aliases.
+ */
+
+/* ==========================================================================
+   Level 1: Primitives (Raw Color Scales & Base Constants)
+   ========================================================================== */
+
+:root {
+  /* Slate Primitive Scale (Neutral) */
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #0f172a;
+  --slate-950: #020617;
+
+  /* Zinc / Pure Dark Scale */
+  --zinc-900: #18181b;
+  --zinc-950: #09090b;
+  --pure-black: #000000;
+  --pure-white: #ffffff;
+
+  /* Mint Primitive Scale (Core Brand) */
+  --mint-50: #ecfdf5;
+  --mint-100: #d1fae5;
+  --mint-200: #a7f3d0;
+  --mint-300: #6ee7b7;
+  --mint-400: #34d399;
+  --mint-500: #10b981;
+  --mint-600: #059669;
+  --mint-700: #047857;
+  --mint-800: #065f46;
+  --mint-900: #064e3b;
+  --mint-950: #022c22;
+
+  /* Accent Flavors */
+  --flavor-mint: #10b981;
+  --flavor-cyan: #06b6d4;
+  --flavor-indigo: #6366f1;
+  --flavor-amber: #f59e0b;
+  --flavor-rose: #f43f5e;
+  --flavor-monochrome: #ffffff;
+
+  /* Functional Status Colors */
+  --status-success: #10b981;
+  --status-warning: #f59e0b;
+  --status-error: #ef4444;
+  --status-info: #0284c7;
+
+  /* Base Radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-full: 9999px;
+
+  /* Default Accent (Mint) */
+  --accent-default: var(--mint-500);
+  --accent-hover: #34d399;
+  --accent-subtle: rgba(16, 185, 129, 0.12);
+  --accent-glow: rgba(16, 185, 129, 0.35);
+  --accent-border: rgba(16, 185, 129, 0.3);
+  --text-on-accent: #ffffff;
+
+  /* Glow presets */
+  --glow-accent-xs: 0 2px 8px color-mix(in srgb, var(--accent-default) 15%, transparent);
+  --glow-accent-sm: 0 4px 14px color-mix(in srgb, var(--accent-default) 22%, transparent);
+  --glow-accent-md: 0 6px 18px color-mix(in srgb, var(--accent-default) 28%, transparent);
+}
+
+/* ==========================================================================
+   Level 2: Semantic Tokens by Theme
+   ========================================================================== */
+
+/* ── Dark Theme (Default) ───────────────────────────────────────────────── */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg-canvas: #0a0a0c;
+  --bg-surface: rgba(24, 24, 27, 0.76);
+  --bg-surface-raised: #18181b;
+  --bg-surface-soft: rgba(255, 255, 255, 0.045);
+  --bg-surface-hover: rgba(255, 255, 255, 0.075);
+  --bg-overlay: #111113; /* Solid opaque modal/dialog surface */
+  --bg-input: rgba(255, 255, 255, 0.05);
+  --bg-input-focus: rgba(255, 255, 255, 0.09);
+
+  /* Typography */
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-disabled: #64748b;
+  --text-main: #f8fafc;
+  --text-soft: #cbd5e1;
+  --text-chat: #f8fafc;
+  --placeholder: #94a3b8;
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.22);
+  --border-focus: var(--accent-default);
+
+  /* Shadows */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.6);
+
+  /* Glass Blur */
+  --glass-blur: blur(16px);
+
+  /* Code Syntax Highlighting Tokens */
+  --syntax-string: #34d399;
+  --syntax-flag: #fbbf24;
+  --syntax-comment: #94a3b8;
+  --syntax-number: #fb923c;
+  --syntax-variable: #f472b6;
+  --syntax-property: #60a5fa;
+  --syntax-function: #38bdf8;
+  --syntax-type: #a78bfa;
+  --syntax-boolean: #fb7185;
+  --syntax-operator: #cbd5e1;
+  --syntax-punctuation: #cbd5e1;
+}
+
+/* ── Light Theme (Clean, Crisp, High-Contrast & Comfortable Clarity) ─────── */
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surfaces: Soft neutral canvas + crisp white cards for depth & eye comfort */
+  --bg-canvas: #f0f2f5;
+  --bg-surface: #ffffff;
+  --bg-surface-raised: #ffffff;
+  --bg-surface-soft: #f8fafc;
+  --bg-surface-hover: #f1f5f9;
+  --bg-overlay: #ffffff; /* 100% Solid Opaque White - NO bleed-through! */
+  --bg-input: #ffffff;
+  --bg-input-focus: #ffffff;
+
+  /* Typography: Rich slate darks for crisp readability, eliminating faded text */
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --text-disabled: #94a3b8;
+  --text-main: #0f172a;
+  --text-soft: #334155;
+  --text-chat: #0f172a;
+  --placeholder: #94a3b8;
+
+  /* Borders: Visible, refined boundaries between components */
+  --border-subtle: rgba(15, 23, 42, 0.08);
+  --border-default: rgba(15, 23, 42, 0.14);
+  --border-strong: rgba(15, 23, 42, 0.24);
+  --border-focus: var(--accent-default);
+
+  /* Shadows: Soft natural elevation */
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 20px 48px rgba(15, 23, 42, 0.14), 0 8px 20px rgba(15, 23, 42, 0.06);
+
+  /* Glass Blur */
+  --glass-blur: blur(16px);
+
+  /* Code Syntax Highlighting Tokens */
+  --syntax-string: #047857;
+  --syntax-flag: #b45309;
+  --syntax-comment: #64748b;
+  --syntax-number: #c2410c;
+  --syntax-variable: #be185d;
+  --syntax-property: #1d4ed8;
+  --syntax-function: #0284c7;
+  --syntax-type: #6d28d9;
+  --syntax-boolean: #e11d48;
+  --syntax-operator: #475569;
+  --syntax-punctuation: #475569;
+}
+
+/* ── Midnight Theme (OLED Deep Pure Black) ───────────────────────────────── */
+[data-theme="midnight"] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg-canvas: #000000;
+  --bg-surface: #050508;
+  --bg-surface-raised: #0d0d12;
+  --bg-surface-soft: #121218;
+  --bg-surface-hover: #1a1a22;
+  --bg-overlay: #050508;
+  --bg-input: #0a0a0e;
+  --bg-input-focus: #121218;
+
+  /* Typography */
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #71717a;
+  --text-disabled: #52525b;
+  --text-main: #f8fafc;
+  --text-soft: #cbd5e1;
+  --text-chat: #f8fafc;
+  --placeholder: #71717a;
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --border-focus: var(--accent-default);
+
+  /* Shadows */
+  --shadow-sm: none;
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.8);
+  --shadow-lg: 0 24px 72px rgba(0, 0, 0, 0.95);
+
+  --glass-blur: none;
+
+  /* Code Syntax Highlighting Tokens */
+  --syntax-string: #34d399;
+  --syntax-flag: #fbbf24;
+  --syntax-comment: #71717a;
+  --syntax-number: #fb923c;
+  --syntax-variable: #f472b6;
+  --syntax-property: #60a5fa;
+  --syntax-function: #38bdf8;
+  --syntax-type: #a78bfa;
+  --syntax-boolean: #fb7185;
+  --syntax-operator: #a1a1aa;
+  --syntax-punctuation: #a1a1aa;
+}
+
+/* ── Surface Style Modes ─────────────────────────────────────────────────── */
+[data-surface="opaque"] {
+  --glass-blur: none !important;
+  --bg-surface: #121215;
+  --bg-surface-raised: #18181c;
+  --bg-surface-soft: #1b1b20;
+  --bg-surface-hover: #25252b;
+}
+
+[data-theme="light"][data-surface="opaque"] {
+  --bg-surface: #ffffff;
+  --bg-surface-raised: #ffffff;
+  --bg-surface-soft: #f8fafc;
+  --bg-surface-hover: #f1f5f9;
+}
+
+[data-theme="midnight"][data-surface="opaque"] {
+  --bg-surface: #050508;
+  --bg-surface-raised: #0d0d12;
+  --bg-surface-soft: #121218;
+  --bg-surface-hover: #1a1a22;
+}
+
+[data-surface="glass"] {
+  --glass-blur: blur(16px);
+}
+
+.chat-callout-card {
+  background: var(--callout-tint);
+}
+
+[data-surface="opaque"] .chat-callout-card {
+  background: color-mix(in srgb, var(--bg-surface) 92%, var(--callout-accent) 8%);
+}
+
+/* ==========================================================================
+   Level 3: Backwards Compatibility Aliases
+   (Ensures every existing component and stylesheet keeps working seamlessly)
+   ========================================================================== */
+
+:root,
+[data-theme="dark"],
+[data-theme="light"],
+[data-theme="midnight"] {
+  --bg-color: var(--bg-canvas);
+  --bg-gradient: var(--bg-canvas);
+  --panel-bg: var(--bg-surface);
+  --panel-raised: var(--bg-surface-raised);
+  --panel-soft: var(--bg-surface-soft);
+  --chrome-bg: var(--bg-surface);
+  --surface-bg: var(--bg-surface);
+  --surface-strong: var(--bg-surface-soft);
+  --surface-hover: var(--bg-surface-hover);
+  --input-bg: var(--bg-input);
+  --input-focus-bg: var(--bg-input-focus);
+  --text-main: var(--text-primary);
+  --text-soft: var(--text-secondary);
+  --text-chat: var(--text-primary);
+  --placeholder: var(--text-muted);
+  --border: var(--border-subtle);
+  --border-light: var(--border-subtle);
+  --border-strong: var(--border-default);
+  --shadow: var(--shadow-lg);
+
+  --accent: var(--accent-default);
+  --accent-contrast: var(--text-on-accent);
+  /* Accent is a surface color; interactive text needs its own semantic role. */
+  --interactive-fg: var(--accent);
+  --interactive-fg-hover: var(--accent-hover);
+  --danger: var(--status-error);
+}
+
+/* Pure white remains the primary surface for Dark Monochrome. Its text and
+ * icon affordances use zinc so they stay legible on light selected states. */
+:root[data-accent-mode="monochrome"] {
+  --interactive-fg: #71717a;
+  --interactive-fg-hover: #d4d4d8;
+}

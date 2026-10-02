@@ -222,37 +222,9 @@ pub(super) fn print_table_block(table_lines: &[String], is_first: &mut bool) {
     }
 }
 
-pub(super) fn should_show_verification(verification: &str) -> bool {
-    let normalized = verification.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        return false;
-    }
-    if normalized.starts_with("information retrieved from web search")
-        || normalized.starts_with("successfully ran background command")
-        || normalized.starts_with("opened ")
-        || normalized.contains("background command to open")
-        || normalized.contains("web search results")
-    {
-        return false;
-    }
-    !matches!(
-        normalized.as_str(),
-        "not run"
-            | "not run."
-            | "no checks run"
-            | "no checks run."
-            | "no technical task requested"
-            | "no technical task requested."
-            | "no technical task requested, just a greeting."
-            | "not required"
-            | "not required."
-            | "none"
-            | "n/a"
-    )
-}
-
 #[derive(Debug, Default)]
 pub(super) struct LiveStatus {
+    pub(super) tui: Option<crate::interactive::TuiHandle>,
     pub(super) thinking: Option<String>,
     /// Context-window usage (0-100) as of the last completed step —
     /// mirrored here (not just built into `thinking`'s label text) so the
@@ -305,6 +277,9 @@ pub(super) struct LiveStatus {
     pub(super) committed_activities: usize,
     pub(super) committed_tasks: usize,
     pub(super) spinner_tick: usize,
+    /// When the currently running tool began executing — used to animate an
+    /// inline spinner and elapsed timer directly on the active tool line.
+    pub(super) active_tool_started: Option<Instant>,
     /// Sources collected from web_search ToolEnd results (title, url)
     pub(super) web_sources: Vec<(String, String)>,
     pub(super) inline_tui: InlineTui,
@@ -562,13 +537,6 @@ pub(super) fn strip_ansi_escapes(s: &str) -> String {
     result
 }
 
-pub(super) fn is_thai_combining(c: char) -> bool {
-    matches!(c,
-        '\u{0e31}' | '\u{0e34}'..='\u{0e37}' | '\u{0e38}'..='\u{0e39}' |
-        '\u{0e47}'..='\u{0e4e}'
-    )
-}
-
 pub(super) fn apply_wave_effect(text: &str, tick: usize) -> String {
     let (label, metadata) = if let Some(idx) = text.rfind(" • Esc to interrupt)") {
         if let Some(open_paren_idx) = text[..idx].rfind('(') {
@@ -606,33 +574,10 @@ pub(super) fn apply_wave_effect(text: &str, tick: usize) -> String {
         let x = (i as f32 * 0.4) - phase;
         let t = (x.sin() + 1.0) / 2.0; // Oscillates in [0.0, 1.0]
 
-        // Stop colors: Dim Gray (70, 70, 70) -> Mint Green (105, 230, 166) -> Cyan (78, 201, 216)
-        let (r, g, b) = if t < 0.3 {
-            let local_t = t / 0.3;
-            let r = 70.0 + (105.0 - 70.0) * local_t;
-            let g = 70.0 + (230.0 - 70.0) * local_t;
-            let b = 70.0 + (166.0 - 70.0) * local_t;
-            (r, g, b)
-        } else if t < 0.7 {
-            let local_t = (t - 0.3) / 0.4;
-            let r = 105.0 + (78.0 - 105.0) * local_t;
-            let g = 230.0 + (201.0 - 230.0) * local_t;
-            let b = 166.0 + (216.0 - 166.0) * local_t;
-            (r, g, b)
-        } else {
-            let local_t = (t - 0.7) / 0.3;
-            let r = 78.0 + (70.0 - 78.0) * local_t;
-            let g = 201.0 + (70.0 - 201.0) * local_t;
-            let b = 216.0 + (70.0 - 216.0) * local_t;
-            (r, g, b)
-        };
-
+        let emphasis = if t > 0.72 { BOLD } else { "" };
         animated_label.push_str(&format!(
-            "\x1b[1m\x1b[38;2;{};{};{}m{}\x1b[0m",
-            r.round() as u8,
-            g.round() as u8,
-            b.round() as u8,
-            c
+            "{emphasis}{}{c}{RESET}",
+            crate::terminal_theme::ANSI_ACCENT
         ));
     }
 
@@ -715,7 +660,10 @@ pub(super) fn compose_queue_box(
     (lines, cursor_x, cursor_y)
 }
 
-pub(super) fn render_live_status(status: &mut LiveStatus) {
+/// Renders the live viewport and reports whether a terminal was available to
+/// draw it. Callers use the result to fall back to plain output when Mint is
+/// run without an interactive terminal.
+pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
     let mut lines = Vec::new();
     let explored_start = status.committed_explored.min(status.explored.len());
     let activities_start = status.committed_activities.min(status.activities.len());
@@ -735,6 +683,12 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
         &status.explored[explored_start..],
         true,
         tick,
+        status.active_tool_started,
+        // The full-screen TUI shows only the last eight live rows. A shell
+        // output preview can otherwise push the activity header and command
+        // labels out of view while the model is composing its next answer.
+        // Keep the preview in `status.tasks` for the committed transcript.
+        status.tui.is_none(),
     ));
     // Built here (not inline below) so both destinations for it — the old
     // trailing-line spot in `lines`, and the queue box's own pinned row —
@@ -831,18 +785,23 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
         }
     }
 
+    if let Some(tui) = &status.tui {
+        tui.set_status(lines.iter().map(|line| strip_ansi_escapes(line)).collect());
+        return true;
+    }
+
     if lines.is_empty() && box_lines.is_empty() {
         status.inline_tui.teardown();
-        return;
+        return false;
     }
 
     let Ok(terminal) = status.inline_tui.ensure() else {
-        return;
+        return false;
     };
     // `draw()` itself only queries the cursor position on the rare path
     // where it detects the terminal window was actually resized since the
     // last frame — bracket it too, defensively, for that case.
-    let _ = with_raw_mode_for_cursor_query(|| {
+    with_raw_mode_for_cursor_query(|| {
         terminal.draw(|frame| {
             let area = frame.area();
             // The box (the "Ask anything..." input) claims its own rows
@@ -856,7 +815,7 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
             let box_height = (box_lines.len() as u16).min(area.height);
             let available_for_status = area.height.saturating_sub(box_height);
 
-            let mut status_line_count: u16 = 0;
+            let mut status_height: u16 = 0;
             let mut status_paragraph = None;
             if !lines.is_empty()
                 && let Ok(status_text) = lines.join("\n").into_text()
@@ -874,17 +833,18 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
                 // bottom of the frame. (`Paragraph::line_count` would do this
                 // exactly, but it's gated behind an unstable ratatui feature.)
                 let wrap_width = area.width.max(1);
-                status_line_count = status_text
+                let status_line_count: u16 = status_text
                     .lines
                     .iter()
                     .map(|line| (line.width().max(1) as u16).div_ceil(wrap_width))
                     .sum();
+                status_height = status_line_count.min(available_for_status);
                 status_paragraph = Some(
                     ratatui::widgets::Paragraph::new(status_text)
-                        .wrap(ratatui::widgets::Wrap { trim: false }),
+                        .wrap(ratatui::widgets::Wrap { trim: false })
+                        .scroll((status_line_count.saturating_sub(status_height), 0)),
                 );
             }
-            let status_height = status_line_count.min(available_for_status);
             let status_area = ratatui::layout::Rect {
                 height: status_height,
                 ..area
@@ -909,13 +869,24 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
                 ));
             }
         })
-    });
+    })
+    .is_ok()
 }
 
 /// Freezes any in-flight activity into scrollback. Returns whether it
 /// actually committed anything — callers that print their own leading blank
 /// line right after (e.g. the final answer) use this to skip it when this
 /// already ended on one, instead of stacking two.
+pub(super) fn commit_activity_snapshot_if_idle(
+    status: &mut LiveStatus,
+    active_tools: usize,
+) -> bool {
+    if active_tools > 0 {
+        return false;
+    }
+    commit_activity_snapshot(status)
+}
+
 pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
     let explored_start = status.committed_explored.min(status.explored.len());
     let activities_start = status.committed_activities.min(status.activities.len());
@@ -927,16 +898,16 @@ pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
         &status.explored[explored_start..],
         false,
         0,
+        None,
+        true,
     );
     if lines.is_empty() {
         return false;
     }
 
     let (tw, _) = markdown::terminal_size_or_default();
-    let width = tw as usize;
-    lines.push(String::new());
-    lines.push(format!("{DIM}{}{RESET}", "─".repeat(width)));
-    lines.push(String::new());
+    let width = (tw as usize).saturating_sub(8).max(40);
+    lines.push(format!("{DIM}  {}{RESET}", "─".repeat(width)));
     insert_permanent_lines(status, &lines);
 
     status.committed_explored = status.explored.len();
@@ -945,19 +916,153 @@ pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
     true
 }
 
-pub(super) fn print_timeline_note(status: &mut LiveStatus, thought: &str) {
+#[cfg(test)]
+mod concurrent_activity_tests {
+    use super::*;
+
+    #[test]
+    fn unrelated_thought_keeps_in_flight_shell_activity_live() {
+        let mut status = LiveStatus::default();
+        status.tasks.push(TaskEntry {
+            label: "[run_shell] Running command: `sleep 1`...".to_owned(),
+            output: Vec::new(),
+        });
+
+        assert!(!commit_activity_snapshot_if_idle(&mut status, 1));
+        assert_eq!(status.committed_tasks, 0);
+        let live_lines = activity_block_lines(
+            &status.tasks[status.committed_tasks..],
+            &[],
+            &[],
+            true,
+            0,
+            Some(Instant::now()),
+            true,
+        );
+        assert!(
+            live_lines
+                .iter()
+                .any(|line| line.contains("Running 1 shell command"))
+        );
+        assert!(live_lines.iter().any(|line| line.contains("sleep 1")));
+    }
+}
+
+#[cfg(test)]
+mod compact_tui_status_tests {
+    use super::*;
+
+    #[test]
+    fn completed_shell_output_does_not_push_command_labels_out_of_live_view() {
+        let tasks = vec![
+            TaskEntry {
+                label: "[run_shell] Running command: `time sleep 10`...".into(),
+                output: Vec::new(),
+            },
+            TaskEntry {
+                label: "Finished command: `time sleep 10`".into(),
+                output: vec![
+                    "stdout:".into(),
+                    "stderr:".into(),
+                    "real 0m10.002s".into(),
+                    "user 0m0.002s".into(),
+                    "sys 0m0.002s".into(),
+                ],
+            },
+        ];
+        let mut lines = activity_block_lines(&tasks, &[], &[], true, 0, None, false);
+        lines.push("  Herding...".into());
+        let visible = &lines[lines.len().saturating_sub(8)..];
+        assert!(
+            visible
+                .iter()
+                .any(|line| line.contains("Running 1 shell command"))
+        );
+        assert!(visible.iter().any(|line| line.contains("[run_shell]")));
+        assert!(visible.iter().any(|line| line.contains("Finished command")));
+        assert!(!visible.iter().any(|line| line.contains("real 0m10.002s")));
+        let committed = activity_block_lines(&tasks, &[], &[], false, 0, None, true);
+        assert!(committed.iter().any(|line| line.contains("real 0m10.002s")));
+    }
+}
+
+pub(super) fn is_internal_cot(text: &str) -> bool {
+    mint_core::orchestration::is_internal_cot(text)
+}
+
+pub(super) fn print_timeline_note(
+    status: &mut LiveStatus,
+    thought: &str,
+    elapsed: Duration,
+    stream_id: Option<&str>,
+) {
     let thought = thought.trim();
     if thought.is_empty() {
         return;
     }
-    let (tw, _) = markdown::terminal_size_or_default();
-    let width = tw as usize;
-    let options = textwrap::Options::new(width)
-        .initial_indent("  • ")
-        .subsequent_indent("    ")
-        .break_words(true);
-    let wrapped = textwrap::fill(thought, &options);
-    insert_permanent_lines(status, &[wrapped]);
+    let elapsed_str = crate::interactive::format_thought_elapsed(elapsed);
+    crate::interactive::finish_thought(stream_id, thought, &elapsed_str);
+
+    if is_internal_cot(thought) {
+        let summary = format!(
+            "{muted}  • Thought for {elapsed_str}{reset} {muted}(Ctrl+T to view){reset}",
+            muted = crate::terminal_theme::ANSI_MUTED,
+            reset = crate::terminal_theme::ANSI_RESET
+        );
+        insert_permanent_lines(status, &[summary]);
+    } else {
+        let clean_note = thought
+            .strip_prefix("•")
+            .or_else(|| thought.strip_prefix("-"))
+            .unwrap_or(thought)
+            .trim();
+        let clean_note = strip_intermediate_greeting(clean_note);
+        let (tw, _) = markdown::terminal_size_or_default();
+        let width = (tw as usize).saturating_sub(2).max(20);
+        let options = textwrap::Options::new(width)
+            .initial_indent("  ")
+            .subsequent_indent("  ")
+            .break_words(true);
+        let wrapped = textwrap::fill(clean_note, &options);
+        let formatted = format!("{WHITE}{wrapped}{RESET}");
+        insert_permanent_lines(status, &[formatted]);
+    }
+}
+
+fn strip_intermediate_greeting(text: &str) -> &str {
+    let mut s = text.trim();
+    for prefix in &[
+        "สวัสดีค่ะ",
+        "สวัสดีครับ",
+        "หวัดดีค่ะ",
+        "หวัดดีครับ",
+        "สวัสดี",
+        "Hello",
+        "Hi",
+        "Hey",
+    ] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            s = rest.trim_start();
+            break;
+        }
+    }
+    if let Some(rest) = s.strip_prefix("พี่") {
+        if let Some(space_idx) = rest.find(' ') {
+            s = rest[space_idx..].trim_start();
+        }
+    } else if let Some(rest) = s.strip_prefix("คุณ") {
+        if let Some(space_idx) = rest.find(' ') {
+            s = rest[space_idx..].trim_start();
+        }
+    }
+    for emoji in &["🌿", "🍃", "✨", "🌱"] {
+        if let Some(rest) = s.strip_prefix(emoji) {
+            s = rest.trim_start();
+        }
+    }
+    let trimmed =
+        s.trim_start_matches(|c: char| c == ',' || c == '-' || c == '—' || c == ' ' || c == '•');
+    if trimmed.is_empty() { text } else { trimmed }
 }
 
 /// Inserts already ANSI-formatted `lines` as permanent content above the
@@ -979,6 +1084,10 @@ pub(super) fn print_timeline_note(status: &mut LiveStatus, thought: &str) {
 /// Falls back to plain `println!` if no inline terminal is currently live
 /// (e.g. committing before anything has rendered yet this turn).
 pub(super) fn insert_permanent_lines(status: &mut LiveStatus, lines: &[String]) {
+    if let Some(tui) = &status.tui {
+        tui.push_notice(lines.join("\n"));
+        return;
+    }
     let Some(terminal) = status.inline_tui.terminal.as_mut() else {
         // Defensive, same reasoning as `approve_cb`/`on_chunk`: this is a
         // plain `println!`, so it needs cooked mode regardless of whether
@@ -991,37 +1100,29 @@ pub(super) fn insert_permanent_lines(status: &mut LiveStatus, lines: &[String]) 
         return;
     };
 
-    let (tw, _) = markdown::terminal_size_or_default();
-    let width = tw as usize;
-    let mut height: u16 = 0;
-    for line in lines {
-        let stripped = strip_ansi_escapes(line);
-        let line_len = stripped.chars().filter(|&c| !is_thai_combining(c)).count();
-        let physical_lines = if width > 0 {
-            line_len.div_ceil(width)
-        } else {
-            1
-        }
-        .max(1);
-        height = height.saturating_add(physical_lines as u16);
-    }
-
     let Ok(text) = lines.join("\n").into_text() else {
         return;
     };
+    let (width, _) = markdown::terminal_size_or_default();
+    let height = wrapped_text_height(&text, width);
     let _ = terminal.insert_before(height, |buf| {
         use ratatui::widgets::Widget as _;
-        // `height` above is computed assuming lines longer than the
-        // terminal width wrap onto extra rows; without `.wrap(...)` here
-        // the `Paragraph` instead clips each source line to a single row,
-        // so a long committed line (e.g. a full shell command) reserved
-        // more rows than it painted — leaving stray blank rows behind in
-        // the scrollback. Wrapping keeps what's actually drawn in sync
-        // with what was reserved.
+        // Measure and render with the same Paragraph/Wrap implementation.
+        // Counting Rust chars here under-reserved rows for wide Unicode,
+        // emoji, ANSI-styled spans, and word-boundary wrapping, clipping the
+        // tail of otherwise complete assistant responses in scrollback.
         ratatui::widgets::Paragraph::new(text)
             .wrap(ratatui::widgets::Wrap { trim: false })
             .render(buf.area, buf);
     });
+}
+
+fn wrapped_text_height(text: &ratatui::text::Text<'_>, width: u16) -> u16 {
+    ratatui::widgets::Paragraph::new(text.clone())
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .line_count(width)
+        .max(1)
+        .min(u16::MAX as usize) as u16
 }
 
 /// Tears down the shared inline `ratatui` terminal (if one is currently
@@ -1033,6 +1134,10 @@ pub(super) fn insert_permanent_lines(status: &mut LiveStatus, lines: &[String]) 
 /// `render_live_status` call reconstructs it fresh, re-querying the
 /// terminal for where the cursor actually is now.
 pub(super) fn clear_live_status(status: &mut LiveStatus) {
+    if let Some(tui) = &status.tui {
+        tui.clear_status();
+        return;
+    }
     if status.inline_tui.terminal.is_none() {
         clear_working_status();
         return;
@@ -1092,7 +1197,46 @@ pub(super) fn activity_summary_line(
     let web_count = activities.len();
     let shell_count = tasks
         .iter()
-        .filter(|t| t.label.starts_with("[run_shell]"))
+        .filter(|t| {
+            t.label.starts_with("[run_shell]")
+                || t.label.starts_with("[shell_output]")
+                || t.label.starts_with("[kill_shell]")
+        })
+        .count();
+    let edit_count = tasks
+        .iter()
+        .filter(|t| {
+            t.label.starts_with("[write_file]")
+                || t.label.starts_with("[apply_patch]")
+                || t.label.starts_with("[note_write]")
+        })
+        .count();
+    let git_count = tasks
+        .iter()
+        .filter(|t| t.label.starts_with("[git_"))
+        .count();
+    let subagent_count = tasks
+        .iter()
+        .filter(|t| {
+            t.label.contains("[dispatch_subagent]")
+                || t.label.contains("Subagent dispatched")
+                || t.label.contains("subagent")
+        })
+        .count();
+    let other_count = tasks
+        .iter()
+        .filter(|t| {
+            !t.label.starts_with("[run_shell]")
+                && !t.label.starts_with("[shell_output]")
+                && !t.label.starts_with("[kill_shell]")
+                && !t.label.starts_with("[write_file]")
+                && !t.label.starts_with("[apply_patch]")
+                && !t.label.starts_with("[note_write]")
+                && !t.label.starts_with("[git_")
+                && !t.label.contains("[dispatch_subagent]")
+                && !t.label.contains("Subagent dispatched")
+                && !t.label.contains("subagent")
+        })
         .count();
 
     let mut parts: Vec<String> = Vec::new();
@@ -1106,6 +1250,12 @@ pub(super) fn activity_summary_line(
         parts.push(format!(
             "reading {file_count} file{}",
             if file_count == 1 { "" } else { "s" }
+        ));
+    }
+    if edit_count > 0 {
+        parts.push(format!(
+            "editing {edit_count} file{}",
+            if edit_count == 1 { "" } else { "s" }
         ));
     }
     if dir_count > 0 {
@@ -1132,8 +1282,33 @@ pub(super) fn activity_summary_line(
             if shell_count == 1 { "" } else { "s" }
         ));
     }
+    if git_count > 0 {
+        parts.push(format!(
+            "checking repository {git_count} time{}",
+            if git_count == 1 { "" } else { "s" }
+        ));
+    }
+    if subagent_count > 0 {
+        parts.push(format!(
+            "dispatching {subagent_count} subagent{}",
+            if subagent_count == 1 { "" } else { "s" }
+        ));
+    }
+    if other_count > 0 {
+        parts.push(format!(
+            "running {other_count} tool{}",
+            if other_count == 1 { "" } else { "s" }
+        ));
+    }
 
     if parts.is_empty() {
+        let total = tasks.len() + activities.len() + explored.len();
+        if total > 0 {
+            return Some(format!(
+                "Running {total} tool{}…",
+                if total == 1 { "" } else { "s" }
+            ));
+        }
         return None;
     }
     let sentence = parts.join(", ");
@@ -1154,20 +1329,68 @@ pub(super) fn activity_block_lines(
     explored: &[ExploredAction],
     animate: bool,
     tick: usize,
+    active_tool_started: Option<Instant>,
+    // Whether to render stored command-output preview lines.
+    include_output: bool,
 ) -> Vec<String> {
     if tasks.is_empty() && activities.is_empty() && explored.is_empty() {
         return Vec::new();
     }
     let char_str = bullet_char(animate, tick);
-    let header_text =
-        activity_summary_line(tasks, activities, explored).unwrap_or_else(|| "activity".into());
+    let header_text = activity_summary_line(tasks, activities, explored)
+        .unwrap_or_else(|| "Running tools…".into());
     let mut lines = vec![format!("  {BLUE}{char_str}{RESET} {header_text}")];
-    lines.extend(tasks_lines(tasks));
-    lines.extend(activities_lines(activities));
-    lines.extend(explored_lines(explored));
+
+    // Collect all items with their output lines
+    let mut all_items: Vec<(String, Vec<String>)> = Vec::new();
+    for task in tasks.iter().take(24) {
+        all_items.push((task.label.clone(), task.output.clone()));
+    }
+    for act in activities.iter().take(24) {
+        all_items.push((act.clone(), Vec::new()));
+    }
+    let grouped = grouped_explored_actions(explored);
+    for action in grouped.into_iter().take(24) {
+        all_items.push((action, Vec::new()));
+    }
+
+    let total_items = all_items.len();
+    const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let spinner = SPINNER_FRAMES[tick % SPINNER_FRAMES.len()];
+
+    for (idx, (label, output)) in all_items.into_iter().enumerate() {
+        let is_active = animate && active_tool_started.is_some() && idx == total_items - 1;
+        let prefix = if idx == 0 {
+            format!("{DIM}    └{RESET}")
+        } else {
+            "      ".to_string()
+        };
+
+        if is_active {
+            let elapsed_secs = active_tool_started.unwrap().elapsed().as_secs_f64();
+            let timer_suffix = format!(" ({:.1}s)", elapsed_secs);
+            lines.push(format!(
+                "{prefix} {CYAN}{spinner}{RESET} {WHITE}{label}{RESET}{DIM}{timer_suffix}{RESET}"
+            ));
+        } else {
+            lines.push(format!("{prefix} {MINT}✓{RESET} {WHITE}{label}{RESET}"));
+        }
+
+        if include_output {
+            for out_line in &output {
+                lines.push(format!("{DIM}       │ {}{RESET}", out_line));
+            }
+        }
+    }
+
+    let raw_total = tasks.len() + activities.len() + explored.len();
+    if raw_total > 24 {
+        lines.push(format!("{DIM}     ... {} more{RESET}", raw_total - 24));
+    }
     lines
 }
 
+#[allow(dead_code)]
 pub(super) fn explored_lines(actions: &[ExploredAction]) -> Vec<String> {
     if actions.is_empty() {
         return Vec::new();
@@ -1178,8 +1401,12 @@ pub(super) fn explored_lines(actions: &[ExploredAction]) -> Vec<String> {
         .take(24)
         .enumerate()
         .map(|(index, action)| {
-            let prefix = if index == 0 { "    └" } else { "     " };
-            format!("{DIM}{prefix} {action}{RESET}")
+            if index == 0 {
+                // └ connector in DIM, tool text in WHITE (plain white)
+                format!("{DIM}    └{RESET} {WHITE}{action}{RESET}")
+            } else {
+                format!("      {WHITE}{action}{RESET}")
+            }
         })
         .collect();
     if grouped.len() > 24 {
@@ -1325,6 +1552,7 @@ pub(super) fn truncate_line(line: &str, max_chars: usize) -> String {
     format!("{head}…")
 }
 
+#[allow(dead_code)]
 pub(super) fn activities_lines(activities: &[String]) -> Vec<String> {
     if activities.is_empty() {
         return Vec::new();
@@ -1334,8 +1562,12 @@ pub(super) fn activities_lines(activities: &[String]) -> Vec<String> {
         .take(24)
         .enumerate()
         .map(|(index, act)| {
-            let prefix = if index == 0 { "    └" } else { "     " };
-            format!("{DIM}{prefix} {act}{RESET}")
+            if index == 0 {
+                // └ connector in DIM, activity text in WHITE (plain white)
+                format!("{DIM}    └{RESET} {WHITE}{act}{RESET}")
+            } else {
+                format!("      {WHITE}{act}{RESET}")
+            }
         })
         .collect();
     if activities.len() > 24 {
@@ -1396,14 +1628,19 @@ pub(super) fn plan_lines(steps: &[String], animate: bool, tick: usize) -> Vec<St
     lines
 }
 
+#[allow(dead_code)]
 pub(super) fn tasks_lines(tasks: &[TaskEntry]) -> Vec<String> {
     if tasks.is_empty() {
         return Vec::new();
     }
     let mut lines = Vec::new();
     for (index, task) in tasks.iter().take(24).enumerate() {
-        let prefix = if index == 0 { "    └" } else { "     " };
-        lines.push(format!("{DIM}{prefix} {}{RESET}", task.label));
+        if index == 0 {
+            // └ connector in DIM, task label in WHITE (plain white)
+            lines.push(format!("{DIM}    └{RESET} {WHITE}{}{RESET}", task.label));
+        } else {
+            lines.push(format!("      {WHITE}{}{RESET}", task.label));
+        }
         for out_line in &task.output {
             lines.push(format!("{DIM}       │ {}{RESET}", out_line));
         }
@@ -1449,6 +1686,18 @@ mod format_token_count_tests {
     #[test]
     fn millions_round_to_one_decimal_place() {
         assert_eq!(format_token_count_bare(1_234_567), "1.2m");
+    }
+}
+
+#[cfg(test)]
+mod scrollback_layout_tests {
+    use super::*;
+
+    #[test]
+    fn scrollback_height_accounts_for_wide_unicode() {
+        let text = ratatui::text::Text::raw("🙂🙂🙂");
+
+        assert_eq!(wrapped_text_height(&text, 4), 2);
     }
 }
 

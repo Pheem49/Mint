@@ -166,7 +166,7 @@
   border-radius: var(--radius-lg);
   border: none;
   background: var(--accent, #10b981);
-  color: #06120c;
+  color: var(--text-on-accent);
   font-weight: 650;
   font-size: 0.92rem;
   cursor: pointer;
@@ -202,5 +202,5 @@
 }
 
 .auth-gate-switch:hover {
-  color: var(--accent, #10b981);
+  color: var(--interactive-fg);
 }

@@ -27,6 +27,7 @@ export interface ChatResponse {
   text: string
   thought?: string | null
   fallbackProvider?: string | null
+  fallbackReason?: string | null
 }
 
 export interface TtsUrl {
@@ -74,6 +75,8 @@ export interface RunTelemetrySummary {
 export type AgentProgress =
   | { type: 'Thinking'; data: { elapsed_secs: number; agent_name?: string; model_name?: string } }
   | { type: 'Thought'; data: { thought: string } }
+  | { type: 'ThinkingDelta'; data: { id: string; delta: string; elapsed_ms: number } }
+  | { type: 'ExtendedThinking'; data: { id?: string; thought: string; elapsed_ms?: number } }
   | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown>; subagent?: string } }
   | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string; subagent?: string } }
   | { type: 'PlanUpdated'; data: { plan: ActivePlan } }
@@ -88,7 +91,20 @@ export interface InteractionMemory {
   model: string
   fallbackProvider?: string | null
   createdAt: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted'
   agentActivity?: AgentProgress[] | null
+}
+
+export interface ConversationSnapshot {
+  interactions: InteractionMemory[]
+  cursor: number
+  hasOlder: boolean
+}
+
+export interface ConversationChanges {
+  changes: { sequence: number; interactionId: number; interaction: InteractionMemory | null }[]
+  cursor: number
+  hasMore: boolean
 }
 
 export interface ChatSession {
@@ -97,7 +113,25 @@ export interface ChatSession {
   kind: string
   createdAt: string
   updatedAt: string
+  workspacePath?: string | null
+  gitBranch?: string | null
+  mainLanguage?: string | null
+  messageCount?: number
+  totalBytes?: number
 }
+
+export interface GitBranchInfo {
+  isRepository: boolean
+  currentBranch: string | null
+  detachedHead: string | null
+  branches: string[]
+  remoteBranches: string[]
+  isDirty: boolean
+}
+
+export type GitBranchChangeOutcome =
+  | { status: 'changed'; info: GitBranchInfo }
+  | { status: 'confirmation_required'; info: GitBranchInfo }
 
 export interface PictureEntry {
   id: string
@@ -154,6 +188,34 @@ export interface WorkspaceTreeEntry {
   kind: 'file' | 'directory'
   children: WorkspaceTreeEntry[]
 }
+export interface WorkspaceSnapshot { path: string; tree: WorkspaceTreeEntry; git: GitBranchInfo; revision: number }
+export interface WorkspaceOperation { root: string; relativePath: string; revision: number }
+
+export interface VideoGenRequest {
+  prompt: string
+  negativePrompt?: string
+  aspectRatio: '16:9' | '9:16' | '1:1'
+  duration: 5 | 8
+  model?: string
+  provider: string
+}
+
+export interface VideoGenEntry {
+  id: string
+  url: string
+  path: string
+  message?: string
+  createdAt?: string
+}
+
+export interface VideoGenResponse {
+  videos: VideoGenEntry[]
+  provider: string
+  model: string
+  description?: string
+}
+
+export interface VideoGenProviders { active: string; available: string[] }
 
 export interface DetectedTools {
   docker: boolean
@@ -229,6 +291,25 @@ export interface LinkedFolderDraft {
   description?: string
 }
 
+export interface LinkedFolderStatus {
+  indexedFiles: number
+  indexedAt?: string | null
+  indexError?: string | null
+  pendingJobs: number
+  failedJobs: number
+  lastJobError?: string | null
+}
+
+export interface LinkedFolderNote {
+  id: string
+  folder: string
+  path: string
+  content: string
+  createdAt: string
+  status: 'pending' | 'saved' | 'failed'
+  error?: string | null
+}
+
 export interface DiffHunk {
   oldText: string
   newText: string
@@ -266,9 +347,9 @@ export interface CustomProviderHeader {
 export interface CustomProviderConfig {
   id: string
   displayName: string
+  logoDataUrl?: string
   baseUrl: string
   apiKey: string
   models: CustomProviderModel[]
   headers: CustomProviderHeader[]
 }
-

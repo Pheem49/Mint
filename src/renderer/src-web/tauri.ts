@@ -8,12 +8,13 @@ import type {
   DocumentAttachment,
   AgentProgress,
   InteractionMemory,
+  ConversationSnapshot,
+  ConversationChanges,
   ChatSession,
   PictureEntry,
   ImageGenRequest,
   ImageGenProviders,
   ImageGenResponse,
-  WorkspaceTreeEntry,
   CodeEdit,
   CodeEditProposal,
   LearnedSkill,
@@ -22,11 +23,16 @@ import type {
   CronJobDraft,
   LinkedFolder,
   LinkedFolderDraft,
+  LinkedFolderNote,
+  LinkedFolderStatus,
   GitCheckpoint,
+  GitBranchInfo,
+  GitBranchChangeOutcome,
 } from '../shared/types'
 
 
 type DesktopStreamEvent =
+  | { type: 'started'; interactionId: number }
   | { type: 'chunk'; chunk: string }
   | { type: 'progress'; progress: AgentProgress }
 
@@ -37,6 +43,12 @@ import type { GeminiLiveEvent } from '../shared/utils/useGeminiLiveVoice'
 export const isTauriRuntime = () => (
   typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__)
 )
+
+const WEB_SETTINGS_CHANGED_EVENT = 'mint:web-settings-changed'
+
+function dispatchWebSettingsChanged(config: any) {
+  window.dispatchEvent(new CustomEvent(WEB_SETTINGS_CHANGED_EVENT, { detail: config }))
+}
 
 /** The last browser Notification shown by notifyAiResponse's fallback
  * (non-Tauri) branch, so clearAiNotifications can dismiss it. */
@@ -536,6 +548,7 @@ export async function streamChatMessage(
   // an `approval-requested` event down this same ndjson stream instead —
   // this callback is how the caller learns about it.
   onApprovalRequested?: (payload: { token: string; approval: any }) => void,
+  onTurnStarted?: (interactionId: number) => void,
 ): Promise<ChatResponse> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
@@ -568,6 +581,8 @@ export async function streamChatMessage(
           const event = JSON.parse(line);
           if (event.type === 'chunk') {
             onChunk(event.chunk);
+          } else if (event.type === 'started') {
+            onTurnStarted?.(event.interactionId);
           } else if (event.type === 'progress') {
             onProgress?.(event.progress);
           } else if (event.type === 'done') {
@@ -588,6 +603,7 @@ export async function streamChatMessage(
   const onEvent = new Channel<DesktopStreamEvent>()
   onEvent.onmessage = (event) => {
     if (event.type === 'chunk') onChunk(event.chunk)
+    else if (event.type === 'started') onTurnStarted?.(event.interactionId)
     else onProgress?.(event.progress)
   }
   const response = await invoke<ChatResponse>('stream_chat_message', {
@@ -739,6 +755,29 @@ export async function getRecentInteractions(limit = 50, chatId?: string | null, 
   return invoke<InteractionMemory[]>('get_recent_interactions', { limit, chatId, workspacePath })
 }
 
+export async function getConversationSnapshot(chatId: string, beforeId?: number | null, limit = 50): Promise<ConversationSnapshot> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const params = new URLSearchParams({ chatId, limit: String(limit) })
+    if (beforeId != null) params.set('beforeId', String(beforeId))
+    const response = await authFetch(`${getApiBase()}/conversation-snapshot?${params}`)
+    if (!response.ok) throw new Error(`Conversation snapshot failed: ${response.status}`)
+    return response.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<ConversationSnapshot>('get_conversation_snapshot', { chatId, beforeId, limit })
+}
+
+export async function getConversationChanges(chatId: string, after: number, limit = 100): Promise<ConversationChanges> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const params = new URLSearchParams({ chatId, after: String(after), limit: String(limit) })
+    const response = await authFetch(`${getApiBase()}/conversation-changes?${params}`)
+    if (!response.ok) throw new Error(`Conversation changes failed: ${response.status}`)
+    return response.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<ConversationChanges>('get_conversation_changes', { chatId, after, limit })
+}
+
 export async function saveSystemInteraction(
   chatId: string,
   userText: string,
@@ -802,6 +841,24 @@ export async function listChatSessions(): Promise<ChatSession[]> {
   }
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<ChatSession[]>('list_chat_sessions')
+}
+
+export async function updateChatSessionWorkspace(chatId: string, workspacePath: string | null): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    try {
+      await authFetch(`${API_BASE}/chat-sessions/workspace`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, workspacePath })
+      });
+    } catch (e) {
+      console.error("Failed to update chat session workspace on local server:", e);
+    }
+    return;
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('update_chat_session_workspace', { chatId, workspacePath })
 }
 
 export async function deleteChatSession(chatId: string): Promise<number> {
@@ -1148,7 +1205,9 @@ export function installTauriAdapters() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
           });
-          return await res.json();
+          const data = await res.json();
+          if (res.ok) dispatchWebSettingsChanged(config)
+          return data;
         } catch (e) {
           console.error("Failed to save settings to local server:", e);
           return {};
@@ -1194,6 +1253,9 @@ export function installTauriAdapters() {
 
     (window as any).widgetAPI = {
       onStateChange: () => {},
+      openChat: async () => {},
+      setVisible: async () => {},
+      startDragging: async () => {},
     };
 
     (window as any).screenPickerApi = {
@@ -1291,7 +1353,9 @@ export function installTauriAdapters() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
           });
-          return await res.json();
+          const data = await res.json();
+          if (res.ok) dispatchWebSettingsChanged(config)
+          return data;
         } catch (e) {
           return {};
         }
@@ -1301,7 +1365,11 @@ export function installTauriAdapters() {
           window.history.replaceState(null, '', window.location.pathname + window.location.search)
         }
       },
-      onSettingsChanged: () => {},
+      onSettingsChanged: (callback: (config: any) => void) => {
+        window.addEventListener(WEB_SETTINGS_CHANGED_EVENT, (event) => {
+          callback((event as CustomEvent).detail)
+        })
+      },
       startVision: () => {},
       onVisionReady: async () => () => {},
       captureSilentScreen: async () => '',
@@ -1457,6 +1525,9 @@ export function installTauriAdapters() {
       const { listen } = await import('@tauri-apps/api/event')
       void listen<string>('widget-state', (event) => callback(event.payload))
     },
+    openChat: async () => {},
+    setVisible: async () => {},
+    startDragging: async () => {},
   }
 
   window.screenPickerApi = {
@@ -1556,15 +1627,14 @@ export function installTauriAdapters() {
     onSettingsChanged: settingsChanged,
     startVision: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
+      let image: string
       try {
-        const image = await captureSharedScreen()
-        window.localStorage.setItem('mint:pending-screen-capture', image)
+        image = await captureSharedScreen()
       } catch (reason) {
         console.warn('Screen share capture failed before opening picker:', reason)
-        const image = await invoke<string>('capture_silent_screen')
-        window.localStorage.setItem('mint:pending-screen-capture', image)
+        image = await invoke<string>('capture_silent_screen')
       }
-      return invoke('start_screen_capture')
+      return invoke('start_screen_capture', { image })
     },
     onVisionReady: async (callback) => {
       const { listen } = await import('@tauri-apps/api/event')
@@ -1858,7 +1928,7 @@ export async function setCronJobEnabled(id: string, enabled: boolean): Promise<C
 export async function listLinkedFolders(): Promise<Record<string, LinkedFolder>> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const res = await authFetch(`${getLocalApiBase()}/linked-folders`)
-    if (!res.ok) return {}
+    if (!res.ok) throw new Error('Failed to load linked folders')
     return res.json()
   }
   const { invoke } = await import('@tauri-apps/api/core')
@@ -1894,38 +1964,130 @@ export async function removeLinkedFolder(name: string): Promise<void> {
   await invoke('remove_linked_folder', { name })
 }
 
-export async function getWorkspaceTree(path?: string | null): Promise<WorkspaceTreeEntry> {
+export async function linkedFolderStatus(name: string): Promise<LinkedFolderStatus> {
+  const res = await authFetch(`${getLocalApiBase()}/linked-folders/${encodeURIComponent(name)}/status`)
+  if (!res.ok) throw new Error('Failed to load folder status')
+  return res.json()
+}
+
+export async function refreshLinkedFolder(name: string): Promise<LinkedFolderStatus> {
+  const res = await authFetch(`${getLocalApiBase()}/linked-folders/${encodeURIComponent(name)}/refresh`, { method: 'POST' })
+  if (!res.ok) throw new Error('Failed to refresh folder')
+  return res.json()
+}
+
+export async function listLinkedFolderNotes(name: string): Promise<LinkedFolderNote[]> {
+  const res = await authFetch(`${getLocalApiBase()}/linked-folders/${encodeURIComponent(name)}/notes`)
+  if (!res.ok) throw new Error('Failed to load notes')
+  return res.json()
+}
+
+export async function readLinkedFolderNote(name: string, id: string): Promise<string> {
+  const res = await authFetch(`${getLocalApiBase()}/linked-folders/${encodeURIComponent(name)}/notes/${encodeURIComponent(id)}`)
+  if (!res.ok) throw new Error('Failed to read note')
+  return (await res.json()).content
+}
+
+export async function openLinkedFolderNote(name: string, id: string): Promise<void> {
+  if (!isTauriRuntime()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('open_linked_folder_note', { name, id })
+}
+
+export async function getWorkspaceSnapshot(operation: import('../shared/types').WorkspaceOperation): Promise<import('../shared/types').WorkspaceSnapshot> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     return {
-      name: 'Workspace',
-      path: '.',
-      kind: 'directory',
-      children: [
-        { name: 'src', path: 'src', kind: 'directory', children: [] },
-        { name: 'package.json', path: 'package.json', kind: 'file', children: [] },
-      ],
+      path: operation.root, revision: operation.revision,
+      git: { isRepository: false, currentBranch: null, detachedHead: null, branches: [], remoteBranches: [], isDirty: false },
+      tree: { name: 'Workspace', path: '.', kind: 'directory', children: [] },
     }
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<WorkspaceTreeEntry>('get_workspace_tree', { path })
+  return invoke('get_workspace_snapshot', { operation })
 }
 
-export async function createWorkspaceFile(path: string): Promise<void> {
-  if (typeof window === 'undefined' || !isTauriRuntime()) return
+export async function getWorkspaceGitDiff(workspacePath: string): Promise<import('../shared/types').FileChange[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    try {
+      const res = await fetch(`/api/git/diff?workspace=${encodeURIComponent(workspacePath)}`)
+      if (res.ok) {
+        return (await res.json()) || []
+      }
+    } catch {
+      // fallback
+    }
+    return []
+  }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('create_workspace_file', { path })
+  return invoke<import('../shared/types').FileChange[]>('get_workspace_git_diff', { workspacePath })
 }
 
-export async function createWorkspaceFolder(path: string): Promise<void> {
-  if (typeof window === 'undefined' || !isTauriRuntime()) return
+export async function getGitBranchInfo(workspacePath: string): Promise<GitBranchInfo> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    return { isRepository: false, currentBranch: null, detachedHead: null, branches: [], remoteBranches: [], isDirty: false }
+  }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('create_workspace_folder', { path })
+  return invoke<GitBranchInfo>('get_git_branch_info', { workspacePath })
 }
 
-export async function deleteWorkspaceItem(path: string): Promise<void> {
-  if (typeof window === 'undefined' || !isTauriRuntime()) return
+export async function switchGitBranch(
+  workspacePath: string,
+  branch: string,
+  confirmedDirtyWorkspace = false,
+): Promise<GitBranchChangeOutcome> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    throw new Error('Branch switching is only available in the desktop app.')
+  }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('delete_workspace_item', { path })
+  return invoke<GitBranchChangeOutcome>('switch_git_branch', { workspacePath, branch, confirmedDirtyWorkspace })
+}
+
+export async function createGitBranch(
+  workspacePath: string,
+  branch: string,
+  confirmedDirtyWorkspace = false,
+): Promise<GitBranchChangeOutcome> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    throw new Error('Branch creation is only available in the desktop app.')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<GitBranchChangeOutcome>('create_git_branch', { workspacePath, branch, confirmedDirtyWorkspace })
+}
+
+export async function checkoutRemoteGitBranch(
+  workspacePath: string,
+  remoteBranch: string,
+  confirmedDirtyWorkspace = false,
+): Promise<GitBranchChangeOutcome> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    throw new Error('Remote branch checkout is only available in the desktop app.')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<GitBranchChangeOutcome>('checkout_remote_git_branch', { workspacePath, remoteBranch, confirmedDirtyWorkspace })
+}
+
+export async function getGitGraph(workspacePath: string): Promise<string[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) return []
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('get_git_graph', { workspacePath })
+}
+
+export async function createWorkspaceFile(operation: import('../shared/types').WorkspaceOperation): Promise<import('../shared/types').WorkspaceSnapshot> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) throw new Error('Workspace files are only available in the desktop app.')
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('create_workspace_file', { operation })
+}
+
+export async function createWorkspaceFolder(operation: import('../shared/types').WorkspaceOperation): Promise<import('../shared/types').WorkspaceSnapshot> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) throw new Error('Workspace folders are only available in the desktop app.')
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('create_workspace_folder', { operation })
+}
+
+export async function deleteWorkspaceItem(operation: import('../shared/types').WorkspaceOperation): Promise<import('../shared/types').WorkspaceSnapshot> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) throw new Error('Workspace files are only available in the desktop app.')
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('delete_workspace_item', { operation })
 }
 
 export async function selectWorkspaceDirectory(): Promise<string | null> {
@@ -2428,9 +2590,12 @@ const _apiCheck: MintPlatformApi = {
   getTtsUrls,
   cancelChatMessage,
   getRecentInteractions,
+  getConversationSnapshot,
+  getConversationChanges,
   saveSystemInteraction,
   saveInteractionAgentActivity,
   listChatSessions,
+  updateChatSessionWorkspace,
   deleteChatSession,
   renameChatSession,
   getProfileValue,
@@ -2447,7 +2612,13 @@ const _apiCheck: MintPlatformApi = {
   generateImages,
   getImageGenProviders,
   setDefaultImageProvider,
-  getWorkspaceTree,
+  getWorkspaceSnapshot,
+  getWorkspaceGitDiff,
+  getGitBranchInfo,
+  switchGitBranch,
+  createGitBranch,
+  checkoutRemoteGitBranch,
+  getGitGraph,
   createWorkspaceFile,
   createWorkspaceFolder,
   deleteWorkspaceItem,
@@ -2464,4 +2635,3 @@ const _apiCheck: MintPlatformApi = {
   readWorkspaceFile,
   testMcpConnection,
 }
-

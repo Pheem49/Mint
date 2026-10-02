@@ -73,6 +73,7 @@ jobs:
           cp target/release/bundle/deb/mint-agent_amd64.deb release-artifacts/mint-agent_linux_x86_64.deb
           cp target/release/bundle/tar/mint-agent.tar.gz release-artifacts/mint-agent_linux_x86_64.tar.gz
           cp target/release/mint release-artifacts/mint-cli_linux_x86_64
+          sha256sum release-artifacts/mint-cli_linux_x86_64 | cut -d' ' -f1 > release-artifacts/mint-cli_linux_x86_64.sha256
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -133,6 +134,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path release-artifacts | Out-Null
           Copy-Item target/release/bundle/nsis/*-setup.exe release-artifacts/mint-agent_windows_x64.exe
           Copy-Item target/release/mint.exe release-artifacts/mint-cli_windows_x64.exe
+          (Get-FileHash release-artifacts/mint-cli_windows_x64.exe -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content release-artifacts/mint-cli_windows_x64.exe.sha256 -NoNewline
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -198,6 +200,7 @@ jobs:
           mkdir -p release-artifacts
           cp target/release/bundle/dmg/*.dmg release-artifacts/mint-agent_macos_arm64.dmg
           cp target/release/mint release-artifacts/mint-cli_macos_arm64
+          shasum -a 256 release-artifacts/mint-cli_macos_arm64 | cut -d' ' -f1 > release-artifacts/mint-cli_macos_arm64.sha256
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

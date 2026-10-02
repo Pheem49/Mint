@@ -1,0 +1,28 @@
+title: ""
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape Mint. Please describe the user problem before proposing an implementation.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Who needs this, and what are they trying to do today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Mint to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What alternatives have you tried?
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add screenshots, examples, links, or related issues.

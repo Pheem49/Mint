@@ -294,7 +294,7 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
 
                 {p.hasCredentials && p.fields && (
                   <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border, rgba(255, 255, 255, 0.08))' }}>
-                    <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent, #10b981)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 12px' }}>
+                    <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--interactive-fg)', textTransform: 'none', letterSpacing: '0.5px', margin: '0 0 12px' }}>
                       Credentials
                     </h4>
                     <div style={{ display: 'grid', gap: '12px' }}>

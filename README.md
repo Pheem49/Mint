@@ -3,7 +3,7 @@
 
   # Mint
 
-  **Your AI agent, reachable from Telegram, Discord, Slack, LINE, or WhatsApp — not just a terminal window.**
+  **Fix code from Telegram — with an AI agent that runs on your own machine.**
 
   [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://v2.tauri.app/)
   [![Rust](https://img.shields.io/badge/Rust-backend-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -11,11 +11,33 @@
   [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 </div>
 
-Mint is a local-first AI assistant and autonomous coding agent that runs on your own machine. Powered by a high-performance Rust **Agent Execution Harness** (`mint-core`), Mint wraps foundation models (Claude, GPT-4o, Gemini, Ollama, DeepSeek) with deterministic tool execution, verification gates, subagent DAG orchestration, memory compaction, and human-in-the-loop safety guardrails.
+Mint is a local-first AI coding agent you can message from Telegram, Discord, Slack, LINE, or WhatsApp. Send it a bug, feature request, or code-review task; Mint inspects your workspace, edits the code, runs tests, and reports the result back to chat — while asking for approval before risky changes.
+
+```text
+You: Fix the failing authentication test in my API
+Mint: I found the cause, prepared a patch, and ran the test suite.
+      4 tests passed · 2 files changed · Ready for your approval
+```
+
+### Why Mint?
+
+- **Reach it from chat:** hand off coding tasks from Telegram or the messaging app you already use.
+- **Keep your code local:** Mint runs on your machine, with support for cloud models and local models such as Ollama.
+- **Stay in control:** Git checkpoints, verification gates, and human approval are built into the workflow.
+
+```bash
+mint onboard
+mint setup
+mint code agent "inspect this repo and fix the failing tests"
+```
+
+> **Best for:** developers who want an always-available coding assistant without handing their workspace to a hosted agent.
+
+Powered by a high-performance Rust **Agent Execution Harness** (`mint-core`), Mint wraps foundation models (Claude, GPT-4o, Gemini, Ollama, DeepSeek) with deterministic tool execution, verification gates, subagent DAG orchestration, memory compaction, and human-in-the-loop safety guardrails.
 
 It follows you wherever you already are: message it from Telegram, Discord, Slack, LINE, or WhatsApp like you'd message a person, no desktop window required. It's also a native desktop app with a Live2D companion, a web application, and a full terminal agent for coding tasks — all backed by the exact same execution harness and safety policies, so chat, memory, knowledge, tools, and safety behave identically no matter which door you walk in through.
 
-See [Release Notes](Release_Note.md) for what's new, and read the [Agent Harness Architecture Guide](docs/AGENT_HARNESS.md) for deep technical details.
+See the [Roadmap](ROADMAP.md) for the project direction, [Contributing Guide](CONTRIBUTING.md) to help improve Mint, and [Release Notes](Release_Note.md) for what's new. Read the [Agent Harness Architecture Guide](docs/AGENT_HARNESS.md) for deep technical details. Questions and ideas belong in [GitHub Discussions](https://github.com/Pheem49/Mint/discussions).
 
 ## 🏛️ Architecture: The Mint Agent Harness
 
@@ -98,6 +120,7 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 ### 6. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Scheduled Tasks & Linked Folders
 - `mint cron` runs agent tasks on a schedule with no OS-level daemon — rides along on whatever's already open, or `mint gateway start` for always-on.
 - Link a folder (e.g. "Food") and chat that touches its topic gets a short, cross-referenced note written into it automatically.
+- Mint indexes supported files in linked folders and their subfolders to decide which conversations contain useful notes. Use `/link refresh <name>` after changing files, `/link notes <name>` to inspect saved notes, or `/link save <name> | <text>` to save text directly. Notes are stored in `<folder>/mint-notes/`.
 
 ---
 
@@ -237,11 +260,16 @@ cp .env.example .env
 Open the `.env` file and insert your API keys (e.g. `GEMINI_API_KEY=your_key_here`).
 
 ### 2. Desktop Application
-Install the dependencies and start the application in development mode:
+Install the dependencies and start the application in development mode with HMR:
 ```bash
 npm install
-npm run tauri:dev
+npm run dev
 ```
+To open the normal production-mode desktop app locally (without a Vite dev server):
+```bash
+npm start
+```
+`npm start` opens the existing local Desktop binary and only builds it when it does not exist. Use `npm run start:rebuild` to explicitly rebuild with the fast-release profile, `npm run start:release` to rebuild the fully optimized release profile before measuring performance or publishing, or `npm run launch` to require an existing binary without any fallback build.
 To compile and build a production standalone desktop package:
 ```bash
 npm run tauri:build
@@ -267,7 +295,7 @@ Pick one way to get the global `mint` command:
   source ~/.bashrc  # or ~/.zshrc
   ```
 
-No alias set up? Everything below still works via `npm run cli -- <command>` in place of `mint <command>`.
+No alias set up? Everything below still works via `npm run cli -- <command>` in place of `mint <command>`. This uses the existing compiled CLI binary; use `npm run cli:rebuild -- <command>` after changing Rust code, or `npm run cli:dev -- <command>` while developing the CLI.
 
 ---
 
@@ -276,8 +304,10 @@ No alias set up? Everything below still works via `npm run cli -- <command>` in 
 Prebuilt downloads from the [Releases page](https://github.com/Pheem49/Mint/releases) — the
 desktop `.dmg` / `.exe` and the standalone `mint-cli_*` binaries — are **not yet code-signed**,
 so macOS Gatekeeper and Windows SmartScreen flag them on first launch. The warnings are
-expected and safe to dismiss. Installing with `install.sh` / `install.ps1` / `npm` builds from
-source and avoids all of this.
+expected and safe to dismiss. Installing with `install.sh` / `install.ps1` uses a verified
+prebuilt CLI when the current platform is available in the latest release. Set
+`MINT_SOURCE_INSTALL=1` to force the source build. Installing through `npm` still uses the
+source build.
 
 **macOS** — Gatekeeper blocks unsigned, un-notarized builds until you clear the quarantine flag:
 
@@ -319,6 +349,36 @@ This appears once per new version until the builds are signed.
   </tr>
 </table>
 
+#### Install the Web UI on a phone (Tailscale)
+
+`mint web --tailscale` is an optional mode for using Mint as a private PWA. It
+does not change the normal `mint web` command or require every Mint user to
+install Tailscale.
+
+For detailed setup and usage instructions, see [Mint Web on mobile with Tailscale](docs/MOBILE_PWA_TAILSCALE.md).
+
+1. Install Tailscale on the computer running Mint and on your phone, sign in
+   to the same tailnet, and enable MagicDNS and HTTPS certificates in the
+   [Tailscale DNS settings](https://tailscale.com/docs/how-to/set-up-https-certificates).
+   On Linux, allow your regular account to manage Serve with
+   `sudo tailscale set --operator="$(whoami)"` after signing in; Mint does not
+   run Tailscale as root.
+2. In the Mint project, build the production Web UI with `npm run build:web`.
+   Start `mint web --tailscale` and keep the command running. HTTPS port 443
+   must be free in Tailscale Serve; Mint will not replace an existing route
+   on that port.
+3. Open the printed `https://<machine>.<tailnet>.ts.net` URL on your phone.
+   Use the browser's **Add to Home Screen** action to install the PWA. Mint's
+   backend continues running on the computer, so the phone needs an active
+   Tailscale connection and the computer must stay awake.
+
+This mode binds both local ports (`9000` for the Web UI and `3000` for the API)
+to `127.0.0.1`; Tailscale Serve forwards the private HTTPS URL to the Web UI.
+Press Ctrl+C to stop Mint and the Serve session. Do not use Tailscale Funnel for
+this setup: Funnel publishes the service to the public internet. If Tailscale
+is missing, disconnected, or Serve/HTTPS is unavailable, follow the error
+shown by `mint web --tailscale` and try again.
+
 ### CLI
 <table width="100%">
   <tr>
@@ -355,6 +415,7 @@ mint
 # Or fallback: npm run cli
 ```
 This opens the Mint interactive shell, where you can type prompts naturally or use `/commands` (like `/help`, `/cd`, `/clear`, `/exit`).
+Press F6 at the prompt to confirm a switch between the full-screen TUI and Classic CLI without leaving the current conversation. You can also start directly in Classic mode with `mint --classic`.
 
 ---
 
@@ -368,6 +429,7 @@ mint setup
 mint plugins
 mint status
 mint web
+mint web --tailscale
 mint api
 mint auto
 mint chat "<message>"
@@ -383,6 +445,7 @@ mint chat "<message>"
 | `mint setup` | Interactively manage enabled agent tools |
 | `mint plugins` | Centralized interactive management for built-in ecosystem plugins & skills |
 | `mint web` | Launch the web UI and local API server |
+| `mint web --tailscale` | Serve the built web UI privately over Tailscale HTTPS for mobile/PWA use |
 | `mint api` | Start only the local API server |
 | `mint gateway start` | Run headless: bridges + cron, no TUI — for VPS/systemd use |
 | `mint gateway start --api-port <N>` | Same, plus the local API/WebUI on port `<N>` |
@@ -818,4 +881,3 @@ We welcome contributions from the community! Whether you want to fix a bug, add 
 ## License
 
 Mint is licensed under the [AGPL-3.0-only license](LICENSE).
-

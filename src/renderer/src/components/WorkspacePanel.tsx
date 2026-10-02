@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react'
-import { getWorkspaceTree, type WorkspaceTreeEntry, createWorkspaceFile, createWorkspaceFolder, deleteWorkspaceItem } from '../tauri'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { workspacePlatform } from '@shared/platform'
+import type { WorkspaceSnapshot, WorkspaceTreeEntry } from '@shared/types'
 import {
   materialFolderIcon,
   materialFileIcon,
@@ -15,6 +16,7 @@ interface WorkspacePanelProps {
   onEnableAgentMode: () => void
   onSetMessage: (message: string) => void
   onWorkspaceReady: (path: string) => void
+  refreshRevision?: number
 }
 
 const FILE_LABEL: Record<string, string> = {
@@ -29,7 +31,7 @@ const FILE_LABEL: Record<string, string> = {
 }
 
 
-function TreeNode({ entry, level, onRefresh, workspacePath }: { entry: WorkspaceTreeEntry; level: number; onRefresh: () => void; workspacePath: string; key?: string }) {
+function TreeNode({ entry, level, onSnapshot, workspacePath, revision }: { entry: WorkspaceTreeEntry; level: number; onSnapshot: (snapshot: WorkspaceSnapshot) => void; workspacePath: string; revision: number; key?: string }) {
   const [open, setOpen] = useState(level < 1)
   const isDirectory = entry.kind === 'directory'
   const hasChildren = entry.children.length > 0
@@ -44,9 +46,8 @@ function TreeNode({ entry, level, onRefresh, workspacePath }: { entry: Workspace
     if (!confirmed) return
 
     try {
-      const absolutePath = `${workspacePath}/${entry.path}`
-      await deleteWorkspaceItem(absolutePath)
-      onRefresh()
+      const snapshot = await workspacePlatform.deleteWorkspaceItem({ root: workspacePath, relativePath: entry.path, revision })
+      onSnapshot(snapshot)
     } catch (err) {
       alert(`Failed to delete item: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -83,7 +84,7 @@ function TreeNode({ entry, level, onRefresh, workspacePath }: { entry: Workspace
       {isDirectory && open && hasChildren && (
         <div className="workspace-tree-children">
           {entry.children.map((child) => (
-            <TreeNode key={child.path} entry={child} level={level + 1} onRefresh={onRefresh} workspacePath={workspacePath} />
+            <TreeNode key={child.path} entry={child} level={level + 1} onSnapshot={onSnapshot} workspacePath={workspacePath} revision={revision} />
           ))}
         </div>
       )}
@@ -91,46 +92,58 @@ function TreeNode({ entry, level, onRefresh, workspacePath }: { entry: Workspace
   )
 }
 
-export default function WorkspacePanel({ agentMode, sending, workspacePath, onEnableAgentMode, onSetMessage, onWorkspaceReady }: WorkspacePanelProps) {
+export default function WorkspacePanel({ agentMode, sending, workspacePath, onEnableAgentMode, onSetMessage, onWorkspaceReady, refreshRevision = 0 }: WorkspacePanelProps) {
   const [tree, setTree] = useState<WorkspaceTreeEntry | null>(null)
+  const [revision, setRevision] = useState(0)
+  const revisionRef = useRef(0)
+  const refreshInFlightRef = useRef(false)
   const [error, setError] = useState('')
 
-  const refresh = async () => {
+  const applySnapshot = useCallback((snapshot: WorkspaceSnapshot) => {
+    setTree(snapshot.tree)
+    revisionRef.current = snapshot.revision
+    setRevision(snapshot.revision)
+    if (snapshot.path !== workspacePath) onWorkspaceReady(snapshot.path)
+  }, [onWorkspaceReady, workspacePath])
+  const refresh = useCallback(async () => {
     if (!workspacePath.trim()) {
       setError('')
       setTree(null)
       return
     }
+    if (refreshInFlightRef.current) return
 
+    refreshInFlightRef.current = true
     try {
       setError('')
-      const nextTree = await getWorkspaceTree(workspacePath)
-      setTree(nextTree)
-      if (nextTree.path !== workspacePath) onWorkspaceReady(nextTree.path)
+      applySnapshot(await workspacePlatform.getWorkspaceSnapshot({ root: workspacePath, relativePath: '', revision: revisionRef.current }))
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      refreshInFlightRef.current = false
     }
-  }
+  }, [applySnapshot, workspacePath])
 
   useEffect(() => {
-    refresh()
+    void refresh()
 
-    // Refresh when the window gains focus (e.g., switching back from VS Code)
-    const handleFocus = () => {
-      refresh()
+    // There is no filesystem event stream behind this native snapshot API.
+    // Catch up immediately when returning to the app and use a low-frequency
+    // fallback only while this panel is actually visible and focused.
+    const refreshWhenActive = () => {
+      if (document.visibilityState === 'visible' && document.hasFocus()) void refresh()
     }
-    window.addEventListener('focus', handleFocus)
+    window.addEventListener('focus', refreshWhenActive)
+    document.addEventListener('visibilitychange', refreshWhenActive)
 
-    // Poll every 15 seconds to catch edits/updates in real-time
-    const interval = setInterval(() => {
-      refresh()
-    }, 15000)
+    const interval = window.setInterval(refreshWhenActive, 30000)
 
     return () => {
-      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('focus', refreshWhenActive)
+      document.removeEventListener('visibilitychange', refreshWhenActive)
       clearInterval(interval)
     }
-  }, [workspacePath])
+  }, [workspacePath, refreshRevision, refresh])
 
   const handleCreateFile = async () => {
     if (!workspacePath.trim()) return
@@ -139,9 +152,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
 
     try {
       setError('')
-      const fullPath = `${workspacePath}/${name.trim()}`
-      await createWorkspaceFile(fullPath)
-      await refresh()
+      applySnapshot(await workspacePlatform.createWorkspaceFile({ root: workspacePath, relativePath: name.trim(), revision }))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -154,9 +165,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
 
     try {
       setError('')
-      const fullPath = `${workspacePath}/${name.trim()}`
-      await createWorkspaceFolder(fullPath)
-      await refresh()
+      applySnapshot(await workspacePlatform.createWorkspaceFolder({ root: workspacePath, relativePath: name.trim(), revision }))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -165,20 +174,29 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
   return (
     <section className="workspace-panel">
       <header className="workspace-panel-header">
-        <div>
-          <span className="workspace-kicker">Agent Workspace</span>
-          <h2>Workspace</h2>
+        <div className="workspace-title-group">
+          <span className="workspace-title-icon material-icon folder" aria-hidden="true">
+            <img src={folderOpenIcon} alt="" draggable={false} />
+          </span>
+          <div className="workspace-title-copy">
+            <h2 title={workspacePath || 'Workspace'}>{tree?.name || workspacePath.split(/[\\/]/).filter(Boolean).pop() || 'Workspace'}</h2>
+          </div>
+          <span className="workspace-agent-pill" data-state={sending ? 'thinking' : agentMode ? 'agent' : 'idle'}>
+            {sending ? 'Running' : agentMode ? 'Agent mode' : 'Manual'}
+          </span>
         </div>
-        <span className="workspace-agent-pill" data-state={sending ? 'thinking' : agentMode ? 'agent' : 'idle'}>
-          {sending ? 'Running' : agentMode ? 'Agent mode' : 'Manual'}
-        </span>
+        <div className="workspace-panel-actions" aria-label="Workspace actions">
+          <button type="button" onClick={handleCreateFile} disabled={!workspacePath.trim()} aria-label="New file" title="New file">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 11v6M9 14h6"/></svg>
+          </button>
+          <button type="button" onClick={handleCreateFolder} disabled={!workspacePath.trim()} aria-label="New folder" title="New folder">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v6M9 13h6"/></svg>
+          </button>
+          <button type="button" onClick={refresh} disabled={!workspacePath.trim()} aria-label="Refresh workspace" title="Refresh workspace">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.55-2.6L20 12M4 12l2.85 5.6A7 7 0 0 0 18.4 15"/></svg>
+          </button>
+        </div>
       </header>
-
-      <div className="workspace-panel-actions">
-        <button type="button" onClick={handleCreateFile} disabled={!workspacePath.trim()}>New File</button>
-        <button type="button" onClick={handleCreateFolder} disabled={!workspacePath.trim()}>New Folder</button>
-        <button type="button" onClick={refresh} disabled={!workspacePath.trim()}>Refresh</button>
-      </div>
 
       <div className="workspace-tree-shell">
         {error ? (
@@ -194,7 +212,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
             </div>
             <div className="workspace-tree">
               {tree.children.map((entry) => (
-                <TreeNode key={entry.path} entry={entry} level={0} onRefresh={refresh} workspacePath={workspacePath} />
+                <TreeNode key={entry.path} entry={entry} level={0} onSnapshot={applySnapshot} workspacePath={workspacePath} revision={revision} />
               ))}
             </div>
           </>

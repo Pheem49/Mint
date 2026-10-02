@@ -173,7 +173,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
             M
           </div>
           <div>
-            <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#f3f4f6' }}>Main Orchestrator</div>
+            <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#f3f4f6' }}>Main orchestrator</div>
             <div style={{ fontSize: '0.72rem', color: isLive ? '#10b981' : '#9ca3af', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <span
                 style={{
@@ -246,7 +246,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
                       fontWeight: 600,
                       padding: '2px 6px',
                       borderRadius: '4px',
-                      textTransform: 'uppercase',
+                      textTransform: 'none',
                       background: `${statusColor}22`,
                       color: statusColor,
                       border: `1px solid ${statusColor}44`,
@@ -302,7 +302,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
               <span style={{ fontWeight: 600, fontSize: '0.86rem', color: '#10b981' }}>
                 Subagent Activity: {activeSubagent.name}
               </span>
-              <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({activeSubagent.tools.length} steps)</span>
+              <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({activeSubagent.tools.length})</span>
             </div>
             <button
               type="button"
@@ -333,7 +333,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
                   <span style={{ fontWeight: 600, color: '#38bdf8' }}>{tool.action}</span>
-                  {tool.isError && <span style={{ color: '#f87171', fontWeight: 600 }}>FAILED</span>}
+                  {tool.isError && <span style={{ color: '#f87171', fontWeight: 600 }}>Failed</span>}
                 </div>
                 {tool.input && (
                   <pre

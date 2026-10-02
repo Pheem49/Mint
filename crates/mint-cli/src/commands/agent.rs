@@ -367,30 +367,21 @@ pub async fn handle_auto() -> Result<()> {
 
     // Enable the browser tools if they are disabled
     let mut config_mut = config.clone();
-    let mut changed = false;
-    for tool in &[
-        "browser_open",
-        "browser_click",
-        "browser_type",
-        "browser_read",
-        "browser_mouse_move",
-        "browser_mouse_click",
-        "browser_key_press",
-        "browser_screenshot",
-    ] {
-        if config_mut.disabled_tools.contains(&tool.to_string()) {
-            config_mut.disabled_tools.retain(|x| x != *tool);
-            changed = true;
-        }
-    }
-    if changed {
+    if mint_core::enable_browser_tools(&mut config_mut) {
         mint_core::save_config(&config_mut)?;
         println!(
-            "✅ Enabled browser automation tools in config: browser_open, browser_click, browser_type, browser_read, browser_mouse_move, browser_mouse_click, browser_key_press, browser_screenshot"
+            "✅ Enabled browser automation tools in config: browser_open, browser_click, browser_type, browser_read, browser_mouse_move, browser_mouse_click, browser_key_press, browser_screenshot, browser_tabs, browser_observe, browser_fill, browser_select, browser_scroll, browser_wait"
         );
     }
 
-    println!("🌐 Isolated browser running with remote debugging on http://127.0.0.1:9222");
+    println!(
+        "🌐 Isolated browser running with remote debugging on {}",
+        config
+            .extra
+            .get("browserDebugUrl")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("http://127.0.0.1:9222/json/list")
+    );
     println!("💬 Keep this terminal open while you want Mint to automate browser tasks.");
     println!("Press Ctrl+C to terminate the automation browser session.");
     println!("----------------------------------------------------------------------");
@@ -458,7 +449,10 @@ pub async fn handle_auto() -> Result<()> {
     Ok(())
 }
 
-pub async fn handle_web(dev: bool) -> Result<()> {
+pub async fn handle_web(dev: bool, tailscale: bool) -> Result<()> {
+    if tailscale {
+        return super::tailnet_web::run().await;
+    }
     launch_mint_target("web".into(), dev).await
 }
 
@@ -607,10 +601,11 @@ pub async fn handle_chat(
                 messages: None,
                 tools: None,
                 temperature: config.temperature,
+                ..Default::default()
             },
         )
         .await?;
-        image::save_sent_image_after_send(image_data_uri.as_deref(), &message);
+        image::save_sent_image_after_send(image_data_uri.as_deref(), &message, None);
         println!("{}", response.text);
     }
     Ok(())

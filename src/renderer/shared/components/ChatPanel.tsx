@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
-import { hasAgentToolActivity, thoughtsFrom, parseFileChangesFromProgress } from '../agentProgress'
+import { hasAgentToolActivity, thoughtsFrom, extendedThoughtsFrom, mergeFileChanges, parseFileChangesFromProgress } from '../agentProgress'
+import { visibleInteractionsDuringRun } from '../conversation/syncView'
 import {
   GEMINI_MODELS,
   OPENAI_MODELS,
@@ -25,32 +26,61 @@ import ChatMessageItem from './ChatMessageItem'
 import { AgentActivityDrawer } from './AgentActivityDrawer'
 import { ArtifactPreviewPanel, type ArtifactFile } from './ArtifactPreviewPanel'
 import { RewindModal } from './RewindModal'
-import type { DiffHunk, FileChange, GitCheckpoint } from '../types'
+import type { AgentProgress, ChatResponse, DiffHunk, FileChange, GitCheckpoint, RuntimeStatus } from '../types'
 import { numericSetting, shouldShowSessionDivider, formatSessionDividerLabel } from '../utils/ui'
 import { useVoiceInput } from '@/voiceInput'
 import { useGeminiLiveVoice } from '../utils/useGeminiLiveVoice'
 import GeminiLiveOverlay from './GeminiLiveOverlay'
 import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../utils/documentTypes'
 import ModelSelectorPopover from './ModelSelectorPopover'
+import GitBranchSelector from './GitBranchSelector'
+import WorkspaceSelector from './WorkspaceSelector'
+import CodeReviewPage from './CodeReviewPage'
+import type { ToolSurface } from './ToolSurfacePage'
 
-import {
-  APP_ICON_PATH,
-  type AgentProgress,
-  type ChatResponse,
-  type RuntimeStatus,
-  getTtsUrls,
-  startGeminiLiveSession,
-  sendGeminiLiveAudioChunk,
-  stopGeminiLiveSession,
-  listGitCheckpoints,
-  rollbackGitCheckpoint,
-  undoGitCheckpoint,
-  fetchProviderModels,
-} from '@/tauri'
+import { catalogPlatform, conversationPlatform, runtimePlatform } from '../platform'
+
+const STREAM_MARKDOWN_UPDATE_MS = 120
+
+function useThrottledValue<T>(value: T, intervalMs: number): T {
+  const [throttledValue, setThrottledValue] = useState(value)
+  const latestValueRef = useRef(value)
+  const lastUpdateRef = useRef(0)
+  const timerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+
+  useEffect(() => {
+    latestValueRef.current = value
+    if (Object.is(value, throttledValue)) return
+
+    const flush = () => {
+      timerRef.current = null
+      lastUpdateRef.current = Date.now()
+      setThrottledValue(latestValueRef.current)
+    }
+    const remaining = intervalMs - (Date.now() - lastUpdateRef.current)
+    if (remaining <= 0) flush()
+    else if (timerRef.current === null) timerRef.current = window.setTimeout(flush, remaining)
+  }, [value, throttledValue, intervalMs])
+
+  useEffect(() => () => {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current)
+  }, [])
+
+  return throttledValue
+}
+
+const {
+  getTtsUrls, startGeminiLiveSession, sendGeminiLiveAudioChunk, stopGeminiLiveSession,
+  listGitCheckpoints, rollbackGitCheckpoint, undoGitCheckpoint,
+} = conversationPlatform
+const { fetchProviderModels } = catalogPlatform
 
 
-interface ChatPanelProps {
+interface ChatPanelContract {
   interactions: any[]
+  sendingInteractionId?: number | null
+  hasOlder?: boolean
+  onLoadOlder?: () => Promise<void>
   sending: boolean
   sendingMessage: string
   sendingImageCount: number
@@ -66,13 +96,13 @@ interface ChatPanelProps {
   videoAttachments: Array<{ dataUri: string; name: string }>
   documentName: string
   pendingApproval: any | null
-  smartContext: boolean
   agentMode: boolean
   /** Desktop only — plan-mode-approval UI isn't available on web. */
   planMode?: boolean
   status: RuntimeStatus | null
   /** Desktop only — web has no local workspace-folder concept to select from. */
   workspacePath?: string
+  chatId: string
   chatEnd: RefObject<HTMLDivElement | null>
   welcomeInteraction: any
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
@@ -87,15 +117,17 @@ interface ChatPanelProps {
   onRemoveDocument: () => void
   onStartWebSearch: () => void
   onCaptureScreen: () => void
-  onSetSmartContext: (enabled: boolean) => void
   onSetAgentMode: (enabled: boolean) => void
   /** Desktop only — see `planMode`. */
   onSetPlanMode?: (enabled: boolean) => void
   onSetProvider: (provider: string) => void
   /** Desktop only — see `workspacePath`. */
-  onSelectWorkspace?: () => void
+  onSelectWorkspace?: (path?: string) => void
+  onWorkspaceChanged?: () => void
+  recentWorkspacePaths: string[]
   onApproval: (approved: boolean, autoApproveSession?: boolean, answer?: string) => void
   settingsConfig: any
+  onUpdateSettings?: (config: any) => void
   onSetModel: (model: string) => void
   onSelectModelAndProvider?: (provider: string, model: string) => void
   onCancelMessage: () => void
@@ -103,11 +135,40 @@ interface ChatPanelProps {
   onSetGeminiLiveVoice: (voice: string) => Promise<void>
   /** Web only — desktop's window has no mobile-width sidebar to toggle. */
   onToggleMobileSidebar?: () => void
+  isCliSession?: boolean
+  cliSessionId?: string
+  onBackToCode?: () => void
+  conversationTitle?: string
+  onOpenArtifact?: (artifact: ArtifactFile) => void
+  onOpenReview?: (review: Extract<ToolSurface, { kind: 'review' }>) => void
 }
 
+export type ConversationViewModel = Pick<ChatPanelContract,
+  | 'interactions' | 'sending' | 'sendingMessage' | 'sendingImageCount' | 'sendingVideoCount'
+  | 'streamedReply' | 'streamedResponse' | 'agentProgress' | 'agentActivitySnapshots'
+  | 'thinkingExpanded' | 'message' | 'imageAttachments' | 'videoAttachments' | 'documentName'
+  | 'pendingApproval' | 'agentMode' | 'planMode' | 'status' | 'workspacePath' | 'chatId' | 'recentWorkspacePaths'
+  | 'chatEnd' | 'welcomeInteraction' | 'settingsConfig' | 'isCliSession' | 'cliSessionId'
+  | 'conversationTitle'
+  | 'hasOlder'
+  | 'sendingInteractionId'
+>
+export type ConversationActions = Omit<ChatPanelContract, keyof ConversationViewModel>
+
+interface ChatPanelProps {
+  conversation: ConversationViewModel
+  actions: ConversationActions
+}
 
 export default function ChatPanel({
+  conversation,
+  actions,
+}: ChatPanelProps) {
+  const {
   interactions,
+  sendingInteractionId,
+  hasOlder,
+  onLoadOlder,
   sending,
   sendingMessage,
   sendingImageCount,
@@ -123,11 +184,12 @@ export default function ChatPanel({
   videoAttachments,
   documentName,
   pendingApproval,
-  smartContext,
   agentMode,
   planMode,
   status,
   workspacePath,
+  chatId,
+  recentWorkspacePaths,
   chatEnd,
   welcomeInteraction,
   onSubmit,
@@ -142,21 +204,71 @@ export default function ChatPanel({
   onRemoveDocument,
   onStartWebSearch,
   onCaptureScreen,
-  onSetSmartContext,
   onSetAgentMode,
   onSetPlanMode,
   onSetProvider,
   onSelectWorkspace,
+  onWorkspaceChanged,
   onApproval,
   settingsConfig,
+  onUpdateSettings,
   onSetModel,
   onSelectModelAndProvider,
   onCancelMessage,
   onClearMessages,
   onSetGeminiLiveVoice,
   onToggleMobileSidebar,
-}: ChatPanelProps) {
+  isCliSession,
+  cliSessionId,
+  onBackToCode,
+  conversationTitle,
+  onOpenArtifact,
+  onOpenReview,
+  } = { ...conversation, ...actions }
+  // The initiating surface already renders a live prompt/reply pair below.
+  // Hide its matching persisted turn until the local stream settles, while
+  // still showing turns submitted from other surfaces during that time.
+  const visibleInteractions = useMemo(
+    () => visibleInteractionsDuringRun(interactions, sending, sendingInteractionId),
+    [interactions, sending, sendingInteractionId],
+  )
   const agentActivities = activitiesFrom(agentProgress)
+  // Keep the composer summary tied to the active/latest agent run. This is cheap
+  // metadata, but memoizing it avoids parsing the activity stream while typing.
+  const composerChanges = useMemo(() => parseFileChangesFromProgress(agentProgress), [agentProgress])
+  const composerAdditions = useMemo(
+    () => composerChanges.reduce((sum, change) => sum + change.additions, 0),
+    [composerChanges],
+  )
+  const composerDeletions = useMemo(
+    () => composerChanges.reduce((sum, change) => sum + change.deletions, 0),
+    [composerChanges],
+  )
+  const composerChangeLabel = composerChanges.length === 1
+    ? '1 file changed'
+    : `${composerChanges.length} files changed`
+  const conversationChanges = useMemo(() => {
+    const historicalGroups = interactions.map((interaction) => {
+      const interactionId = String(interaction.id)
+      const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
+      return parseFileChangesFromProgress(progress)
+    })
+    const activeChanges = parseFileChangesFromProgress(agentProgress)
+    return mergeFileChanges([...historicalGroups, activeChanges])
+  }, [agentActivitySnapshots, agentProgress, interactions])
+
+  const projectName = useMemo(() => {
+    if (!workspacePath) return null
+    const clean = workspacePath.replace(/[\\/]+$/, '').trim()
+    if (!clean) return null
+    const parts = clean.split(/[\\/]/)
+    return parts[parts.length - 1] || clean
+  }, [workspacePath])
+
+  // Markdown parsing can be expensive for code, tables, and interactive cards.
+  // Limit it to a steady cadence instead of parsing on every stream chunk.
+  const throttledStreamedReply = useThrottledValue(streamedReply, STREAM_MARKDOWN_UPDATE_MS)
+  const liveWebSources = useMemo(() => parseWebSearchSources(agentProgress), [agentProgress])
   const activeFallbackNotice = fallbackNotice(streamedResponse)
   const lastThinkingProgress = [...agentProgress].reverse().find(p => p.type === 'Thinking')
   let activeAgentName: string | null = null
@@ -168,10 +280,22 @@ export default function ChatPanel({
   const [openActivityIds, setOpenActivityIds] = useState<Record<string, boolean>>({})
   const [openReviewIds, setOpenReviewIds] = useState<Record<string, boolean>>({})
   const [openFileDiffs, setOpenFileDiffs] = useState<Record<string, boolean>>({})
+  const [showAllFileChanges, setShowAllFileChanges] = useState<Record<string, boolean>>({})
+  const [reviewPage, setReviewPage] = useState<{ title: string; changes: FileChange[] } | null>(null)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactFile | null>(null)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
+
+  const openArtifact = (artifact: ArtifactFile) => {
+    if (onOpenArtifact) onOpenArtifact(artifact)
+    else setActiveArtifact(artifact)
+  }
+
+  const openReview = (title: string, changes: FileChange[]) => {
+    if (onOpenReview) onOpenReview({ id: `review:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: title, changes })
+    else setReviewPage({ title, changes })
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -239,7 +363,9 @@ export default function ChatPanel({
 
   const chatContainerRef = useRef<HTMLDivElement | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const isNearBottomRef = useRef(true)
+  const scrollFrameRef = useRef<number | null>(null)
 
   const handleChatScroll = useCallback(() => {
     const el = chatContainerRef.current
@@ -248,6 +374,26 @@ export default function ChatPanel({
     const nearBottom = distanceFromBottom <= 240
     setShowScrollToBottom(!nearBottom)
     isNearBottomRef.current = nearBottom
+  }, [])
+
+  const scheduleScrollToLatest = useCallback(() => {
+    if (!isNearBottomRef.current || scrollFrameRef.current !== null) return
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      const element = chatContainerRef.current
+      if (element && isNearBottomRef.current) {
+        // Smooth scrolling on every token restarts animations and causes jank.
+        element.scrollTop = element.scrollHeight
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    scheduleScrollToLatest()
+  }, [interactions, sending, streamedReply, pendingApproval, agentProgress, scheduleScrollToLatest])
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current)
   }, [])
 
   useEffect(() => {
@@ -560,6 +706,7 @@ export default function ChatPanel({
   const geminiLiveEnabled = settingsConfig?.voiceMode === 'geminiLive'
   const geminiLive = useGeminiLiveVoice({
     workspacePath,
+    chatId,
     startSession: startGeminiLiveSession,
     sendAudioChunk: sendGeminiLiveAudioChunk,
     stopSession: stopGeminiLiveSession
@@ -631,9 +778,6 @@ export default function ChatPanel({
     }
   }
   const activeModel = getActiveModel(activeProvider)
-  const workspaceName = workspacePath
-    ? workspacePath.split(/[\\/]/).filter(Boolean).pop() || workspacePath
-    : 'Select Project'
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const slashRef = useRef<SlashSuggestionsHandle>(null)
 
@@ -993,9 +1137,11 @@ export default function ChatPanel({
   }, [agentActivitySnapshots])
 
   const renderChangesList = (changes: ReturnType<typeof parseFileChangesFromProgress>, idPrefix: string) => {
+    const showAll = Boolean(showAllFileChanges[idPrefix])
+    const visibleChanges = showAll ? changes : changes.slice(0, 3)
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        {changes.map((change) => {
+      <div className="file-changes-list" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        {visibleChanges.map((change) => {
           const fileKey = `${idPrefix}-${change.path}`
           const isDiffOpen = Boolean(openFileDiffs[fileKey])
           const fileName = change.path.split('/').pop() || change.path
@@ -1042,7 +1188,7 @@ export default function ChatPanel({
                         change.created && change.hunks.length > 0
                           ? change.hunks.map((h) => h.newText).filter(Boolean).join('\n')
                           : undefined
-                      setActiveArtifact({ path: change.path, content: fallbackContent })
+                    openArtifact({ path: change.path, content: fallbackContent })
                     }}
                     title="Open Live Preview Split View"
                   >
@@ -1083,6 +1229,17 @@ export default function ChatPanel({
             </div>
           )
         })}
+        {changes.length > 3 && (
+          <button
+            type="button"
+            className="file-changes-show-more"
+            aria-expanded={showAll}
+            onClick={() => setShowAllFileChanges((current) => ({ ...current, [idPrefix]: !current[idPrefix] }))}
+          >
+            {showAll ? 'Show fewer files' : `Show ${changes.length - 3} more ${changes.length - 3 === 1 ? 'file' : 'files'}`}
+            <span aria-hidden="true" className={showAll ? 'is-expanded' : ''}>⌄</span>
+          </button>
+        )}
       </div>
     )
   }
@@ -1097,7 +1254,7 @@ export default function ChatPanel({
     const totalDeletions = changes.reduce((sum, c) => sum + c.deletions, 0)
     const createdCount = changes.filter((c) => c.created).length
     const modifiedCount = changes.length - createdCount
-    const isOpen = Boolean(openReviewIds[interactionId])
+    const isOpen = openReviewIds[interactionId] ?? true
 
     let summaryLabel = ''
     if (createdCount > 0 && modifiedCount === 0) {
@@ -1171,56 +1328,49 @@ export default function ChatPanel({
     }
 
     return (
-      <div className="file-changes-summary-container" style={{ marginBottom: '8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-          <button
-            type="button"
-            className="agent-activity-toggle file-changes-toggle"
-            aria-expanded={isOpen}
-            onClick={() => setOpenReviewIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-              <polyline points="22 4 12 14.01 9 11.01" />
-            </svg>
-            <span>
-              {summaryLabel}
-              {createdCount > 0 && modifiedCount === 0 ? (
-                <span className="file-changes-count-add" style={{ marginLeft: '6px' }}>
-                  (+{totalAdditions} {totalAdditions === 1 ? 'line' : 'lines'})
+      <div className="file-changes-summary-container">
+        <div className="agent-activity-card file-changes-card">
+          <div className="file-changes-summary-row">
+            <div className="file-changes-summary">
+              <span className="file-changes-summary-icon" aria-hidden="true">⊞</span>
+              <span className="file-changes-summary-copy">
+                <span className="file-changes-summary-label">{summaryLabel}</span>
+                <span className="file-changes-summary-counts">
+                  {totalAdditions > 0 && <span className="file-changes-count-add">+{totalAdditions}</span>}
+                  {totalDeletions > 0 && <span className="file-changes-count-del">-{totalDeletions}</span>}
                 </span>
-              ) : (
-                <>
-                  {totalAdditions > 0 && <span className="file-changes-count-add" style={{ marginLeft: '6px' }}>+{totalAdditions}</span>}
-                  {totalDeletions > 0 && <span className="file-changes-count-del" style={{ marginLeft: '4px' }}>-{totalDeletions}</span>}
-                </>
-              )}
-            </span>
-            <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
-          </button>
-
-          <button
-            type="button"
-            className="file-changes-rewind-btn"
-            onClick={handleRewind}
-            title="Rewind workspace to before these file edits (Git Checkpoint)"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="1 4 1 10 7 10" />
-              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-            </svg>
-            Rewind
-          </button>
-        </div>
-
-        {isOpen && (
-          <div className="agent-activity-card file-changes-card">
-            {renderChangesList(changes, interactionId)}
+              </span>
+            </div>
+            <div className="file-changes-summary-actions">
+              <button
+                type="button"
+                className="file-changes-rewind-btn"
+                onClick={handleRewind}
+                title="Rewind workspace to before these file edits (Git Checkpoint)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="1 4 7 4 7 10" />
+                  <path d="M3 9a9 9 0 1 0 2.13-5.36L1 7" />
+                </svg>
+                Undo
+              </button>
+              <button
+                type="button"
+                className="file-changes-review-btn"
+                title="Review changed code"
+                onClick={() => {
+                  openReview('All conversation changes', conversationChanges)
+                }}
+              >
+                Review
+              </button>
+            </div>
           </div>
-        )}
+          {isOpen && <div className="file-changes-list-container">{renderChangesList(changes, interactionId)}</div>}
+        </div>
       </div>
     )
-  }, [agentActivitySnapshots, openReviewIds, openFileDiffs, workspacePath])
+  }, [agentActivitySnapshots, conversationChanges, openReviewIds, openFileDiffs, showAllFileChanges, workspacePath])
 
   const renderActiveFileChanges = () => {
     const changes = parseFileChangesFromProgress(agentProgress)
@@ -1230,49 +1380,45 @@ export default function ChatPanel({
     const totalDeletions = changes.reduce((sum, c) => sum + c.deletions, 0)
     const createdCount = changes.filter((c) => c.created).length
     const modifiedCount = changes.length - createdCount
-    const isOpen = Boolean(openReviewIds['active-run'])
+    const isOpen = openReviewIds['active-run'] ?? true
 
     let summaryLabel = ''
     if (createdCount > 0 && modifiedCount === 0) {
-      summaryLabel = `${createdCount} ${createdCount === 1 ? 'file created' : 'files created'} in this run`
+      summaryLabel = `${createdCount} ${createdCount === 1 ? 'file created' : 'files created'}`
     } else if (createdCount > 0 && modifiedCount > 0) {
-      summaryLabel = `${createdCount} created, ${modifiedCount} modified in this run`
+      summaryLabel = `${createdCount} created, ${modifiedCount} modified`
     } else {
-      summaryLabel = `${changes.length} ${changes.length === 1 ? 'file changed' : 'files changed'} in this run`
+      summaryLabel = `${changes.length} ${changes.length === 1 ? 'file changed' : 'files changed'}`
     }
 
     return (
       <div className="message ai-message agent-activity-message" style={{ marginTop: '4px', marginBottom: '8px' }}>
         <div className="agent-activity-card file-changes-card">
-          <button
-            type="button"
-            className="agent-activity-toggle file-changes-toggle"
-            aria-expanded={isOpen}
-            onClick={() => setOpenReviewIds((current) => ({ ...current, 'active-run': !current['active-run'] }))}
-            style={{ border: 0, background: 'transparent', padding: 0 }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-              <polyline points="22 4 12 14.01 9 11.01" />
-            </svg>
-            <span>
-              {summaryLabel}
-              {createdCount > 0 && modifiedCount === 0 ? (
-                <span className="file-changes-count-add" style={{ marginLeft: '6px' }}>
-                  (+{totalAdditions} {totalAdditions === 1 ? 'line' : 'lines'})
+          <div className="file-changes-summary-row">
+            <div className="file-changes-summary">
+              <span className="file-changes-summary-icon" aria-hidden="true">✓</span>
+              <span className="file-changes-summary-copy">
+                <span className="file-changes-summary-label">{summaryLabel}</span>
+                <span className="file-changes-summary-counts">
+                  {totalAdditions > 0 && <span className="file-changes-count-add">+{totalAdditions}</span>}
+                  {totalDeletions > 0 && <span className="file-changes-count-del">-{totalDeletions}</span>}
                 </span>
-              ) : (
-                <>
-                  {totalAdditions > 0 && <span className="file-changes-count-add" style={{ marginLeft: '6px' }}>+{totalAdditions}</span>}
-                  {totalDeletions > 0 && <span className="file-changes-count-del" style={{ marginLeft: '4px' }}>-{totalDeletions}</span>}
-                </>
-              )}
-            </span>
-            <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
-          </button>
+              </span>
+            </div>
+            <button
+              type="button"
+              className="file-changes-review-btn"
+              title="Review changed code"
+              onClick={() => {
+                openReview('All conversation changes', conversationChanges)
+              }}
+            >
+              Review
+            </button>
+          </div>
 
           {isOpen && (
-            <div style={{ marginTop: '8px' }}>
+            <div className="file-changes-list-container" style={{ marginTop: '8px' }}>
               {renderChangesList(changes, 'active')}
             </div>
           )}
@@ -1288,7 +1434,7 @@ export default function ChatPanel({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      style={activeArtifact ? { flex: '0 0 calc(100% - var(--preview-width, 50%))', width: 'calc(100% - var(--preview-width, 50%))', minWidth: '320px', maxWidth: 'none', margin: 0, position: 'relative' } : undefined}
+      style={activeArtifact || reviewPage ? { flex: '0 0 calc(100% - var(--preview-width, 50%))', width: 'calc(100% - var(--preview-width, 50%))', minWidth: '320px', maxWidth: 'none', margin: 0, position: 'relative' } : undefined}
     >
         {isDragging && (
           <div
@@ -1317,7 +1463,7 @@ export default function ChatPanel({
               pointerEvents: 'auto',
             }}
           >
-            <div style={{ marginBottom: '16px', color: 'var(--accent)' }}>
+            <div style={{ marginBottom: '16px', color: 'var(--interactive-fg)' }}>
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                 <circle cx="8.5" cy="8.5" r="1.5" />
@@ -1334,9 +1480,9 @@ export default function ChatPanel({
               className="mobile-menu-btn"
               type="button"
               onClick={onToggleMobileSidebar}
-              aria-label="Toggle menu"
+              aria-label="Open navigation menu"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <line x1="3" y1="12" x2="21" y2="12" />
                 <line x1="3" y1="6" x2="21" y2="6" />
                 <line x1="3" y1="18" x2="21" y2="18" />
@@ -1344,35 +1490,79 @@ export default function ChatPanel({
             </button>
           )}
           <div className="chat-header-title">
-            <img src={APP_ICON_PATH} alt="Logo" className="chat-header-logo" />
-            <span>Mint Agent</span>
+            {isCliSession ? (
+              <div className="chat-header-breadcrumb">
+                {onBackToCode && (
+                  <button
+                    type="button"
+                    className="chat-header-back-btn"
+                    onClick={onBackToCode}
+                    title="Back to Code sessions Hub"
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M15 18l-6-6 6-6" />
+                    </svg>
+                    <span>Code</span>
+                  </button>
+                )}
+                <span className="chat-header-sep">/</span>
+                <span className="chat-header-session-tag" title={cliSessionId || 'CLI Session'}>
+                  <span>
+                    {cliSessionId ? (cliSessionId === 'cli' ? 'cli' : `cli::${cliSessionId.replace(/^cli::/, '').slice(0, 7)}`) : 'cli'}
+                  </span>
+                </span>
+              </div>
+            ) : (
+              <div className="chat-header-brand-group">
+                <img src={runtimePlatform.appIconPath()} alt="Logo" className="chat-header-logo" />
+                <span
+                  className="chat-header-title-text"
+                  title={conversationTitle && conversationTitle.trim() && conversationTitle !== 'New chat' ? conversationTitle.trim() : 'Mint Agent'}
+                >
+                  {conversationTitle && conversationTitle.trim() && conversationTitle !== 'New chat' ? conversationTitle.trim() : 'Mint Agent'}
+                </span>
+                {projectName && (
+                  <span className="chat-header-project-pill" title={`Project: ${workspacePath}`}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <span>{projectName}</span>
+                  </span>
+                )}
+              </div>
+            )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="chat-header-actions">
             {activeArtifact && (
               <button
                 type="button"
-                className="chat-header-clear-btn"
+                className="chat-header-pill-btn"
                 title="Close Live Preview"
                 onClick={() => setActiveArtifact(null)}
-                style={{
-                  color: 'var(--accent)',
-                  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
-                  border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)',
-                  padding: '2px 8px',
-                  borderRadius: 'var(--radius-xs, 4px)',
-                  fontSize: '0.74rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}
               >
-                <span>Close Live Preview</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                <span>Close preview</span>
               </button>
             )}
-            <button className="chat-header-clear-btn" title="Clear Messages" onClick={onClearMessages}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <button
+              type="button"
+              className="chat-header-action-btn"
+              title="Clear conversation"
+              onClick={onClearMessages}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="3 6 5 6 21 6"></polyline>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                 <line x1="10" y1="11" x2="10" y2="17"></line>
@@ -1382,9 +1572,28 @@ export default function ChatPanel({
           </div>
         </div>
       <div className="chat-container" ref={chatContainerRef} onScroll={handleChatScroll}>
-        {interactions.map((interaction, index) => (
+        {hasOlder && onLoadOlder && (
+          <button type="button" className="load-older-messages" disabled={loadingOlder}
+            style={{ display: 'block', margin: '0 auto 20px', padding: '7px 14px', borderRadius: 8,
+              border: '1px solid var(--border-color, #3a3a3a)', background: 'var(--surface, #252525)',
+              color: 'var(--text-secondary, #c0c0c0)', cursor: loadingOlder ? 'default' : 'pointer' }}
+            onClick={async () => {
+            const container = chatContainerRef.current
+            const previousHeight = container?.scrollHeight ?? 0
+            setLoadingOlder(true)
+            try {
+              await onLoadOlder()
+              window.requestAnimationFrame(() => {
+                if (container) container.scrollTop += container.scrollHeight - previousHeight
+              })
+            } finally { setLoadingOlder(false) }
+          }}>
+            {loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}
+          </button>
+        )}
+        {visibleInteractions.map((interaction, index) => (
           <Fragment key={interaction.id}>
-            {index > 0 && shouldShowSessionDivider(interactions[index - 1].createdAt, interaction.createdAt) && (
+            {index > 0 && shouldShowSessionDivider(visibleInteractions[index - 1].createdAt, interaction.createdAt) && (
               <div className="system-event-divider">
                 <div className="system-event-line" />
                 <div className="system-event-pill">
@@ -1432,23 +1641,29 @@ export default function ChatPanel({
             {renderActiveFileChanges()}
             <div className="message ai-message thinking-message">
               <div className="bubble-wrapper">
-                <ThinkingBlock
-                  blockKey="live"
-                  thoughts={thoughtsFrom(agentProgress)}
-                  isLive={true}
-                  expanded={thinkingExpanded.live ?? true}
-                  onExpandedChange={onThinkingExpandedChange}
-                  showEmptyHint={
-                    agentMode
-                    && hasAgentToolActivity(agentProgress)
-                    && thoughtsFrom(agentProgress).length === 0
-                    && !streamedReply
-                  }
-                />
+                {!agentMode && extendedThoughtsFrom(agentProgress).length > 0 && (
+                  <ThinkingBlock
+                    blockKey="live-extended"
+                    thoughts={extendedThoughtsFrom(agentProgress)}
+                    isLive={true}
+                    variant="extended"
+                    expanded={thinkingExpanded['live-extended'] ?? true}
+                    onExpandedChange={onThinkingExpandedChange}
+                  />
+                )}
+                {!agentMode && thoughtsFrom(agentProgress).length > 0 && extendedThoughtsFrom(agentProgress).length === 0 && (
+                  <ThinkingBlock
+                    blockKey="live"
+                    thoughts={thoughtsFrom(agentProgress)}
+                    isLive={true}
+                    expanded={thinkingExpanded.live ?? true}
+                    onExpandedChange={onThinkingExpandedChange}
+                  />
+                )}
                 <div className="message-bubble">
                   <span>
-                    {streamedReply ? (
-                      renderFormattedMessage(streamedReply)
+                    {throttledStreamedReply ? (
+                      renderFormattedMessage(throttledStreamedReply, liveWebSources)
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-soft, #94a3b8)' }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', flexShrink: 0 }}>
@@ -1483,23 +1698,23 @@ export default function ChatPanel({
                       <span className="provider-chip-model">{streamedResponse.model}</span>
                     </span>
                     {activeFallbackNotice && <span className="provider-fallback-notice">{activeFallbackNotice}</span>}
-                    {streamedReply && (
+                    {throttledStreamedReply && (
                       <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
                         <button
                           type="button"
                           className={`msg-action-btn copy-btn ${copiedId === 'live' ? 'is-copied' : ''}`}
-                          onClick={() => handleCopyMessage('live', streamedReply)}
+                          onClick={() => handleCopyMessage('live', throttledStreamedReply)}
                           title={copiedId === 'live' ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
                         >
                           {renderCopyIcon(copiedId === 'live')}
                         </button>
                         <button
                           type="button"
-                          className={`msg-action-btn tts-btn ${speakingText === streamedReply ? 'is-speaking' : ''}`}
-                          onClick={() => speak(streamedReply)}
-                          title={speakingText === streamedReply ? 'Stop reading' : 'Read aloud'}
+                          className={`msg-action-btn tts-btn ${speakingText === throttledStreamedReply ? 'is-speaking' : ''}`}
+                          onClick={() => speak(throttledStreamedReply)}
+                          title={speakingText === throttledStreamedReply ? 'Stop reading' : 'Read aloud'}
                         >
-                          {renderSpeakerIcon(speakingText === streamedReply)}
+                          {renderSpeakerIcon(speakingText === throttledStreamedReply)}
                         </button>
                       </div>
                     )}
@@ -1535,41 +1750,62 @@ export default function ChatPanel({
       </div>
 
       <div className={`input-area ${voiceMode ? 'voice-active' : ''}`}>
-        {isEmptyChat && <div className="empty-chat-prompt">Mint Agent is ready to work</div>}
-        {onSelectWorkspace && (
-          <button type="button" className="workspace-select-btn" onClick={onSelectWorkspace}>
-            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>
-              </svg>
+        {composerChanges.length > 0 && (
+          <button
+            type="button"
+            className={`composer-change-status ${sending ? 'is-live' : ''}`}
+            onClick={() => openReview(composerChangeLabel, composerChanges)}
+            title="Review recent agent changes"
+          >
+            <span className="composer-change-status-copy">
+              {sending && <span className="composer-change-status-spinner" aria-hidden="true" />}
+              <span>{sending ? `Editing ${composerChanges.length} ${composerChanges.length === 1 ? 'file' : 'files'}…` : composerChangeLabel}</span>
             </span>
-            <span>{workspaceName}</span>
-            <span aria-hidden="true">⌄</span>
+            <span className="composer-change-status-counts" aria-label={`${composerAdditions} additions and ${composerDeletions} deletions`}>
+              {composerAdditions > 0 && <strong>+{composerAdditions}</strong>}
+              {composerDeletions > 0 && <em>-{composerDeletions}</em>}
+            </span>
           </button>
         )}
-        <div className="smart-context-bar">
-          <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label className="toggle-switch">
-              <input type="checkbox" checked={smartContext} onChange={(event) => onSetSmartContext(event.target.checked)} />
-              <span className="slider round" />
-            </label>
-            <span>Smart Context (Auto-Screen)</span>
+        {isEmptyChat && (
+          <div className="empty-chat-prompt-wrap">
+            <div className="empty-chat-prompt">Mint Agent is ready to work</div>
+            {projectName && (
+              <div className="empty-chat-project-badge">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span>Working in <strong>{projectName}</strong></span>
+              </div>
+            )}
           </div>
-          <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label className="toggle-switch">
+        )}
+        {onSelectWorkspace && (
+          <div className="project-context-row">
+            <WorkspaceSelector
+              currentPath={workspacePath || ''}
+              recentPaths={recentWorkspacePaths}
+              onSelectWorkspace={onSelectWorkspace}
+            />
+            {workspacePath && <GitBranchSelector workspacePath={workspacePath} disabled={sending} onBranchChanged={onWorkspaceChanged} />}
+          </div>
+        )}
+        <div className="smart-context-bar">
+          <label className={`smart-context-option ${agentMode ? 'is-active' : ''}`}>
+            <span className="toggle-switch">
               <input type="checkbox" checked={agentMode} onChange={(event) => onSetAgentMode(event.target.checked)} />
               <span className="slider round" />
-            </label>
-            <span>Agent Mode</span>
-          </div>
+            </span>
+            <span className="smart-context-copy"><span className="smart-context-title">Agent mode</span></span>
+          </label>
           {onSetPlanMode && (
-            <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }} title="Investigate read-only and require plan approval before editing files or running commands">
-              <label className="toggle-switch">
+            <label className={`smart-context-option ${planMode ? 'is-active' : ''}`} title="Investigate read-only and require plan approval before editing files or running commands">
+              <span className="toggle-switch">
                 <input type="checkbox" checked={Boolean(planMode)} onChange={(event) => onSetPlanMode(event.target.checked)} />
                 <span className="slider round" />
-              </label>
-              <span>Plan Mode</span>
-            </div>
+              </span>
+              <span className="smart-context-copy"><span className="smart-context-title">Plan mode</span></span>
+            </label>
           )}
         </div>
         {voiceMode && (
@@ -1779,7 +2015,10 @@ export default function ChatPanel({
           <input id="video-file-input" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" onChange={onSelectVideo} style={{ display: 'none' }} />
           <input id="document-file-input" type="file" accept={SUPPORTED_DOCUMENT_ACCEPT} onChange={onSelectDocument} style={{ display: 'none' }} />
           <button id="screen-capture-btn" type="button" onClick={onCaptureScreen} aria-label="Capture screen">
-            <span className="screen-capture-eye" aria-hidden="true" />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="2" y="3" width="20" height="15" rx="2" />
+              <path d="M8 22h8M12 18v4M7 10h10M12 5v10" />
+            </svg>
           </button>
           <ModelSelectorPopover
             activeProvider={status?.activeProvider ?? ''}
@@ -1795,6 +2034,7 @@ export default function ChatPanel({
                 onSetModel(model)
               }
             }}
+            onUpdateSettings={onUpdateSettings}
           />
           <button
             id="mic-btn"
@@ -1941,19 +2181,13 @@ export default function ChatPanel({
   return (
     <div
       ref={wrapperRef}
-      className={`chat-panel-split-wrapper ${activeArtifact ? 'has-preview' : 'no-preview'}`}
+      className={`chat-panel-split-wrapper ${activeArtifact || reviewPage ? 'has-preview' : 'no-preview'}`}
       style={{
-        width: '100%',
-        height: '100%',
-        overflow: 'hidden',
-        position: 'relative',
-        gridColumn: '1 / -1',
-        zIndex: 1,
         '--preview-width': `${(splitRatio * 100).toFixed(2)}%`,
       } as React.CSSProperties}
     >
       {sectionContent}
-      {activeArtifact && (
+      {(activeArtifact || reviewPage) && (
         <>
           <div
             className="preview-split-resizer"
@@ -1963,11 +2197,16 @@ export default function ChatPanel({
           >
             <div className="preview-split-resizer-grip" />
           </div>
-          <ArtifactPreviewPanel
-            artifact={activeArtifact}
-            onClose={() => setActiveArtifact(null)}
-            workspacePath={workspacePath}
-          />
+          {reviewPage ? (
+            <CodeReviewPage
+              title={reviewPage.title}
+              changes={reviewPage.changes}
+              workspacePath={workspacePath}
+              onBack={() => setReviewPage(null)}
+            />
+          ) : activeArtifact ? (
+            <ArtifactPreviewPanel artifact={activeArtifact} onClose={() => setActiveArtifact(null)} workspacePath={workspacePath} />
+          ) : null}
         </>
       )}
       {rewindModalState.isOpen && (

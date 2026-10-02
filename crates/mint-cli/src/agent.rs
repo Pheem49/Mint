@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use std::time::{Duration, Instant};
 
@@ -27,19 +27,21 @@ mod markdown_render;
 use approval_prompts::*;
 use diff_render::*;
 pub(crate) use live_status::*;
-use markdown_render::*;
+pub(crate) use markdown_render::*;
 
-const RESET: &str = "\x1b[0m";
-const MINT: &str = "\x1b[32m";
-const GREEN: &str = "\x1b[32m";
-const RED: &str = "\x1b[31m";
-const BLUE: &str = "\x1b[38;2;78;201;216m";
-const CYAN: &str = "\x1b[38;2;56;189;248m";
-const DIM: &str = "\x1b[90m";
-const BRIGHT: &str = "\x1b[1;97m";
-const BOLD: &str = "\x1b[1m";
-const BG_ADD: &str = "\x1b[48;2;20;53;32m\x1b[38;2;166;226;46m";
-const BG_DEL: &str = "\x1b[48;2;61;23;23m\x1b[38;2;255;121;121m";
+const RESET: &str = crate::terminal_theme::ANSI_RESET;
+const MINT: &str = crate::terminal_theme::ANSI_ACCENT;
+const GREEN: &str = crate::terminal_theme::ANSI_ACCENT;
+const RED: &str = crate::terminal_theme::ANSI_ERROR;
+const YELLOW: &str = crate::terminal_theme::ANSI_WARNING;
+const BLUE: &str = crate::terminal_theme::ANSI_BLUE;
+const CYAN: &str = crate::terminal_theme::ANSI_BLUE;
+const DIM: &str = crate::terminal_theme::ANSI_MUTED;
+const BRIGHT: &str = crate::terminal_theme::ANSI_BRIGHT_TEXT;
+const WHITE: &str = crate::terminal_theme::ANSI_TEXT;
+const BOLD: &str = crate::terminal_theme::ANSI_BOLD;
+const BG_ADD: &str = crate::terminal_theme::ANSI_ADD;
+const BG_DEL: &str = crate::terminal_theme::ANSI_DELETE;
 
 #[derive(Debug, Clone, Default)]
 pub struct AgentOptions {
@@ -58,6 +60,11 @@ pub struct AgentOptions {
     /// configured MCP server — set by an `@servername` mention in the typed
     /// query, mirroring the GUI composer's `@` mention picker.
     pub pinned_mcp_server: Option<String>,
+    /// Chat ID / session ID for this turn. Defaults to `CHAT_CLI_ID` if omitted.
+    pub chat_id: Option<String>,
+    /// Full-screen UI event sink. When present, agent output never writes
+    /// directly to stdout and stdin remains owned by the TUI controller.
+    pub tui: Option<crate::interactive::TuiHandle>,
 }
 
 pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Result<AgentResult> {
@@ -327,6 +334,187 @@ fn save_plan_file(root: &Path, plan: &str) -> io::Result<std::path::PathBuf> {
     Ok(path)
 }
 
+fn tui_persistable_approval(
+    tui: &crate::interactive::TuiHandle,
+    tool: &str,
+    subject: &str,
+    title: &str,
+    body: String,
+    root: &Path,
+    permission_rules: &mut Vec<PermissionRule>,
+) -> ApprovalOutcome {
+    if let Some(decision) = permission_decision_for(permission_rules, tool, subject, root) {
+        return match decision {
+            PermissionDecision::Allow => ApprovalOutcome::Approved,
+            PermissionDecision::Deny => ApprovalOutcome::Denied,
+        };
+    }
+    match tui.choose(
+        title,
+        body,
+        vec![
+            "Yes".into(),
+            "Yes, allow for this session".into(),
+            "No".into(),
+        ],
+    ) {
+        Some(0) => ApprovalOutcome::Approved,
+        Some(1) => {
+            permission_rules.push(PermissionRule {
+                tool: tool.to_owned(),
+                pattern: subject.to_owned(),
+                decision: PermissionDecision::Allow,
+                project_root: None,
+            });
+            ApprovalOutcome::Approved
+        }
+        _ => ApprovalOutcome::Denied,
+    }
+}
+
+fn tui_approval(
+    tui: &crate::interactive::TuiHandle,
+    approval: &AgentApproval,
+    root: &Path,
+    permission_rules: &mut Vec<PermissionRule>,
+) -> Result<ApprovalOutcome, String> {
+    let yes_no = |title: &str, body: String| match tui.choose(
+        title,
+        body,
+        vec!["Approve".into(), "Deny".into()],
+    ) {
+        Some(0) => ApprovalOutcome::Approved,
+        _ => ApprovalOutcome::Denied,
+    };
+    Ok(match approval {
+        AgentApproval::WriteFile { path, diff, .. } => tui_persistable_approval(
+            tui,
+            "write_file",
+            path,
+            "Create file",
+            format!("Path: {path}\n\n{diff}"),
+            root,
+            permission_rules,
+        ),
+        AgentApproval::ApplyPatch { path, diff, .. } => tui_persistable_approval(
+            tui,
+            "apply_patch",
+            path,
+            "Update file",
+            format!("Path: {path}\n\n{diff}"),
+            root,
+            permission_rules,
+        ),
+        AgentApproval::RunShell {
+            command,
+            mode,
+            background,
+        } => tui_persistable_approval(
+            tui,
+            "run_shell",
+            command,
+            "Local shell command",
+            format!(
+                "Command: {command}\nMode: {mode}\nBackground: {}",
+                if *background { "yes" } else { "no" }
+            ),
+            root,
+            permission_rules,
+        ),
+        AgentApproval::NoteWrite { path, .. } => tui_persistable_approval(
+            tui,
+            "note_write",
+            path,
+            "Create note",
+            format!("Path: {path}"),
+            root,
+            permission_rules,
+        ),
+        AgentApproval::RunPlugin { name, instruction } => {
+            let subject = format!("{name}: {instruction}");
+            tui_persistable_approval(
+                tui,
+                "run_plugin",
+                &subject,
+                "Run plugin",
+                format!("Plugin: {name}\n\n{instruction}"),
+                root,
+                permission_rules,
+            )
+        }
+        AgentApproval::McpTool {
+            server,
+            tool,
+            arguments,
+        } => {
+            let body = format!("Server: {server}\nTool: {tool}\nArguments: {arguments}");
+            if tui.choose(
+                "MCP tool call",
+                body,
+                vec![format!("Allow all tools on {server}"), "No".into()],
+            ) == Some(0)
+            {
+                ApprovalOutcome::Intercepted(mint_core::MCP_ALLOW_ALL_SENTINEL.to_owned())
+            } else {
+                ApprovalOutcome::Denied
+            }
+        }
+        AgentApproval::UserApproval { title, prompt } => yes_no(title, prompt.to_owned()),
+        AgentApproval::EnterPlanMode { reason } => yes_no("Enter plan mode?", reason.to_owned()),
+        AgentApproval::ExitPlanMode { plan } => {
+            let outcome = yes_no("Review plan", plan.to_owned());
+            if outcome == ApprovalOutcome::Approved {
+                match save_plan_file(root, plan) {
+                    Ok(path) => tui.push_notice(format!("Plan saved to {}", path.display())),
+                    Err(error) => tui.push_notice(format!("Could not save plan: {error}")),
+                }
+            }
+            outcome
+        }
+        AgentApproval::AskUser {
+            question,
+            options,
+            header,
+            multi_select,
+        } => {
+            let title = header.as_deref().unwrap_or("Mint needs your input");
+            if options.is_empty() {
+                tui.prompt_text(title, question)
+                    .map(ApprovalOutcome::Intercepted)
+                    .unwrap_or(ApprovalOutcome::Denied)
+            } else {
+                let labels = options
+                    .iter()
+                    .map(|option| match &option.description {
+                        Some(description) => format!("{} — {description}", option.label),
+                        None => option.label.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                if *multi_select {
+                    let selected = tui.choose_many(title, question, labels);
+                    let answer = selected
+                        .into_iter()
+                        .filter_map(|index| options.get(index))
+                        .map(|option| option.label.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if answer.is_empty() {
+                        ApprovalOutcome::Denied
+                    } else {
+                        ApprovalOutcome::Intercepted(answer)
+                    }
+                } else {
+                    let choice = tui.choose(title, question, labels);
+                    choice
+                        .and_then(|choice| options.get(choice))
+                        .map(|option| ApprovalOutcome::Intercepted(option.label.clone()))
+                        .unwrap_or(ApprovalOutcome::Denied)
+                }
+            }
+        }
+    })
+}
+
 pub async fn run_code_agent_with_options(
     task: &str,
     root: &Path,
@@ -338,19 +526,23 @@ pub async fn run_code_agent_with_options(
     draft_out: Arc<Mutex<Option<String>>>,
 ) -> Result<AgentResult> {
     let started_at = Instant::now();
+    crate::interactive::clear_last_thought();
     let thinking_verb = random_thinking_verb();
     let approval_active = Arc::new(AtomicBool::new(false));
     let agent_done = Arc::new(AtomicBool::new(false));
-    // True between a tool starting and finishing — tells the periodic timer
+    // Number of tools between start and finish — tells the periodic timer
     // below not to overwrite the live status with "Thinking (Xs)…" text
-    // while a tool (e.g. a shell command) is actually the thing in flight,
-    // without stopping it from still re-rendering (so the bullets keep
-    // pulsing) while that's happening.
-    let tool_running = Arc::new(AtomicBool::new(false));
+    // while any tool (e.g. a shell command) is still in flight. A count is
+    // needed because parallel tools may finish at different times.
+    let tool_running = Arc::new(AtomicUsize::new(0));
     let live_status = Arc::new(Mutex::new(LiveStatus::default()));
     {
         use crossterm::tty::IsTty;
+        if let Ok(mut status) = live_status.lock() {
+            status.tui = options.tui.clone();
+        }
         if options.queueing
+            && options.tui.is_none()
             && !options.fast_mode
             && io::stdout().is_tty()
             && io::stdin().is_tty()
@@ -372,6 +564,11 @@ pub async fn run_code_agent_with_options(
 
     let approve_cb = |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         approve_approval_active.store(true, Ordering::Relaxed);
+        if let Some(tui) = &options.tui {
+            let result = tui_approval(tui, approval, root, &mut permission_rules);
+            approve_approval_active.store(false, Ordering::Relaxed);
+            return result;
+        }
         // Synchronous, not polled: `wait_for_escape_interrupt` holds raw
         // mode continuously while the queueing box is live (see its docs),
         // and only reacts to `approval_active` on its next ~15ms tick. Every
@@ -600,7 +797,7 @@ pub async fn run_code_agent_with_options(
                     if timer_agent_done.load(Ordering::Relaxed) {
                         break;
                     }
-                    if !timer_tool_running.load(Ordering::Relaxed) {
+                    if timer_tool_running.load(Ordering::Relaxed) == 0 {
                         status.thinking = Some(
                             if let Some((attempt, max_attempts)) = status.waiting_for_network {
                                 waiting_for_network_label(attempt, max_attempts)
@@ -648,6 +845,7 @@ pub async fn run_code_agent_with_options(
             } => {
                 if !options.fast_mode
                     && !progress_approval_active.load(Ordering::Relaxed)
+                    && progress_tool_running.load(Ordering::Relaxed) == 0
                     && let Ok(mut status) = progress_live_status.lock()
                 {
                     status.context_pct = context_pct;
@@ -655,6 +853,7 @@ pub async fn run_code_agent_with_options(
                     status.input_tokens = input_tokens;
                     status.generated_tokens = generated_tokens;
                     status.estimated_tokens = estimated_tokens;
+                    status.active_tool_started = None;
                     // Re-derive the animation rate from this real data point
                     // every time one arrives (cumulative generated tokens /
                     // elapsed turn time so far) — see
@@ -695,6 +894,7 @@ pub async fn run_code_agent_with_options(
             } => {
                 if !options.fast_mode
                     && !progress_approval_active.load(Ordering::Relaxed)
+                    && progress_tool_running.load(Ordering::Relaxed) == 0
                     && let Ok(mut status) = progress_live_status.lock()
                 {
                     status.waiting_for_network = Some((attempt, max_attempts));
@@ -707,8 +907,49 @@ pub async fn run_code_agent_with_options(
                     && !progress_approval_active.load(Ordering::Relaxed)
                     && let Ok(mut status) = progress_live_status.lock()
                 {
-                    commit_activity_snapshot(&mut status);
-                    print_timeline_note(&mut status, &thought);
+                    commit_activity_snapshot_if_idle(
+                        &mut status,
+                        progress_tool_running.load(Ordering::Relaxed),
+                    );
+                    let elapsed = started_at.elapsed();
+                    print_timeline_note(&mut status, &thought, elapsed, None);
+                    status.thinking = None;
+                    status.waiting_for_network = None;
+                    render_live_status(&mut status);
+                }
+            }
+            AgentProgress::ThinkingDelta {
+                id,
+                delta,
+                elapsed_ms,
+            } => {
+                if !options.fast_mode {
+                    let elapsed = Duration::from_millis(elapsed_ms);
+                    let elapsed_str = crate::interactive::format_thought_elapsed(elapsed);
+                    crate::interactive::append_thought_delta(&id, &delta, &elapsed_str);
+                }
+            }
+            AgentProgress::ExtendedThinking {
+                id,
+                thought,
+                elapsed_ms,
+            } => {
+                if !options.fast_mode
+                    && !progress_approval_active.load(Ordering::Relaxed)
+                    && let Ok(mut status) = progress_live_status.lock()
+                {
+                    commit_activity_snapshot_if_idle(
+                        &mut status,
+                        progress_tool_running.load(Ordering::Relaxed),
+                    );
+                    let elapsed = elapsed_ms
+                        .map(Duration::from_millis)
+                        .unwrap_or_else(|| started_at.elapsed());
+                    // Extended thinking gets the same timeline-note treatment
+                    // as regular Thought — `print_timeline_note` already
+                    // distinguishes internal CoT (long) from short notes via
+                    // `is_internal_cot` and renders accordingly.
+                    print_timeline_note(&mut status, &thought, elapsed, id.as_deref());
                     status.thinking = None;
                     status.waiting_for_network = None;
                     render_live_status(&mut status);
@@ -719,8 +960,13 @@ pub async fn run_code_agent_with_options(
                 input,
                 subagent,
             } => {
-                progress_tool_running.store(true, Ordering::Relaxed);
-                if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
+                progress_tool_running.fetch_add(1, Ordering::Relaxed);
+                if !options.fast_mode
+                    && (options.tui.is_some() || !progress_approval_active.load(Ordering::Relaxed))
+                {
+                    if let Ok(mut status) = progress_live_status.lock() {
+                        status.active_tool_started = Some(std::time::Instant::now());
+                    }
                     if let Some(subagent_name) = subagent {
                         // A tool call happening *inside* a running subagent's own
                         // nested loop (tagged by `dispatch_one_subagent`) — render
@@ -794,8 +1040,20 @@ pub async fn run_code_agent_with_options(
                 result,
                 subagent,
             } => {
-                progress_tool_running.store(false, Ordering::Relaxed);
-                if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
+                let remaining = progress_tool_running
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |running| {
+                        Some(running.saturating_sub(1))
+                    })
+                    .unwrap_or(0)
+                    .saturating_sub(1);
+                if !options.fast_mode
+                    && (options.tui.is_some() || !progress_approval_active.load(Ordering::Relaxed))
+                {
+                    if remaining == 0
+                        && let Ok(mut status) = progress_live_status.lock()
+                    {
+                        status.active_tool_started = None;
+                    }
                     if subagent.is_some() {
                         // Nested call inside a subagent finished — the ToolStart
                         // line already shown covers it; only the command-output
@@ -890,7 +1148,12 @@ pub async fn run_code_agent_with_options(
                 if let Ok(mut status) = progress_live_status.lock() {
                     status.thinking = None;
                     status.waiting_for_network = None;
-                    let mut card = format!("\x1b[1;36m┌─ Plan: {} \x1b[0m\n", plan.objective);
+                    let mut card = format!(
+                        "{}┌─ Plan: {} {}\n",
+                        crate::terminal_theme::ANSI_ACCENT_BOLD,
+                        plan.objective,
+                        crate::terminal_theme::ANSI_RESET
+                    );
                     for task in &plan.tasks {
                         let mark = match task.status.as_str() {
                             "completed" => "\x1b[32m[✓]\x1b[0m",
@@ -900,7 +1163,11 @@ pub async fn run_code_agent_with_options(
                         };
                         card.push_str(&format!("│  {} {}\n", mark, task.title));
                     }
-                    card.push_str("\x1b[1;36m└────────────────────────────────────────\x1b[0m");
+                    card.push_str(&format!(
+                        "{}└────────────────────────────────────────{}",
+                        crate::terminal_theme::ANSI_ACCENT_BOLD,
+                        crate::terminal_theme::ANSI_RESET
+                    ));
                     status.tasks.push(card.into());
                     render_live_status(&mut status);
                 }
@@ -909,173 +1176,75 @@ pub async fn run_code_agent_with_options(
                 if let Ok(mut status) = progress_live_status.lock() {
                     status.thinking = None;
                     status.waiting_for_network = None;
-                    let outcome_str = match summary.outcome.as_str() {
-                        "SUCCESS" => "\x1b[32m✓ Success\x1b[0m",
-                        "FAILED" => "\x1b[31m✗ Failure\x1b[0m",
-                        "ROLLED_BACK" => "\x1b[33m↺ Rolled Back\x1b[0m",
-                        _ => &summary.outcome,
-                    };
-                    let tokens_k = if summary.total_tokens >= 1000 {
-                        format!("{:.1}k", summary.total_tokens as f64 / 1000.0)
+                    commit_activity_snapshot(&mut status);
+
+                    let failed_tools: Vec<_> = summary
+                        .tool_timeline
+                        .iter()
+                        .filter(|record| !record.success)
+                        .collect();
+                    let outcome = if !failed_tools.is_empty() {
+                        format!(
+                            "{YELLOW}⚠ Completed with {} failure{}{RESET}",
+                            failed_tools.len(),
+                            if failed_tools.len() == 1 { "" } else { "s" }
+                        )
+                    } else if summary.outcome == "ROLLED_BACK" {
+                        format!("{YELLOW}↺ Rolled back{RESET}")
+                    } else if summary.outcome == "FAILED" {
+                        format!("{RED}✗ Failed{RESET}")
                     } else {
-                        summary.total_tokens.to_string()
+                        format!("{GREEN}✓ Completed{RESET}")
                     };
-                    let created_count = summary.files_created.len();
-                    let modified_count = summary.files_changed.len().saturating_sub(created_count);
-                    let files_str = if created_count > 0 && modified_count > 0 {
-                        format!("{} created, {} modified", created_count, modified_count)
-                    } else if created_count > 0 {
-                        format!("{} created", created_count)
-                    } else {
-                        format!("{} modified", summary.files_changed.len())
-                    };
-                    let mut card = format!(
-                        "\x1b[1;36m┌─ Agent Run #{} ────────────────────────────\x1b[0m\n\
-                         │ Status:   {}\n\
-                         │ Duration: {:.1}s\n\
-                         │ Tokens:   {}\n\
-                         │ Tools:    {} calls ({} retries)\n\
-                         │ Files:    {}\n",
-                        summary.run_id,
-                        outcome_str,
+                    let file_count = summary.files_changed.len();
+                    let mut lines = vec![format!(
+                        "  {outcome} {DIM}in {:.1}s · {} tool{} · {} file{} changed{RESET}",
                         summary.duration_secs,
-                        tokens_k,
                         summary.tool_calls_count,
-                        summary.retries_count,
-                        files_str,
-                    );
-                    if !summary.tool_timeline.is_empty() {
-                        card.push_str("│\n│ Tool calls timeline:\n");
-                        for rec in &summary.tool_timeline {
-                            let status_icon = if !rec.success {
-                                "\x1b[31m✗\x1b[0m"
-                            } else if rec.retried {
-                                "\x1b[33m↺\x1b[0m"
-                            } else {
-                                "\x1b[32m✓\x1b[0m"
-                            };
-                            let note = if !rec.success {
-                                " (failed)"
-                            } else if rec.retried {
-                                " (self-corrected)"
-                            } else {
-                                ""
-                            };
-                            let target_desc = if rec.target.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" [{}]", rec.target)
-                            };
-                            card.push_str(&format!(
-                                "│  {:02}s {} {}{}{}\n",
-                                rec.step, status_icon, rec.action, target_desc, note
-                            ));
+                        if summary.tool_calls_count == 1 {
+                            ""
+                        } else {
+                            "s"
+                        },
+                        file_count,
+                        if file_count == 1 { "" } else { "s" },
+                    )];
+
+                    if file_count > 0 {
+                        let mut names: Vec<String> = summary
+                            .files_changed
+                            .iter()
+                            .take(6)
+                            .map(|path| display_tool_target(path))
+                            .collect();
+                        if file_count > names.len() {
+                            names.push(format!("+{} more", file_count - names.len()));
                         }
+                        lines.push(format!("    {DIM}└ {}{RESET}", names.join(", ")));
                     }
-                    card.push_str("\x1b[1;36m└────────────────────────────────────────\x1b[0m");
-                    status.tasks.push(card.into());
-                    render_live_status(&mut status);
+                    for record in failed_tools.into_iter().take(3) {
+                        let target = if record.target.is_empty() {
+                            record.action.clone()
+                        } else {
+                            format!("{} [{}]", record.action, truncate_line(&record.target, 72))
+                        };
+                        lines.push(format!("    {RED}└ {target} failed{RESET}"));
+                    }
+                    insert_permanent_lines(&mut status, &lines);
                 }
             }
         }
     };
 
-    let chunk_live_status = Arc::clone(&live_status);
-    let chunk_agent_done = Arc::clone(&agent_done);
-    let on_chunk = |summary: String| {
-        // Flip this *before* touching anything else — `agent_loop` still has
-        // async work left (memory writes, etc.) after calling `on_chunk`, so
-        // the real "done" store below (after `agent_loop.await`) fires too
-        // late: the periodic status ticker keeps polling every 150ms in the
-        // meantime and, seeing `agent_done` still false, unconditionally
-        // resurrects `status.thinking` and re-renders — reconstructing a
-        // fresh inline TUI viewport mid-print if that lands while the plain
-        // `print!`s below are still spooling out a long answer (e.g. a big
-        // markdown table), corrupting the terminal. Setting it here closes
-        // that window instead of only the (much narrower) one the
-        // `accepting_input` flag below covers.
-        chunk_agent_done.store(true, Ordering::Relaxed);
-        let mut committed_activity = false;
-        if !options.fast_mode
-            && let Ok(mut status) = chunk_live_status.lock()
-        {
-            status.thinking = None;
-            status.waiting_for_network = None;
-            // Stop accepting keystrokes for the queueing box before it's torn
-            // down below — otherwise a keypress landing between this
-            // `clear_live_status` and the final answer's plain `println!`
-            // would resurrect the box (via `render_live_status`'s lazy
-            // `InlineTui::ensure`) at whatever the cursor's current position
-            // happens to be, underneath the answer that just printed.
-            status.accepting_input = false;
-            committed_activity = commit_activity_snapshot(&mut status);
-            clear_live_status(&mut status);
-        }
-        // Same reasoning as `approve_cb`: drop raw mode synchronously,
-        // right here, rather than leaving `wait_for_escape_interrupt` to
-        // notice `accepting_input` went false on its next tick — the prints
-        // below need cooked mode's `\n` → `\r\n` translation immediately.
-        let _ = crossterm::terminal::disable_raw_mode();
-        let formatted_summary = format_markdown_bold(&sanitize_latex(&summary));
-        // `commit_activity_snapshot` above already ended on a blank line when
-        // it committed anything (e.g. a tool-use activity block) — printing
-        // this leading "\n" unconditionally on top of that stacked two blank
-        // lines before every answer that followed tool use.
-        if committed_activity {
-            print!("  {MINT}Mint:{RESET} ");
-        } else {
-            print!("\n  {MINT}Mint:{RESET} ");
-        }
-        avatar_bridge.on_talking(true);
-        render_live_summary(&formatted_summary);
-        avatar_bridge.on_talking(false);
-
-        // Print web search sources if any were collected (grouped by domain)
-        if let Ok(mut status) = chunk_live_status.lock()
-            && !status.web_sources.is_empty()
-        {
-            println!();
-            println!("  {DIM}Sources:{RESET}");
-
-            let mut domain_groups: Vec<(String, Vec<(String, String)>)> = Vec::new();
-            for (title, url) in status.web_sources.drain(..) {
-                let domain = extract_domain(&url);
-                if let Some(group) = domain_groups.iter_mut().find(|(d, _)| d == &domain) {
-                    group.1.push((title, url));
-                } else {
-                    domain_groups.push((domain, vec![(title, url)]));
-                }
-            }
-
-            for (i, (domain, items)) in domain_groups.iter().enumerate() {
-                let (first_title, first_url) = &items[0];
-                let extra_count = items.len() - 1;
-                if extra_count > 0 {
-                    println!(
-                        "  {DIM}{}.{RESET} {BLUE}{}{RESET} {DIM}({}){RESET} {CYAN}[+{} extra]{RESET}",
-                        i + 1,
-                        first_title,
-                        domain,
-                        extra_count
-                    );
-                } else {
-                    println!(
-                        "  {DIM}{}.{RESET} {BLUE}{}{RESET} {DIM}({}){RESET}",
-                        i + 1,
-                        first_title,
-                        domain
-                    );
-                }
-                println!("     {DIM}{}{RESET}", first_url);
-            }
-        }
-
-        println!();
-    };
+    // Providers may still stream internally, but the CLI deliberately waits
+    // for AgentResult.summary so it can render one complete Markdown document.
+    let on_chunk = |_summary: String| {};
 
     let user_name = MemoryStore::open_default()
         .ok()
         .and_then(|memory| memory.get_profile("name").ok().flatten());
+
+    let target_chat_id = options.chat_id.as_deref().unwrap_or(CHAT_CLI_ID);
 
     let agent_loop = orchestrate_agent_loop(
         config,
@@ -1084,7 +1253,7 @@ pub async fn run_code_agent_with_options(
         image_data_uri,
         None,
         video_data_uri,
-        Some(CHAT_CLI_ID),
+        Some(target_chat_id),
         None,
         user_name.as_deref(),
         options.pinned_mcp_server.as_deref(),
@@ -1111,51 +1280,53 @@ pub async fn run_code_agent_with_options(
         status.thinking = None;
         status.waiting_for_network = None;
         status.accepting_input = false;
+        commit_activity_snapshot(&mut status);
         if let Ok(mut out) = queued_out.lock() {
-            *out = status.queued.clone();
+            *out = options
+                .tui
+                .as_ref()
+                .map(|tui| tui.take_queued())
+                .unwrap_or_else(|| status.queued.clone());
         }
         if let Ok(mut out) = draft_out.lock() {
-            *out = if status.draft.is_empty() {
-                None
-            } else {
-                Some(status.draft.iter().collect())
-            };
-        }
-        if res.is_err() {
-            commit_activity_snapshot(&mut status);
+            *out = options
+                .tui
+                .as_ref()
+                .and_then(|tui| tui.draft())
+                .or_else(|| (!status.draft.is_empty()).then(|| status.draft.iter().collect()));
         }
         clear_live_status(&mut status);
     }
-    let res = res.map_err(|e| anyhow!("{}", e))?;
-
-    if should_show_verification(&res.verification) {
-        println!("  Verification: {}", res.verification);
+    let mut res = res.map_err(|e| anyhow!("{}", e))?;
+    if let Ok(status) = live_status.lock() {
+        if res.input_tokens == 0 && status.input_tokens > 0 {
+            res.input_tokens = status.input_tokens;
+        }
+        if res.generated_tokens == 0 && status.generated_tokens > 0 {
+            res.generated_tokens = status.generated_tokens;
+        }
     }
-    let badge_plain = if let Some(fb_provider) = &res.fallback {
+
+    let badge_plain = if let Some(orig_provider) = &res.fallback {
+        let reason_suffix = if let Some(reason) = &res.fallback_reason {
+            format!(" ({reason})")
+        } else {
+            String::new()
+        };
         format!(
-            "{} • {} → fallback: {} • {}",
-            config.ai_provider,
-            crate::active_model(&config.ai_provider, config),
-            fb_provider,
+            "{} • {}{} → fallback: {} • {}",
+            orig_provider,
+            crate::active_model(orig_provider, config),
+            reason_suffix,
+            res.provider,
             res.model
         )
     } else {
         format!("{} • {}", res.provider, res.model)
     };
 
-    // "─ Worked for {elapsed} • {provider} • {model}" as one *labeled*
-    // divider — filled out with more "─" to the same width the box's own
-    // two divider lines use — rather than the provider/model badge and the
-    // elapsed-time label as two separate short lines followed by a third,
-    // unlabeled full-width divider directly under them. The three used to
-    // look like unrelated elements stacked on top of each other; folding
-    // both labels into one rule reads as a single line doing all three
-    // jobs, matching the box below it.
     let (tw, _) = markdown::terminal_size_or_default();
-    let width = tw as usize;
-    // `↑` context stays dim with the rest of the footer; `↓` generated drops
-    // out of DIM for its segment so the "what the model actually produced"
-    // number reads a touch stronger than the divider around it.
+    let width = (tw as usize).saturating_sub(6).max(40);
     let tokens_suffix = if res.input_tokens > 0 || res.generated_tokens > 0 {
         format!(
             " • ↑ {} · {RESET}↓ {}{DIM}",
@@ -1169,11 +1340,77 @@ pub async fn run_code_agent_with_options(
         "─ Worked for {}{tokens_suffix} • {badge_plain}",
         format_elapsed(started_at.elapsed())
     );
-    // Count only visible columns for the fill — `tokens_suffix` carries ANSI
-    // codes that don't occupy screen width.
     let label_width = strip_ansi_escapes(&label).chars().count();
-    let fill_len = width.saturating_sub(2).saturating_sub(label_width + 1);
-    println!("  {DIM}{label} {}{RESET}", "─".repeat(fill_len));
+    let fill_len = width.saturating_sub(label_width + 1);
+    let worked_line = format!("{DIM}{label} {}{RESET}", "─".repeat(fill_len));
+
+    if let Some(tui) = &options.tui {
+        tui.push_assistant(res.summary.clone());
+        if let Ok(mut status) = live_status.lock()
+            && !status.web_sources.is_empty()
+        {
+            let sources = status
+                .web_sources
+                .drain(..)
+                .enumerate()
+                .map(|(index, (title, url))| format!("{}. {title}\n   {url}", index + 1))
+                .collect::<Vec<_>>()
+                .join("\n");
+            tui.push_notice(format!("Sources:\n{sources}"));
+        }
+        tui.push_notice(worked_line);
+        avatar_bridge.on_talking(false);
+        return Ok(res);
+    }
+
+    let formatted_summary = format_markdown_bold(&sanitize_latex(&res.summary));
+    print!("\n  {MINT}Mint:{RESET} ");
+    avatar_bridge.on_talking(true);
+    render_live_summary(&formatted_summary);
+    avatar_bridge.on_talking(false);
+    println!();
+
+    // Print web search sources once after the streamed answer is complete.
+    if let Ok(mut status) = live_status.lock()
+        && !status.web_sources.is_empty()
+    {
+        println!("  {DIM}Sources:{RESET}");
+
+        let mut domain_groups: Vec<(String, Vec<(String, String)>)> = Vec::new();
+        for (title, url) in status.web_sources.drain(..) {
+            let domain = extract_domain(&url);
+            if let Some(group) = domain_groups.iter_mut().find(|(d, _)| d == &domain) {
+                group.1.push((title, url));
+            } else {
+                domain_groups.push((domain, vec![(title, url)]));
+            }
+        }
+
+        for (i, (domain, items)) in domain_groups.iter().enumerate() {
+            let (first_title, first_url) = &items[0];
+            let extra_count = items.len() - 1;
+            if extra_count > 0 {
+                println!(
+                    "  {DIM}{}.{RESET} {BLUE}{}{RESET} {DIM}({}){RESET} {CYAN}[+{} extra]{RESET}",
+                    i + 1,
+                    first_title,
+                    domain,
+                    extra_count
+                );
+            } else {
+                println!(
+                    "  {DIM}{}.{RESET} {BLUE}{}{RESET} {DIM}({}){RESET}",
+                    i + 1,
+                    first_title,
+                    domain
+                );
+            }
+            println!("     {DIM}{}{RESET}", first_url);
+        }
+        println!();
+    }
+
+    println!("  {worked_line}");
 
     Ok(res)
 }

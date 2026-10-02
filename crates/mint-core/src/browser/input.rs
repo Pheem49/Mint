@@ -157,7 +157,7 @@ pub async fn mouse_click(
 pub async fn type_text_native(config: &MintConfig, text: &str) -> Result<String, String> {
     log_action(
         "TYPE",
-        &format!("Native typing: '{}'", &text[..text.len().min(60)]),
+        &format!("Native typing: {} characters", text.chars().count()),
     );
     ensure_page_open(config).await?;
 

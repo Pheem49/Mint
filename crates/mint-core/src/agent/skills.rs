@@ -136,7 +136,7 @@ pub fn learned_skills_context(
     let mut has_history = false;
     if let Some(cid) = chat_id {
         if let Ok(memory) = MemoryStore::open_default() {
-            if let Ok(interactions) = memory.recent_interactions_for_chat(cid, 1) {
+            if let Ok(interactions) = memory.recent_completed_interactions_for_chat(cid, 1) {
                 has_history = !interactions.is_empty();
             }
         }

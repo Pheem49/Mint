@@ -6,6 +6,24 @@ use thiserror::Error;
 
 use crate::MintConfig;
 
+/// Provider-neutral pieces produced while a model response is still arriving.
+/// Callers never need to know which vendor-specific field carried the data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatStreamEvent {
+    TextDelta {
+        delta: String,
+    },
+    ReasoningDelta {
+        delta: String,
+    },
+    ToolCallDelta {
+        index: usize,
+        name: Option<String>,
+        arguments: Option<String>,
+        input: Option<Value>,
+    },
+}
+
 /// `available_providers()`'s configured-providers list, reordered so
 /// `gemini` is tried first among fallbacks (when it's configured and isn't
 /// already the primary) — the user's explicit preference, ahead of
@@ -63,8 +81,26 @@ pub async fn send_chat_with_fallback(
 /// away from `provider` — `None` for an ordinary transient failure, so routine
 /// hiccups don't get an extra notice while specific, actionable ones do.
 fn fallback_reason_text(provider: &str, error: &ChatError) -> Option<String> {
+    let provider_name = if provider.starts_with("custom:") {
+        provider.strip_prefix("custom:").unwrap_or(provider)
+    } else {
+        provider
+    };
     match error {
-        ChatError::InsufficientBalance(_) => Some(format!("{provider} ran out of balance")),
+        ChatError::InsufficientBalance(_) => Some(format!("{provider_name} ran out of balance")),
+        ChatError::Request(e) => {
+            if let Some(status) = e.status() {
+                if status == reqwest::StatusCode::PAYLOAD_TOO_LARGE {
+                    Some(format!("{provider_name} payload too large (HTTP 413)"))
+                } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    Some(format!("{provider_name} rate limit exceeded (HTTP 429)"))
+                } else {
+                    Some(format!("{provider_name} returned HTTP {status}"))
+                }
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -105,6 +141,42 @@ where
     stream_chat(config, request, &mut on_chunk)
         .await
         .map(|r| (r, None))
+}
+
+/// Streaming equivalent of [`send_chat_with_fallback`] that preserves the
+/// complete response (tool calls, usage, stop reason, and reasoning) while
+/// exposing provider-neutral deltas as they arrive.
+pub async fn stream_chat_events_with_fallback<F>(
+    config: &MintConfig,
+    request: &ChatRequest,
+    mut on_event: F,
+) -> Result<(ChatResponse, Option<String>), ChatError>
+where
+    F: FnMut(ChatStreamEvent),
+{
+    let primary_error = match stream_chat_events(config, request, &mut on_event).await {
+        Ok(r) => return Ok((r, None)),
+        Err(e) if !is_recoverable(&e) => return Err(e),
+        Err(e) => e,
+    };
+    if matches!(primary_error, ChatError::NetworkUnavailable) {
+        return Err(primary_error);
+    }
+    let fallback_reason = fallback_reason_text(&config.ai_provider, &primary_error);
+    for provider in fallback_provider_order(config) {
+        if provider == config.ai_provider {
+            continue;
+        }
+        let alt = config_for_provider(config, &provider);
+        if let Ok(mut response) = stream_chat_events(&alt, request, &mut on_event).await {
+            response.fallback_provider = Some(config.ai_provider.clone());
+            response.fallback_reason = fallback_reason.clone();
+            return Ok((response, Some(provider)));
+        }
+    }
+    stream_chat_events(config, request, &mut on_event)
+        .await
+        .map(|response| (response, None))
 }
 
 /// Whether an error warrants trying another provider.
@@ -167,6 +239,12 @@ pub struct ChatRequest {
     /// `config.resolved_temperature()`.
     #[serde(default)]
     pub temperature: Option<f64>,
+    /// Optional per-request thinking/reasoning enabled override.
+    #[serde(default)]
+    pub thinking_enabled: Option<bool>,
+    /// Optional per-request thinking effort override ("low", "medium", "high", "extra_high").
+    #[serde(default)]
+    pub thinking_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -484,34 +562,53 @@ pub async fn stream_chat<F>(
 where
     F: FnMut(String),
 {
+    stream_chat_events(config, request, |event| {
+        if let ChatStreamEvent::TextDelta { delta } = event {
+            on_chunk(delta);
+        }
+    })
+    .await
+}
+
+pub async fn stream_chat_events<F>(
+    config: &MintConfig,
+    request: &ChatRequest,
+    mut on_event: F,
+) -> Result<ChatResponse, ChatError>
+where
+    F: FnMut(ChatStreamEvent),
+{
     let client = crate::HTTP_CLIENT.clone();
     let provider = config.ai_provider.as_str();
     require_supported_attachments(provider, request)?;
-    let (model, text) = match provider {
-        "gemini" => stream_gemini(&client, config, request, &mut on_chunk).await?,
+    let reply = match provider {
+        "gemini" => stream_gemini_reply(&client, config, request, &mut on_event).await?,
         "openai" | "local_openai" | "openrouter" | "deepseek" => {
-            stream_openai(&client, config, request, &mut on_chunk).await?
+            stream_openai_reply(&client, config, request, &mut on_event).await?
         }
-        "ollama" => stream_ollama(&client, config, request, &mut on_chunk).await?,
-        "anthropic" => stream_anthropic(&client, config, request, &mut on_chunk).await?,
-        "huggingface" => stream_huggingface(&client, config, request, &mut on_chunk).await?,
+        "ollama" => stream_ollama_reply(&client, config, request, &mut on_event).await?,
+        "anthropic" => stream_anthropic_reply(&client, config, request, &mut on_event).await?,
+        "huggingface" => stream_huggingface_reply(&client, config, request, &mut on_event).await?,
         p if p.starts_with("custom:") => {
-            stream_custom_provider(&client, config, request, &mut on_chunk).await?
+            stream_custom_provider_reply(&client, config, request, &mut on_event).await?
         }
         other => return Err(ChatError::UnsupportedProvider(other.into())),
     };
     Ok(ChatResponse {
         provider: provider.into(),
-        model,
-        text,
-        thought: None,
+        model: reply.model,
+        text: reply.text,
+        thought: reply.thought,
         fallback_provider: None,
         fallback_reason: None,
-        tool_calls: None,
-        stop_reason: None,
-        total_tokens: None,
-        input_tokens: None,
-        output_tokens: None,
+        tool_calls: reply.tool_calls,
+        stop_reason: reply.stop_reason,
+        total_tokens: match (reply.input_tokens, reply.output_tokens) {
+            (Some(input), Some(output)) => Some(input + output),
+            (input, output) => input.or(output),
+        },
+        input_tokens: reply.input_tokens,
+        output_tokens: reply.output_tokens,
     })
 }
 
@@ -529,7 +626,9 @@ async fn call_gemini(
     let payload = if request.messages.is_some() {
         let mut p = gemini_native_payload(request)?;
         let temp = effective_temperature(config, request);
-        p["generationConfig"] = json!({ "temperature": temp });
+        let mut gen_cfg = json!({ "temperature": temp });
+        gemini_apply_thinking_config(&mut gen_cfg, config, request, &model);
+        p["generationConfig"] = gen_cfg;
         p
     } else {
         gemini_chat_payload(config, request)?
@@ -1009,6 +1108,10 @@ async fn call_ollama(
         "num_ctx": config.ollama_num_ctx,
         "temperature": temp,
     });
+    let (thinking_enabled, _) = effective_thinking(config, request, &model);
+    if MintConfig::is_thinking_supported_for_model("ollama", &model) {
+        body["think"] = json!(thinking_enabled);
+    }
     let response: Value = client
         .post(format!("{host}/api/chat"))
         .json(&body)
@@ -1203,11 +1306,27 @@ fn anthropic_chat_payload(
     stream: bool,
 ) -> Result<Value, ChatError> {
     let system = anthropic_system_blocks(&request.system_instruction);
-    let temp = effective_temperature(config, request);
+    let (thinking_enabled, thinking_effort) = effective_thinking(config, request, model);
+    let is_thinking_supported = MintConfig::is_thinking_supported_for_model("anthropic", model);
+    let use_thinking = thinking_enabled && is_thinking_supported;
+
+    let (budget, max_tokens, temp) = if use_thinking {
+        let b = match thinking_effort.as_str() {
+            "low" => 1024,
+            "medium" => 4096,
+            "high" => 16384,
+            "extra_high" => 32768,
+            _ => 4096,
+        };
+        (Some(b), b + 8192, 1.0)
+    } else {
+        (None, 8192, effective_temperature(config, request))
+    };
+
     let mut payload = if let Some(messages) = &request.messages {
         json!({
             "model": model,
-            "max_tokens": 8192,
+            "max_tokens": max_tokens,
             "system": system,
             "messages": anthropic_messages(messages)?,
             "temperature": temp,
@@ -1215,7 +1334,7 @@ fn anthropic_chat_payload(
     } else {
         json!({
             "model": model,
-            "max_tokens": 8192,
+            "max_tokens": max_tokens,
             "system": system,
             "messages": [{
                 "role": "user",
@@ -1224,6 +1343,12 @@ fn anthropic_chat_payload(
             "temperature": temp,
         })
     };
+    if let Some(b) = budget {
+        payload["thinking"] = json!({
+            "type": "enabled",
+            "budget_tokens": b,
+        });
+    }
     if stream {
         payload["stream"] = json!(true);
     }
@@ -1469,41 +1594,43 @@ async fn call_huggingface(
     parse_openai_style_reply(model, &response)
 }
 
-async fn stream_gemini<F>(
+async fn stream_gemini_reply<F>(
     client: &Client,
     config: &MintConfig,
     request: &ChatRequest,
-    on_chunk: &mut F,
-) -> Result<(String, String), ChatError>
+    on_event: &mut F,
+) -> Result<ProviderReply, ChatError>
 where
-    F: FnMut(String),
+    F: FnMut(ChatStreamEvent),
 {
     let api_key = provider_key(&config.api_key, "GEMINI_API_KEY");
     required_key("gemini", &api_key)?;
     let model = config.gemini_model.clone();
-
+    let payload = if request.messages.is_some() {
+        gemini_native_payload(request)?
+    } else {
+        gemini_chat_payload(config, request)?
+    };
     let response = client
         .post(format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
         ))
         .header("x-goog-api-key", api_key)
-        .json(&gemini_chat_payload(config, request)?)
+        .json(&payload)
         .send()
         .await?
         .error_for_status()?;
-    collect_stream(response, StreamFormat::Gemini, on_chunk)
-        .await
-        .map(|text| (model, text))
+    collect_stream_reply(response, StreamFormat::Gemini, model, on_event).await
 }
 
-async fn stream_openai<F>(
+async fn stream_openai_reply<F>(
     client: &Client,
     config: &MintConfig,
     request: &ChatRequest,
-    on_chunk: &mut F,
-) -> Result<(String, String), ChatError>
+    on_event: &mut F,
+) -> Result<ProviderReply, ChatError>
 where
-    F: FnMut(String),
+    F: FnMut(ChatStreamEvent),
 {
     let local = config.ai_provider == "local_openai";
     let openrouter = config.ai_provider == "openrouter";
@@ -1551,19 +1678,71 @@ where
         let body = response.text().await.unwrap_or_default();
         return Err(ChatError::Api(format!("HTTP {status}: {body}")));
     }
-    collect_stream(response, StreamFormat::OpenAi, on_chunk)
-        .await
-        .map(|text| (model, text))
+    collect_stream_reply(response, StreamFormat::OpenAi, model, on_event).await
 }
 
-async fn stream_ollama<F>(
+fn ollama_stream_payload(
+    config: &MintConfig,
+    request: &ChatRequest,
+    model: &str,
+) -> Result<Value, ChatError> {
+    let native = request.messages.is_some()
+        && config.tool_calling_mode() == crate::config::ToolCallingMode::Native;
+    let mut payload = if native {
+        let mut value = json!({
+            "model": model,
+            "stream": true,
+            "messages": ollama_native_messages(request.messages.as_deref().unwrap_or(&[])),
+        });
+        if let Some(tools) = &request.tools {
+            value["tools"] = json!(
+                tools
+                    .iter()
+                    .map(|tool| json!({
+                        "type": "function",
+                        "function": {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters,
+                        }
+                    }))
+                    .collect::<Vec<_>>()
+            );
+        }
+        value
+    } else {
+        let mut user = json!({ "role": "user", "content": request.message });
+        if let Some(images) = ollama_images(request) {
+            user["images"] = json!(images);
+        }
+        json!({
+            "model": model,
+            "stream": true,
+            "messages": [
+                { "role": "system", "content": request.system_instruction },
+                user
+            ]
+        })
+    };
+    payload["options"] = json!({
+        "num_ctx": config.ollama_num_ctx,
+        "temperature": effective_temperature(config, request),
+    });
+    let (thinking_enabled, _) = effective_thinking(config, request, model);
+    if MintConfig::is_thinking_supported_for_model("ollama", model) {
+        payload["think"] = json!(thinking_enabled);
+    }
+    Ok(payload)
+}
+
+async fn stream_ollama_reply<F>(
     client: &Client,
     config: &MintConfig,
     request: &ChatRequest,
-    on_chunk: &mut F,
-) -> Result<(String, String), ChatError>
+    on_event: &mut F,
+) -> Result<ProviderReply, ChatError>
 where
-    F: FnMut(String),
+    F: FnMut(ChatStreamEvent),
 {
     let host = if config.ollama_host.trim().is_empty() {
         "http://localhost:11434"
@@ -1571,41 +1750,23 @@ where
         config.ollama_host.trim_end_matches('/')
     };
     let model = config.ollama_model.clone();
-    let mut user_message = json!({ "role": "user", "content": request.message });
-    if let Some(images) = ollama_images(request) {
-        user_message["images"] = json!(images);
-    }
     let response = client
         .post(format!("{host}/api/chat"))
-        .json(&json!({
-            "model": model,
-            "stream": true,
-            "messages": [
-                { "role": "system", "content": request.system_instruction },
-                user_message
-            ],
-            // See `call_ollama`: pin the window instead of Ollama's ~4K default.
-            "options": {
-                "num_ctx": config.ollama_num_ctx,
-                "temperature": effective_temperature(config, request),
-            }
-        }))
+        .json(&ollama_stream_payload(config, request, &model)?)
         .send()
         .await?
         .error_for_status()?;
-    collect_stream(response, StreamFormat::Ollama, on_chunk)
-        .await
-        .map(|text| (model, text))
+    collect_stream_reply(response, StreamFormat::Ollama, model, on_event).await
 }
 
-async fn stream_anthropic<F>(
+async fn stream_anthropic_reply<F>(
     client: &Client,
     config: &MintConfig,
     request: &ChatRequest,
-    on_chunk: &mut F,
-) -> Result<(String, String), ChatError>
+    on_event: &mut F,
+) -> Result<ProviderReply, ChatError>
 where
-    F: FnMut(String),
+    F: FnMut(ChatStreamEvent),
 {
     let api_key = provider_key(&config.anthropic_api_key, "ANTHROPIC_API_KEY");
     required_key("anthropic", &api_key)?;
@@ -1615,37 +1776,25 @@ where
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
         .header("anthropic-beta", "prompt-caching-2024-07-31")
-        .json(&json!({
-            "model": model,
-            "max_tokens": 8192,
-            "stream": true,
-            "system": request.system_instruction,
-            "messages": [{ "role": "user", "content": request.message }],
-            "temperature": effective_temperature(config, request),
-        }))
+        .json(&anthropic_chat_payload(config, &model, request, true)?)
         .send()
         .await?
         .error_for_status()?;
-    collect_stream(response, StreamFormat::Anthropic, on_chunk)
-        .await
-        .map(|text| (model, text))
+    collect_stream_reply(response, StreamFormat::Anthropic, model, on_event).await
 }
 
-async fn stream_huggingface<F>(
+async fn stream_huggingface_reply<F>(
     client: &Client,
     config: &MintConfig,
     request: &ChatRequest,
-    on_chunk: &mut F,
-) -> Result<(String, String), ChatError>
+    on_event: &mut F,
+) -> Result<ProviderReply, ChatError>
 where
-    F: FnMut(String),
+    F: FnMut(ChatStreamEvent),
 {
     let api_key = provider_key(&config.hf_api_key, "HF_TOKEN");
     required_key("huggingface", &api_key)?;
     let model = config.hf_model.clone();
-    // Same fix as `call_huggingface`: build the real `messages`/`tools`
-    // payload instead of a bare `{system, user: request.message}` request
-    // that dropped the agent loop's tool-call history on a fallback.
     let response = client
         .post("https://router.huggingface.co/v1/chat/completions")
         .bearer_auth(api_key)
@@ -1653,12 +1802,41 @@ where
         .send()
         .await?
         .error_for_status()?;
-    collect_stream(response, StreamFormat::OpenAi, on_chunk)
-        .await
-        .map(|text| (model, text))
+    collect_stream_reply(response, StreamFormat::OpenAi, model, on_event).await
 }
 
-#[derive(Clone, Copy)]
+async fn stream_custom_provider_reply<F>(
+    client: &Client,
+    config: &MintConfig,
+    request: &ChatRequest,
+    on_event: &mut F,
+) -> Result<ProviderReply, ChatError>
+where
+    F: FnMut(ChatStreamEvent),
+{
+    let provider = config
+        .resolve_custom_provider(&config.ai_provider)
+        .ok_or_else(|| ChatError::UnsupportedProvider(config.ai_provider.clone()))?;
+    let model = resolve_custom_model(config);
+    let mut builder = client
+        .post(format!(
+            "{}/chat/completions",
+            provider.base_url.trim_end_matches('/')
+        ))
+        .json(&openai_chat_payload(config, &model, request, true)?);
+    if !provider.api_key.is_empty() {
+        builder = builder.bearer_auth(&provider.api_key);
+    }
+    for header in &provider.headers {
+        if !header.name.is_empty() {
+            builder = builder.header(header.name.as_str(), header.value.as_str());
+        }
+    }
+    let response = builder.send().await?.error_for_status()?;
+    collect_stream_reply(response, StreamFormat::OpenAi, model, on_event).await
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StreamFormat {
     Gemini,
     OpenAi,
@@ -1666,55 +1844,444 @@ enum StreamFormat {
     Anthropic,
 }
 
-async fn collect_stream<F>(
+#[derive(Default)]
+struct StreamToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+    input: Option<Value>,
+    thought_signature: Option<String>,
+}
+
+#[derive(Default)]
+struct StreamReplyAccumulator {
+    text: String,
+    thought: String,
+    tag_buffer: String,
+    inside_think_tag: bool,
+    tool_calls: Vec<StreamToolCall>,
+    stop_reason: Option<String>,
+    input_tokens: Option<u32>,
+    output_tokens: Option<u32>,
+    anthropic_blocks: std::collections::HashMap<usize, usize>,
+}
+
+impl StreamReplyAccumulator {
+    fn tool_at(&mut self, index: usize) -> &mut StreamToolCall {
+        while self.tool_calls.len() <= index {
+            self.tool_calls.push(StreamToolCall::default());
+        }
+        &mut self.tool_calls[index]
+    }
+
+    fn emit_text<F>(&mut self, delta: &str, on_event: &mut F)
+    where
+        F: FnMut(ChatStreamEvent),
+    {
+        if !delta.is_empty() {
+            on_event(ChatStreamEvent::TextDelta {
+                delta: delta.to_owned(),
+            });
+        }
+    }
+
+    /// Route inline `<think>` content without assuming tag boundaries line up
+    /// with provider chunks. A possible partial tag is retained until the next
+    /// chunk; ordinary text is emitted immediately.
+    fn push_text<F>(&mut self, delta: &str, on_event: &mut F)
+    where
+        F: FnMut(ChatStreamEvent),
+    {
+        if delta.is_empty() {
+            return;
+        }
+        self.text.push_str(delta);
+        self.tag_buffer.push_str(delta);
+        loop {
+            let tag = if self.inside_think_tag {
+                "</think>"
+            } else {
+                "<think>"
+            };
+            if let Some(index) = self.tag_buffer.find(tag) {
+                let before = self.tag_buffer[..index].to_owned();
+                self.tag_buffer.drain(..index + tag.len());
+                if self.inside_think_tag {
+                    self.push_reasoning(&before, on_event);
+                } else {
+                    self.emit_text(&before, on_event);
+                }
+                self.inside_think_tag = !self.inside_think_tag;
+                continue;
+            }
+
+            let retain_from = self
+                .tag_buffer
+                .rfind('<')
+                .and_then(|index| tag.starts_with(&self.tag_buffer[index..]).then_some(index));
+            let emit_end = retain_from.unwrap_or(self.tag_buffer.len());
+            if emit_end > 0 {
+                let ready = self.tag_buffer[..emit_end].to_owned();
+                self.tag_buffer.drain(..emit_end);
+                if self.inside_think_tag {
+                    self.push_reasoning(&ready, on_event);
+                } else {
+                    self.emit_text(&ready, on_event);
+                }
+            }
+            break;
+        }
+    }
+
+    fn flush_tag_buffer<F>(&mut self, on_event: &mut F)
+    where
+        F: FnMut(ChatStreamEvent),
+    {
+        if self.tag_buffer.is_empty() {
+            return;
+        }
+        let remaining = std::mem::take(&mut self.tag_buffer);
+        if self.inside_think_tag {
+            self.push_reasoning(&remaining, on_event);
+        } else {
+            self.emit_text(&remaining, on_event);
+        }
+    }
+
+    fn push_reasoning<F>(&mut self, delta: &str, on_event: &mut F)
+    where
+        F: FnMut(ChatStreamEvent),
+    {
+        if !delta.is_empty() {
+            self.thought.push_str(delta);
+            on_event(ChatStreamEvent::ReasoningDelta {
+                delta: delta.to_owned(),
+            });
+        }
+    }
+
+    fn consume<F>(&mut self, format: StreamFormat, value: &Value, on_event: &mut F)
+    where
+        F: FnMut(ChatStreamEvent),
+    {
+        match format {
+            StreamFormat::OpenAi => self.consume_openai(value, on_event),
+            StreamFormat::Gemini => self.consume_gemini(value, on_event),
+            StreamFormat::Ollama => self.consume_ollama(value, on_event),
+            StreamFormat::Anthropic => self.consume_anthropic(value, on_event),
+        }
+    }
+
+    fn consume_openai<F>(&mut self, value: &Value, on_event: &mut F)
+    where
+        F: FnMut(ChatStreamEvent),
+    {
+        let choice = &value["choices"][0];
+        let delta = &choice["delta"];
+        if let Some(text) = delta["content"].as_str() {
+            self.push_text(text, on_event);
+        }
+        if let Some(reasoning) = delta["reasoning_content"]
+            .as_str()
+            .or_else(|| delta["reasoning"].as_str())
+            .or_else(|| delta["thinking"].as_str())
+        {
+            self.push_reasoning(reasoning, on_event);
+        }
+        if let Some(details) = delta["reasoning_details"].as_array() {
+            for detail in details {
+                if let Some(reasoning) = detail["text"].as_str() {
+                    self.push_reasoning(reasoning, on_event);
+                }
+            }
+        }
+        if let Some(calls) = delta["tool_calls"].as_array() {
+            for (fallback_index, call) in calls.iter().enumerate() {
+                let index = call["index"]
+                    .as_u64()
+                    .map(|n| n as usize)
+                    .unwrap_or(fallback_index);
+                let name_delta = call["function"]["name"].as_str().map(str::to_owned);
+                let arguments = call["function"]["arguments"].as_str().map(str::to_owned);
+                let current_name = {
+                    let tool = self.tool_at(index);
+                    if let Some(id) = call["id"].as_str() {
+                        tool.id.push_str(id);
+                    }
+                    if let Some(name) = &name_delta {
+                        tool.name.push_str(name);
+                    }
+                    if let Some(arguments) = &arguments {
+                        tool.arguments.push_str(arguments);
+                    }
+                    tool.name.clone()
+                };
+                if name_delta.is_some() || arguments.is_some() {
+                    on_event(ChatStreamEvent::ToolCallDelta {
+                        index,
+                        name: name_delta.map(|_| current_name),
+                        arguments,
+                        input: None,
+                    });
+                }
+            }
+        }
+        if let Some(reason) = choice["finish_reason"].as_str() {
+            self.stop_reason = Some(reason.to_owned());
+        }
+        self.input_tokens = value["usage"]["prompt_tokens"]
+            .as_u64()
+            .map(|n| n as u32)
+            .or(self.input_tokens);
+        self.output_tokens = value["usage"]["completion_tokens"]
+            .as_u64()
+            .map(|n| n as u32)
+            .or(self.output_tokens);
+    }
+
+    fn consume_gemini<F>(&mut self, value: &Value, on_event: &mut F)
+    where
+        F: FnMut(ChatStreamEvent),
+    {
+        if let Some(parts) = value["candidates"][0]["content"]["parts"].as_array() {
+            for (index, part) in parts.iter().enumerate() {
+                if let Some(text) = part["text"].as_str() {
+                    if part["thought"].as_bool().unwrap_or(false) {
+                        self.push_reasoning(text, on_event);
+                    } else {
+                        self.push_text(text, on_event);
+                    }
+                }
+                if let Some(call) = part.get("functionCall") {
+                    let tool = self.tool_at(index);
+                    tool.id = format!("call_{index}");
+                    tool.name = call["name"].as_str().unwrap_or_default().to_owned();
+                    tool.input = Some(call["args"].clone());
+                    tool.thought_signature = part["thoughtSignature"].as_str().map(str::to_owned);
+                    on_event(ChatStreamEvent::ToolCallDelta {
+                        index,
+                        name: call["name"].as_str().map(str::to_owned),
+                        arguments: None,
+                        input: Some(call["args"].clone()),
+                    });
+                }
+            }
+        }
+        self.stop_reason = value["candidates"][0]["finishReason"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| self.stop_reason.take());
+        self.input_tokens = value["usageMetadata"]["promptTokenCount"]
+            .as_u64()
+            .map(|n| n as u32)
+            .or(self.input_tokens);
+        self.output_tokens = value["usageMetadata"]["candidatesTokenCount"]
+            .as_u64()
+            .map(|n| n as u32)
+            .or(self.output_tokens);
+    }
+
+    fn consume_ollama<F>(&mut self, value: &Value, on_event: &mut F)
+    where
+        F: FnMut(ChatStreamEvent),
+    {
+        let message = &value["message"];
+        if let Some(text) = message["content"].as_str() {
+            self.push_text(text, on_event);
+        }
+        if let Some(reasoning) = message["thinking"]
+            .as_str()
+            .or_else(|| message["reasoning_content"].as_str())
+        {
+            self.push_reasoning(reasoning, on_event);
+        }
+        if let Some(calls) = message["tool_calls"].as_array() {
+            for (index, call) in calls.iter().enumerate() {
+                let tool = self.tool_at(index);
+                tool.id = call["id"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("call_{index}"));
+                tool.name = call["function"]["name"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                tool.input = Some(call["function"]["arguments"].clone());
+                on_event(ChatStreamEvent::ToolCallDelta {
+                    index,
+                    name: call["function"]["name"].as_str().map(str::to_owned),
+                    arguments: None,
+                    input: Some(call["function"]["arguments"].clone()),
+                });
+            }
+        }
+        self.input_tokens = value["prompt_eval_count"]
+            .as_u64()
+            .map(|n| n as u32)
+            .or(self.input_tokens);
+        self.output_tokens = value["eval_count"]
+            .as_u64()
+            .map(|n| n as u32)
+            .or(self.output_tokens);
+        if value["done"].as_bool().unwrap_or(false) {
+            self.stop_reason = value["done_reason"]
+                .as_str()
+                .map(str::to_owned)
+                .or_else(|| Some("stop".to_owned()));
+        }
+    }
+
+    fn consume_anthropic<F>(&mut self, value: &Value, on_event: &mut F)
+    where
+        F: FnMut(ChatStreamEvent),
+    {
+        match value["type"].as_str() {
+            Some("message_start") => {
+                self.input_tokens = value["message"]["usage"]["input_tokens"]
+                    .as_u64()
+                    .map(|n| n as u32);
+            }
+            Some("content_block_start") => {
+                let block_index = value["index"].as_u64().unwrap_or(0) as usize;
+                let block = &value["content_block"];
+                if block["type"].as_str() == Some("tool_use") {
+                    let tool_index = self.tool_calls.len();
+                    let tool = self.tool_at(tool_index);
+                    tool.id = block["id"].as_str().unwrap_or_default().to_owned();
+                    tool.name = block["name"].as_str().unwrap_or_default().to_owned();
+                    self.anthropic_blocks.insert(block_index, tool_index);
+                    on_event(ChatStreamEvent::ToolCallDelta {
+                        index: tool_index,
+                        name: block["name"].as_str().map(str::to_owned),
+                        arguments: None,
+                        input: None,
+                    });
+                }
+            }
+            Some("content_block_delta") => {
+                let delta = &value["delta"];
+                match delta["type"].as_str() {
+                    Some("text_delta") => {
+                        if let Some(text) = delta["text"].as_str() {
+                            self.push_text(text, on_event);
+                        }
+                    }
+                    Some("thinking_delta") => {
+                        if let Some(thinking) = delta["thinking"].as_str() {
+                            self.push_reasoning(thinking, on_event);
+                        }
+                    }
+                    Some("input_json_delta") => {
+                        let block_index = value["index"].as_u64().unwrap_or(0) as usize;
+                        if let Some(tool_index) = self.anthropic_blocks.get(&block_index).copied()
+                            && let Some(json) = delta["partial_json"].as_str()
+                        {
+                            self.tool_at(tool_index).arguments.push_str(json);
+                            on_event(ChatStreamEvent::ToolCallDelta {
+                                index: tool_index,
+                                name: None,
+                                arguments: Some(json.to_owned()),
+                                input: None,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Some("message_delta") => {
+                self.stop_reason = value["delta"]["stop_reason"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .or_else(|| self.stop_reason.take());
+                self.output_tokens = value["usage"]["output_tokens"]
+                    .as_u64()
+                    .map(|n| n as u32)
+                    .or(self.output_tokens);
+            }
+            _ => {}
+        }
+    }
+
+    fn finish(self, model: String) -> Result<ProviderReply, ChatError> {
+        let (tag_thought, clean_text) = extract_think_tag(&self.text);
+        let thought = if self.thought.trim().is_empty() {
+            tag_thought
+        } else {
+            Some(self.thought.trim().to_owned())
+        };
+        let calls: Vec<ToolCall> = self
+            .tool_calls
+            .into_iter()
+            .filter(|tool| !tool.name.is_empty())
+            .map(|tool| {
+                let input = tool.input.unwrap_or_else(|| {
+                    serde_json::from_str(&tool.arguments).unwrap_or_else(|_| json!({}))
+                });
+                ToolCall {
+                    id: tool.id,
+                    name: tool.name,
+                    input,
+                    thought_signature: tool.thought_signature,
+                }
+            })
+            .collect();
+        if clean_text.is_empty() && calls.is_empty() && thought.is_none() {
+            return Err(ChatError::MissingResponseText);
+        }
+        Ok(ProviderReply {
+            model,
+            text: if clean_text.is_empty() && calls.is_empty() {
+                thought.clone().unwrap_or_default()
+            } else {
+                clean_text
+            },
+            thought,
+            tool_calls: (!calls.is_empty()).then_some(calls),
+            stop_reason: self.stop_reason,
+            input_tokens: self.input_tokens,
+            output_tokens: self.output_tokens,
+        })
+    }
+}
+
+async fn collect_stream_reply<F>(
     response: reqwest::Response,
     format: StreamFormat,
-    on_chunk: &mut F,
-) -> Result<String, ChatError>
+    model: String,
+    on_event: &mut F,
+) -> Result<ProviderReply, ChatError>
 where
-    F: FnMut(String),
+    F: FnMut(ChatStreamEvent),
 {
     let mut bytes = response.bytes_stream();
     let mut buffer = String::new();
-    let mut text = String::new();
+    let mut accumulator = StreamReplyAccumulator::default();
     while let Some(chunk) = bytes.next().await {
         buffer.push_str(&String::from_utf8_lossy(&chunk?));
         while let Some(index) = buffer.find('\n') {
             let line = buffer[..index].trim().to_owned();
             buffer.drain(..=index);
-            if let Some(chunk) = parse_stream_line(format, &line) {
-                on_chunk(chunk.clone());
-                text.push_str(&chunk);
+            if let Some(value) = parse_stream_value(format, &line) {
+                accumulator.consume(format, &value, on_event);
             }
         }
     }
-    if let Some(chunk) = parse_stream_line(format, buffer.trim()) {
-        on_chunk(chunk.clone());
-        text.push_str(&chunk);
+    if let Some(value) = parse_stream_value(format, buffer.trim()) {
+        accumulator.consume(format, &value, on_event);
     }
-    if text.is_empty() {
-        Err(ChatError::MissingResponseText)
-    } else {
-        Ok(text)
-    }
+    accumulator.flush_tag_buffer(on_event);
+    accumulator.finish(model)
 }
 
-fn parse_stream_line(format: StreamFormat, line: &str) -> Option<String> {
+fn parse_stream_value(format: StreamFormat, line: &str) -> Option<Value> {
     let payload = match format {
         StreamFormat::Ollama => line,
-        _ => line.strip_prefix("data: ")?.trim(),
+        _ => line.strip_prefix("data:")?.trim(),
     };
     if payload.is_empty() || payload == "[DONE]" {
         return None;
     }
-    let value: Value = serde_json::from_str(payload).ok()?;
-    let text = match format {
-        StreamFormat::Gemini => value["candidates"][0]["content"]["parts"][0]["text"].as_str(),
-        StreamFormat::OpenAi => value["choices"][0]["delta"]["content"].as_str(),
-        StreamFormat::Ollama => value["message"]["content"].as_str(),
-        StreamFormat::Anthropic => value["delta"]["text"].as_str(),
-    }?;
-    (!text.is_empty()).then(|| text.to_owned())
+    serde_json::from_str(payload).ok()
 }
 
 fn required_key(provider: &str, key: &str) -> Result<(), ChatError> {
@@ -1784,42 +2351,6 @@ async fn call_custom_provider(
     let response: serde_json::Value = builder.send().await?.error_for_status()?.json().await?;
 
     parse_openai_style_reply(model, &response)
-}
-
-async fn stream_custom_provider<F>(
-    client: &Client,
-    config: &crate::MintConfig,
-    request: &ChatRequest,
-    on_chunk: &mut F,
-) -> Result<(String, String), ChatError>
-where
-    F: FnMut(String),
-{
-    let provider = config
-        .resolve_custom_provider(&config.ai_provider)
-        .ok_or_else(|| ChatError::UnsupportedProvider(config.ai_provider.clone()))?;
-
-    let base_url = provider.base_url.trim_end_matches('/');
-    let model = resolve_custom_model(config);
-    let payload = openai_chat_payload(config, &model, request, true)?;
-
-    let mut builder = client
-        .post(format!("{base_url}/chat/completions"))
-        .json(&payload);
-
-    if !provider.api_key.is_empty() {
-        builder = builder.bearer_auth(&provider.api_key);
-    }
-    for h in &provider.headers {
-        if !h.name.is_empty() {
-            builder = builder.header(h.name.as_str(), h.value.as_str());
-        }
-    }
-
-    let response = builder.send().await?.error_for_status()?;
-    collect_stream(response, StreamFormat::OpenAi, on_chunk)
-        .await
-        .map(|text| (model, text))
 }
 
 fn provider_key(configured: &str, environment_variable: &str) -> String {
@@ -1913,13 +2444,15 @@ fn gemini_chat_payload(config: &MintConfig, request: &ChatRequest) -> Result<Val
         "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
         "contents": [{ "role": "user", "parts": gemini_parts(request)? }]
     });
-    if wants_agent_json(request) {
-        let mut gen_cfg = gemini_agent_generation_config(config);
-        gen_cfg["temperature"] = json!(temp);
-        payload["generationConfig"] = gen_cfg;
+    let mut gen_cfg = if wants_agent_json(request) {
+        let mut cfg = gemini_agent_generation_config(config);
+        cfg["temperature"] = json!(temp);
+        cfg
     } else {
-        payload["generationConfig"] = json!({ "temperature": temp });
-    }
+        json!({ "temperature": temp })
+    };
+    gemini_apply_thinking_config(&mut gen_cfg, config, request, &config.gemini_model);
+    payload["generationConfig"] = gen_cfg;
     Ok(payload)
 }
 
@@ -2042,6 +2575,47 @@ pub(crate) fn effective_temperature(config: &MintConfig, request: &ChatRequest) 
         .unwrap_or_else(|| config.resolved_temperature())
 }
 
+/// Resolves (enabled, effort) for this request and model, prioritizing request overrides.
+pub(crate) fn effective_thinking(
+    config: &MintConfig,
+    request: &ChatRequest,
+    model: &str,
+) -> (bool, String) {
+    let enabled = request
+        .thinking_enabled
+        .unwrap_or_else(|| config.resolved_thinking_enabled_for_model(&config.ai_provider, model));
+    let effort = request
+        .thinking_effort
+        .as_deref()
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_else(|| config.resolved_thinking_effort_for_model(model).to_string());
+    (enabled, effort)
+}
+
+pub(crate) fn gemini_apply_thinking_config(
+    gen_cfg: &mut Value,
+    config: &MintConfig,
+    request: &ChatRequest,
+    model: &str,
+) {
+    if !MintConfig::is_thinking_supported_for_model("gemini", model) {
+        return;
+    }
+    let (enabled, effort) = effective_thinking(config, request, model);
+    if !enabled {
+        gen_cfg["thinkingConfig"] = json!({ "thinkingBudget": 0 });
+    } else {
+        let budget = match effort.as_str() {
+            "low" => 1024,
+            "medium" => 4096,
+            "high" => 16384,
+            "extra_high" => 32768,
+            _ => 4096,
+        };
+        gen_cfg["thinkingConfig"] = json!({ "thinkingBudget": budget });
+    }
+}
+
 fn openai_chat_payload(
     config: &MintConfig,
     model: &str,
@@ -2070,21 +2644,50 @@ fn openai_chat_payload(
             }),
         ]
     };
+    // Left unset, several OpenAI-compatible providers (DeepSeek in
+    // particular) default to a much lower output cap than the model can
+    // actually produce, which silently truncates long structured answers
+    // (a code block followed by a couple of markdown tables is enough to
+    // hit it) — matches the explicit cap already used for Anthropic in
+    // `anthropic_chat_payload`/`stream_anthropic`.
+    // For Groq endpoints, free tiers enforce a tight 6,000–8,000 TPM limit
+    // where a static 8192 max_tokens triggers immediate HTTP 413 / rate limit errors.
+    let max_tokens = {
+        let is_groq = config
+            .resolve_custom_provider(&config.ai_provider)
+            .map(|cp| cp.base_url.contains("groq.com"))
+            .unwrap_or(false);
+        if is_groq {
+            if request.tools.is_some() { 2048 } else { 4096 }
+        } else {
+            8192
+        }
+    };
     let mut payload = json!({
         "model": model,
         "stream": stream,
         "messages": messages,
-        // Left unset, several OpenAI-compatible providers (DeepSeek in
-        // particular) default to a much lower output cap than the model can
-        // actually produce, which silently truncates long structured answers
-        // (a code block followed by a couple of markdown tables is enough to
-        // hit it) — matches the explicit cap already used for Anthropic in
-        // `anthropic_chat_payload`/`stream_anthropic`.
-        "max_tokens": 8192,
+        "max_tokens": max_tokens,
     });
+    if stream {
+        payload["stream_options"] = json!({ "include_usage": true });
+    }
     // OpenAI reasoning models (o1, o3, etc.) reject explicit temperature parameter.
     let is_reasoning_model = model.starts_with("o1") || model.starts_with("o3");
-    if !is_reasoning_model {
+    let (thinking_enabled, thinking_effort) = effective_thinking(config, request, model);
+    if is_reasoning_model {
+        if thinking_enabled {
+            let effort_str = match thinking_effort.as_str() {
+                "low" => "low",
+                "medium" => "medium",
+                "high" | "extra_high" => "high",
+                _ => "medium",
+            };
+            payload["reasoning_effort"] = json!(effort_str);
+        } else {
+            payload["reasoning_effort"] = json!("low");
+        }
+    } else {
         payload["temperature"] = json!(effective_temperature(config, request));
     }
     if wants_agent_json(request) {
@@ -2369,6 +2972,7 @@ mod tests {
             messages: None,
             tools: None,
             temperature: None,
+            ..Default::default()
         };
 
         let error = require_supported_attachments("openai", &request).unwrap_err();
@@ -2379,26 +2983,83 @@ mod tests {
 
     #[test]
     fn parses_stream_provider_formats() {
+        let openai = parse_stream_value(
+            StreamFormat::OpenAi,
+            r#"data: {"choices":[{"delta":{"content":"hello"}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(openai["choices"][0]["delta"]["content"], "hello");
+        let ollama =
+            parse_stream_value(StreamFormat::Ollama, r#"{"message":{"content":"hi"}}"#).unwrap();
+        assert_eq!(ollama["message"]["content"], "hi");
+        assert!(parse_stream_value(StreamFormat::Anthropic, "data: [DONE]").is_none());
+    }
+
+    #[test]
+    fn accumulates_openai_reasoning_tools_and_usage() {
+        let mut accumulator = StreamReplyAccumulator::default();
+        let mut events = Vec::new();
+        accumulator.consume_openai(
+            &json!({
+                "choices": [{"delta": {"reasoning_content": "inspect "}}]
+            }),
+            &mut |event| events.push(event),
+        );
+        accumulator.consume_openai(&json!({
+            "choices": [{"delta": {"reasoning_content": "files", "tool_calls": [{
+                "index": 0, "id": "call_1", "function": {"name": "read_file", "arguments": "{\"path\":"}
+            }]}}]
+        }), &mut |event| events.push(event));
+        accumulator.consume_openai(
+            &json!({
+                "choices": [{"delta": {"tool_calls": [{
+                    "index": 0, "function": {"arguments": "\"README.md\"}"}
+                }]}, "finish_reason": "tool_calls"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+            }),
+            &mut |event| events.push(event),
+        );
+        accumulator.flush_tag_buffer(&mut |event| events.push(event));
+        let reply = accumulator.finish("test".into()).unwrap();
+        assert_eq!(reply.thought.as_deref(), Some("inspect files"));
+        assert_eq!(reply.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(reply.input_tokens, Some(10));
+        assert_eq!(reply.tool_calls.unwrap()[0].input["path"], "README.md");
         assert_eq!(
-            parse_stream_line(
-                StreamFormat::OpenAi,
-                r#"data: {"choices":[{"delta":{"content":"hello"}}]}"#
-            )
-            .as_deref(),
-            Some("hello")
+            events
+                .iter()
+                .filter(|event| matches!(event, ChatStreamEvent::ReasoningDelta { .. }))
+                .count(),
+            2
         );
         assert_eq!(
-            parse_stream_line(StreamFormat::Ollama, r#"{"message":{"content":"hi"}}"#).as_deref(),
-            Some("hi")
+            events
+                .iter()
+                .filter(|event| matches!(event, ChatStreamEvent::ToolCallDelta { .. }))
+                .count(),
+            2
         );
-        assert_eq!(
-            parse_stream_line(
-                StreamFormat::Anthropic,
-                r#"data: {"delta":{"type":"text_delta","text":"hey"}}"#
-            )
-            .as_deref(),
-            Some("hey")
-        );
+    }
+
+    #[test]
+    fn streams_think_tags_split_across_chunks() {
+        let mut accumulator = StreamReplyAccumulator::default();
+        let mut events = Vec::new();
+        for chunk in ["ก่อน<thi", "nk>คิด", "อยู่</th", "ink>หลัง"] {
+            accumulator.push_text(chunk, &mut |event| events.push(event));
+        }
+        accumulator.flush_tag_buffer(&mut |event| events.push(event));
+        let reply = accumulator.finish("test".into()).unwrap();
+        assert_eq!(reply.text, "ก่อนหลัง");
+        assert_eq!(reply.thought.as_deref(), Some("คิดอยู่"));
+        let streamed_reasoning: String = events
+            .iter()
+            .filter_map(|event| match event {
+                ChatStreamEvent::ReasoningDelta { delta } => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(streamed_reasoning, "คิดอยู่");
     }
 
     #[test]
@@ -2418,6 +3079,7 @@ mod tests {
             messages: None,
             tools: None,
             temperature: None,
+            ..Default::default()
         })
         .unwrap();
         assert_eq!(parts.len(), 3);
@@ -2453,6 +3115,7 @@ mod tests {
             messages: Some(messages),
             tools,
             temperature: None,
+            ..Default::default()
         }
     }
 
@@ -2673,6 +3336,7 @@ mod tests {
             messages: None,
             tools: None,
             temperature: None,
+            ..Default::default()
         };
         assert!(require_supported_attachments("openai", &request).is_ok());
     }
@@ -2698,6 +3362,7 @@ mod tests {
             messages: None,
             tools: None,
             temperature: None,
+            ..Default::default()
         };
         for provider in [
             "local_openai",
@@ -3231,6 +3896,7 @@ mod tests {
         let config = MintConfig {
             ai_provider: "anthropic".into(),
             anthropic_model: "claude-sonnet-5".into(),
+            thinking_enabled: false,
             ..MintConfig::default()
         };
         let payload = anthropic_chat_payload(&config, "claude-sonnet-5", &request, false).unwrap();

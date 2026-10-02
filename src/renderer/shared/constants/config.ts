@@ -5,15 +5,18 @@
 
 export const DEFAULT_CONFIG = {
   theme: 'dark',
+  tuiTheme: 'dark' as 'system' | 'dark' | 'light',
   accentColor: '#10b981',
   systemTextColor: '#f8fafc',
   chatTextColor: '#f8fafc',
   customBgStart: '#0f172a',
   customBgEnd: '#1e1b4b',
   customPanelBg: '#1e293b',
-  glassBlur: 'blur(16px)',
-  fontFamily: "'Outfit', sans-serif",
-  fontSize: '18px',
+  surfaceStyle: 'opaque' as 'opaque' | 'glass',
+  glassBlur: 'none',
+  fontFamily: "'Prompt', sans-serif",
+  fontSize: '16px',
+  typographyScaleVersion: 2,
   apiKey: '',
   aiProvider: 'gemini',
   geminiModel: 'gemini-2.5-flash' as string,
@@ -24,6 +27,9 @@ export const DEFAULT_CONFIG = {
   ollamaModel: 'llama3:latest' as string,
   temperature: null as number | null,
   modelTemperatures: {} as Record<string, number>,
+  thinkingEnabled: true,
+  thinkingEffort: 'medium' as 'low' | 'medium' | 'high' | 'extra_high',
+  modelThinkingConfigs: {} as Record<string, { enabled: boolean; effort: 'low' | 'medium' | 'high' | 'extra_high' }>,
   language: 'th-TH',
   proactiveInterval: 60,
   proactiveCooldown: 120,
@@ -159,4 +165,23 @@ export const DEFAULT_CONFIG = {
 
   // Custom Model Selections per Provider
   customModelSelections: {} as Record<string, string>,
+}
+
+export const migrateTuiTheme = <T extends Record<string, any>>(config: T): T & { tuiTheme: 'system' | 'dark' | 'light' } => {
+  const legacyTheme = config.tuiTheme || config.theme
+  const tuiTheme = legacyTheme === 'system' || legacyTheme === 'light' ? legacyTheme : 'dark'
+  return { ...config, tuiTheme }
+}
+
+/**
+ * Version 1 used 18px as the implicit default. Move that old default to the
+ * denser 16px scale once, while preserving any size chosen after this update.
+ */
+export function migrateTypographyScale<T extends Record<string, any> | null | undefined>(config: T): T {
+  if (!config || config.typographyScaleVersion === 2) return config
+  return {
+    ...config,
+    fontSize: config.fontSize === '18px' ? '16px' : config.fontSize,
+    typographyScaleVersion: 2,
+  } as T
 }

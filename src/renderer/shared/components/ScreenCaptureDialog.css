@@ -1,0 +1,221 @@
+.screen-capture-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 70%, transparent);
+  color: var(--text-main);
+}
+
+.screen-capture-dialog.is-capturing { visibility: hidden; }
+
+.screen-capture-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 100%);
+  max-height: min(900px, calc(100dvh - 48px));
+  overflow: hidden;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-md);
+}
+
+.screen-capture-header,
+.screen-capture-footer {
+  padding: 18px 24px;
+}
+
+.screen-capture-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.screen-capture-header h2 {
+  margin: 3px 0 4px;
+  font-size: 1.3rem;
+  line-height: 1.3;
+}
+
+.screen-capture-header p,
+.screen-capture-instruction,
+.screen-capture-empty p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.83rem;
+}
+
+.screen-capture-header .screen-capture-eyebrow {
+  color: var(--interactive-fg);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.screen-capture-close {
+  border: 0;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.screen-capture-body {
+  display: grid;
+  min-height: 200px;
+  flex: 1;
+  overflow: hidden;
+  background: var(--surface-strong);
+}
+
+.screen-capture-stage {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 20px;
+  overflow: auto;
+}
+
+.screen-capture-image-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  max-height: 100%;
+  line-height: 0;
+  box-shadow: var(--shadow-md);
+  touch-action: none;
+}
+
+.screen-capture-image-wrap.is-selecting { cursor: crosshair; }
+
+.screen-capture-image-wrap img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100dvh - 290px);
+  width: auto;
+  height: auto;
+  user-select: none;
+}
+
+.screen-capture-selection {
+  position: absolute;
+  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: 0 0 0 9999px color-mix(in srgb, #000 35%, transparent);
+  pointer-events: none;
+}
+
+.screen-capture-empty {
+  align-self: center;
+  justify-self: center;
+  padding: 42px 24px;
+  text-align: center;
+}
+
+.screen-capture-empty-icon {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--interactive-fg);
+  font-size: 2rem;
+}
+
+.screen-capture-empty h3 { margin: 0 0 6px; font-size: 1.1rem; }
+.screen-capture-empty .screen-capture-primary { margin-top: 22px; }
+
+.screen-capture-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+}
+
+.screen-capture-modes {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-strong);
+}
+
+.screen-capture-modes button,
+.screen-capture-secondary,
+.screen-capture-primary {
+  min-height: 36px;
+  padding: 7px 12px;
+  border-radius: var(--radius-lg);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.screen-capture-modes button {
+  border: 0;
+  background: transparent;
+  color: var(--text-soft);
+}
+
+.screen-capture-modes button.active {
+  background: var(--panel-raised);
+  color: var(--text-main);
+  box-shadow: var(--shadow-sm);
+}
+
+.screen-capture-instruction { flex: 1 1 180px; }
+.screen-capture-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+
+.screen-capture-secondary {
+  border: 1px solid var(--border);
+  background: var(--surface-strong);
+  color: var(--text-main);
+}
+
+.screen-capture-primary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast, var(--text-on-accent));
+}
+
+:root[data-accent-mode="monochrome"] .screen-capture-primary:not(:disabled) {
+  color: var(--zinc-950);
+}
+
+.screen-capture-primary:disabled {
+  border-color: var(--border-strong);
+  background: var(--surface-strong);
+  color: var(--text-soft);
+  cursor: not-allowed;
+}
+
+.screen-capture-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.screen-capture-dialog button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.screen-capture-error {
+  margin: 0;
+  padding: 10px 24px;
+  color: var(--danger);
+  font-size: 0.82rem;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 680px) {
+  .screen-capture-dialog { padding: 0; }
+  .screen-capture-panel { width: 100%; max-height: 100dvh; height: 100dvh; border-radius: 0; }
+  .screen-capture-header, .screen-capture-footer { padding: 14px 16px; }
+  .screen-capture-stage { padding: 10px; }
+  .screen-capture-image-wrap img { max-height: calc(100dvh - 330px); }
+  .screen-capture-actions { width: 100%; margin-left: 0; }
+  .screen-capture-actions button { flex: 1 1 calc(50% - 8px); }
+}

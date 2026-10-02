@@ -271,9 +271,15 @@ writes / refines `<workspace>/.agents/skills/<slug>/SKILL.md` with a bumped
 
 ### 4.4 Linked-folder notes — `spawn_linked_folder_note`
 
-If you've `/link`ed folders, a model decides whether the turn is on-topic for
-one of them and, if so, appends a dated note to
-`<folder>/mint-notes/<date>.md`, cross-linking related existing notes by id.
+If you've `/link`ed folders, Mint indexes supported files under each folder
+separately from the general document knowledge base. A background job searches
+relevant folder excerpts after each completed turn; a model can save distinct
+notes in all relevant folders. Notes append to `<folder>/mint-notes/<date>.md`
+with unique IDs and a cross-process file lock. SQLite records job and note
+status so interrupted writes can resume without duplicating entries. `/link
+save <name> | <text>` writes directly, `/link notes <name>` lists notes, and
+`/link refresh <name>` updates the file index. Existing daily note files remain
+readable and available for cross-reference.
 
 ---
 

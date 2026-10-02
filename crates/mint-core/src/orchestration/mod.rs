@@ -7,11 +7,13 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Command;
+use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
 
 use crate::chat::{
-    ChatMessage, ChatRole, ContentBlock, send_chat_with_fallback, stream_chat_with_fallback,
+    ChatMessage, ChatRole, ChatStreamEvent, ContentBlock, send_chat_with_fallback,
+    stream_chat_events_with_fallback, stream_chat_with_fallback,
 };
 use crate::code_tools::{
     CodeEdit, CodePatchHunk, apply_code_edits, build_code_patch, list_code_files,
@@ -40,6 +42,135 @@ const CONTEXT_LIMIT: usize = 3;
 /// interactions — this exists purely to nudge the model with recent
 /// continuity, not to re-litigate a whole previous answer.
 const MAX_CONTEXT_MESSAGE_CHARS: usize = 200;
+
+struct TurnStartListener {
+    chat_id: String,
+    callback: Arc<dyn Fn(i64) + Send + Sync>,
+}
+
+tokio::task_local! {
+    static TURN_START_LISTENER: TurnStartListener;
+}
+
+/// Reports the persisted turn ID to the initiating transport without changing
+/// the agent/chat interfaces used by CLI, jobs, and background integrations.
+pub async fn with_turn_start_listener<F, R>(
+    chat_id: String,
+    callback: impl Fn(i64) + Send + Sync + 'static,
+    future: F,
+) -> R
+where
+    F: Future<Output = R>,
+{
+    TURN_START_LISTENER
+        .scope(
+            TurnStartListener {
+                chat_id,
+                callback: Arc::new(callback),
+            },
+            future,
+        )
+        .await
+}
+
+/// Owns one persisted turn, including its cross-process queue lease. Dropping a
+/// cancelled task marks its prompt interrupted instead of leaving it running.
+struct TurnLease {
+    memory: MemoryStore,
+    id: i64,
+    heartbeat: tokio::task::JoinHandle<()>,
+    finished: bool,
+    activity: Arc<std::sync::Mutex<Vec<AgentProgress>>>,
+}
+
+impl TurnLease {
+    async fn start(memory: &MemoryStore, chat_id: &str, text: &str) -> Result<Self, MemoryError> {
+        let id = memory.start_turn(chat_id, text)?;
+        let _ = TURN_START_LISTENER.try_with(|listener| {
+            if listener.chat_id == chat_id {
+                (listener.callback)(id);
+            }
+        });
+        let heartbeat_memory = memory.clone();
+        let heartbeat = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                if heartbeat_memory.renew_turn(id).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut lease = Self {
+            memory: memory.clone(),
+            id,
+            heartbeat,
+            finished: false,
+            activity: Arc::new(std::sync::Mutex::new(Vec::new())),
+        };
+        loop {
+            match memory.claim_turn(chat_id, id) {
+                Ok(true) => return Ok(lease),
+                Ok(false) => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
+                Err(error) => {
+                    lease.fail();
+                    return Err(error);
+                }
+            }
+        }
+    }
+
+    fn persist_activity(&self) {
+        if let Ok(lock) = self.activity.lock() {
+            let compacted = compact_agent_progress(&lock);
+            if !compacted.is_empty() {
+                if let Ok(activity_json) = serde_json::to_string(&compacted) {
+                    let _ = self
+                        .memory
+                        .set_interaction_agent_activity_json(self.id, &activity_json);
+                }
+            }
+        }
+    }
+
+    fn complete_with_summary(
+        &mut self,
+        summary: &str,
+        provider: &str,
+        model: &str,
+        fallback_provider: Option<&str>,
+    ) -> Result<(), MemoryError> {
+        self.persist_activity();
+        self.memory
+            .finish_turn(self.id, summary, provider, model, fallback_provider)?;
+        self.finished = true;
+        Ok(())
+    }
+
+    fn complete(&mut self, response: &ChatResponse) -> Result<(), MemoryError> {
+        self.complete_with_summary(
+            &response.text,
+            &response.provider,
+            &response.model,
+            response.fallback_provider.as_deref(),
+        )
+    }
+
+    fn fail(&mut self) {
+        self.persist_activity();
+        let _ = self.memory.end_turn(self.id, "failed");
+        self.finished = true;
+    }
+}
+
+impl Drop for TurnLease {
+    fn drop(&mut self) {
+        self.heartbeat.abort();
+        if !self.finished {
+            self.persist_activity();
+            let _ = self.memory.end_turn(self.id, "interrupted");
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum OrchestrationError {
@@ -105,19 +236,24 @@ pub async fn orchestrate_chat(
     config: &MintConfig,
     request: &ChatRequest,
 ) -> Result<ChatResponse, OrchestrationError> {
+    let memory = MemoryStore::open_default()?;
+    let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
-    let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(config, &memory, &resolved_request)?;
-    let response = send_chat(config, &enriched).await?;
-    memory.add_interaction_for_chat_with_fallback(
-        &request_chat_id(request),
-        &request.message,
-        &response.text,
-        &response.provider,
-        &response.model,
-        response.fallback_provider.as_deref(),
-    )?;
+    let response = match send_chat(config, &enriched).await {
+        Ok(response) => response,
+        Err(error) => {
+            turn.fail();
+            return Err(error.into());
+        }
+    };
+    turn.complete(&response)?;
+    if let Some(ref ws) = request.workspace_path {
+        if !ws.trim().is_empty() {
+            let _ = memory.set_chat_session_workspace(&request_chat_id(request), Some(ws.trim()));
+        }
+    }
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -129,6 +265,7 @@ pub async fn orchestrate_chat(
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        turn.id,
     );
     Ok(response)
 }
@@ -141,19 +278,24 @@ pub async fn orchestrate_chat_stream<F>(
 where
     F: FnMut(String),
 {
+    let memory = MemoryStore::open_default()?;
+    let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
-    let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(config, &memory, &resolved_request)?;
-    let response = stream_chat(config, &enriched, on_chunk).await?;
-    memory.add_interaction_for_chat_with_fallback(
-        &request_chat_id(request),
-        &request.message,
-        &response.text,
-        &response.provider,
-        &response.model,
-        response.fallback_provider.as_deref(),
-    )?;
+    let response = match stream_chat(config, &enriched, on_chunk).await {
+        Ok(response) => response,
+        Err(error) => {
+            turn.fail();
+            return Err(error.into());
+        }
+    };
+    turn.complete(&response)?;
+    if let Some(ref ws) = request.workspace_path {
+        if !ws.trim().is_empty() {
+            let _ = memory.set_chat_session_workspace(&request_chat_id(request), Some(ws.trim()));
+        }
+    }
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -165,6 +307,7 @@ where
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        turn.id,
     );
     Ok(response)
 }
@@ -173,19 +316,19 @@ pub async fn orchestrate_chat_with_fallback(
     config: &MintConfig,
     request: &ChatRequest,
 ) -> Result<(ChatResponse, Option<String>), OrchestrationError> {
+    let memory = MemoryStore::open_default()?;
+    let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
-    let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(config, &memory, &resolved_request)?;
-    let (response, fallback) = send_chat_with_fallback(config, &enriched).await?;
-    memory.add_interaction_for_chat_with_fallback(
-        &request_chat_id(request),
-        &request.message,
-        &response.text,
-        &response.provider,
-        &response.model,
-        response.fallback_provider.as_deref(),
-    )?;
+    let (response, fallback) = match send_chat_with_fallback(config, &enriched).await {
+        Ok(result) => result,
+        Err(error) => {
+            turn.fail();
+            return Err(error.into());
+        }
+    };
+    turn.complete(&response)?;
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -197,6 +340,7 @@ pub async fn orchestrate_chat_with_fallback(
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        turn.id,
     );
     Ok((response, fallback))
 }
@@ -209,19 +353,24 @@ pub async fn orchestrate_chat_stream_with_fallback<F>(
 where
     F: FnMut(String),
 {
+    let memory = MemoryStore::open_default()?;
+    let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
-    let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(config, &memory, &resolved_request)?;
-    let (response, fallback) = stream_chat_with_fallback(config, &enriched, on_chunk).await?;
-    memory.add_interaction_for_chat_with_fallback(
-        &request_chat_id(request),
-        &request.message,
-        &response.text,
-        &response.provider,
-        &response.model,
-        response.fallback_provider.as_deref(),
-    )?;
+    let (response, fallback) = match stream_chat_with_fallback(config, &enriched, on_chunk).await {
+        Ok(result) => result,
+        Err(error) => {
+            turn.fail();
+            return Err(error.into());
+        }
+    };
+    turn.complete(&response)?;
+    if let Some(ref ws) = request.workspace_path {
+        if !ws.trim().is_empty() {
+            let _ = memory.set_chat_session_workspace(&request_chat_id(request), Some(ws.trim()));
+        }
+    }
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -233,6 +382,7 @@ where
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        turn.id,
     );
     Ok((response, fallback))
 }
@@ -255,7 +405,7 @@ fn enrich_request(
     request: &ChatRequest,
 ) -> Result<ChatRequest, MemoryError> {
     let mut interactions =
-        memory.recent_interactions_for_chat(&request_chat_id(request), CONTEXT_LIMIT)?;
+        memory.recent_completed_interactions_for_chat(&request_chat_id(request), CONTEXT_LIMIT)?;
     interactions.reverse();
     let transcript = interactions
         .into_iter()
@@ -514,6 +664,27 @@ pub enum AgentProgress {
     Thought {
         thought: String,
     },
+    /// Incremental model reasoning for the currently active agent step. These
+    /// events are live-only; consumers replace them with the matching final
+    /// `ExtendedThinking` record instead of persisting every delta.
+    ThinkingDelta {
+        id: String,
+        delta: String,
+        elapsed_ms: u64,
+    },
+    /// Extended reasoning / chain-of-thought from the model's API thinking
+    /// tokens (e.g. Claude `<thinking>`, Gemini Thinking, DeepSeek Reasoner,
+    /// or `<think>` tags). Semantically distinct from `Thought`, which
+    /// carries short, one-line agent notes (fallback warnings, decision
+    /// summaries). The CLI renders this as a collapsible block; the web/
+    /// desktop UI shows it in a dedicated "Extended Thinking" panel.
+    ExtendedThinking {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        thought: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        elapsed_ms: Option<u64>,
+    },
     /// Emitted while retrying a step after every configured provider was
     /// unreachable (`ChatError::NetworkUnavailable`) — distinct from
     /// `Thinking` because there's nothing to wait *on* here except the
@@ -547,6 +718,87 @@ pub enum AgentProgress {
     RunCompleted {
         summary: RunTelemetrySummary,
     },
+}
+
+/// Determines whether a thought string represents long-form / internal chain-of-thought
+/// (reasoning tokens, <think> tags, or multi-line reasoning) versus a brief agent note.
+pub fn is_internal_cot(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.starts_with("<think>") || trimmed.contains("</think>") {
+        return true;
+    }
+    let line_count = trimmed.lines().count();
+    let char_count = trimmed.chars().count();
+    if trimmed.contains("\n\n") || line_count > 2 || char_count > 180 {
+        return true;
+    }
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with("the user ")
+        || lower.starts_with("let's think")
+        || lower.starts_with("let me analyze")
+        || lower.starts_with("per rule")
+        || lower.starts_with("note the ")
+        || lower.contains("thinking process:")
+    {
+        return true;
+    }
+    false
+}
+
+/// Compacts an agent progress event stream for storage, removing transport-only
+/// streaming deltas (`ThinkingDelta`) while preserving complete `ExtendedThinking`
+/// blocks, or synthesizing an `ExtendedThinking` block for any interrupted delta sequence.
+pub fn compact_agent_progress(progress: &[AgentProgress]) -> Vec<AgentProgress> {
+    let completed_ids: std::collections::HashSet<String> = progress
+        .iter()
+        .filter_map(|event| match event {
+            AgentProgress::ExtendedThinking { id: Some(id), .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+
+    let mut result = Vec::new();
+    let mut interrupted_order: Vec<String> = Vec::new();
+    let mut interrupted: std::collections::HashMap<String, (String, Option<u64>)> =
+        std::collections::HashMap::new();
+
+    for event in progress {
+        match event {
+            AgentProgress::ThinkingDelta {
+                id,
+                delta,
+                elapsed_ms,
+            } => {
+                if !completed_ids.contains(id) {
+                    if !interrupted.contains_key(id) {
+                        interrupted_order.push(id.clone());
+                    }
+                    interrupted
+                        .entry(id.clone())
+                        .and_modify(|(text, elapsed)| {
+                            text.push_str(delta);
+                            *elapsed = Some(*elapsed_ms);
+                        })
+                        .or_insert_with(|| (delta.clone(), Some(*elapsed_ms)));
+                }
+            }
+            _ => {
+                result.push(event.clone());
+            }
+        }
+    }
+
+    for id in interrupted_order {
+        if let Some((thought, elapsed_ms)) = interrupted.remove(&id) {
+            result.push(AgentProgress::ExtendedThinking {
+                id: Some(id),
+                thought,
+                elapsed_ms,
+            });
+        }
+    }
+
+    result
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -598,6 +850,8 @@ pub struct AgentResult {
     pub summary: String,
     pub verification: String,
     pub fallback: Option<String>,
+    #[serde(default)]
+    pub fallback_reason: Option<String>,
     /// Sum of `total_tokens` across every step's API response this turn —
     /// see the doc comment on `turn_total_tokens` where it's accumulated.
     pub total_tokens: u64,
@@ -722,6 +976,24 @@ struct AgentInput {
     button: String,
     #[serde(default)]
     key: String,
+    #[serde(default)]
+    element_ref: String,
+    #[serde(default)]
+    tab_id: String,
+    #[serde(default)]
+    operation: String,
+    #[serde(default)]
+    condition: String,
+    #[serde(default)]
+    value: String,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+    #[serde(default)]
+    text_offset: Option<u64>,
+    #[serde(default)]
+    element_offset: Option<u64>,
+    #[serde(default)]
+    takeover_complete: bool,
     // Video tools input fields
     #[serde(default)]
     input: String,
@@ -915,22 +1187,56 @@ fn resolve_agent_config(
     )
 }
 
-/// Calls `send_chat_with_fallback`, retrying up to `NETWORK_RETRY_ATTEMPTS`
-/// times (waiting `NETWORK_RETRY_DELAY` between each) when every configured
-/// provider comes back `ChatError::NetworkUnavailable` — swapping providers
-/// is pointless when the network itself is down, so this waits for it to
-/// come back instead of burning through the provider list, keeping the user
-/// informed via `AgentProgress::WaitingForNetwork` in the meantime. Any other
-/// error (including `NetworkUnavailable` after the last attempt) is returned
-/// immediately, unchanged.
-async fn send_chat_with_network_retry(
+enum AgentStreamChunk {
+    DirectText(String),
+    FinalSummary(String),
+}
+
+async fn stream_chat_with_network_retry(
     config: &MintConfig,
     request: &ChatRequest,
+    thought_id: &str,
+    thought_started: Instant,
+    fast_mode: bool,
     progress: &mut (dyn FnMut(AgentProgress) + Send),
+    stream_json_prompt: bool,
+    allow_final_stream: bool,
+    on_stream_chunk: &mut (dyn FnMut(AgentStreamChunk) + Send),
 ) -> Result<(ChatResponse, Option<String>), ChatError> {
     let mut attempt = 0;
+    let mut summary_stream = FinishSummaryStream::default();
     loop {
-        match send_chat_with_fallback(config, request).await {
+        let result = stream_chat_events_with_fallback(config, request, |event| match event {
+            ChatStreamEvent::ReasoningDelta { delta } if !fast_mode && !delta.is_empty() => {
+                progress(AgentProgress::ThinkingDelta {
+                    id: thought_id.to_owned(),
+                    delta,
+                    elapsed_ms: thought_started.elapsed().as_millis() as u64,
+                });
+            }
+            ChatStreamEvent::TextDelta { delta } if allow_final_stream => {
+                if stream_json_prompt {
+                    summary_stream.push_json_prompt(&delta, &mut |chunk| {
+                        on_stream_chunk(AgentStreamChunk::FinalSummary(chunk));
+                    });
+                }
+            }
+            ChatStreamEvent::ToolCallDelta {
+                index,
+                name,
+                arguments,
+                input,
+            } if allow_final_stream => summary_stream.push_tool_call(
+                index,
+                name.as_deref(),
+                arguments.as_deref(),
+                input.as_ref(),
+                &mut |chunk| on_stream_chunk(AgentStreamChunk::FinalSummary(chunk)),
+            ),
+            _ => {}
+        })
+        .await;
+        match result {
             Err(ChatError::NetworkUnavailable) if attempt < NETWORK_RETRY_ATTEMPTS => {
                 attempt += 1;
                 progress(AgentProgress::WaitingForNetwork {
@@ -939,9 +1245,181 @@ async fn send_chat_with_network_retry(
                 });
                 tokio::time::sleep(NETWORK_RETRY_DELAY).await;
             }
+            Ok((response, fallback)) => {
+                if !stream_json_prompt
+                    && allow_final_stream
+                    && response
+                        .tool_calls
+                        .as_ref()
+                        .is_none_or(|calls| calls.is_empty())
+                    && !response.text.is_empty()
+                {
+                    // Plain text from a native tool-calling response is only a final
+                    // answer if the completed model turn contains no tool calls. Buffer
+                    // it until then so an assistant preamble doesn't appear under
+                    // "Mint:" while the requested tools are still about to run.
+                    on_stream_chunk(AgentStreamChunk::DirectText(response.text.clone()));
+                }
+                return Ok((response, fallback));
+            }
             other => return other,
         }
     }
+}
+
+#[derive(Default)]
+struct FinishSummaryStream {
+    tool_names: std::collections::HashMap<usize, String>,
+    tool_arguments: std::collections::HashMap<usize, String>,
+    json_prompt: String,
+    emitted: String,
+}
+
+impl FinishSummaryStream {
+    fn push_tool_call(
+        &mut self,
+        index: usize,
+        name_delta: Option<&str>,
+        arguments_delta: Option<&str>,
+        input: Option<&serde_json::Value>,
+        on_chunk: &mut (dyn FnMut(String) + Send),
+    ) {
+        if let Some(name) = name_delta {
+            self.tool_names.insert(index, name.to_owned());
+        }
+        if let Some(arguments) = arguments_delta {
+            self.tool_arguments
+                .entry(index)
+                .or_default()
+                .push_str(arguments);
+        }
+        if let Some(input) = input {
+            self.tool_arguments.insert(index, input.to_string());
+        }
+        if self
+            .tool_names
+            .get(&index)
+            .is_some_and(|name| name == "finish")
+            && let Some(arguments) = self.tool_arguments.get(&index)
+            && let Some(summary) = json_string_field_prefix(arguments, "summary")
+        {
+            self.emit_new_text(&summary, on_chunk);
+        }
+    }
+
+    fn push_json_prompt(&mut self, delta: &str, on_chunk: &mut (dyn FnMut(String) + Send)) {
+        self.json_prompt.push_str(delta);
+        if json_string_field_prefix(&self.json_prompt, "action").as_deref() == Some("finish")
+            && let Some(summary) = json_string_field_prefix(&self.json_prompt, "summary")
+        {
+            self.emit_new_text(&summary, on_chunk);
+        }
+    }
+
+    fn emit_new_text(&mut self, text: &str, on_chunk: &mut (dyn FnMut(String) + Send)) {
+        if !text.starts_with(&self.emitted) || text.len() == self.emitted.len() {
+            return;
+        }
+        let delta = text[self.emitted.len()..].to_owned();
+        self.emitted.push_str(&delta);
+        on_chunk(delta);
+    }
+}
+
+fn unstreamed_summary_remainder<'a>(
+    summary: &'a str,
+    streamed_finish: &str,
+    streamed_direct: &str,
+) -> &'a str {
+    let streamed_finish = streamed_finish.trim();
+    if !streamed_finish.is_empty()
+        && let Some(remainder) = summary.strip_prefix(streamed_finish)
+    {
+        return remainder;
+    }
+
+    let streamed_direct = streamed_direct.trim();
+    if !streamed_direct.is_empty()
+        && let Some(remainder) = summary.strip_prefix(streamed_direct)
+    {
+        return remainder;
+    }
+
+    summary
+}
+
+/// Reads a JSON string-valued property even while its value is still arriving.
+/// It skips quoted values and only recognizes actual object keys, so a mention
+/// of `"summary"` inside a thought or another string cannot leak to the chat.
+fn json_string_field_prefix(input: &str, field: &str) -> Option<String> {
+    let bytes = input.as_bytes();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'"' {
+            cursor += 1;
+            continue;
+        }
+        let start = cursor;
+        cursor += 1;
+        let mut escaped = false;
+        let mut end = None;
+        while cursor < bytes.len() {
+            match (bytes[cursor], escaped) {
+                (b'"', false) => {
+                    end = Some(cursor);
+                    cursor += 1;
+                    break;
+                }
+                (b'\\', false) => escaped = true,
+                (_, true) => escaped = false,
+                _ => {}
+            }
+            cursor += 1;
+        }
+        if end.is_none() {
+            break;
+        }
+        let Ok(key) = serde_json::from_str::<String>(&input[start..cursor]) else {
+            continue;
+        };
+        if key != field {
+            continue;
+        }
+        let mut value_start = cursor;
+        while value_start < bytes.len() && bytes[value_start].is_ascii_whitespace() {
+            value_start += 1;
+        }
+        if value_start >= bytes.len() || bytes[value_start] != b':' {
+            continue;
+        }
+        value_start += 1;
+        while value_start < bytes.len() && bytes[value_start].is_ascii_whitespace() {
+            value_start += 1;
+        }
+        if value_start >= bytes.len() || bytes[value_start] != b'"' {
+            continue;
+        }
+        let value_content_start = value_start + 1;
+        let mut value_cursor = value_content_start;
+        let mut value_escaped = false;
+        while value_cursor < bytes.len() {
+            match (bytes[value_cursor], value_escaped) {
+                (b'"', false) => {
+                    return serde_json::from_str::<String>(&input[value_start..value_cursor + 1])
+                        .ok();
+                }
+                (b'\\', false) => value_escaped = true,
+                (_, true) => value_escaped = false,
+                _ => {}
+            }
+            value_cursor += 1;
+        }
+        // Close a temporary copy of an incomplete string. Invalid partial
+        // escapes (e.g. half a `\\uXXXX`) are held until the next provider delta.
+        let partial = format!("\"{}\"", &input[value_content_start..]);
+        return serde_json::from_str::<String>(&partial).ok();
+    }
+    None
 }
 
 /// Returns a boxed `dyn Future` trait object rather than being a plain
@@ -987,7 +1465,6 @@ where
                 e
             ))
         })?;
-        let resolved_task = resolve_github_links(task, config).await;
         let chat_id = chat_id
             .map(str::trim)
             .filter(|chat_id| !chat_id.is_empty())
@@ -1000,6 +1477,17 @@ where
         // are already scoped or aren't "cli" at all (see `scoped_chat_id`).
         let chat_id = crate::agent::memory::scoped_chat_id(chat_id, Some(&root.to_string_lossy()));
         let chat_id = chat_id.as_str();
+        let memory = MemoryStore::open_default()?;
+        let mut turn = TurnLease::start(&memory, chat_id, task).await?;
+        let record_activity = Arc::clone(&turn.activity);
+        let mut progress = move |event: AgentProgress| {
+            if let Ok(mut lock) = record_activity.lock() {
+                lock.push(event.clone());
+            }
+            progress(event);
+        };
+        let resolved_task = resolve_github_links(task, config).await;
+        let agent_result = crate::browser::run_session(async {
         // Subagent runs use a synthetic `{parent_chat_id}::subagent::{name}` chat id
         // (see the `dispatch_subagent` arm in `execute_tool`) so their own memory
         // interaction doesn't leak into the parent conversation's history. That
@@ -1065,7 +1553,10 @@ where
         #[allow(unused_assignments)]
         let mut final_model = "".to_string();
         let mut final_fallback = None;
+        let mut final_fallback_reason = None;
         let mut action_counts = BTreeMap::<String, usize>::new();
+        let mut streamed_finish_summary = String::new();
+        let mut streamed_direct_text = String::new();
         // Track the most recent step (if any) that successfully modified a file
         // (`apply_patch`/`write_file`) and the most recent step that ran `verify`,
         // so `finish` can be rejected when code was changed but never checked —
@@ -1119,6 +1610,12 @@ where
             std::collections::BTreeSet::new();
 
         'steps: for step in 1..=MAX_STEPS {
+            let thought_id = if let Some(name) = chat_id.split("::subagent::").nth(1) {
+                format!("subagent-{name}-step-{step}")
+            } else {
+                format!("root-step-{step}")
+            };
+            let thought_started = Instant::now();
             let (active_config, agent_instruction, active_agent_name, active_model_name) =
                 resolve_agent_config(config, agent_id, &trajectory);
 
@@ -1150,6 +1647,12 @@ where
             }
 
             let tool_mode = active_config.tool_calling_mode();
+            // A finish can still be rejected after the provider finishes
+            // streaming when edited files have not been verified. Don't show
+            // that provisional summary to the user as if the run were done.
+            let allow_final_stream =
+                !unverified_modification(last_modify_step, last_verify_step, "")
+                    && last_verify_failed != Some(true);
 
             if tool_mode == ToolCallingMode::JsonPrompt
                 && active_config.ai_provider == "ollama"
@@ -1204,54 +1707,92 @@ where
                         content,
                     });
                 }
-                send_chat_with_network_retry(
-                    &active_config,
-                    &ChatRequest {
-                        message: String::new(),
-                        system_instruction: active_system_prompt.clone(),
-                        chat_id: Some(chat_id.to_owned()),
-                        image_data_uri: None,
-                        audio_data_uri: None,
-                        video_data_uri: None,
-                        document_attachment: None,
-                        workspace_path: None,
-                        agent_id: None,
-                        plan_mode: false,
-                        pinned_mcp_server: None,
-                        messages: Some(native_messages.clone()),
-                        tools: Some(tool_catalog(
-                            &active_config,
-                            plan_mode,
-                            &root,
-                            allow_subagent_dispatch,
-                        )),
-                        temperature: active_config.temperature,
-                    },
-                    &mut progress,
-                )
-                .await?
+                {
+                    let mut emit_stream_chunk = |chunk| match chunk {
+                        AgentStreamChunk::DirectText(delta) => {
+                            streamed_direct_text.push_str(&delta);
+                            on_chunk(delta);
+                        }
+                        AgentStreamChunk::FinalSummary(delta) => {
+                            streamed_finish_summary.push_str(&delta);
+                            on_chunk(delta);
+                        }
+                    };
+                    stream_chat_with_network_retry(
+                        &active_config,
+                        &ChatRequest {
+                            message: String::new(),
+                            system_instruction: active_system_prompt.clone(),
+                            chat_id: Some(chat_id.to_owned()),
+                            image_data_uri: None,
+                            audio_data_uri: None,
+                            video_data_uri: None,
+                            document_attachment: None,
+                            workspace_path: None,
+                            agent_id: None,
+                            plan_mode: false,
+                            pinned_mcp_server: None,
+                            messages: Some(native_messages.clone()),
+                            tools: Some(tool_catalog(
+                                &active_config,
+                                plan_mode,
+                                &root,
+                                allow_subagent_dispatch,
+                            )),
+                            temperature: active_config.temperature,
+                            ..Default::default()
+                        },
+                        &thought_id,
+                        thought_started,
+                        fast_mode,
+                        &mut progress,
+                        false,
+                        allow_final_stream,
+                        &mut emit_stream_chunk,
+                    )
+                    .await?
+                }
             } else {
-                send_chat_with_network_retry(
-                    &active_config,
-                    &ChatRequest {
-                        message: observation.clone(),
-                        system_instruction: active_system_prompt.clone(),
-                        chat_id: Some(chat_id.to_owned()),
-                        image_data_uri: pending_image.take(),
-                        audio_data_uri: pending_audio.take(),
-                        video_data_uri: pending_video.take(),
-                        document_attachment: None,
-                        workspace_path: None,
-                        agent_id: None,
-                        plan_mode: false,
-                        pinned_mcp_server: None,
-                        messages: None,
-                        tools: None,
-                        temperature: active_config.temperature,
-                    },
-                    &mut progress,
-                )
-                .await?
+                {
+                    let mut emit_stream_chunk = |chunk| match chunk {
+                        AgentStreamChunk::DirectText(delta) => {
+                            streamed_direct_text.push_str(&delta);
+                            on_chunk(delta);
+                        }
+                        AgentStreamChunk::FinalSummary(delta) => {
+                            streamed_finish_summary.push_str(&delta);
+                            on_chunk(delta);
+                        }
+                    };
+                    stream_chat_with_network_retry(
+                        &active_config,
+                        &ChatRequest {
+                            message: observation.clone(),
+                            system_instruction: active_system_prompt.clone(),
+                            chat_id: Some(chat_id.to_owned()),
+                            image_data_uri: pending_image.take(),
+                            audio_data_uri: pending_audio.take(),
+                            video_data_uri: pending_video.take(),
+                            document_attachment: None,
+                            workspace_path: None,
+                            agent_id: None,
+                            plan_mode: false,
+                            pinned_mcp_server: None,
+                            messages: None,
+                            tools: None,
+                            temperature: active_config.temperature,
+                            ..Default::default()
+                        },
+                        &thought_id,
+                        thought_started,
+                        fast_mode,
+                        &mut progress,
+                        true,
+                        allow_final_stream,
+                        &mut emit_stream_chunk,
+                    )
+                    .await?
+                }
             };
 
             final_provider = response.provider.clone();
@@ -1262,14 +1803,10 @@ where
                 last_input_tokens = input as u64;
             }
             if fallback.is_some() {
-                // `fallback` (this function's own return value) is the provider
-                // that actually served this response; `response.fallback_provider`
-                // is a same-shaped but differently-populated field that
-                // `send_chat_with_fallback` sets to the *original* provider that
-                // failed over — using it here showed e.g. "gemini → fallback:
-                // gemini • Qwen..." in the CLI badge instead of "gemini →
-                // fallback: huggingface • Qwen...".
-                final_fallback = fallback.clone();
+                // Track the original provider that failed over (held in `response.fallback_provider`),
+                // so UI and logs correctly show `<original> unavailable, fell back to <current>`.
+                final_fallback = response.fallback_provider.clone();
+                final_fallback_reason = response.fallback_reason.clone();
                 if let Some(reason) = &response.fallback_reason {
                     progress(AgentProgress::Thought {
                         thought: format!(
@@ -1300,10 +1837,7 @@ where
                         .enumerate()
                         .map(|(index, call)| {
                             let thought = if index == 0 {
-                                match &response.thought {
-                                    Some(t) if !t.trim().is_empty() => t.trim().to_string(),
-                                    _ => response.text.trim().to_string(),
-                                }
+                                response.text.trim().to_string()
                             } else {
                                 String::new()
                             };
@@ -1377,6 +1911,7 @@ where
                                 messages: None,
                                 tools: None,
                                 temperature: active_config.temperature,
+                                ..Default::default()
                             },
                         )
                         .await?;
@@ -1388,6 +1923,13 @@ where
                         })?
                     }
                 };
+                // If the model's inline JSON `thought` is empty but the API
+                // sent separate thinking tokens (reasoning models), emit them
+                // as `ExtendedThinking` so the UI can display them in a
+                // dedicated collapsible block instead of the short-thought
+                // timeline.  Still copy into `decision.thought` so the text
+                // is available downstream, but the *progress event* uses the
+                // correct variant.
                 if decision.thought.trim().is_empty() {
                     if let Some(t) = &response.thought {
                         decision.thought = t.trim().to_string();
@@ -1395,6 +1937,19 @@ where
                 }
                 vec![(format!("call_{step}"), decision)]
             };
+
+            let mut extended_emitted = false;
+            if !fast_mode
+                && let Some(t) = &response.thought
+                && !t.trim().is_empty()
+            {
+                progress(AgentProgress::ExtendedThinking {
+                    id: Some(thought_id.clone()),
+                    thought: t.trim().to_owned(),
+                    elapsed_ms: Some(thought_started.elapsed().as_millis() as u64),
+                });
+                extended_emitted = true;
+            }
 
             let mut step_tool_results: Vec<(String, String, Value, String)> = Vec::new();
             // Screenshots (and any future binary/image tool result) are kept out of
@@ -1440,114 +1995,84 @@ where
                 .await;
             } else {
                 for (call_id, decision) in decisions {
-                    if !fast_mode && !decision.thought.trim().is_empty() {
-                        progress(AgentProgress::Thought {
-                            thought: decision.thought.trim().to_owned(),
-                        });
+                    let d_thought = decision.thought.trim();
+                    if !fast_mode && !d_thought.is_empty() {
+                        let already_extended = extended_emitted
+                            && response.thought.as_deref().map(str::trim) == Some(d_thought);
+                        if !already_extended {
+                            if is_internal_cot(d_thought) {
+                                progress(AgentProgress::ExtendedThinking {
+                                    id: Some(thought_id.clone()),
+                                    thought: d_thought.to_owned(),
+                                    elapsed_ms: Some(thought_started.elapsed().as_millis() as u64),
+                                });
+                            } else {
+                                progress(AgentProgress::Thought {
+                                    thought: d_thought.to_owned(),
+                                });
+                            }
+                        }
                     }
 
                     if decision.action == "finish" {
                         let mut summary = decision.input.summary.trim().to_owned();
-                        let is_thai_task =
-                            task.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
-                        if let Some(err_line) = observation
-                            .lines()
-                            .find(|l| l.contains("Web search error:"))
-                        {
-                            let clean_err = err_line
-                                .replace("Web search error: ", "")
-                                .replace("Web search is currently unavailable.", "")
-                                .trim()
-                                .to_string();
-                            if summary.is_empty() {
-                                if is_thai_task {
-                                    summary = format!(
-                                        "การค้นหาข้อมูลจากเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {}\nมิ้นท์ขออภัยด้วยนะคะที่ไม่สามารถค้นหาข้อมูลเรียลไทม์ให้ได้ในขณะนี้ค่ะ",
-                                        clean_err
-                                    );
-                                } else {
-                                    summary = format!(
-                                        "Web search failed due to error: {}\nI apologize, but I cannot retrieve real-time information at the moment.",
-                                        clean_err
-                                    );
-                                }
-                            } else {
-                                let err_lower = clean_err.to_lowercase();
-                                let summary_lower = summary.to_lowercase();
-                                let already_mentions_error = if is_thai_task {
-                                    summary_lower.contains("ล้มเหลว")
-                                        || summary_lower.contains("ข้อผิดพลาด")
-                                        || summary_lower.contains(&err_lower)
-                                } else {
-                                    summary_lower.contains("fail")
-                                        || summary_lower.contains("error")
-                                        || summary_lower.contains(&err_lower)
-                                };
-                                if !already_mentions_error {
-                                    if is_thai_task {
-                                        summary.push_str(&format!(
-                                            "\n\n(การค้นหาเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {})",
-                                            clean_err
-                                        ));
-                                    } else {
-                                        summary.push_str(&format!(
-                                            "\n\n(Web search failed due to error: {})",
-                                            clean_err
-                                        ));
-                                    }
-                                }
-                            }
-                        } else {
-                            if summary.is_empty() {
-                                let err_msg = "Error: Your finish action summary was empty. \
+                        if summary.is_empty() {
+                            let err_msg = "Error: Your finish action summary was empty. \
                                        You MUST provide a final answer, explanation, or response to the user's query \
                                        in the 'summary' field of the 'finish' action input. Do not leave it empty.";
-                                trajectory.push(format_trajectory_step(
-                                    step,
-                                    &decision.thought,
-                                    &decision.action,
-                                    err_msg,
-                                ));
-                                rebuild_observation(task, &root, &trajectory, &mut observation);
-                                reject_native_finish(
-                                    tool_mode,
-                                    &mut native_messages,
-                                    &response.text,
-                                    err_msg,
-                                );
-                                continue 'steps;
-                            }
-                            if unverified_modification(
-                                last_modify_step,
-                                last_verify_step,
-                                &decision.input.verification,
-                            ) {
-                                let err_msg = "Error: You modified a file (apply_patch/write_file) in this \
+                            trajectory.push(format_trajectory_step(
+                                step,
+                                &decision.thought,
+                                &decision.action,
+                                err_msg,
+                            ));
+                            rebuild_observation(task, &root, &trajectory, &mut observation);
+                            reject_native_finish(
+                                tool_mode,
+                                &mut native_messages,
+                                &response.text,
+                                err_msg,
+                            );
+                            continue 'steps;
+                        }
+                        if crate::browser::session_finish_evidence().await && meaningful_verification(&decision.input.verification).is_empty() {
+                            let error = "Browser tasks require observed evidence in finish.verification. Describe the observed outcome, or explicitly state that completion is unverified or blocked.";
+                            trajectory.push(format_trajectory_step(step, &decision.thought, &decision.action, error));
+                            rebuild_observation(task, &root, &trajectory, &mut observation);
+                            reject_native_finish(tool_mode, &mut native_messages, &response.text, error);
+                            continue 'steps;
+                        }
+                        if unverified_modification(
+                            last_modify_step,
+                            last_verify_step,
+                            &decision.input.verification,
+                        ) {
+                            let err_msg = "Error: You modified a file (apply_patch/write_file) in this \
                                        run but finished without verifying it. Call the verify tool \
                                        with build/test/lint commands appropriate for this project \
                                        before finishing. If no check genuinely applies (e.g. no test \
                                        suite, documentation-only change), say so explicitly in the \
                                        finish action's 'verification' field and finish again.";
-                                trajectory.push(format_trajectory_step(
-                                    step,
-                                    &decision.thought,
-                                    &decision.action,
-                                    err_msg,
-                                ));
-                                rebuild_observation(task, &root, &trajectory, &mut observation);
-                                reject_native_finish(
-                                    tool_mode,
-                                    &mut native_messages,
-                                    &response.text,
-                                    err_msg,
-                                );
-                                continue 'steps;
-                            }
-                            if unacknowledged_verify_failure(
-                                last_verify_failed,
-                                &decision.input.verification,
-                            ) {
-                                let err_msg = "Error: Your last verify call reported a failure \
+                            trajectory.push(format_trajectory_step(
+                                step,
+                                &decision.thought,
+                                &decision.action,
+                                err_msg,
+                            ));
+                            rebuild_observation(task, &root, &trajectory, &mut observation);
+                            reject_native_finish(
+                                tool_mode,
+                                &mut native_messages,
+                                &response.text,
+                                err_msg,
+                            );
+                            continue 'steps;
+                        }
+                        if unacknowledged_verify_failure(
+                            last_verify_failed,
+                            &decision.input.verification,
+                        ) {
+                            let err_msg = "Error: Your last verify call reported a failure \
                                        (non-zero exit code), but you're finishing without \
                                        addressing it. Read the stdout/stderr from that verify \
                                        call, fix the actual problem, and run verify again until \
@@ -1556,49 +2081,21 @@ where
                                        unrelated to your change (e.g. pre-existing), say so \
                                        explicitly in the finish action's 'verification' field and \
                                        finish again.";
-                                trajectory.push(format_trajectory_step(
-                                    step,
-                                    &decision.thought,
-                                    &decision.action,
-                                    err_msg,
-                                ));
-                                rebuild_observation(task, &root, &trajectory, &mut observation);
-                                reject_native_finish(
-                                    tool_mode,
-                                    &mut native_messages,
-                                    &response.text,
-                                    err_msg,
-                                );
-                                continue 'steps;
-                            }
-                            let mut provider_used = None;
-                            for line in observation.lines() {
-                                if line.contains("Web search succeeded using Google Search") {
-                                    provider_used = Some("Google");
-                                } else if line.contains("Web search succeeded using Brave Search") {
-                                    provider_used = Some("Brave");
-                                }
-                            }
-                            if let Some(prov) = provider_used {
-                                let summary_lower = summary.to_lowercase();
-                                if !summary_lower.contains("google")
-                                    && !summary_lower.contains("brave")
-                                {
-                                    if is_thai_task {
-                                        summary.push_str(&format!(
-                                            "\n\n(มิ้นท์หาข้อมูลนี้มาจาก {} Search นะคะ 💖)",
-                                            prov
-                                        ));
-                                    } else {
-                                        summary.push_str(&format!(
-                                            "\n\n(Information retrieved via {} Search 💖)",
-                                            prov
-                                        ));
-                                    }
-                                }
-                            }
+                            trajectory.push(format_trajectory_step(
+                                step,
+                                &decision.thought,
+                                &decision.action,
+                                err_msg,
+                            ));
+                            rebuild_observation(task, &root, &trajectory, &mut observation);
+                            reject_native_finish(
+                                tool_mode,
+                                &mut native_messages,
+                                &response.text,
+                                err_msg,
+                            );
+                            continue 'steps;
                         }
-
                         // Auto-append generated media (image/video) and model feedback to summary if LLM omitted it
                         let mut media_blocks = Vec::new();
                         for step in trajectory.iter() {
@@ -1621,17 +2118,15 @@ where
                         let verification =
                             meaningful_verification(&decision.input.verification).to_owned();
 
-                        on_chunk(summary.clone());
-
-                        let memory = MemoryStore::open_default()?;
-                        memory.add_interaction_for_chat_with_fallback(
-                            chat_id,
-                            task,
+                        let remainder = unstreamed_summary_remainder(
                             &summary,
-                            &final_provider,
-                            &final_model,
-                            final_fallback.as_deref(),
-                        )?;
+                            &streamed_finish_summary,
+                            &streamed_direct_text,
+                        );
+                        if !remainder.is_empty() {
+                            on_chunk(remainder.to_owned());
+                        }
+
                         memory.save_workspace_session(
                             &root.to_string_lossy(),
                             &summary,
@@ -1648,6 +2143,7 @@ where
                             config.clone(),
                             task.to_string(),
                             summary.clone(),
+                            turn.id,
                         );
                         if config.auto_skill_writing && looks_skill_worthy(step, &action_counts) {
                             spawn_auto_skill_write(
@@ -1678,12 +2174,20 @@ where
                             summary: run_summary,
                         });
 
+                        turn.complete_with_summary(
+                            &summary,
+                            &final_provider,
+                            &final_model,
+                            final_fallback.as_deref(),
+                        )?;
+
                         return Ok(AgentResult {
                             provider: final_provider,
                             model: final_model,
                             summary,
                             verification,
                             fallback: final_fallback,
+                            fallback_reason: final_fallback_reason,
                             total_tokens: turn_total_tokens,
                             input_tokens: last_input_tokens,
                             generated_tokens: turn_generated_tokens,
@@ -1960,7 +2464,7 @@ where
                             _ => "[Screenshot captured — see attached image]".to_string(),
                         }
                     } else {
-                        truncate(&result)
+                        if decision.action.starts_with("browser_") {result.clone()} else {truncate(&result)}
                     };
                     if matches!(
                         decision.action.as_str(),
@@ -1986,7 +2490,7 @@ where
                      concise verification read.]",
                 );
                     }
-                    if action_count >= 3 {
+                    if action_count >= 3 && !decision.action.starts_with("browser_") {
                         final_result.push_str(
                     "\n\n[System Tip: You repeated the same tool action three or more times. \
                      Stop repeating it. If you already have enough information or the requested edit is done, \
@@ -2116,10 +2620,16 @@ where
             summary: run_summary,
         });
 
+        turn.fail();
         Err(OrchestrationError::Agent(format!(
-            "code agent reached the limit of {} steps",
-            MAX_STEPS
+            "code agent reached the limit of {} steps; task incomplete. Last browser state: {}",
+            MAX_STEPS, crate::browser::session_last_state().await
         )))
+        }).await;
+        if agent_result.is_err() {
+            turn.fail();
+        }
+        agent_result
     })
 }
 
@@ -2427,7 +2937,7 @@ async fn run_parallel_subagent_batch(
             *count
         };
         let mut final_result = truncate(&tool_result);
-        if action_count >= 3 {
+        if action_count >= 3 && !action.starts_with("browser_") {
             final_result.push_str(
                 "\n\n[System Tip: You repeated the same tool action three or more times. \
                  Stop repeating it. If you already have enough information or the requested edit is done, \
@@ -2478,10 +2988,19 @@ async fn run_parallel_read_only_batch(
 
         tasks.push(async move {
             if !fast_mode && !thought.trim().is_empty() {
+                let t = thought.trim();
                 let mut guard = progress_mutex.lock().unwrap();
-                (*guard)(AgentProgress::Thought {
-                    thought: thought.trim().to_owned(),
-                });
+                if is_internal_cot(t) {
+                    (*guard)(AgentProgress::ExtendedThinking {
+                        id: None,
+                        thought: t.to_owned(),
+                        elapsed_ms: None,
+                    });
+                } else {
+                    (*guard)(AgentProgress::Thought {
+                        thought: t.to_owned(),
+                    });
+                }
             }
 
             {
@@ -2610,7 +3129,7 @@ async fn run_parallel_read_only_batch(
             truncate(&result)
         };
 
-        if action_count >= 3 {
+        if action_count >= 3 && !action.starts_with("browser_") {
             final_result.push_str(
                 "\n\n[System Tip: You repeated the same tool action three or more times. \
                  Stop repeating it. If you already have enough information or the requested edit is done, \
@@ -2709,7 +3228,13 @@ async fn execute_tool(
         | "browser_mouse_move"
         | "browser_mouse_click"
         | "browser_key_press"
-        | "browser_screenshot" => {
+        | "browser_screenshot"
+        | "browser_tabs"
+        | "browser_observe"
+        | "browser_fill"
+        | "browser_select"
+        | "browser_scroll"
+        | "browser_wait" => {
             tools::browser::execute(
                 decision.action.as_str(),
                 input,
@@ -2860,6 +3385,233 @@ where
 mod tests {
     use super::*;
     use crate::config::AgentConfig;
+
+    #[tokio::test]
+    async fn turn_start_listener_reports_only_the_matching_chat() {
+        let memory = MemoryStore::open(std::env::temp_dir().join(format!(
+            "mint-turn-start-listener-{}.sqlite",
+            uuid::Uuid::new_v4()
+        )));
+        let reported = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let callback_reported = reported.clone();
+        with_turn_start_listener(
+            "cli::one".to_string(),
+            move |id| callback_reported.lock().unwrap().push(id),
+            async {
+                let first = TurnLease::start(&memory, "cli::one", "hello")
+                    .await
+                    .unwrap();
+                let other = TurnLease::start(&memory, "cli::two", "other")
+                    .await
+                    .unwrap();
+                assert_eq!(*reported.lock().unwrap(), vec![first.id]);
+                drop(first);
+                drop(other);
+            },
+        )
+        .await;
+    }
+
+    #[test]
+    fn test_compact_agent_progress_cleans_deltas_and_preserves_tools() {
+        let events = vec![
+            AgentProgress::ToolStart {
+                action: "read_file".into(),
+                input: serde_json::json!({ "path": "src/main.rs" }),
+                subagent: None,
+            },
+            AgentProgress::ThinkingDelta {
+                id: "cot-1".into(),
+                delta: "Reading ".into(),
+                elapsed_ms: 100,
+            },
+            AgentProgress::ThinkingDelta {
+                id: "cot-1".into(),
+                delta: "the file...".into(),
+                elapsed_ms: 200,
+            },
+            AgentProgress::ExtendedThinking {
+                id: Some("cot-1".into()),
+                thought: "Reading the file...".into(),
+                elapsed_ms: Some(200),
+            },
+            AgentProgress::ToolEnd {
+                action: "read_file".into(),
+                input: serde_json::json!({ "path": "src/main.rs" }),
+                result: "fn main() {}".into(),
+                subagent: None,
+            },
+            AgentProgress::ThinkingDelta {
+                id: "cot-interrupted".into(),
+                delta: "Let's check ".into(),
+                elapsed_ms: 300,
+            },
+            AgentProgress::ThinkingDelta {
+                id: "cot-interrupted".into(),
+                delta: "more lines".into(),
+                elapsed_ms: 350,
+            },
+        ];
+
+        let compacted = compact_agent_progress(&events);
+        assert!(
+            !compacted
+                .iter()
+                .any(|e| matches!(e, AgentProgress::ThinkingDelta { id, .. } if id == "cot-1"))
+        );
+        assert!(compacted.iter().any(
+            |e| matches!(e, AgentProgress::ToolStart { action, .. } if action == "read_file")
+        ));
+        assert!(
+            compacted.iter().any(
+                |e| matches!(e, AgentProgress::ToolEnd { action, .. } if action == "read_file")
+            )
+        );
+        assert!(compacted.iter().any(|e| matches!(e, AgentProgress::ExtendedThinking { id: Some(id), thought, .. } if id == "cot-1" && thought == "Reading the file...")));
+        assert!(compacted.iter().any(|e| matches!(e, AgentProgress::ExtendedThinking { id: Some(id), thought, .. } if id == "cot-interrupted" && thought == "Let's check more lines")));
+    }
+
+    #[tokio::test]
+    async fn test_turn_lease_persists_agent_activity_on_complete() {
+        let memory = MemoryStore::open(std::env::temp_dir().join(format!(
+            "mint-turn-lease-complete-{}.sqlite",
+            uuid::Uuid::new_v4()
+        )));
+        let mut turn = TurnLease::start(&memory, "cli::test_complete", "hello")
+            .await
+            .unwrap();
+        let turn_id = turn.id;
+        turn.activity
+            .lock()
+            .unwrap()
+            .push(AgentProgress::ToolStart {
+                action: "run_shell".into(),
+                input: serde_json::json!({ "command": "ls -la" }),
+                subagent: None,
+            });
+        turn.activity.lock().unwrap().push(AgentProgress::ToolEnd {
+            action: "run_shell".into(),
+            input: serde_json::json!({ "command": "ls -la" }),
+            result: "file.txt".into(),
+            subagent: None,
+        });
+
+        turn.complete_with_summary("Done listing files", "test_provider", "test_model", None)
+            .unwrap();
+
+        let rows = memory.interactions_for_chat("cli::test_complete").unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.id, turn_id);
+        assert_eq!(row.status, "completed");
+        assert_eq!(row.ai_text, "Done listing files");
+        assert!(row.agent_activity.is_some());
+        let activity_val = row.agent_activity.as_ref().unwrap();
+        let activity_arr = activity_val.as_array().unwrap();
+        assert_eq!(activity_arr.len(), 2);
+        assert_eq!(activity_arr[0]["type"], "ToolStart");
+        assert_eq!(activity_arr[1]["type"], "ToolEnd");
+    }
+
+    #[tokio::test]
+    async fn test_turn_lease_persists_partial_activity_on_interrupt() {
+        let memory = MemoryStore::open(std::env::temp_dir().join(format!(
+            "mint-turn-lease-interrupt-{}.sqlite",
+            uuid::Uuid::new_v4()
+        )));
+        let turn = TurnLease::start(&memory, "cli::test_interrupt", "run something")
+            .await
+            .unwrap();
+        let turn_id = turn.id;
+        turn.activity
+            .lock()
+            .unwrap()
+            .push(AgentProgress::ToolStart {
+                action: "read_file".into(),
+                input: serde_json::json!({ "path": "test.txt" }),
+                subagent: None,
+            });
+        drop(turn);
+
+        let rows = memory.interactions_for_chat("cli::test_interrupt").unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.id, turn_id);
+        assert_eq!(row.status, "interrupted");
+        assert!(row.agent_activity.is_some());
+        let activity_val = row.agent_activity.as_ref().unwrap();
+        let activity_arr = activity_val.as_array().unwrap();
+        assert_eq!(activity_arr.len(), 1);
+        assert_eq!(activity_arr[0]["type"], "ToolStart");
+    }
+
+    #[test]
+    fn extracts_a_summary_incrementally_without_matching_text_inside_other_strings() {
+        let mut stream = FinishSummaryStream::default();
+        let mut output = String::new();
+        let mut emit = |delta: String| output.push_str(&delta);
+
+        stream.push_tool_call(0, Some("read_file"), None, None, &mut emit);
+        stream.push_tool_call(
+            0,
+            None,
+            Some(r#"{"thought":"the \"summary\" key is data","path":"x"}"#),
+            None,
+            &mut emit,
+        );
+        assert!(stream.emitted.is_empty());
+
+        stream.push_tool_call(1, Some("fin"), None, None, &mut emit);
+        stream.push_tool_call(1, Some("finish"), None, None, &mut emit);
+        stream.push_tool_call(1, None, Some(r#"{"summary":"สวัส"#), None, &mut emit);
+        stream.push_tool_call(
+            1,
+            None,
+            Some(r#"ดี\nโลก","verification":""}"#),
+            None,
+            &mut emit,
+        );
+
+        assert_eq!(output, "สวัสดี\nโลก");
+    }
+
+    #[test]
+    fn extracts_json_prompt_summary_as_chunks_arrive() {
+        let mut stream = FinishSummaryStream::default();
+        let mut output = String::new();
+        let mut emit = |delta: String| output.push_str(&delta);
+        stream.push_json_prompt(
+            r#"{"thought":"done","action":"finish","input":{"summary":"Hello"#,
+            &mut emit,
+        );
+        assert_eq!(stream.emitted, "Hello");
+        stream.push_json_prompt(r#" world"}}"#, &mut emit);
+        assert_eq!(output, "Hello world");
+    }
+
+    #[test]
+    fn direct_native_text_is_not_sent_again_as_a_completed_summary() {
+        assert_eq!(
+            unstreamed_summary_remainder("A streamed answer.", "", "A streamed answer."),
+            ""
+        );
+    }
+
+    #[test]
+    fn direct_native_text_appends_only_the_unstreamed_suffix() {
+        assert_eq!(
+            unstreamed_summary_remainder("A streamed answer, continued.", "", "A streamed answer"),
+            ", continued."
+        );
+    }
+
+    #[test]
+    fn streamed_finish_summary_takes_precedence_over_direct_text() {
+        assert_eq!(
+            unstreamed_summary_remainder("Final answer.", "Final", "unrelated preamble"),
+            " answer."
+        );
+    }
 
     #[test]
     fn truncate_for_context_leaves_short_text_untouched() {
@@ -3068,6 +3820,7 @@ mod tests {
             messages: None,
             tools: None,
             temperature: None,
+            ..Default::default()
         };
         let config = MintConfig::default();
         assert!(

@@ -65,6 +65,20 @@ pub(super) async fn wait_for_escape_interrupt(
 ) {
     use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 
+    let tui = live_status
+        .lock()
+        .ok()
+        .and_then(|status| status.tui.clone());
+    if let Some(tui) = tui {
+        loop {
+            if tui.take_interrupted() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+        return;
+    }
+
     // Fixed for the whole turn (set once when it starts), so it's safe to
     // snapshot instead of re-locking every tick.
     let queueing = live_status
@@ -770,6 +784,5 @@ pub(super) fn confirm_pausing_interrupt(prompt: &str, approval_active: &AtomicBo
     approved
 }
 
-/// Dim-cyan used for the code block gutter/border — same hue as `CYAN` but
-/// at reduced intensity so it doesn't compete with actual code content.
-pub(super) const CODE_BORDER: &str = "\x1b[2m\x1b[38;2;56;189;248m";
+/// Shared accent used for the code block gutter and border.
+pub(super) const CODE_BORDER: &str = crate::terminal_theme::ANSI_ACCENT;
