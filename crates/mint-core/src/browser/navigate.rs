@@ -34,18 +34,23 @@ pub async fn list_tabs(config: &MintConfig) -> Result<Vec<BrowserTab>, String> {
         .collect())
 }
 
-pub async fn navigate(config: &MintConfig, url: &str) -> Result<String, String> {
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
-        log_action(
-            "NAVIGATE_ERROR",
-            "Browser navigation only supports http and https URLs",
-        );
+pub(super) fn validate_url(url: &str) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url).map_err(|_| "invalid_browser_url".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
         return Err("browser navigation only supports http and https URLs".into());
     }
+    Ok(())
+}
+
+pub async fn navigate(config: &MintConfig, url: &str) -> Result<String, String> {
+    validate_url(url)?;
     log_action("NAVIGATE", &format!("Navigating to {url}"));
     ensure_page_open(config).await?;
     match cdp_call(config, "Page.navigate", json!({ "url": url })).await {
         Ok(response) => {
+            if let Some(error) = response["result"]["errorText"].as_str() {
+                return Err(format!("navigation_failed: {error}"));
+            }
             if response["result"]["frameId"].as_str().is_some() {
                 wait_for_page_load(config).await;
                 log_action(
@@ -84,21 +89,24 @@ pub async fn navigate(config: &MintConfig, url: &str) -> Result<String, String> 
 /// etc.) never settle to `"complete"`, so this gives up after ~8s and lets
 /// the caller proceed rather than blocking the agent loop indefinitely.
 pub(super) async fn wait_for_page_load(config: &MintConfig) {
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-    for _ in 0..40 {
-        if let Ok(response) = cdp_call_raw(
-            config,
-            "Runtime.evaluate",
-            json!({ "expression": "document.readyState", "returnByValue": true }),
-        )
-        .await
-        {
-            if response["result"]["result"]["value"].as_str() == Some("complete") {
-                return;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(8), async {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        for _ in 0..40 {
+            if let Ok(response) = cdp_call_raw(
+                config,
+                "Runtime.evaluate",
+                json!({ "expression": "document.readyState", "returnByValue": true }),
+            )
+            .await
+            {
+                if response["result"]["result"]["value"].as_str() == Some("complete") {
+                    return;
+                }
             }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    }
+    })
+    .await;
 }
 
 pub async fn read_page_text(config: &MintConfig) -> Result<String, String> {

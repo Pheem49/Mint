@@ -87,7 +87,7 @@ where
 {
     let (audio_tx, audio_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
-    tokio::spawn(async move {
+    spawn_live_session(async move {
         let mut audio_rx = audio_rx;
         if let Err(message) = run_session(
             &config,
@@ -105,6 +105,17 @@ where
     });
 
     GeminiLiveHandle { audio_tx }
+}
+
+/// Keep browser targeting, evidence, and recovery state for the entire voice
+/// task, including successive tool-call batches and spoken turns. Dropping the
+/// task releases its tab leases; the next voice session starts independently.
+pub(crate) fn spawn_live_session<F>(future: F) -> tokio::task::JoinHandle<F::Output>
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    tokio::spawn(crate::browser::run_session(future))
 }
 
 fn resolve_api_key(config: &MintConfig) -> String {

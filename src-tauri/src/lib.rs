@@ -2222,32 +2222,46 @@ async fn get_browser_tabs() -> Result<Vec<BrowserTab>, String> {
 }
 
 #[tauri::command]
-async fn navigate_browser(url: String) -> Result<String, String> {
-    browser_navigate(&load_config().map_err(|error| error.to_string())?, &url).await
+async fn navigate_browser(url: String, tab_id: Option<String>) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    mint_core::browser::with_tab(&config, tab_id.as_deref(), browser_navigate(&config, &url))
+        .await?
 }
 
 #[tauri::command]
-async fn read_browser_page() -> Result<String, String> {
-    read_page_text(&load_config().map_err(|error| error.to_string())?).await
+async fn read_browser_page(tab_id: Option<String>) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    mint_core::browser::with_tab(&config, tab_id.as_deref(), read_page_text(&config)).await?
 }
 
 #[tauri::command]
-async fn click_browser_selector(selector: String) -> Result<String, String> {
-    browser_click(
-        &load_config().map_err(|error| error.to_string())?,
-        &selector,
+async fn click_browser_selector(
+    selector: String,
+    tab_id: Option<String>,
+) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    mint_core::browser::with_tab(
+        &config,
+        tab_id.as_deref(),
+        browser_click(&config, &selector),
     )
-    .await
+    .await?
 }
 #[tauri::command]
-async fn type_in_browser(selector: String, text: String) -> Result<String, String> {
-    mint_core::browser::type_text(
-        &load_config().map_err(|error| error.to_string())?,
-        &selector,
-        &text,
+async fn type_in_browser(
+    selector: String,
+    text: String,
+    tab_id: Option<String>,
+) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    mint_core::browser::with_tab(
+        &config,
+        tab_id.as_deref(),
+        mint_core::browser::type_text(&config, &selector, &text),
     )
-    .await
+    .await?
 }
+
 #[tauri::command]
 fn start_screen_capture(app: AppHandle, image: String) -> Result<(), String> {
     *PENDING_TRANSLATION_PREVIEW

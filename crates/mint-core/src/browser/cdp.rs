@@ -11,105 +11,96 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use super::overlay::build_overlay_script;
 
-/// Full CDP call — injects the aura+cursor overlay before the actual call.
+/// Calls are pinned to the session target and bounded, including the handshake.
 pub(super) async fn cdp_call(
     config: &MintConfig,
     method: &str,
     params: Value,
 ) -> Result<Value, String> {
-    let page = fetch_pages(config)
-        .await?
-        .into_iter()
-        .find(|page| page["type"] == "page")
-        .ok_or("Chrome DevTools did not report an open browser page")?;
-    let socket_url = page["webSocketDebuggerUrl"]
-        .as_str()
-        .ok_or("Chrome DevTools page does not expose a websocket URL")?;
-    let (mut socket, _) = connect_async(socket_url)
-        .await
-        .map_err(|e| format!("unable to connect to Chrome DevTools websocket: {e}"))?;
-
-    let is_overlay = method == "Runtime.evaluate"
-        && params["expression"]
-            .as_str()
-            .map(|s| s.contains("mint-browser-aura"))
-            .unwrap_or(false);
-
-    if !is_overlay {
-        let overlay = build_overlay_script();
-        let _ = socket
-            .send(Message::Text(
-                json!({
-                    "id": 999,
-                    "method": "Runtime.evaluate",
-                    "params": { "expression": overlay, "returnByValue": false }
-                })
-                .to_string()
-                .into(),
-            ))
-            .await;
+    // The overlay is cosmetic; its failure must not turn an action into a retry.
+    if method != "Runtime.evaluate" {
+        let _ = cdp_call_raw(
+            config,
+            "Runtime.evaluate",
+            json!({
+                "expression": build_overlay_script(), "returnByValue": false
+            }),
+        )
+        .await;
     }
-
-    socket
-        .send(Message::Text(
-            json!({ "id": 1, "method": method, "params": params })
-                .to_string()
-                .into(),
-        ))
-        .await
-        .map_err(|e| e.to_string())?;
-
-    while let Some(message) = socket.next().await {
-        let message = message.map_err(|e| e.to_string())?;
-        let Message::Text(raw) = message else {
-            continue;
-        };
-        let value: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-        if value["id"] == 1 {
-            return Ok(value);
-        }
-    }
-    Err("Chrome DevTools websocket closed before returning a response".into())
+    cdp_call_raw(config, method, params).await
 }
 
-/// Lightweight CDP call — no overlay injection. Used for Input.* and Page.captureScreenshot.
 pub(super) async fn cdp_call_raw(
     config: &MintConfig,
     method: &str,
     params: Value,
 ) -> Result<Value, String> {
-    let page = fetch_pages(config)
-        .await?
-        .into_iter()
-        .find(|page| page["type"] == "page")
-        .ok_or("Chrome DevTools did not report an open browser page")?;
-    let socket_url = page["webSocketDebuggerUrl"]
-        .as_str()
-        .ok_or("Chrome DevTools page does not expose a websocket URL")?;
-    let (mut socket, _) = connect_async(socket_url)
-        .await
-        .map_err(|e| format!("unable to connect to Chrome DevTools websocket: {e}"))?;
-
-    socket
-        .send(Message::Text(
-            json!({ "id": 1, "method": method, "params": params })
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let pages = fetch_pages(config).await?;
+        let target = super::selected_tab();
+        let page = pages
+            .into_iter()
+            .find(|p| {
+                p["type"] == "page"
+                    && target
+                        .as_ref()
+                        .is_none_or(|id| p["id"].as_str() == Some(id.as_str()))
+            })
+            .ok_or_else(|| {
+                if target.is_some() {
+                    "tab_unavailable"
+                } else {
+                    "No browser page is open"
+                }
                 .to_string()
-                .into(),
-        ))
-        .await
-        .map_err(|e| e.to_string())?;
-
-    while let Some(message) = socket.next().await {
-        let message = message.map_err(|e| e.to_string())?;
-        let Message::Text(raw) = message else {
-            continue;
-        };
-        let value: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-        if value["id"] == 1 {
-            return Ok(value);
+            })?;
+        let socket_url = page["webSocketDebuggerUrl"]
+            .as_str()
+            .ok_or("Missing browser websocket URL")?;
+        let (mut socket, _) = connect_async(socket_url)
+            .await
+            .map_err(|e| format!("browser_disconnected: {e}"))?;
+        socket
+            .send(Message::Text(
+                json!({ "id": 1, "method": method, "params": params })
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .map_err(|e| e.to_string())?;
+        while let Some(message) = socket.next().await {
+            let Message::Text(raw) = message.map_err(|e| e.to_string())? else {
+                continue;
+            };
+            let value: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            if value["id"] == 1 {
+                validate_response(&value)?;
+                return Ok(value);
+            }
         }
+        Err("browser_disconnected: websocket closed before response".into())
+    })
+    .await
+    .map_err(|_| {
+        "browser_timeout: outcome may be ambiguous; observe before acting again".to_string()
+    })?
+}
+
+pub(super) fn validate_response(value: &Value) -> Result<(), String> {
+    if value.get("error").is_some() {
+        return Err(response_error(value));
     }
-    Err("Chrome DevTools websocket closed before returning a response".into())
+    if let Some(exception) = value["result"].get("exceptionDetails") {
+        return Err(format!(
+            "browser_script_error: {}",
+            exception["exception"]["description"]
+                .as_str()
+                .or_else(|| exception["text"].as_str())
+                .unwrap_or("JavaScript evaluation failed")
+        ));
+    }
+    Ok(())
 }
 
 pub(super) async fn fetch_pages(config: &MintConfig) -> Result<Vec<Value>, String> {

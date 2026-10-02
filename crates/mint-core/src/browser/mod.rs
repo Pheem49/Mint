@@ -3,7 +3,8 @@
 //! click, type, and screenshot a page.
 //!
 //! Split by concern:
-//! - `cdp` — the raw CDP websocket transport
+//! - `session` — run-scoped tab leases, observations, verification, and recovery
+//! - `cdp` — the pinned, bounded CDP websocket transport
 //! - `lifecycle` — spawning/detecting the automation browser instance
 //! - `navigate` — navigation and page-state reading (tabs, text, screenshot)
 //! - `interact` — selector-driven click/type
@@ -12,12 +13,22 @@
 //! - `logging` — the `browser-automation.log` tail `mint auto` reads from
 
 mod cdp;
+mod evidence;
 mod input;
 mod interact;
 mod lifecycle;
 mod logging;
 mod navigate;
 mod overlay;
+mod session;
+
+pub(crate) use lifecycle::BROWSER_TOOLS;
+pub use session::{
+    BrowserActionResult, BrowserObservation, BrowserSession, execute_action, run_session, with_tab,
+};
+pub(crate) use session::{
+    finish_evidence as session_finish_evidence, last_state as session_last_state, selected_tab,
+};
 
 use serde::Serialize;
 

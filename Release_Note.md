@@ -2,6 +2,27 @@
 
 - Added the active model's thinking level to the Full-Screen TUI footer, including an `off` indicator when thinking is disabled.
 
+## Mint Auto Browser Reliability
+
+- Gemini Live voice sessions now keep one shared browser session across tool calls and spoken turns. Selected tabs, DOM references, screenshots, and recovery stops remain available until the voice task ends; ending the task releases tab leases, and a new voice session starts independently.
+- Screenshot capture now retains DOM/layout snapshots from before and after the image. Coordinate validation checks only the intended target in both snapshots and retries a current capture once if that target changes. Continuously updating distant tickers and carousels no longer invalidate stable targets, while target replacement, movement, obstruction, and local pixel changes still prevent clicks.
+- Coordinate hit tests now account for document scroll offsets, so a fresh screenshot taken after scrolling remains usable.
+- Added headless Chrome regressions through the production Gemini Live background runner and agent executor for session continuity, recovery, screenshot reuse, lease release, and continuously changing unrelated DOM/layout.
+
+- Fixed empty/default tab URLs to open `about:blank`; invalid supplied URLs are rejected before tab creation. Recovery stops now cover opening and closing tabs and survive tab selection.
+- Browser retry counts follow the action and DOM target, so clocks, carousels, and refreshed references cannot hide ineffective retries. Navigation, new tabs, target value/checked/expanded changes, verified scrolling, and explicit confirmation waits establish progress for the relevant attempt.
+- Typing and filling pin the original editable node and check focus after clicking and keyboard preparation. Focus redirects and replaced fields stop before text insertion or deletion.
+- Coordinate input now validates screenshot target identity, geometry, current hit testing, and a 64×64 pixel region, including another check after hover. Distant page updates remain allowed; Mint cursor/aura overlays are excluded from evidence.
+- Added isolated headless Chrome regression coverage through real agent argument parsing and tool execution for tab defaults, recovery, changing pages, redirected focus, shadow inputs, replaced targets, modals, hover overlays, and canvas changes.
+
+- Browser agent runs now use dedicated tabs with pinned CDP targeting and exclusive tab leases across Mint processes. Popup tabs are reported for explicit selection; closed tabs fail instead of silently switching pages.
+- Added structured browser observations with accessible element names, fresh DOM references, open shadow-root discovery, pagination, password-value masking, and explicit unsupported-frame counts.
+- Added browser tab management, verified field replacement, native dropdown selection, scrolling, and bounded waits for URL, text, and element visibility conditions. Existing plain-text reads and selector arguments remain supported.
+- Browser clicks now scroll targets into view and reject hidden, disabled, or covered elements. Removed the JavaScript click fallback; CDP errors, script exceptions, navigation failures, and stalled responses no longer count as successful input.
+- Browser actions return page observations and distinguish dispatched input from verified outcomes. Repeated attempts without progress stop for manual takeover, and browser task completion requires a verification statement. Coordinate actions require a recent screenshot from the selected tab.
+- Desktop browser commands accept optional tab IDs. Browser launch, tool availability, and CLI status honor the configured debugging endpoint. Browser typing logs contain character counts instead of field contents.
+- Added unit checks and opt-in headless Chrome acceptance scenarios for forms, search, delayed content, popups, stale references, tab isolation, takeover, and recovery.
+
 ## Sidebar Projects
 
 - Added a three-dot menu to each project in the sidebar. New chat actions are available from the menu, and projects can be removed from the sidebar without deleting their conversations; those conversations move to Recents.

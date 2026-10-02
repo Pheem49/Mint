@@ -1,14 +1,31 @@
 use super::persona;
 use crate::MintConfig;
 
-pub(crate) fn is_port_9222_open() -> bool {
-    use std::net::TcpStream;
+pub(crate) fn browser_endpoint_available(config: &MintConfig) -> bool {
+    use std::net::{TcpStream, ToSocketAddrs};
     use std::time::Duration;
-    if let Ok(addr) = "127.0.0.1:9222".parse() {
-        TcpStream::connect_timeout(&addr, Duration::from_millis(50)).is_ok()
-    } else {
-        false
-    }
+    let endpoint = config
+        .extra
+        .get("browserDebugUrl")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("http://127.0.0.1:9222/json/list");
+    let Ok(url) = reqwest::Url::parse(endpoint) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let Some(port) = url.port_or_known_default() else {
+        return false;
+    };
+    (host, port)
+        .to_socket_addrs()
+        .ok()
+        .is_some_and(|mut addresses| {
+            addresses.any(|address| {
+                TcpStream::connect_timeout(&address, Duration::from_millis(50)).is_ok()
+            })
+        })
 }
 
 pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
@@ -47,6 +64,9 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "mcp_list_tools",
     "browser_open",
     "browser_read",
+    "browser_observe",
+    "browser_wait",
+    "browser_scroll",
     "browser_mouse_move",
     "browser_screenshot",
     "run_shell",
@@ -145,15 +165,8 @@ pub fn build_system_prompt(
 ) -> String {
     let mut allowed_actions = base_allowed_actions();
 
-    if is_port_9222_open() {
-        allowed_actions.push("browser_open");
-        allowed_actions.push("browser_click");
-        allowed_actions.push("browser_type");
-        allowed_actions.push("browser_read");
-        allowed_actions.push("browser_mouse_move");
-        allowed_actions.push("browser_mouse_click");
-        allowed_actions.push("browser_key_press");
-        allowed_actions.push("browser_screenshot");
+    if browser_endpoint_available(config) {
+        allowed_actions.extend_from_slice(crate::browser::BROWSER_TOOLS);
     }
 
     if !config.avatar_token.is_empty() {
@@ -238,6 +251,9 @@ pub fn build_system_prompt(
     }
     if allowed_actions.contains(&"browser_open") {
         input_formats.push("- browser_open: {\"url\":\"https://example.com\"}");
+    }
+    if allowed_actions.contains(&"browser_observe") {
+        input_formats.push("- browser_observe: {textOffset?:number,elementOffset?:number,takeoverComplete?:boolean}; browser_tabs: {operation:list|open|select|close,tabId?:string,url?:string}; browser_fill: {elementRef?:string,selector?:string,text:string}; browser_select: {elementRef?:string,selector?:string,value:string}; browser_scroll: {elementRef?:string,selector?:string,x?:number,y?:number}; browser_wait: {condition:url|text|visible|hidden,value?:string,elementRef?:string,selector?:string,timeoutMs?:number}. browser_click/browser_type also accept elementRef instead of selector.");
     }
     if allowed_actions.contains(&"browser_click") {
         input_formats.push("- browser_click: {\"selector\":\"button.submit-btn\"} (CSS selector, or text=Login, contains=Submit, xpath=//button)");
@@ -529,6 +545,9 @@ pub fn build_system_prompt(
     }
     if allowed_actions.contains(&"browser_screenshot") {
         rules.push("7h. Use browser_screenshot to capture the current page as a PNG image (base64). Use it to inspect the visual state of the page before deciding where to click.");
+    }
+    if allowed_actions.contains(&"browser_observe") {
+        rules.push("7i. Browser workflow: browser_observe -> action -> inspect the returned observation -> verify the expected result with browser_wait. Each run starts in its own tab. Use browser_tabs to list/open/select/close tabs; select new popup tabs explicitly. Prefer elementRef from the most recent observation over guessing selectors. Old refs expire after observation refresh, navigation, removed nodes, or tab selection. browser_fill replaces text; browser_type appends. browser_select handles native dropdowns; browser_scroll scrolls the viewport or a target. browser_wait accepts condition url/text/visible/hidden, value or target, and timeoutMs (default 10000, maximum 30000). Observations support textOffset and elementOffset pagination. Coordinate actions require a screenshot of the selected tab within 30 seconds. Never retry an ambiguous click or submission automatically; observe and check the result first. input_dispatched is not task completion. Cite observed URL/text/field evidence in finish.verification, or say the task is unverified/blocked. If blocked by login, CAPTCHA, or repeated lack of progress, ask_user for manual takeover; only after user confirmation call browser_observe with takeoverComplete=true.");
     }
     if allowed_actions.contains(&"memory_recall") {
         rules.push("8. Use memory_recall to search past interactions before asking the user to repeat context.");

@@ -370,11 +370,18 @@ pub async fn handle_auto() -> Result<()> {
     if mint_core::enable_browser_tools(&mut config_mut) {
         mint_core::save_config(&config_mut)?;
         println!(
-            "✅ Enabled browser automation tools in config: browser_open, browser_click, browser_type, browser_read, browser_mouse_move, browser_mouse_click, browser_key_press, browser_screenshot"
+            "✅ Enabled browser automation tools in config: browser_open, browser_click, browser_type, browser_read, browser_mouse_move, browser_mouse_click, browser_key_press, browser_screenshot, browser_tabs, browser_observe, browser_fill, browser_select, browser_scroll, browser_wait"
         );
     }
 
-    println!("🌐 Isolated browser running with remote debugging on http://127.0.0.1:9222");
+    println!(
+        "🌐 Isolated browser running with remote debugging on {}",
+        config
+            .extra
+            .get("browserDebugUrl")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("http://127.0.0.1:9222/json/list")
+    );
     println!("💬 Keep this terminal open while you want Mint to automate browser tasks.");
     println!("Press Ctrl+C to terminate the automation browser session.");
     println!("----------------------------------------------------------------------");

@@ -974,6 +974,24 @@ struct AgentInput {
     button: String,
     #[serde(default)]
     key: String,
+    #[serde(default)]
+    element_ref: String,
+    #[serde(default)]
+    tab_id: String,
+    #[serde(default)]
+    operation: String,
+    #[serde(default)]
+    condition: String,
+    #[serde(default)]
+    value: String,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+    #[serde(default)]
+    text_offset: Option<u64>,
+    #[serde(default)]
+    element_offset: Option<u64>,
+    #[serde(default)]
+    takeover_complete: bool,
     // Video tools input fields
     #[serde(default)]
     input: String,
@@ -1467,7 +1485,7 @@ where
             progress(event);
         };
         let resolved_task = resolve_github_links(task, config).await;
-        let agent_result = async {
+        let agent_result = crate::browser::run_session(async {
         // Subagent runs use a synthetic `{parent_chat_id}::subagent::{name}` chat id
         // (see the `dispatch_subagent` arm in `execute_tool`) so their own memory
         // interaction doesn't leak into the parent conversation's history. That
@@ -2015,6 +2033,13 @@ where
                             );
                             continue 'steps;
                         }
+                        if crate::browser::session_finish_evidence().await && meaningful_verification(&decision.input.verification).is_empty() {
+                            let error = "Browser tasks require observed evidence in finish.verification. Describe the observed outcome, or explicitly state that completion is unverified or blocked.";
+                            trajectory.push(format_trajectory_step(step, &decision.thought, &decision.action, error));
+                            rebuild_observation(task, &root, &trajectory, &mut observation);
+                            reject_native_finish(tool_mode, &mut native_messages, &response.text, error);
+                            continue 'steps;
+                        }
                         if unverified_modification(
                             last_modify_step,
                             last_verify_step,
@@ -2437,7 +2462,7 @@ where
                             _ => "[Screenshot captured — see attached image]".to_string(),
                         }
                     } else {
-                        truncate(&result)
+                        if decision.action.starts_with("browser_") {result.clone()} else {truncate(&result)}
                     };
                     if matches!(
                         decision.action.as_str(),
@@ -2463,7 +2488,7 @@ where
                      concise verification read.]",
                 );
                     }
-                    if action_count >= 3 {
+                    if action_count >= 3 && !decision.action.starts_with("browser_") {
                         final_result.push_str(
                     "\n\n[System Tip: You repeated the same tool action three or more times. \
                      Stop repeating it. If you already have enough information or the requested edit is done, \
@@ -2595,10 +2620,10 @@ where
 
         turn.fail();
         Err(OrchestrationError::Agent(format!(
-            "code agent reached the limit of {} steps",
-            MAX_STEPS
+            "code agent reached the limit of {} steps; task incomplete. Last browser state: {}",
+            MAX_STEPS, crate::browser::session_last_state().await
         )))
-        }.await;
+        }).await;
         if agent_result.is_err() {
             turn.fail();
         }
@@ -2910,7 +2935,7 @@ async fn run_parallel_subagent_batch(
             *count
         };
         let mut final_result = truncate(&tool_result);
-        if action_count >= 3 {
+        if action_count >= 3 && !action.starts_with("browser_") {
             final_result.push_str(
                 "\n\n[System Tip: You repeated the same tool action three or more times. \
                  Stop repeating it. If you already have enough information or the requested edit is done, \
@@ -3102,7 +3127,7 @@ async fn run_parallel_read_only_batch(
             truncate(&result)
         };
 
-        if action_count >= 3 {
+        if action_count >= 3 && !action.starts_with("browser_") {
             final_result.push_str(
                 "\n\n[System Tip: You repeated the same tool action three or more times. \
                  Stop repeating it. If you already have enough information or the requested edit is done, \
@@ -3201,7 +3226,13 @@ async fn execute_tool(
         | "browser_mouse_move"
         | "browser_mouse_click"
         | "browser_key_press"
-        | "browser_screenshot" => {
+        | "browser_screenshot"
+        | "browser_tabs"
+        | "browser_observe"
+        | "browser_fill"
+        | "browser_select"
+        | "browser_scroll"
+        | "browser_wait" => {
             tools::browser::execute(
                 decision.action.as_str(),
                 input,
