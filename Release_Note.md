@@ -1,5 +1,9 @@
 # Release Notes - Mint Agent v1.15.0
 
+- Fixed Linked Folder job claims failing when another database writer commits between selecting and claiming a queued job. Claims now use `BEGIN IMMEDIATE`, and transient SQLite busy/locked errors retry up to three times with bounded backoff before stopping the worker. Claims run on a blocking task so SQLite's lock wait does not block async runtime threads; failed claims leave queued jobs and note attempt counts unchanged.
+
+- Fixed native agent and Gemini Live tool calls silently replacing invalid arguments with defaults, which could make `list_files` list the workspace/home directory instead of the requested nested folder. Malformed provider JSON is preserved for rejection, while valid paths and omitted directory defaults remain supported. Native agent chats now return argument errors to the model with the original call ID and arguments, allowing correction or a different tool without executing the invalid call. Each run returns up to three invalid-call errors for correction and stops on a fourth invalid call; valid calls remain available within the existing 40-step limit. Mixed batches retain both invalid-call errors and valid tool results.
+
 - Applied workspace Rust formatting required by CI and fixed the browser transport test's handling of empty reads so Clippy passes its I/O check.
 - Updated brace-expansion, qs, and DOMPurify dependency resolutions to patched versions; raised the brace-expansion override minimum to 5.0.12.
 

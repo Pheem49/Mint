@@ -465,13 +465,41 @@ pub fn spawn_linked_folder_note(
     resume_linked_folder_jobs(config);
 }
 
+const CLAIM_LOCK_RETRIES: usize = 3;
+
+async fn claim_job_with_retry<Claim, Fut>(
+    mut claim: Claim,
+) -> Result<Option<index::ClaimedJob>, index::ClaimError>
+where
+    Claim: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<Option<index::ClaimedJob>, index::ClaimError>>,
+{
+    for retry in 0..=CLAIM_LOCK_RETRIES {
+        match claim().await {
+            Err(error) if error.is_busy() && retry < CLAIM_LOCK_RETRIES => {
+                tokio::time::sleep(std::time::Duration::from_millis(100 << retry)).await;
+            }
+            result => return result,
+        }
+    }
+    unreachable!("last attempt always returns")
+}
+
 fn resume_linked_folder_jobs(config: MintConfig) {
     let Ok(runtime) = tokio::runtime::Handle::try_current() else {
         return;
     };
     runtime.spawn(async move {
         loop {
-            let job = match index::claim_job() {
+            let job = match claim_job_with_retry(|| async {
+                // SQLite may wait up to five seconds for a writer. Keep that
+                // blocking wait off the async runtime's worker threads.
+                tokio::task::spawn_blocking(index::claim_job)
+                    .await
+                    .map_err(|error| index::ClaimError::Setup(error.to_string()))?
+            })
+            .await
+            {
                 Ok(Some(job)) => job,
                 Ok(None) => break,
                 Err(error) => {
@@ -674,6 +702,59 @@ Use an empty notes array when nothing is worth saving."#
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn database_error(code: i32) -> index::ClaimError {
+        rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None).into()
+    }
+
+    #[tokio::test]
+    async fn claim_retries_busy_errors_then_returns_recovered_job() {
+        let mut calls = 0;
+        let job = claim_job_with_retry(|| {
+            calls += 1;
+            std::future::ready(if calls <= 2 {
+                Err(database_error(rusqlite::ffi::SQLITE_BUSY))
+            } else {
+                Ok(Some(("job".into(), "user".into(), "ai".into(), 0)))
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(calls, 3);
+        assert_eq!(job.0, "job");
+        assert_eq!(job.3, 0);
+    }
+
+    #[tokio::test]
+    async fn claim_stops_retrying_after_budget_and_does_not_retry_other_errors() {
+        for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+            let mut calls = 0;
+            let error = claim_job_with_retry(|| {
+                calls += 1;
+                std::future::ready(Err(database_error(code)))
+            })
+            .await
+            .unwrap_err();
+            assert!(error.is_busy());
+            assert_eq!(calls, CLAIM_LOCK_RETRIES + 1);
+        }
+        let mut calls = 0;
+        let error = claim_job_with_retry(|| {
+            calls += 1;
+            std::future::ready(Err(database_error(rusqlite::ffi::SQLITE_CORRUPT)))
+        })
+        .await
+        .unwrap_err();
+        assert!(!error.is_busy());
+        assert_eq!(calls, 1);
+        assert!(
+            claim_job_with_retry(|| std::future::ready(Ok(None)))
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
 
     #[test]
     fn model_response_can_save_distinct_notes_in_multiple_candidate_folders() {

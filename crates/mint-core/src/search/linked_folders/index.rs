@@ -7,7 +7,7 @@ use std::time::UNIX_EPOCH;
 
 use chrono::Local;
 use ignore::WalkBuilder;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use uuid::Uuid;
 
 use super::{LinkedFolder, LinkedFolderNote, LinkedFolderStatus};
@@ -21,13 +21,37 @@ const CHUNK_CHARS: usize = 1000;
 const CHUNK_OVERLAP: usize = 200;
 
 fn db() -> Result<Connection, String> {
-    let path = memory_path().map_err(|e| e.to_string())?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    open_db().map_err(|error| error.to_string())
+}
+
+pub(super) type ClaimedJob = (String, String, String, i64);
+
+#[derive(Debug, thiserror::Error)]
+pub(super) enum ClaimError {
+    #[error(transparent)]
+    Database(#[from] rusqlite::Error),
+    #[error("{0}")]
+    Setup(String),
+}
+
+impl ClaimError {
+    pub(super) fn is_busy(&self) -> bool {
+        matches!(self, Self::Database(rusqlite::Error::SqliteFailure(error, _))
+            if matches!(error.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked))
     }
-    let conn = Connection::open(path).map_err(|e| e.to_string())?;
-    conn.busy_timeout(std::time::Duration::from_secs(5))
-        .map_err(|e| e.to_string())?;
+}
+
+fn open_db() -> Result<Connection, ClaimError> {
+    let path = memory_path().map_err(|e| ClaimError::Setup(e.to_string()))?;
+    open_db_at(&path)
+}
+
+fn open_db_at(path: &Path) -> Result<Connection, ClaimError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| ClaimError::Setup(e.to_string()))?;
+    }
+    let conn = Connection::open(path)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS linked_folder_files (
            folder TEXT NOT NULL, root TEXT NOT NULL, path TEXT NOT NULL,
@@ -50,7 +74,7 @@ fn db() -> Result<Connection, String> {
            id TEXT PRIMARY KEY, user_text TEXT NOT NULL, ai_text TEXT NOT NULL,
            status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
            error TEXT, created_at TEXT NOT NULL, claimed_at INTEGER);"
-    ).map_err(|e| e.to_string())?;
+    )?;
     Ok(conn)
 }
 
@@ -654,15 +678,20 @@ pub(super) fn queue_job(id: &str, user_text: &str, ai_text: &str) -> Result<(), 
     Ok(())
 }
 
-pub(super) fn claim_job() -> Result<Option<(String, String, String, i64)>, String> {
-    let mut conn = db()?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+pub(super) fn claim_job() -> Result<Option<ClaimedJob>, ClaimError> {
+    claim_job_on(&mut open_db()?)
+}
+
+fn claim_job_on(conn: &mut Connection) -> Result<Option<ClaimedJob>, ClaimError> {
+    // Acquire the writer slot before reading: a deferred transaction can read
+    // an outdated WAL snapshot and fail immediately when upgrading to a writer.
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let job = tx.query_row("SELECT id,user_text,ai_text,attempts FROM linked_folder_jobs WHERE (status='pending' AND (claimed_at IS NULL OR claimed_at <= unixepoch())) OR (status='running' AND claimed_at < unixepoch()-600) ORDER BY created_at LIMIT 1", [],
-        |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?))).optional().map_err(|e| e.to_string())?;
+        |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?))).optional()?;
     if let Some((ref id, _, _, _)) = job {
-        tx.execute("UPDATE linked_folder_jobs SET status='running',attempts=attempts+1,claimed_at=unixepoch() WHERE id=?1",[id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE linked_folder_jobs SET status='running',attempts=attempts+1,claimed_at=unixepoch() WHERE id=?1",[id])?;
     }
-    tx.commit().map_err(|e| e.to_string())?;
+    tx.commit()?;
     Ok(job)
 }
 
@@ -685,6 +714,141 @@ pub(super) fn retry_job(id: &str, error: &str, delay_seconds: i64) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn claim_test_db() -> (std::path::PathBuf, Connection) {
+        let dir = std::env::temp_dir().join(format!("mint-linked-claim-{}", Uuid::new_v4()));
+        let path = dir.join("jobs.sqlite");
+        let conn = open_db_at(&path).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+        (path, conn)
+    }
+
+    fn insert_test_job(conn: &Connection, id: &str) {
+        conn.execute("INSERT INTO linked_folder_jobs(id,user_text,ai_text,status,created_at) VALUES(?1,'user','ai','pending','2026-10-02')", [id]).unwrap();
+    }
+
+    #[test]
+    fn concurrent_claims_take_each_job_once() {
+        let (path, conn) = claim_test_db();
+        for i in 0..8 {
+            insert_test_job(&conn, &format!("job-{i}"));
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let mut workers = Vec::new();
+        for _ in 0..8 {
+            let mut worker_conn = open_db_at(&path).unwrap();
+            let barrier = barrier.clone();
+            workers.push(std::thread::spawn(move || {
+                barrier.wait();
+                claim_job_on(&mut worker_conn).unwrap().unwrap()
+            }));
+        }
+        let jobs: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        assert_eq!(
+            jobs.iter().map(|job| &job.0).collect::<HashSet<_>>().len(),
+            8
+        );
+        assert!(jobs.iter().all(|job| job.3 == 0));
+        let running: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM linked_folder_jobs WHERE status='running' AND attempts=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(running, 8);
+        drop(conn);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn claim_waits_for_writer_and_failed_lock_does_not_consume_job_attempt() {
+        let (path, mut writer) = claim_test_db();
+        insert_test_job(&writer, "job");
+        let mut claimant = open_db_at(&path).unwrap();
+        claimant.busy_timeout(std::time::Duration::ZERO).unwrap();
+        let tx = writer
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        let error = claim_job_on(&mut claimant).unwrap_err();
+        assert!(error.is_busy());
+        let attempts: i64 = tx
+            .query_row(
+                "SELECT attempts FROM linked_folder_jobs WHERE id='job'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(attempts, 0);
+        claimant
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            result_tx.send(claim_job_on(&mut claimant)).unwrap();
+        });
+        started_rx.recv().unwrap();
+        assert!(matches!(
+            result_rx.recv_timeout(std::time::Duration::from_millis(50)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        tx.commit().unwrap();
+        let job = result_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(job.0, "job");
+        assert_eq!(job.3, 0);
+        worker.join().unwrap();
+        assert!(claim_job_on(&mut writer).unwrap().is_none());
+        drop(writer);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn claim_retry_recovers_after_real_database_lock_is_released() {
+        let (path, mut writer) = claim_test_db();
+        insert_test_job(&writer, "job");
+        let mut claimant = open_db_at(&path).unwrap();
+        claimant.busy_timeout(std::time::Duration::ZERO).unwrap();
+        let mut lock = Some(
+            writer
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .unwrap(),
+        );
+        let mut calls = 0;
+        let job = super::super::claim_job_with_retry(|| {
+            calls += 1;
+            if calls == 2 {
+                lock.take().unwrap().commit().unwrap();
+            }
+            std::future::ready(claim_job_on(&mut claimant))
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(calls, 2);
+        assert_eq!(job.0, "job");
+        assert_eq!(job.3, 0);
+        let attempts: i64 = claimant
+            .query_row(
+                "SELECT attempts FROM linked_folder_jobs WHERE id='job'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(attempts, 1);
+        drop(lock);
+        drop(claimant);
+        drop(writer);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
 
     #[test]
     fn concurrent_appends_keep_each_note_once() {

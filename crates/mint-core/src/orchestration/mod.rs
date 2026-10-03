@@ -522,6 +522,7 @@ use workspace_helpers::*;
 /// tasks earlier, but 24 turned out too tight for legitimate multi-file
 /// work, cutting it off mid-task — raised to 40 as a middle ground.
 const MAX_STEPS: usize = 40;
+const MAX_INVALID_TOOL_CALLS: usize = 3;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
 /// Compact `native_messages` once a step's reported token usage crosses this
 /// fraction of `MintConfig::context_window_tokens`. Every step resends the whole
@@ -1555,6 +1556,7 @@ where
         let mut final_fallback = None;
         let mut final_fallback_reason = None;
         let mut action_counts = BTreeMap::<String, usize>::new();
+        let mut invalid_tool_calls = 0;
         let mut streamed_finish_summary = String::new();
         let mut streamed_direct_text = String::new();
         // Track the most recent step (if any) that successfully modified a file
@@ -1830,29 +1832,21 @@ where
             // sequentially and all their results are fed back before the next call —
             // `finish` never appears alongside real tool calls (see below), so this
             // never conflicts with the early-return finish handling.
+            let mut step_tool_results: Vec<(String, String, Value, String)> = Vec::new();
             let decisions: Vec<(String, AgentDecision)> = if tool_mode == ToolCallingMode::Native {
                 match response.tool_calls.clone() {
-                    Some(calls) if !calls.is_empty() => calls
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, call)| {
-                            let thought = if index == 0 {
-                                response.text.trim().to_string()
-                            } else {
-                                String::new()
-                            };
-                            let input: AgentInput =
-                                serde_json::from_value(call.input).unwrap_or_default();
-                            (
-                                call.id,
-                                AgentDecision {
-                                    thought,
-                                    action: call.name,
-                                    input,
-                                },
-                            )
-                        })
-                        .collect(),
+                    Some(calls) if !calls.is_empty() => {
+                        let (decisions, errors) = prepare_native_tool_calls(
+                            calls, response.text.trim(), &mut invalid_tool_calls,
+                        )?;
+                        for (_, action, input, error) in &errors {
+                            progress(AgentProgress::ToolStart { action: action.clone(), input: input.clone(), subagent: None });
+                            progress(AgentProgress::ToolEnd { action: action.clone(), input: input.clone(), result: error.clone(), subagent: None });
+                            trajectory.push(format_trajectory_step(step, "", action, error));
+                        }
+                        step_tool_results.extend(errors);
+                        decisions
+                    }
                     // No tool calls means the model answered directly — treat exactly
                     // like the JSON-prompt path's fallback for plain, non-JSON text
                     // (see `parse_decision_or_finish`): finish with that text as the
@@ -1951,7 +1945,6 @@ where
                 extended_emitted = true;
             }
 
-            let mut step_tool_results: Vec<(String, String, Value, String)> = Vec::new();
             // Screenshots (and any future binary/image tool result) are kept out of
             // `step_tool_results`'s plain-text `final_result` — that string is what
             // both the text `trajectory` and the JSON-prompt `observation` are built
@@ -1964,7 +1957,7 @@ where
                 std::collections::HashMap::new();
 
             if decisions_are_parallel_subagent_batch(&decisions) {
-                step_tool_results = run_parallel_subagent_batch(
+                step_tool_results.extend(run_parallel_subagent_batch(
                     &decisions,
                     step,
                     &root,
@@ -1975,9 +1968,9 @@ where
                     &mut action_counts,
                     &mut trajectory,
                 )
-                .await;
+                .await);
             } else if decisions_are_parallel_read_only_batch(&decisions) {
-                step_tool_results = run_parallel_read_only_batch(
+                step_tool_results.extend(run_parallel_read_only_batch(
                     &decisions,
                     step,
                     &root,
@@ -1992,7 +1985,7 @@ where
                     pinned_mcp_server,
                     fast_mode,
                 )
-                .await;
+                .await);
             } else {
                 for (call_id, decision) in decisions {
                     let d_thought = decision.thought.trim();
@@ -2515,44 +2508,13 @@ where
             } // end `else` (sequential path)
 
             if tool_mode == ToolCallingMode::Native {
-                let mut assistant_content: Vec<ContentBlock> = Vec::new();
-                let response_text = response.text.trim();
-                if !response_text.is_empty() {
-                    assistant_content.push(ContentBlock::Text {
-                        text: response_text.to_string(),
-                    });
-                }
-                let mut tool_result_content: Vec<ContentBlock> = Vec::new();
-                for (call_id, action, input_value, final_result) in &step_tool_results {
-                    assistant_content.push(ContentBlock::ToolUse {
-                        id: call_id.clone(),
-                        name: action.clone(),
-                        input: input_value.clone(),
-                        thought_signature: step_thought_signatures.get(call_id).cloned(),
-                    });
-                    tool_result_content.push(ContentBlock::ToolResult {
-                        tool_use_id: call_id.clone(),
-                        content: final_result.clone(),
-                        is_error: false,
-                    });
-                    if let Some(data_uri) = step_images.get(call_id) {
-                        tool_result_content.push(ContentBlock::Image {
-                            data_uri: data_uri.clone(),
-                        });
-                    }
-                }
-                if !assistant_content.is_empty() {
-                    native_messages.push(ChatMessage {
-                        role: ChatRole::Assistant,
-                        content: assistant_content,
-                    });
-                }
-                if !tool_result_content.is_empty() {
-                    native_messages.push(ChatMessage {
-                        role: ChatRole::Tool,
-                        content: tool_result_content,
-                    });
-                }
+                append_native_tool_results(
+                    &mut native_messages,
+                    response.text.trim(),
+                    &step_tool_results,
+                    &step_thought_signatures,
+                    &step_images,
+                );
 
                 if let Some(total_tokens) = response.total_tokens {
                     let window = active_config.context_window_tokens();
@@ -3374,17 +3336,335 @@ where
     let decision = AgentDecision {
         thought: String::new(),
         action: action.to_string(),
-        input: serde_json::from_value(input).unwrap_or_default(),
+        input: parse_tool_input(action, input)?,
     };
     // No progress channel from the realtime voice session — tool-call
     // activity isn't surfaced there the way it is in the CLI/GUI.
     execute_tool(root, config, &decision, chat_id, approve_cb, &mut |_| {}).await
 }
 
+fn parse_tool_input(action: &str, input: Value) -> Result<AgentInput, OrchestrationError> {
+    serde_json::from_value(input).map_err(|error| {
+        OrchestrationError::Agent(format!("invalid arguments for tool '{action}': {error}"))
+    })
+}
+
+fn append_native_tool_results(
+    messages: &mut Vec<ChatMessage>,
+    response_text: &str,
+    results: &[ToolResultEntry],
+    signatures: &std::collections::HashMap<String, String>,
+    images: &std::collections::HashMap<String, String>,
+) {
+    let mut assistant_content: Vec<ContentBlock> = Vec::new();
+    if !response_text.is_empty() {
+        assistant_content.push(ContentBlock::Text {
+            text: response_text.to_string(),
+        });
+    }
+    let mut tool_result_content: Vec<ContentBlock> = Vec::new();
+    for (call_id, action, input_value, final_result) in results {
+        assistant_content.push(ContentBlock::ToolUse {
+            id: call_id.clone(),
+            name: action.clone(),
+            input: input_value.clone(),
+            thought_signature: signatures.get(call_id).cloned(),
+        });
+        tool_result_content.push(ContentBlock::ToolResult {
+            tool_use_id: call_id.clone(),
+            content: final_result.clone(),
+            is_error: final_result.starts_with("Error:"),
+        });
+        if let Some(data_uri) = images.get(call_id) {
+            tool_result_content.push(ContentBlock::Image {
+                data_uri: data_uri.clone(),
+            });
+        }
+    }
+    if !assistant_content.is_empty() {
+        messages.push(ChatMessage {
+            role: ChatRole::Assistant,
+            content: assistant_content,
+        });
+    }
+    if !tool_result_content.is_empty() {
+        messages.push(ChatMessage {
+            role: ChatRole::Tool,
+            content: tool_result_content,
+        });
+    }
+}
+
+type ToolResultEntry = (String, String, Value, String);
+type PreparedToolCalls = (Vec<(String, AgentDecision)>, Vec<ToolResultEntry>);
+
+/// Invalid calls never become executable decisions. Return their original
+/// arguments and call IDs so the next model turn can repair them.
+fn prepare_native_tool_calls(
+    calls: Vec<crate::chat::ToolCall>,
+    thought: &str,
+    invalid_count: &mut usize,
+) -> Result<PreparedToolCalls, OrchestrationError> {
+    let mut decisions = Vec::new();
+    let mut errors = Vec::new();
+    for (index, call) in calls.into_iter().enumerate() {
+        match parse_tool_input(&call.name, call.input.clone()) {
+            Ok(input) => decisions.push((
+                call.id,
+                AgentDecision {
+                    thought: if index == 0 {
+                        thought.to_owned()
+                    } else {
+                        String::new()
+                    },
+                    action: call.name,
+                    input,
+                },
+            )),
+            Err(error) => {
+                if *invalid_count >= MAX_INVALID_TOOL_CALLS {
+                    return Err(OrchestrationError::Agent(format!(
+                        "stopped after {MAX_INVALID_TOOL_CALLS} invalid tool calls were already returned for correction; {error}"
+                    )));
+                }
+                *invalid_count += 1;
+                errors.push((call.id, call.name, call.input, format!(
+                    "Error: {error}. No tool was executed for this call. Correct the arguments to match the tool schema, or choose another suitable tool. Invalid-call budget used: {}/{MAX_INVALID_TOOL_CALLS}. Further invalid calls after this budget is exhausted will stop the run.",
+                    *invalid_count,
+                )));
+            }
+        }
+    }
+    Ok((decisions, errors))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::AgentConfig;
+
+    fn test_list_call(id: &str, input: Value) -> crate::chat::ToolCall {
+        crate::chat::ToolCall {
+            id: id.into(),
+            name: "list_files".into(),
+            input,
+            thought_signature: Some("signature".into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn native_argument_error_is_returned_and_corrected_call_can_execute() {
+        let raw = serde_json::json!({"path": "Downloads/YOUTUBE_DL/playlist", "limit": "100"});
+        let mut count = 0;
+        let (decisions, errors) =
+            prepare_native_tool_calls(vec![test_list_call("bad", raw.clone())], "", &mut count)
+                .unwrap();
+        assert!(decisions.is_empty());
+        assert_eq!(errors.len(), 1);
+        let mut messages = Vec::new();
+        let signatures = std::collections::HashMap::from([("bad".into(), "signature".into())]);
+        append_native_tool_results(&mut messages, "", &errors, &signatures, &Default::default());
+        assert!(
+            matches!(&messages[0].content[0], ContentBlock::ToolUse { id, input, thought_signature, .. }
+            if id == "bad" && input == &raw && thought_signature.as_deref() == Some("signature"))
+        );
+        assert!(
+            matches!(&messages[1].content[0], ContentBlock::ToolResult { tool_use_id, content, is_error }
+            if tool_use_id == "bad" && *is_error && content.contains("Correct the arguments"))
+        );
+
+        let root =
+            std::env::temp_dir().join(format!("mint-tool-recovery-{}", uuid::Uuid::new_v4()));
+        let nested = root.join("Downloads/YOUTUBE_DL/playlist");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("song.txt"), "song").unwrap();
+        let config = MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            blocked_paths: vec![],
+            blocked_file_names: vec![],
+            ..MintConfig::default()
+        };
+        let (decisions, errors) = prepare_native_tool_calls(
+            vec![test_list_call(
+                "fixed",
+                serde_json::json!({"path": "Downloads/YOUTUBE_DL/playlist", "limit": 100}),
+            )],
+            "",
+            &mut count,
+        )
+        .unwrap();
+        assert!(errors.is_empty());
+        let output = execute_tool(
+            &root,
+            &config,
+            &decisions[0].1,
+            "regression",
+            &mut |_| panic!("listing must not request approval"),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+        let entries: Vec<Value> = serde_json::from_str(&output).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0]["path"],
+            serde_json::json!(nested.join("song.txt"))
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_invalid_calls_are_bounded_without_blocking_valid_alternatives() {
+        let mut count = 0;
+        for _ in 0..MAX_INVALID_TOOL_CALLS {
+            let (decisions, errors) = prepare_native_tool_calls(
+                vec![test_list_call(
+                    "bad",
+                    serde_json::json!({"path": "~/Downloads/YOUTUBE_DL", "limit": "100"}),
+                )],
+                "",
+                &mut count,
+            )
+            .unwrap();
+            assert!(decisions.is_empty());
+            assert_eq!(errors.len(), 1);
+        }
+        let alternative = crate::chat::ToolCall {
+            id: "alternative".into(),
+            name: "run_shell".into(),
+            input: serde_json::json!({"command": "ls ~/Downloads/YOUTUBE_DL"}),
+            thought_signature: None,
+        };
+        let (decisions, errors) =
+            prepare_native_tool_calls(vec![alternative], "", &mut count).unwrap();
+        assert_eq!(decisions[0].1.action, "run_shell");
+        assert!(errors.is_empty());
+        assert_eq!(count, MAX_INVALID_TOOL_CALLS);
+        let error =
+            prepare_native_tool_calls(vec![test_list_call("bad", Value::Null)], "", &mut count)
+                .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("stopped after 3 invalid tool calls")
+        );
+    }
+
+    #[test]
+    fn native_mixed_batch_keeps_valid_calls_and_matches_each_error_to_its_id() {
+        let mut count = 0;
+        let (decisions, errors) = prepare_native_tool_calls(
+            vec![
+                test_list_call("bad", Value::Null),
+                test_list_call("valid-1", serde_json::json!({"path": "."})),
+                test_list_call("valid-2", serde_json::json!({"path": "src"})),
+            ],
+            "",
+            &mut count,
+        )
+        .unwrap();
+        assert_eq!(decisions.len(), 2);
+        assert!(decisions_are_parallel_read_only_batch(&decisions));
+        assert_eq!(errors[0].0, "bad");
+        let mut results = errors;
+        results.extend(decisions.iter().map(|(id, d)| {
+            (
+                id.clone(),
+                d.action.clone(),
+                serde_json::to_value(&d.input).unwrap(),
+                "[]".into(),
+            )
+        }));
+        let mut messages = Vec::new();
+        append_native_tool_results(
+            &mut messages,
+            "",
+            &results,
+            &Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(messages[0].content.len(), 3);
+        assert_eq!(messages[1].content.len(), 3);
+        assert!(
+            matches!(&messages[1].content[0], ContentBlock::ToolResult { tool_use_id, is_error: true, .. } if tool_use_id == "bad")
+        );
+        assert!(
+            matches!(&messages[1].content[1], ContentBlock::ToolResult { tool_use_id, is_error: false, .. } if tool_use_id == "valid-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn list_files_rejects_invalid_arguments_instead_of_listing_workspace() {
+        let config = MintConfig::default();
+        // A nonexistent root ensures no filesystem lookup occurs for bad input.
+        let root = Path::new("/nonexistent-mint-list-files-regression");
+        for input in [
+            serde_json::json!({"path": "~/Downloads/YOUTUBE_DL", "limit": "100"}),
+            serde_json::json!({"path": "~/Downloads/YOUTUBE_DL", "limit": -1}),
+            serde_json::json!({"path": null}),
+            Value::String(r#"{"path":"~/Downloads/YOUTUBE_DL""#.into()),
+            Value::Null,
+        ] {
+            let error = execute_tool_from_json(
+                root,
+                &config,
+                "list_files",
+                input,
+                "regression",
+                &mut |_| panic!("invalid arguments must not request approval"),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("invalid arguments for tool 'list_files'")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn list_files_preserves_nested_paths_and_default_directory() {
+        let root =
+            std::env::temp_dir().join(format!("mint-list-files-paths-{}", std::process::id()));
+        let nested = root.join("Downloads/YOUTUBE_DL/playlist");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("song.txt"), "song").unwrap();
+        let config = MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            blocked_paths: vec![],
+            blocked_file_names: vec![],
+            ..MintConfig::default()
+        };
+        for input in [
+            serde_json::json!({"path": "Downloads/YOUTUBE_DL/playlist", "limit": 100}),
+            serde_json::json!({"path": nested}),
+            serde_json::json!({}),
+        ] {
+            let expected = if input.get("path").is_some() {
+                &nested
+            } else {
+                &root
+            };
+            let output = execute_tool_from_json(
+                &root,
+                &config,
+                "list_files",
+                input,
+                "regression",
+                &mut |_| panic!("listing must not request approval"),
+            )
+            .await
+            .unwrap();
+            let entries: Vec<Value> = serde_json::from_str(&output).unwrap();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(
+                Path::new(entries[0]["path"].as_str().unwrap()).parent(),
+                Some(expected.as_path())
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn turn_start_listener_reports_only_the_matching_chat() {

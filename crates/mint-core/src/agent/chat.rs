@@ -970,6 +970,15 @@ async fn send_openai_style_request(
     Ok(response.json().await?)
 }
 
+// Preserve malformed arguments so the executor can reject them. Replacing them
+// with {} would silently turn a requested directory into the workspace root.
+fn decode_tool_arguments(arguments: &Value) -> Value {
+    match arguments.as_str() {
+        Some(raw) => serde_json::from_str(raw).unwrap_or_else(|_| arguments.clone()),
+        None => arguments.clone(),
+    }
+}
+
 /// Parses an OpenAI Chat Completions-shaped response (`choices[0].message`),
 /// extracting both plain text and any native `tool_calls`. Shared by OpenAI,
 /// custom OpenAI-compatible providers, and (for its response shape only) reused
@@ -999,10 +1008,7 @@ fn parse_openai_style_reply(model: String, response: &Value) -> Result<ProviderR
                 .iter()
                 .filter_map(|call| {
                     let name = call["function"]["name"].as_str()?.to_string();
-                    let input = call["function"]["arguments"]
-                        .as_str()
-                        .and_then(|raw| serde_json::from_str(raw).ok())
-                        .unwrap_or_else(|| json!({}));
+                    let input = decode_tool_arguments(&call["function"]["arguments"]);
                     Some(ToolCall {
                         id: call["id"].as_str().unwrap_or_default().to_string(),
                         name,
@@ -1228,11 +1234,7 @@ fn parse_ollama_reply(model: String, response: &Value) -> Result<ProviderReply, 
                 .filter_map(|(index, call)| {
                     let name = call["function"]["name"].as_str()?.to_string();
                     let arguments = &call["function"]["arguments"];
-                    let input = if let Some(raw) = arguments.as_str() {
-                        serde_json::from_str(raw).unwrap_or_else(|_| json!({}))
-                    } else {
-                        arguments.clone()
-                    };
+                    let input = decode_tool_arguments(arguments);
                     let id = call["id"]
                         .as_str()
                         .map(str::to_owned)
@@ -2214,9 +2216,9 @@ impl StreamReplyAccumulator {
             .into_iter()
             .filter(|tool| !tool.name.is_empty())
             .map(|tool| {
-                let input = tool.input.unwrap_or_else(|| {
-                    serde_json::from_str(&tool.arguments).unwrap_or_else(|_| json!({}))
-                });
+                let input = tool
+                    .input
+                    .unwrap_or_else(|| decode_tool_arguments(&Value::String(tool.arguments)));
                 ToolCall {
                     id: tool.id,
                     name: tool.name,
@@ -2993,6 +2995,38 @@ mod tests {
             parse_stream_value(StreamFormat::Ollama, r#"{"message":{"content":"hi"}}"#).unwrap();
         assert_eq!(ollama["message"]["content"], "hi");
         assert!(parse_stream_value(StreamFormat::Anthropic, "data: [DONE]").is_none());
+    }
+
+    #[test]
+    fn malformed_tool_arguments_survive_provider_parsing_for_rejection() {
+        let malformed = r#"{"path":"~/Downloads/YOUTUBE_DL""#;
+        let function = json!({"name": "list_files", "arguments": malformed});
+        let openai = parse_openai_style_reply(
+            "test".into(),
+            &json!({
+                "choices": [{"message": {"tool_calls": [{"id": "call_1", "function": function}]}}]
+            }),
+        )
+        .unwrap();
+        let ollama = parse_ollama_reply(
+            "test".into(),
+            &json!({
+                "message": {"tool_calls": [{"function": function}]}
+            }),
+        )
+        .unwrap();
+        let mut accumulator = StreamReplyAccumulator::default();
+        accumulator.consume_openai(&json!({
+            "choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_1", "function": function}]}}]
+        }), &mut |_| {});
+        let streamed = accumulator.finish("test".into()).unwrap();
+        for reply in [openai, ollama, streamed] {
+            let calls = reply.tool_calls.unwrap();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].input, Value::String(malformed.into()));
+        }
+        assert_eq!(decode_tool_arguments(&json!("{}")), json!({}));
+        assert_eq!(decode_tool_arguments(&Value::Null), Value::Null);
     }
 
     #[test]
