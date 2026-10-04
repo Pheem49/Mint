@@ -1,16 +1,19 @@
 /* desktop: settings/base.css — split from settings.css, rules kept in original order */
+/* Scope element rules with :where() so lazy loading cannot restyle other pages
+   and existing specificity relationships inside Settings remain intact. */
 
-:root {
+.settings-container {
     --sidebar-bg: var(--bg-surface-soft);
 }
 
-* {
+:where(.settings-container),
+:where(.settings-container) * {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
 }
 
-body {
+:where(.settings-container) {
     height: 100vh;
     overflow: hidden;
     background: transparent;
@@ -19,14 +22,14 @@ body {
     user-select: none;
 }
 
-button,
-input,
-select,
-textarea {
+:where(.settings-container) button,
+:where(.settings-container) input,
+:where(.settings-container) select,
+:where(.settings-container) textarea {
     font: inherit;
 }
 
-button {
+:where(.settings-container) button {
     -webkit-app-region: no-drag;
 }
 
@@ -90,7 +93,7 @@ button {
     font-size: 1rem;
 }
 
-h1 {
+:where(.settings-container) h1 {
     color: var(--text-primary);
     font-size: 1.02rem;
     font-weight: 600;
@@ -358,12 +361,12 @@ h1 {
     font-weight: 500;
 }
 
-input[type="text"],
-input[type="password"],
-input[type="email"],
-input[type="url"],
-select,
-textarea {
+:where(.settings-container) input[type="text"],
+:where(.settings-container) input[type="password"],
+:where(.settings-container) input[type="email"],
+:where(.settings-container) input[type="url"],
+:where(.settings-container) select,
+:where(.settings-container) textarea {
     width: 100%;
     min-height: 32px;
     padding: 6px 10px;
@@ -377,7 +380,7 @@ textarea {
     transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 
-select {
+:where(.settings-container) select {
     cursor: pointer;
     background-color: var(--input-bg) !important;
     color: var(--text-main) !important;
@@ -388,25 +391,25 @@ select {
     justify-self: end;
 }
 
-select:focus {
+:where(.settings-container) select:focus {
     background-color: var(--input-focus-bg) !important;
 }
 
-select option {
+:where(.settings-container) select option {
     background-color: var(--input-bg) !important;
     color: var(--text-main) !important;
 }
 
-select option:checked {
+:where(.settings-container) select option:checked {
     background: linear-gradient(var(--accent), var(--accent)) !important;
     color: var(--accent-contrast, #ffffff) !important;
 }
 
-[data-theme="light"] select {
+[data-theme="light"] :where(.settings-container) select {
     color-scheme: light;
 }
 
-textarea {
+:where(.settings-container) textarea {
     min-height: 74px;
     resize: vertical;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -414,20 +417,20 @@ textarea {
     line-height: 1.45;
 }
 
-input:focus,
-select:focus,
-textarea:focus {
+:where(.settings-container) input:focus,
+:where(.settings-container) select:focus,
+:where(.settings-container) textarea:focus {
     background: var(--input-focus-bg);
     border-color: var(--accent);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
-input::placeholder,
-textarea::placeholder {
+:where(.settings-container) input::placeholder,
+:where(.settings-container) textarea::placeholder {
     color: var(--placeholder);
 }
 
-input[type="color"] {
+:where(.settings-container) input[type="color"] {
     width: 44px;
     height: 34px;
     padding: 3px;
@@ -563,12 +566,12 @@ input[type="color"] {
     transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease;
 }
 
-input:checked + .settings-toggle-slider {
+:where(.settings-container) input:checked + .settings-toggle-slider {
     background: var(--accent);
     border-color: color-mix(in srgb, var(--accent) 70%, var(--border-strong));
 }
 
-input:checked + .settings-toggle-slider::before {
+:where(.settings-container) input:checked + .settings-toggle-slider::before {
     transform: translateX(20px);
     background: var(--accent-contrast, #ffffff);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
@@ -802,7 +805,7 @@ input:checked + .settings-toggle-slider::before {
     white-space: nowrap;
 }
 
-kbd {
+:where(.settings-container) kbd {
     min-width: 30px;
     padding: 4px 8px;
     border: 1px solid var(--border-strong);
@@ -1133,40 +1136,40 @@ kbd {
 }
 
 /* Form inputs */
-[data-theme="light"] input[type="text"],
-[data-theme="light"] input[type="password"],
-[data-theme="light"] input[type="email"],
-[data-theme="light"] input[type="url"],
-[data-theme="light"] textarea {
+[data-theme="light"] :where(.settings-container) input[type="text"],
+[data-theme="light"] :where(.settings-container) input[type="password"],
+[data-theme="light"] :where(.settings-container) input[type="email"],
+[data-theme="light"] :where(.settings-container) input[type="url"],
+[data-theme="light"] :where(.settings-container) textarea {
     background: #ffffff;
     border: 1px solid rgba(15, 23, 42, 0.16);
     color: #0f172a;
 }
 
-[data-theme="light"] input[type="text"]:focus,
-[data-theme="light"] input[type="password"]:focus,
-[data-theme="light"] input[type="email"]:focus,
-[data-theme="light"] input[type="url"]:focus,
-[data-theme="light"] textarea:focus {
+[data-theme="light"] :where(.settings-container) input[type="text"]:focus,
+[data-theme="light"] :where(.settings-container) input[type="password"]:focus,
+[data-theme="light"] :where(.settings-container) input[type="email"]:focus,
+[data-theme="light"] :where(.settings-container) input[type="url"]:focus,
+[data-theme="light"] :where(.settings-container) textarea:focus {
     background: #ffffff;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
 }
 
-[data-theme="light"] select {
+[data-theme="light"] :where(.settings-container) select {
     color-scheme: light;
     background-color: #ffffff !important;
     color: #0f172a !important;
     border: 1px solid rgba(15, 23, 42, 0.16);
 }
 
-[data-theme="light"] select:focus {
+[data-theme="light"] :where(.settings-container) select:focus {
     background-color: #ffffff !important;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
 }
 
-[data-theme="light"] select option {
+[data-theme="light"] :where(.settings-container) select option {
     background-color: #ffffff !important;
     color: #0f172a !important;
 }
@@ -1194,12 +1197,12 @@ kbd {
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
 }
 
-[data-theme="light"] input:checked + .settings-toggle-slider {
+[data-theme="light"] :where(.settings-container) input:checked + .settings-toggle-slider {
     background: var(--accent);
     border-color: var(--accent);
 }
 
-[data-theme="light"] input:checked + .settings-toggle-slider::before {
+[data-theme="light"] :where(.settings-container) input:checked + .settings-toggle-slider::before {
     background: #ffffff;
 }
 

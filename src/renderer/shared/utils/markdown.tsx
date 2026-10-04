@@ -417,13 +417,13 @@ function renderMessageImage(src: string | undefined, alt: string | undefined, so
         className="chat-media-card chat-media-card--thumbnail"
         style={{ margin: '6px 0 10px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px' }}
       >
-        <a href={pageUrl} target="_blank" rel="noopener noreferrer" title={sourceUrl ? `Open source page: ${label}` : label} style={{ display: 'block', textDecoration: 'none' }}>
+        <a href={pageUrl} target="_blank" rel="noopener noreferrer" title={sourceUrl ? `Open source page: ${label}` : label} style={{ display: 'flex', justifyContent: 'center', textDecoration: 'none' }}>
           <img
             src={url}
             alt={label}
             loading="lazy"
             referrerPolicy="no-referrer"
-            style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', display: 'block' }}
+            style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block' }}
             onError={(e) => { const card = e.currentTarget.closest('.chat-media-card') as HTMLElement | null; if (card) card.style.display = 'none' }}
           />
         </a>

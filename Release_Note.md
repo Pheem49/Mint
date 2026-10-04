@@ -1,5 +1,15 @@
 # Release Notes - Mint Agent v1.15.0
 
+- Scoped Desktop and Web Settings resets, typography, and form controls to the settings container. Background preloading of Settings no longer changes the sign-in page's font or shrinks its 48px inputs; selector specificity within Settings remains unchanged.
+
+- Refined sign-in and registration styling with a 24px card-radius fallback, 48px inputs and submit buttons, 16px input text, grouped headings with clearer spacing before fields, reduced background accent glows, and compact card padding on mobile.
+
+- Clarified the sign-in subtitle, added an accessible show/hide password control and password-manager autocomplete hints, and made Create account a distinct, prominent action. Sign-in and registration show a loading spinner and progress text, prevent repeated submissions and mode changes while waiting, and announce inline errors while preserving entered credentials for retry.
+
+- Made chat Sources responsive on screens up to 600px: compact rows place thumbnails beside titles and domains, with a full-width keyboard-accessible View more button and popovers sized to the column. Removed percentage card heights that stretched wrapped rows and overlapped message metadata; wider screens retain the existing card layout.
+
+- Updated web-source image previews in Desktop and Web chats to preserve the original aspect ratio and show the complete image without cropping. Previews fit the chat width, remain capped at 420px wide and 420px tall, and center narrower images within the card.
+
 - Fixed Linked Folder job claims failing when another database writer commits between selecting and claiming a queued job. Claims now use `BEGIN IMMEDIATE`, and transient SQLite busy/locked errors retry up to three times with bounded backoff before stopping the worker. Claims run on a blocking task so SQLite's lock wait does not block async runtime threads; failed claims leave queued jobs and note attempt counts unchanged.
 
 - Fixed native agent and Gemini Live tool calls silently replacing invalid arguments with defaults, which could make `list_files` list the workspace/home directory instead of the requested nested folder. Malformed provider JSON is preserved for rejection, while valid paths and omitted directory defaults remain supported. Native agent chats now return argument errors to the model with the original call ID and arguments, allowing correction or a different tool without executing the invalid call. Each run returns up to three invalid-call errors for correction and stops on a fourth invalid call; valid calls remain available within the existing 40-step limit. Mixed batches retain both invalid-call errors and valid tool results.
@@ -10,6 +20,8 @@
 - Added the active model's thinking level to the Full-Screen TUI footer, including an `off` indicator when thinking is disabled.
 
 ## Mint Auto Browser Reliability
+
+- Website tasks now instruct the agent to inspect the automation browser's page observations/text or screenshots and verify the requested URL/content, rather than also opening the website through the system browser. Once a task has used browser automation, ordinary external URL launcher shell commands are rejected before approval or execution (including background launches and verification commands). Local file/folder openers and tasks without browser use remain supported. The shared core applies this behavior to CLI, Desktop, and Web.
 
 - Gemini Live voice sessions now keep one shared browser session across tool calls and spoken turns. Selected tabs, DOM references, screenshots, and recovery stops remain available until the voice task ends; ending the task releases tab leases, and a new voice session starts independently.
 - Screenshot capture now retains DOM/layout snapshots from before and after the image. Coordinate validation checks only the intended target in both snapshots and retries a current capture once if that target changes. Continuously updating distant tickers and carousels no longer invalidate stable targets, while target replacement, movement, obstruction, and local pixel changes still prevent clicks.

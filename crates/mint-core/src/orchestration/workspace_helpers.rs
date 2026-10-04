@@ -189,6 +189,7 @@ pub(super) async fn run_shell(
     chat_id: &str,
     command: &str,
 ) -> Result<String, OrchestrationError> {
+    tools::shell::prevent_duplicate_browser_launch(command).await?;
     let root = root.to_path_buf();
     let config = config.clone();
     let chat_id = chat_id.to_owned();

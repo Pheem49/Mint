@@ -521,7 +521,7 @@ pub fn build_system_prompt(
         rules.push("7v. A Project Avatar is connected. Call avatar_signal when your reply carries an emotional beat the automatic tool-based reactions can't express — greeting, joking, apologizing, thinking something over. Don't call it for routine tool-driven turns (shell, browser, image/video generation); those already react on their own.");
     }
     if allowed_actions.contains(&"browser_open") {
-        rules.push("7a. Use browser_open to navigate the virtual browser to a URL.");
+        rules.push("7a. Use browser_open to open websites in the automation browser. Inspect the returned page observation, then use browser_observe/browser_read to read the page or browser_screenshot for visual inspection; verify the requested URL/content with browser_wait before finishing. A successful browser_open already opens the website for the user: do not also launch it through run_shell, xdg-open, open, Start-Process, or another browser. Keep website navigation and interaction in the automation browser. If the user explicitly requests an external browser, use that route instead of first opening the website in automation. If automation is unavailable or blocked, report that and ask the user before switching browsers.");
     }
     if allowed_actions.contains(&"browser_click") {
         rules.push("7b. Use browser_click to click elements. Selector can be: CSS selector (button.class, #id, [attr=val]), text=ExactText to find by visible text, contains=PartialText for partial match, or xpath=//expr for XPath. Prefer text= or contains= when the element has visible text but no unique CSS class.");
@@ -588,7 +588,9 @@ For every JSON-backed card, ensure all properties stay inside their intended obj
 - Feature showcases: use fenced ```ui-card with JSON array:\n```ui-card\n[{\"title\": \"...\", \"subtitle\": \"...\", \"icon\": \"file-text\", \"badge\": \"...\", \"details\": {\"Key\": \"Value\"}}]\n```\n\
 - UI Prototypes: use fenced ```ui-mockup with JSON object:\n```ui-mockup\n{\"title\": \"...\", \"subtitle\": \"...\", \"dropzoneText\": \"...\", \"metrics\": {...}}\n```\n\
 - Key insights / alerts: use GitHub callouts (> [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING]). Always converse naturally and smoothly; never prefix conversational phrases or greetings with artificial status tags or badge pills. Always put opening and closing ``` fences on their own separate lines.");
-    if native {
+    if allowed_actions.contains(&"browser_open") {
+        rules.push("12. Shell commands may open local files/folders or launch apps when requested. For websites, follow rule 7a and verify the automation browser's observed page; a shell launch is not evidence that a browser task is complete.");
+    } else if native {
         rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the finish tool immediately.");
     } else {
         rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately.");
