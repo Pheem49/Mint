@@ -1,6 +1,6 @@
 {
   "name": "@pheem49/mint",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "description": "A native Tauri desktop AI assistant with a Rust backend and React UI.",
   "scripts": {
     "dev:web": "vite --config vite.config.web.ts",
@@ -32,13 +32,13 @@
     "launch": "npm start --",
     "start:rebuild": "npm start -- --rebuild",
     "test": "npm run test:launchers && npm run test:interfaces && cargo test -p mint-core -p mint-cli",
-    "test:interfaces": "vitest run src/renderer/shared/platform.test.ts src/renderer/shared/conversation/coordinator.test.ts src/renderer/shared/conversation/syncView.test.ts src/renderer/shared/utils/cardJson.test.ts src/renderer/shared/utils/agentActivity.test.ts src/renderer/shared/components/CliSessionsView.test.tsx src/renderer/shared/utils/contextCompaction.test.tsx",
+    "test:launchers": "node --test src/bin/web.test.js src/bin/index.test.js src/bin/desktop.test.js",
+    "test:interfaces": "vitest run src/renderer/shared/utils/contextCompaction.test.tsx src/renderer/shared/platform.test.ts src/renderer/shared/conversation/coordinator.test.ts src/renderer/shared/conversation/syncView.test.ts src/renderer/shared/utils/cardJson.test.ts src/renderer/shared/utils/agentActivity.test.ts src/renderer/shared/components/CliSessionsView.test.tsx src/renderer/shared/components/Settings/MemoryTab.test.tsx src/renderer/shared/theme/themeManager.test.ts",
     "cli": "node src/bin/index.js",
     "prepublishOnly": "npm run build:web",
     "postinstall": "cargo build -p mint-cli --release",
     "dev:desktop:ui": "vite",
-    "build:ui": "npm run build:desktop:ui && npm run build:web",
-    "test:launchers": "node --test src/bin/web.test.js src/bin/index.test.js src/bin/desktop.test.js"
+    "build:ui": "npm run build:desktop:ui && npm run build:web"
   },
   "keywords": [
     "mint",

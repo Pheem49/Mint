@@ -870,7 +870,7 @@ export default function ModelSelectorPopover({
                 </div>
 
                 {!inspectedThinking.supported && (
-                  <div className="model-unsupported-note" style={{ color: inspectedThinking.enabled ? 'var(--accent, #10b981)' : undefined }}>
+                  <div className="model-unsupported-note" style={{ color: inspectedThinking.enabled ? 'var(--interactive-fg)' : undefined }}>
                     {inspectedThinking.enabled
                       ? 'Thinking enabled (force toggle)'
                       : 'Not flagged as reasoning model by default (toggle to force enable)'}

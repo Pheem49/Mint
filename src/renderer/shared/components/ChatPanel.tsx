@@ -37,6 +37,7 @@ import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../utils/documen
 import ModelSelectorPopover from './ModelSelectorPopover'
 import GitBranchSelector from './GitBranchSelector'
 import WorkspaceSelector from './WorkspaceSelector'
+import { BackgroundTerminals } from './BackgroundTerminals'
 import CodeReviewPage from './CodeReviewPage'
 import type { ToolSurface } from './ToolSurfacePage'
 import '../css/thinking-status.css'
@@ -1803,6 +1804,7 @@ export default function ChatPanel({
               <span className="smart-context-copy"><span className="smart-context-title">Plan mode</span></span>
             </label>
           )}
+          <BackgroundTerminals workspacePath={workspacePath} />
         </div>
         {voiceMode && (
           <div className="voice-mode-bar" data-state={voiceStatus}>

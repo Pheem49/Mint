@@ -551,10 +551,6 @@
   }
 }
 
-.model-spotlight-mobile-tabs {
-  display: none;
-}
-
 /* Composer controls use separate rows so the model name never competes with icons. */
 @media (max-width: 760px) {
   #chat-form {

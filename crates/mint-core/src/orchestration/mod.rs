@@ -11,6 +11,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
 
+mod repeated_failures;
+use repeated_failures::RepeatedFailures;
+
 use crate::chat::{
     ChatMessage, ChatRole, ChatStreamEvent, ContentBlock, send_chat_with_fallback,
     stream_chat_events_with_fallback, stream_chat_with_fallback,
@@ -237,6 +240,13 @@ pub async fn orchestrate_chat(
     request: &ChatRequest,
 ) -> Result<ChatResponse, OrchestrationError> {
     let memory = MemoryStore::open_default()?;
+    if let Some(workspace) = request
+        .workspace_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+    {
+        memory.set_chat_session_workspace(&request_chat_id(request), Some(workspace.trim()))?;
+    }
     let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
@@ -249,11 +259,6 @@ pub async fn orchestrate_chat(
         }
     };
     turn.complete(&response)?;
-    if let Some(ref ws) = request.workspace_path {
-        if !ws.trim().is_empty() {
-            let _ = memory.set_chat_session_workspace(&request_chat_id(request), Some(ws.trim()));
-        }
-    }
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -279,6 +284,13 @@ where
     F: FnMut(String),
 {
     let memory = MemoryStore::open_default()?;
+    if let Some(workspace) = request
+        .workspace_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+    {
+        memory.set_chat_session_workspace(&request_chat_id(request), Some(workspace.trim()))?;
+    }
     let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
@@ -291,11 +303,6 @@ where
         }
     };
     turn.complete(&response)?;
-    if let Some(ref ws) = request.workspace_path {
-        if !ws.trim().is_empty() {
-            let _ = memory.set_chat_session_workspace(&request_chat_id(request), Some(ws.trim()));
-        }
-    }
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -317,6 +324,13 @@ pub async fn orchestrate_chat_with_fallback(
     request: &ChatRequest,
 ) -> Result<(ChatResponse, Option<String>), OrchestrationError> {
     let memory = MemoryStore::open_default()?;
+    if let Some(workspace) = request
+        .workspace_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+    {
+        memory.set_chat_session_workspace(&request_chat_id(request), Some(workspace.trim()))?;
+    }
     let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
@@ -354,6 +368,13 @@ where
     F: FnMut(String),
 {
     let memory = MemoryStore::open_default()?;
+    if let Some(workspace) = request
+        .workspace_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+    {
+        memory.set_chat_session_workspace(&request_chat_id(request), Some(workspace.trim()))?;
+    }
     let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
@@ -366,11 +387,6 @@ where
         }
     };
     turn.complete(&response)?;
-    if let Some(ref ws) = request.workspace_path {
-        if !ws.trim().is_empty() {
-            let _ = memory.set_chat_session_workspace(&request_chat_id(request), Some(ws.trim()));
-        }
-    }
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -544,7 +560,8 @@ use workspace_helpers::*;
 /// tasks earlier, but 24 turned out too tight for legitimate multi-file
 /// work, cutting it off mid-task — raised to 40 as a middle ground.
 const MAX_STEPS: usize = 40;
-const MAX_INVALID_TOOL_CALLS: usize = 3;
+// A tool gets its own correction budget, renewed after successful execution.
+const MAX_TOOL_ARGUMENT_RETRIES: usize = 5;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
 /// Compact `native_messages` once a step's reported token usage crosses this
 /// fraction of `MintConfig::context_window_tokens`. Every step resends the whole
@@ -1122,7 +1139,59 @@ fn deserialize_agent_input<'de, D>(deserializer: D) -> Result<AgentInput, D::Err
 where
     D: serde::Deserializer<'de>,
 {
-    Ok(Option::<AgentInput>::deserialize(deserializer)?.unwrap_or_default())
+    let value = Option::<Value>::deserialize(deserializer)?;
+    value
+        .map(decode_agent_input)
+        .transpose()
+        .map_err(serde::de::Error::custom)
+        .map(|input| input.unwrap_or_default())
+}
+
+// Some providers encode the structured patch twice. Decode only that field;
+// retain strict typing for all other arguments and never infer a target file.
+fn decode_agent_input(mut value: Value) -> Result<AgentInput, String> {
+    let outer_path = value.get("path").and_then(Value::as_str).map(str::to_owned);
+    if let Some(patch) = value.get_mut("patch").filter(|patch| !patch.is_null()) {
+        if let Value::String(encoded) = patch {
+            *patch = serde_json::from_str(encoded).map_err(|_| {
+                "patch must contain a valid JSON object with path and hunks".to_owned()
+            })?;
+        }
+        let object = patch
+            .as_object_mut()
+            .ok_or_else(|| "patch must be an object with path and hunks".to_owned())?;
+        if !object.contains_key("path") {
+            if let Some(path) = &outer_path {
+                object.insert("path".into(), Value::String(path.clone()));
+            }
+        }
+        let path = object
+            .get("path")
+            .and_then(Value::as_str)
+            .filter(|path| !path.trim().is_empty())
+            .ok_or_else(|| {
+                "patch.path is required; supply the target file explicitly".to_owned()
+            })?;
+        if outer_path
+            .as_deref()
+            .is_some_and(|outer| !outer.is_empty() && outer != path)
+        {
+            return Err("path and patch.path must name the same target file".into());
+        }
+        serde_json::from_value::<AgentPatch>(patch.clone())
+            .map_err(|_| "patch requires a string path and hunks containing string oldText/newText and optional boolean replaceAll".to_owned())?;
+    }
+    serde_json::from_value(value).map_err(|error| {
+        let message = error.to_string();
+        if message.chars().count() > 400 {
+            format!(
+                "{}… (argument value omitted)",
+                message.chars().take(400).collect::<String>()
+            )
+        } else {
+            message
+        }
+    })
 }
 
 fn resolve_agent_config(
@@ -1508,6 +1577,9 @@ where
         let chat_id = crate::agent::memory::scoped_chat_id(chat_id, Some(&root.to_string_lossy()));
         let chat_id = chat_id.as_str();
         let memory = MemoryStore::open_default()?;
+        // Agent requests use a real workspace even when the provider fails.
+        // Persist it before the first turn so all session lists group it correctly.
+        memory.set_chat_session_workspace(chat_id, Some(root.to_string_lossy().as_ref()))?;
         let mut turn = TurnLease::start(&memory, chat_id, task).await?;
         let record_activity = Arc::clone(&turn.activity);
         let mut progress = move |event: AgentProgress| {
@@ -1585,7 +1657,8 @@ where
         let mut final_fallback = None;
         let mut final_fallback_reason = None;
         let mut action_counts = BTreeMap::<String, usize>::new();
-        let mut invalid_tool_calls = 0;
+        let mut invalid_tool_calls = ToolArgumentRetries::default();
+        let mut repeated_failures = RepeatedFailures::default();
         let mut streamed_finish_summary = String::new();
         let mut streamed_direct_text = String::new();
         // Track the most recent step (if any) that successfully modified a file
@@ -1994,7 +2067,7 @@ where
                 std::collections::HashMap::new();
 
             if decisions_are_parallel_subagent_batch(&decisions) {
-                step_tool_results.extend(run_parallel_subagent_batch(
+                let completed = run_parallel_subagent_batch(
                     &decisions,
                     step,
                     &root,
@@ -2005,9 +2078,11 @@ where
                     &mut action_counts,
                     &mut trajectory,
                 )
-                .await);
+                .await;
+                invalid_tool_calls.observe_completed(&completed);
+                step_tool_results.extend(completed);
             } else if decisions_are_parallel_read_only_batch(&decisions) {
-                step_tool_results.extend(run_parallel_read_only_batch(
+                let completed = run_parallel_read_only_batch(
                     &decisions,
                     step,
                     &root,
@@ -2022,7 +2097,9 @@ where
                     pinned_mcp_server,
                     fast_mode,
                 )
-                .await);
+                .await;
+                invalid_tool_calls.observe_completed(&completed);
+                step_tool_results.extend(completed);
             } else {
                 for (call_id, decision) in decisions {
                     let d_thought = decision.thought.trim();
@@ -2386,6 +2463,9 @@ where
                                     Err(error) => (format!("Error: {}", error), false),
                                 };
                                 action_succeeded = success;
+                                if success {
+                                    invalid_tool_calls.succeeded(&decision.action);
+                                }
                                 let hook_messages = crate::hooks::run_post_tool_hooks(
                                     &hooks,
                                     &decision.action,
@@ -2543,6 +2623,22 @@ where
                     ));
                 } // end `for (call_id, decision) in decisions`
             } // end `else` (sequential path)
+
+            // All interfaces and both native/JSON tool modes share this guard.
+            // Inspect failures, not action counts: legitimate repeated reads
+            // and successful edits must not be stopped as loops.
+            match repeated_failures.observe(step, &mut step_tool_results) {
+                Ok(warnings) => {
+                    for warning in warnings {
+                        progress(AgentProgress::Thought { thought: warning.clone() });
+                        trajectory.push(format!("Step {step} loop warning: {warning}"));
+                    }
+                }
+                Err(error) => {
+                    progress(AgentProgress::Thought { thought: error.to_string() });
+                    return Err(error);
+                }
+            }
 
             if tool_mode == ToolCallingMode::Native {
                 append_native_tool_results(
@@ -3368,7 +3464,7 @@ where
 }
 
 fn parse_tool_input(action: &str, input: Value) -> Result<AgentInput, OrchestrationError> {
-    serde_json::from_value(input).map_err(|error| {
+    decode_agent_input(input).map_err(|error| {
         OrchestrationError::Agent(format!("invalid arguments for tool '{action}': {error}"))
     })
 }
@@ -3427,12 +3523,36 @@ fn append_native_tool_results(
 type ToolResultEntry = (String, String, Value, String);
 type PreparedToolCalls = (Vec<(String, AgentDecision)>, Vec<ToolResultEntry>);
 
+#[derive(Debug, Default)]
+struct ToolArgumentRetries {
+    failures: BTreeMap<String, usize>,
+}
+
+impl ToolArgumentRetries {
+    fn succeeded(&mut self, tool: &str) {
+        self.failures.remove(tool);
+    }
+
+    fn observe_completed(&mut self, results: &[ToolResultEntry]) {
+        for (_, tool, _, result) in results {
+            // Parallel batches encode execution errors and hook blocks in
+            // their results. Neither is a successful execution.
+            if !result.starts_with("Error")
+                && !result.starts_with("Blocked")
+                && !result.starts_with("Skipped")
+            {
+                self.succeeded(tool);
+            }
+        }
+    }
+}
+
 /// Invalid calls never become executable decisions. Return their original
 /// arguments and call IDs so the next model turn can repair them.
 fn prepare_native_tool_calls(
     calls: Vec<crate::chat::ToolCall>,
     thought: &str,
-    invalid_count: &mut usize,
+    retries: &mut ToolArgumentRetries,
 ) -> Result<PreparedToolCalls, OrchestrationError> {
     let mut decisions = Vec::new();
     let mut errors = Vec::new();
@@ -3451,14 +3571,16 @@ fn prepare_native_tool_calls(
                 },
             )),
             Err(error) => {
-                if *invalid_count >= MAX_INVALID_TOOL_CALLS {
+                let invalid_count = retries.failures.entry(call.name.clone()).or_default();
+                if *invalid_count >= MAX_TOOL_ARGUMENT_RETRIES {
                     return Err(OrchestrationError::Agent(format!(
-                        "stopped after {MAX_INVALID_TOOL_CALLS} invalid tool calls were already returned for correction; {error}"
+                        "Tool '{}' exhausted its {MAX_TOOL_ARGUMENT_RETRIES} argument-correction retries without a successful execution. Other tools have independent budgets. {error}",
+                        call.name
                     )));
                 }
                 *invalid_count += 1;
                 errors.push((call.id, call.name, call.input, format!(
-                    "Error: {error}. No tool was executed for this call. Correct the arguments to match the tool schema, or choose another suitable tool. Invalid-call budget used: {}/{MAX_INVALID_TOOL_CALLS}. Further invalid calls after this budget is exhausted will stop the run.",
+                    "Error: {error}. No tool was executed for this call. Correct the arguments to match the tool schema, or choose another suitable tool. Correction retries for this tool: {}/{MAX_TOOL_ARGUMENT_RETRIES}. This counter resets only after this tool executes successfully; changing arguments alone does not reset it. Other tools have independent counters. Continued failures for this tool will stop the run.",
                     *invalid_count,
                 )));
             }
@@ -3472,6 +3594,105 @@ mod tests {
     use super::*;
     use crate::config::AgentConfig;
 
+    #[test]
+    fn stringified_patch_uses_explicit_outer_target() {
+        let patch =
+            serde_json::json!({"hunks": [{"oldText": "old", "newText": "new"}]}).to_string();
+        let input = parse_tool_input(
+            "apply_patch",
+            serde_json::json!({"path": "style.css", "patch": patch}),
+        )
+        .unwrap();
+        let patch = input.patch.unwrap();
+        assert_eq!(patch.path, PathBuf::from("style.css"));
+        assert_eq!(patch.hunks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn stringified_patch_executes_only_after_approval_and_can_be_undone() {
+        let root = std::env::temp_dir().join(format!("mint-patch-repro-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("style.css"), "body { color: black; }").unwrap();
+        let config = MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            allowed_write_paths: vec![root.clone()],
+            blocked_paths: vec![],
+            blocked_file_names: vec![],
+            ..MintConfig::default()
+        };
+        let input = serde_json::json!({"path": "style.css", "patch": serde_json::json!({"hunks": [{"oldText": "black", "newText": "orange"}]}).to_string()});
+        execute_tool_from_json(
+            &root,
+            &config,
+            "apply_patch",
+            input.clone(),
+            "patch-repro",
+            &mut |_| Ok(ApprovalOutcome::Denied),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("style.css")).unwrap(),
+            "body { color: black; }"
+        );
+        execute_tool_from_json(
+            &root,
+            &config,
+            "apply_patch",
+            input,
+            "patch-repro",
+            &mut |_| Ok(ApprovalOutcome::Approved),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("style.css")).unwrap(),
+            "body { color: orange; }"
+        );
+        crate::system::workspace_history::undo(&root, None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("style.css")).unwrap(),
+            "body { color: black; }"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn patch_decoding_preserves_strict_types_and_rejects_ambiguous_targets() {
+        let patch = serde_json::json!({"path": "style.css", "hunks": [{"oldText": "old", "newText": "new"}]});
+        assert!(parse_tool_input("apply_patch", serde_json::json!({"patch": patch})).is_ok());
+        assert!(
+            parse_tool_input(
+                "apply_patch",
+                serde_json::json!({"path": "other.css", "patch": patch.to_string()})
+            )
+            .is_err()
+        );
+        assert!(
+            parse_tool_input(
+                "apply_patch",
+                serde_json::json!({"patch": "{\"hunks\": []}"})
+            )
+            .is_err()
+        );
+        assert!(parse_tool_input("apply_patch", serde_json::json!({"patch": "not JSON"})).is_err());
+        assert!(parse_tool_input("list_files", serde_json::json!({"limit": "100"})).is_err());
+        let huge = "private-code-marker".repeat(1000);
+        let error = parse_tool_input(
+            "apply_patch",
+            serde_json::json!({"patch": {"path": "style.css", "hunks": huge}}),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.len() < 600);
+        assert!(!error.contains("private-code-marker"));
+        let decision: AgentDecision = serde_json::from_value(serde_json::json!({"action": "apply_patch", "input": {"path": "style.css", "patch": serde_json::json!({"hunks": [{"oldText": "old", "newText": "new"}]}).to_string()}})).unwrap();
+        assert_eq!(
+            decision.input.patch.unwrap().path,
+            PathBuf::from("style.css")
+        );
+    }
+
     fn test_list_call(id: &str, input: Value) -> crate::chat::ToolCall {
         crate::chat::ToolCall {
             id: id.into(),
@@ -3484,7 +3705,7 @@ mod tests {
     #[tokio::test]
     async fn native_argument_error_is_returned_and_corrected_call_can_execute() {
         let raw = serde_json::json!({"path": "Downloads/YOUTUBE_DL/playlist", "limit": "100"});
-        let mut count = 0;
+        let mut count = ToolArgumentRetries::default();
         let (decisions, errors) =
             prepare_native_tool_calls(vec![test_list_call("bad", raw.clone())], "", &mut count)
                 .unwrap();
@@ -3539,13 +3760,17 @@ mod tests {
             entries[0]["path"],
             serde_json::json!(nested.join("song.txt"))
         );
+        // Parsing the repaired call alone must not renew its budget.
+        assert_eq!(count.failures["list_files"], 1);
+        count.observe_completed(&[("fixed".into(), "list_files".into(), Value::Null, output)]);
+        assert!(!count.failures.contains_key("list_files"));
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn native_invalid_calls_are_bounded_without_blocking_valid_alternatives() {
-        let mut count = 0;
-        for _ in 0..MAX_INVALID_TOOL_CALLS {
+        let mut count = ToolArgumentRetries::default();
+        for _ in 0..MAX_TOOL_ARGUMENT_RETRIES {
             let (decisions, errors) = prepare_native_tool_calls(
                 vec![test_list_call(
                     "bad",
@@ -3568,20 +3793,50 @@ mod tests {
             prepare_native_tool_calls(vec![alternative], "", &mut count).unwrap();
         assert_eq!(decisions[0].1.action, "run_shell");
         assert!(errors.is_empty());
-        assert_eq!(count, MAX_INVALID_TOOL_CALLS);
+        assert_eq!(count.failures["list_files"], MAX_TOOL_ARGUMENT_RETRIES);
         let error =
             prepare_native_tool_calls(vec![test_list_call("bad", Value::Null)], "", &mut count)
                 .unwrap_err();
         assert!(
             error
                 .to_string()
-                .contains("stopped after 3 invalid tool calls")
+                .contains("exhausted its 5 argument-correction retries")
+        );
+        // One exhausted tool must not consume another tool's corrections.
+        let other = crate::chat::ToolCall {
+            id: "other-bad".into(),
+            name: "read_file".into(),
+            input: serde_json::json!({"path": 123}),
+            thought_signature: None,
+        };
+        let (_, errors) = prepare_native_tool_calls(vec![other], "", &mut count).unwrap();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(count.failures["read_file"], 1);
+        for result in [
+            "Error: execution failed",
+            "Blocked by hook",
+            "Skipped duplicate",
+        ] {
+            count.observe_completed(&[(
+                "x".into(),
+                "list_files".into(),
+                Value::Null,
+                result.into(),
+            )]);
+            assert_eq!(count.failures["list_files"], MAX_TOOL_ARGUMENT_RETRIES);
+        }
+        count.succeeded("list_files");
+        assert_eq!(count.failures["read_file"], 1);
+        assert!(!count.failures.contains_key("list_files"));
+        assert!(
+            prepare_native_tool_calls(vec![test_list_call("fresh", Value::Null)], "", &mut count)
+                .is_ok()
         );
     }
 
     #[test]
     fn native_mixed_batch_keeps_valid_calls_and_matches_each_error_to_its_id() {
-        let mut count = 0;
+        let mut count = ToolArgumentRetries::default();
         let (decisions, errors) = prepare_native_tool_calls(
             vec![
                 test_list_call("bad", Value::Null),

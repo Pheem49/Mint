@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import type { FileChange, GitBranchInfo } from '../types'
+import type { FileChange, GitBranchInfo, WorkspaceHistoryEntry } from '../types'
 import { workspacePlatform } from '../platform'
+import { useWorkspaceUndo } from '../workspaceUndo'
+import { HistoryDetails, UndoConfirmation } from './ReviewHistory'
 import GitBranchSelector from './GitBranchSelector'
 import {
   materialFolderIcon,
@@ -24,6 +26,31 @@ interface Props {
 function diffLines(text: string) {
   if (!text) return []
   return text.replace(/\n$/, '').split('\n')
+}
+
+/** Display paths inside the selected workspace, with a boundary-safe prefix. */
+function workspaceRelativePath(path: string, workspace?: string | null): string | null {
+  const normalized = path.replace(/\\/g, '/')
+  const root = workspace?.replace(/\\/g, '/').replace(/\/+$/, '')
+  const isAbsolute = /^(\/|[a-z]:\/)/i.test(normalized)
+  let relative = normalized
+  if (root && isAbsolute) {
+    const windows = /^[a-z]:\//i.test(root) || root.startsWith('//')
+    const prefix = `${root}/`
+    if (!(windows ? normalized.toLowerCase().startsWith(prefix.toLowerCase()) : normalized.startsWith(prefix))) return null
+    relative = normalized.slice(prefix.length)
+  } else if (!root && isAbsolute) {
+    return normalized
+  }
+  const parts: string[] = []
+  for (const part of relative.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (!parts.length) return null
+      parts.pop()
+    } else parts.push(part)
+  }
+  return parts.length ? parts.join('/') : null
 }
 
 interface TreeNode {
@@ -84,10 +111,23 @@ export default function CodeReviewPage({
   onBack,
   onOpenFiles,
 }: Props) {
+  const workspaceRef = useRef(workspacePath)
+  workspaceRef.current = workspacePath
+  const diffRequest = useRef(0)
+  const [tab, setTab] = useState<'changes' | 'history'>('changes')
+  const [historyRevision, setHistoryRevision] = useState(0)
+  const [historySelection, setHistorySelection] = useState('')
+  const [confirmation, setConfirmation] = useState<{ root: string; entry: WorkspaceHistoryEntry } | null>(null)
+  const [undoNotice, setUndoNotice] = useState('')
+  const [undonePaths, setUndonePaths] = useState<Set<string>>(new Set())
   const [workspaceDiffs, setWorkspaceDiffs] = useState<FileChange[]>([])
   const [isLoadingDiff, setIsLoadingDiff] = useState(false)
   const [gitInfo, setGitInfo] = useState<GitBranchInfo | null>(null)
-  const hasAgentChanges = Boolean(changes && changes.length > 0)
+  const agentChanges = useMemo(() => (changes || []).flatMap(change => {
+    const path = workspaceRelativePath(change.path, workspacePath)
+    return path ? [{ ...change, path }] : []
+  }), [changes, workspacePath])
+  const hasAgentChanges = agentChanges.length > 0
 
   const [diffScope, setDiffScope] = useState<'workspace' | 'agent'>(
     hasAgentChanges ? 'agent' : 'workspace'
@@ -98,18 +138,24 @@ export default function CodeReviewPage({
   // Fetch real Git diff and branch info from workspace
   const loadWorkspaceDiff = useCallback(async () => {
     if (!workspacePath) return
+    const request = ++diffRequest.current
+    setHistoryRevision(value => value + 1)
     setIsLoadingDiff(true)
     try {
       const [diffs, branch] = await Promise.all([
         workspacePlatform.getWorkspaceGitDiff(workspacePath),
         workspacePlatform.getGitBranchInfo(workspacePath).catch(() => null),
       ])
-      setWorkspaceDiffs(diffs || [])
+      if (workspaceRef.current !== workspacePath || request !== diffRequest.current) return
+      setWorkspaceDiffs((diffs || []).flatMap(change => {
+        const path = workspaceRelativePath(change.path, workspacePath)
+        return path ? [{ ...change, path }] : []
+      }))
       if (branch) setGitInfo(branch)
     } catch (e) {
       console.error('Failed to load workspace git diff:', e)
     } finally {
-      setIsLoadingDiff(false)
+      if (workspaceRef.current === workspacePath && request === diffRequest.current) setIsLoadingDiff(false)
     }
   }, [workspacePath])
 
@@ -117,18 +163,41 @@ export default function CodeReviewPage({
     loadWorkspaceDiff()
   }, [loadWorkspaceDiff])
 
+  const history = useWorkspaceUndo(workspacePath || '', historyRevision, () => { void loadWorkspaceDiff() })
+  useEffect(() => {
+    setConfirmation(null)
+    setHistorySelection('')
+    setUndoNotice('')
+    setUndonePaths(new Set())
+    setWorkspaceDiffs([])
+  }, [workspacePath])
+  const undoConfirmed = async () => {
+    if (!confirmation || confirmation.root !== workspacePath) return
+    if (await history.undo(confirmation.entry.id)) {
+      if (workspaceRef.current !== confirmation.root) return
+      setUndonePaths(previous => new Set([...previous,
+        workspaceRelativePath(confirmation.entry.path, confirmation.root) || '',
+        workspaceRelativePath(confirmation.entry.destination || '', confirmation.root) || '',
+      ]))
+      setDiffScope('workspace')
+      setUndoNotice(`Undone: ${confirmation.entry.label.replace(/^Undo /, '')}`)
+      setConfirmation(null)
+      void loadWorkspaceDiff()
+    }
+  }
+
   const activeChanges = useMemo(() => {
     if (diffScope === 'agent' && hasAgentChanges) {
-      return changes!
+      return agentChanges.filter(change => !undonePaths.has(change.path))
     }
     if (workspaceDiffs.length > 0) {
       return workspaceDiffs
     }
     if (hasAgentChanges) {
-      return changes!
+      return agentChanges.filter(change => !undonePaths.has(change.path))
     }
     return []
-  }, [diffScope, hasAgentChanges, changes, workspaceDiffs])
+  }, [diffScope, hasAgentChanges, agentChanges, workspaceDiffs, undonePaths])
 
   const filteredChanges = useMemo(() => {
     if (!filterQuery.trim()) return activeChanges
@@ -146,6 +215,15 @@ export default function CodeReviewPage({
 
   const currentIndex = Math.max(0, filteredChanges.findIndex((c) => c.path === selectedPath))
   const selectedChange = filteredChanges[currentIndex] || filteredChanges[0]
+
+  const selectedHistory = history.entries.find(entry => entry.id === historySelection) || history.entries[0]
+  const selectedFileHistory = selectedChange && history.entries.find(entry =>
+    workspaceRelativePath(entry.path, workspacePath) === selectedChange.path ||
+    workspaceRelativePath(entry.destination || '', workspacePath) === selectedChange.path)
+  const canUndoFile = Boolean(selectedFileHistory && selectedFileHistory.id === history.entries[0]?.id)
+  const requestUndo = (entry: WorkspaceHistoryEntry) => {
+    if (workspacePath) setConfirmation({ root: workspacePath, entry })
+  }
 
   const totalAdditions = activeChanges.reduce((sum, change) => sum + change.additions, 0)
   const totalDeletions = activeChanges.reduce((sum, change) => sum + change.deletions, 0)
@@ -374,6 +452,27 @@ export default function CodeReviewPage({
         </div>
       </header>
 
+      <div className="review-tabs" role="tablist" aria-label="Review views">
+        <button type="button" role="tab" id="review-changes-tab" aria-selected={tab === 'changes'} aria-controls="review-changes" onClick={() => setTab('changes')}>Changes</button>
+        <button type="button" role="tab" id="review-history-tab" aria-selected={tab === 'history'} aria-controls="review-history" onClick={() => setTab('history')}>File history ({history.entries.length})</button>
+      </div>
+      {history.error && <p className="review-feedback" role="alert">{history.error}</p>}
+      {undoNotice && <p className="review-feedback" role="status">{undoNotice}</p>}
+      {tab === 'history' && <section id="review-history" role="tabpanel" aria-labelledby="review-history-tab" className="review-history-panel">
+        {!workspacePath ? <p>Select a workspace to view file history.</p> : history.loading && history.entries.length === 0 ? <p>Loading file history…</p> : history.entries.length === 0 ? <p>No saved file history in this workspace.</p> : <>
+          <label className="review-history-picker">Saved action
+            <select value={selectedHistory?.id || ''} onChange={event => setHistorySelection(event.target.value)}>
+              {history.entries.map((entry, index) => <option key={entry.id} value={entry.id}>{index === 0 ? 'Latest · ' : ''}{entry.label.replace(/^Undo /, '')}</option>)}
+            </select>
+          </label>
+          {selectedHistory && <>
+            <HistoryDetails entry={selectedHistory} />
+            <button type="button" className="review-undo-button" disabled={history.busy || selectedHistory.id !== history.entries[0]?.id} onClick={() => requestUndo(selectedHistory)}>Undo action…</button>
+            {selectedHistory.id !== history.entries[0]?.id && <p>Undo newer actions first. History is restored in reverse order.</p>}
+          </>}
+        </>}
+      </section>}
+      {tab === 'changes' && <div id="review-changes" role="tabpanel" aria-labelledby="review-changes-tab" className="review-changes-panel">
       {/* Large diff / status banner */}
       <div className="code-review-banner">
         <div className="code-review-banner-left">
@@ -396,7 +495,7 @@ export default function CodeReviewPage({
                 className={`code-review-scope-btn ${diffScope === 'agent' ? 'is-active' : ''}`}
                 onClick={() => setDiffScope('agent')}
               >
-                AI Edits ({changes?.length || 0})
+                AI Edits ({agentChanges.length})
               </button>
             </div>
           ) : (
@@ -455,6 +554,7 @@ export default function CodeReviewPage({
                 <span className="code-review-file-bar-path" title={selectedChange.path}>
                   {selectedChange.path}
                 </span>
+                <button type="button" className="review-undo-button" disabled={!canUndoFile || history.busy} title={canUndoFile ? selectedFileHistory?.label : selectedFileHistory ? 'Undo newer workspace actions first in File history.' : 'No saved undo action for this file.'} onClick={() => selectedFileHistory && requestUndo(selectedFileHistory)}>Undo edit…</button>
                 <span className="code-review-file-bar-stat-add">+{selectedChange.additions}</span>
                 <span className="code-review-file-bar-stat-del">-{selectedChange.deletions}</span>
               </div>
@@ -560,6 +660,8 @@ export default function CodeReviewPage({
           </aside>
         )}
       </div>
+      </div>}
+      {confirmation && confirmation.root === workspacePath && <UndoConfirmation entry={confirmation.entry} busy={history.busy} error={history.error} onCancel={() => setConfirmation(null)} onConfirm={() => { void undoConfirmed() }} />}
     </main>
   )
 }

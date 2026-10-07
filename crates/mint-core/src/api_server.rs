@@ -139,8 +139,28 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
     // Start the cron scheduler so scheduled agent tasks fire while this server is up
     crate::start_cron_scheduler();
 
+    let shutdown = async {
+        #[cfg(unix)]
+        {
+            if let Ok(mut signal) =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            {
+                tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = signal.recv() => {} }
+                return;
+            }
+        }
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    tokio::pin!(shutdown);
     loop {
-        let (mut socket, peer_addr) = match listener.accept().await {
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
+            _ = &mut shutdown => {
+                let _ = tokio::task::spawn_blocking(crate::bg_shell::shutdown).await;
+                return Ok(());
+            }
+        };
+        let (mut socket, peer_addr) = match accepted {
             Ok(val) => val,
             Err(_) => continue,
         };
@@ -303,6 +323,13 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
             }
 
             match (method, route) {
+                ("POST", "/api/html-preview") => {
+                    routes::html_preview::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
+                }
+                ("GET" | "POST", route) if route == "/api/background-jobs" || route.starts_with("/api/background-jobs/") => {
+                    routes::background_jobs::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
+                }
+
                                 ("GET", "/api/status") => {
                     routes::status_health::execute(
                         routes::RequestCtx {
@@ -543,7 +570,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                     )
                     .await;
                 }
-                                ("POST", "/api/chat-sessions/rename") => {
+                                ("POST", "/api/chat-sessions/rename" | "/api/chat-sessions/workspace") => {
                     routes::sessions::execute(
                         routes::RequestCtx {
                             method,
@@ -1136,6 +1163,8 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                 | ("GET", "/api/checkpoints")
                 | ("POST", "/api/checkpoints/rollback")
                 | ("POST", "/api/checkpoints/undo")
+                | ("GET", "/api/workspace-history")
+                | ("POST", "/api/workspace-history/undo")
                 | ("GET", "/api/file/read") => {
                     routes::misc::execute(
                         routes::RequestCtx {
@@ -1589,6 +1618,25 @@ fn authorized_user_id(request_str: &str) -> Option<String> {
     let header = get_header(request_str, "Authorization")?;
     let token = header.strip_prefix("Bearer ")?;
     session_user_id(token.trim())
+}
+
+fn background_request_owner(request: &str) -> Result<Option<String>, &'static str> {
+    let owner = authorized_user_id(request);
+    if get_header(request, "Authorization").is_some() && owner.is_none() {
+        let configured = load_config().ok().and_then(|c| {
+            c.extra
+                .get("apiAuthToken")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
+        if !configured
+            .filter(|t| !t.is_empty())
+            .is_some_and(|token| token_matches(request, &token))
+        {
+            return Err("Session expired or invalid");
+        }
+    }
+    Ok(owner)
 }
 
 fn percent_decode(raw: &str) -> String {

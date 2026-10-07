@@ -1,0 +1,60 @@
+/* Reserve layout space: error notifications must never cover app controls. */
+.mint-error.mint-error-notice {
+  position: static;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 8px 12px;
+  padding: 10px 12px;
+  max-height: min(30vh, 220px);
+  min-width: 0;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-app-region: no-drag;
+}
+
+.mint-error-notice-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.mint-error-notice-content p {
+  margin: 0;
+}
+
+.mint-error-notice-content details {
+  margin-top: 6px;
+}
+
+.mint-error-notice-content summary {
+  cursor: pointer;
+}
+
+.mint-error-notice-content pre {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  font: inherit;
+}
+
+.mint-error-notice-close {
+  position: sticky;
+  top: 0;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.mint-error-notice-close:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}

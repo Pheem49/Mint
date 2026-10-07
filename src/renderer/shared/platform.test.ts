@@ -26,9 +26,30 @@ describe('renderer platform interfaces', () => {
       getWorkspaceSnapshot: vi.fn(), getWorkspaceGitDiff: vi.fn(), getGitBranchInfo: vi.fn(), switchGitBranch: vi.fn(),
       createGitBranch: vi.fn(), checkoutRemoteGitBranch: vi.fn(), getGitGraph: vi.fn(),
       createWorkspaceFile, createWorkspaceFolder: vi.fn(), deleteWorkspaceItem: vi.fn(),
+      moveWorkspaceItem: vi.fn(), listWorkspaceHistory: vi.fn(), undoWorkspaceAction: vi.fn(),
     } satisfies WorkspacePlatform
     installWorkspacePlatform(adapter)
     await expect(workspacePlatform.createWorkspaceFile(operation)).resolves.toEqual(snapshot)
     expect(createWorkspaceFile).toHaveBeenCalledWith(operation)
   })
+})
+
+it('routes background terminal controls through both platform adapters', async () => {
+  const { backgroundPlatform } = await import('./platform')
+  for (const adapter of [desktopAdapter, webAdapter]) {
+    expect(adapter.listBackgroundJobs).toBeTypeOf('function')
+    expect(adapter.getBackgroundJob).toBeTypeOf('function')
+    expect(adapter.stopBackgroundJob).toBeTypeOf('function')
+  }
+  const job = { id: 'bg-backend-1', status: 'running' }
+  const listBackgroundJobs = vi.fn(async () => [job])
+  const getBackgroundJob = vi.fn(async () => ({ ...job, stdout: 'hello', stderr: '' }))
+  const stopBackgroundJob = vi.fn(async () => ({ ...job, status: 'stopping' }))
+  installRendererPlatform(new Proxy({ listBackgroundJobs, getBackgroundJob, stopBackgroundJob }, { get: (target, name) => target[name as keyof typeof target] || vi.fn() }) as any)
+  await expect(backgroundPlatform.list('/Demo')).resolves.toEqual([job])
+  await expect(backgroundPlatform.output(job.id)).resolves.toMatchObject({ stdout: 'hello' })
+  await expect(backgroundPlatform.stop(job.id)).resolves.toMatchObject({ status: 'stopping' })
+  expect(listBackgroundJobs).toHaveBeenCalledWith('/Demo')
+  expect(getBackgroundJob).toHaveBeenCalledWith(job.id)
+  expect(stopBackgroundJob).toHaveBeenCalledWith(job.id)
 })

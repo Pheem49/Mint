@@ -595,6 +595,7 @@ For every JSON-backed card, ensure all properties stay inside their intended obj
     } else {
         rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately.");
     }
+    rules.push("12a. Development servers and watchers must use run_shell with background: true so the tool returns a job_id immediately. For Python use python3 -u -m http.server <port>. Inspect shell_output and verify an HTTP response before claiming a server is ready; a job_id alone only proves it started. Keep existing background jobs alive when finishing a response or cancelling AI work, unless the user asks to stop them. Use kill_shell to stop only the requested job.");
     let mature_rule = format!("13. {}", persona::MATURE_CONTENT_POLICY);
     rules.push(&mature_rule);
 

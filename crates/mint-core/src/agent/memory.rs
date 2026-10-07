@@ -596,6 +596,7 @@ impl MemoryStore {
              WHERE id != ?1
                AND id != ?2
                AND id NOT LIKE 'cron::%'
+               AND (workspace_path IS NULL OR TRIM(workspace_path) = '')
                AND (SELECT COUNT(*) FROM interaction_memories WHERE interaction_memories.chat_id = chat_sessions.id) = 0",
             params![DEFAULT_CONVERSATION_ID, CHAT_CLI_ID],
         );

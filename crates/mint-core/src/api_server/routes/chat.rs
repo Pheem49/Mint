@@ -4,6 +4,37 @@ use tokio::net::TcpStream;
 use super::super::*;
 
 pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpStream) {
+    let owner = match background_request_owner(ctx.request_str) {
+        Ok(owner) => owner,
+        Err(message) => {
+            send_json_response(
+                socket,
+                "401 Unauthorized",
+                &json!({"message": message}).to_string(),
+            )
+            .await;
+            return;
+        }
+    };
+    if ctx.method == "POST" && matches!(ctx.route, "/api/chat" | "/api/chat-stream") {
+        if let Ok(value) = serde_json::from_str::<Value>(ctx.body) {
+            let chat = value
+                .get("chatId")
+                .or_else(|| value.get("chat_id"))
+                .and_then(Value::as_str)
+                .unwrap_or(DEFAULT_CONVERSATION_ID);
+            if !crate::bg_shell::bind_chat_owner(chat, owner) {
+                send_json_response(
+                    socket,
+                    "403 Forbidden",
+                    "{\"message\":\"Conversation belongs to another user\"}",
+                )
+                .await;
+                return;
+            }
+        }
+    }
+
     let RequestCtx {
         method,
         route,

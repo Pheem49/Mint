@@ -197,7 +197,9 @@ pub(super) async fn run_shell(
     let output = {
         let command = command.clone();
         tokio::task::spawn_blocking(move || {
-            run_shell_command(&command, &root, true, &config, Some(&chat_id))
+            crate::bg_shell::with_context(crate::bg_shell::chat_context(&root, &chat_id), || {
+                run_shell_command(&command, &root, true, &config, Some(&chat_id))
+            })
         })
         .await
         .map_err(|e| OrchestrationError::Agent(format!("shell command task panicked: {e}")))?

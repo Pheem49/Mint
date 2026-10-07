@@ -191,6 +191,7 @@ export interface WorkspaceTreeEntry {
 }
 export interface WorkspaceSnapshot { path: string; tree: WorkspaceTreeEntry; git: GitBranchInfo; revision: number }
 export interface WorkspaceOperation { root: string; relativePath: string; revision: number }
+export interface WorkspaceHistoryEntry { id: string; label: string; path: string; kind: string; destination: string | null; expected: string | null; backup: string | null }
 
 export interface VideoGenRequest {
   prompt: string
@@ -353,4 +354,26 @@ export interface CustomProviderConfig {
   apiKey: string
   models: CustomProviderModel[]
   headers: CustomProviderHeader[]
+}
+
+export type BackgroundJobStatus = 'running' | 'stopping' | 'completed' | 'failed' | 'stopped'
+export interface BackgroundJob {
+  id: string
+  command: string
+  cwd: string
+  workspacePath: string
+  chatId: string | null
+  pid: number | null
+  status: BackgroundJobStatus
+  exitCode: number | null
+  error: string | null
+  startedAt: number
+  endedAt: number | null
+  elapsedSeconds: number
+  serverUrl: string | null
+}
+export interface BackgroundJobOutput extends BackgroundJob {
+  stdout: string
+  stderr: string
+  truncated: boolean
 }

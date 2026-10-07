@@ -87,7 +87,7 @@ pub fn resolve(root: &Path, relative: &str) -> Result<PathBuf, String> {
 }
 pub fn create_file(operation: &WorkspaceOperation) -> Result<WorkspaceSnapshot, String> {
     let path = resolve(&operation.root, &operation.relative_path)?;
-    fs::write(path, "").map_err(|e| e.to_string())?;
+    super::workspace_history::create(&operation.root, &path, false)?;
     snapshot(&WorkspaceOperation {
         revision: operation.revision + 1,
         ..operation.clone()
@@ -95,7 +95,7 @@ pub fn create_file(operation: &WorkspaceOperation) -> Result<WorkspaceSnapshot, 
 }
 pub fn create_folder(operation: &WorkspaceOperation) -> Result<WorkspaceSnapshot, String> {
     let path = resolve(&operation.root, &operation.relative_path)?;
-    fs::create_dir_all(path).map_err(|e| e.to_string())?;
+    super::workspace_history::create(&operation.root, &path, true)?;
     snapshot(&WorkspaceOperation {
         revision: operation.revision + 1,
         ..operation.clone()
@@ -103,15 +103,36 @@ pub fn create_folder(operation: &WorkspaceOperation) -> Result<WorkspaceSnapshot
 }
 pub fn delete(operation: &WorkspaceOperation) -> Result<WorkspaceSnapshot, String> {
     let path = resolve(&operation.root, &operation.relative_path)?;
-    if path.is_dir() {
-        fs::remove_dir_all(path)
-    } else {
-        fs::remove_file(path)
-    }
-    .map_err(|e| e.to_string())?;
+    super::workspace_history::record_trash(&operation.root, &path)?;
     snapshot(&WorkspaceOperation {
         revision: operation.revision + 1,
         ..operation.clone()
+    })
+}
+pub fn move_item(
+    operation: &WorkspaceOperation,
+    destination: &str,
+) -> Result<WorkspaceSnapshot, String> {
+    let source = resolve(&operation.root, &operation.relative_path)?;
+    let target = resolve(&operation.root, destination)?;
+    super::workspace_history::move_item(&operation.root, &source, &target)?;
+    snapshot(&WorkspaceOperation {
+        revision: operation.revision + 1,
+        ..operation.clone()
+    })
+}
+
+pub fn undo_last(
+    root: &Path,
+    revision: u64,
+    expected_id: Option<&str>,
+) -> Result<WorkspaceSnapshot, String> {
+    super::workspace_history::undo(root, expected_id)?
+        .ok_or("There is no workspace action to undo")?;
+    snapshot(&WorkspaceOperation {
+        root: root.to_path_buf(),
+        relative_path: "".into(),
+        revision: revision + 1,
     })
 }
 fn canonical_root(root: &Path) -> Result<PathBuf, String> {
@@ -222,6 +243,49 @@ mod tests {
         assert_eq!(
             create_file(&operation).unwrap_err(),
             "workspace path escapes root"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn interface_workspace_trash_preserves_file_and_folder_contents_for_restore() {
+        let root = root().canonicalize().unwrap();
+        fs::write(root.join("note.txt"), "keep this file").unwrap();
+        fs::create_dir(root.join("notes")).unwrap();
+        fs::write(root.join("notes/nested.txt"), "keep nested contents").unwrap();
+
+        for (revision, relative_path) in ["note.txt", "notes"].into_iter().enumerate() {
+            let operation = WorkspaceOperation {
+                root: root.clone(),
+                relative_path: relative_path.into(),
+                revision: revision as u64,
+            };
+            let snapshot = delete(&operation).unwrap();
+            assert_eq!(snapshot.revision, revision as u64 + 1);
+            assert!(!root.join(relative_path).exists());
+            assert!(
+                !snapshot
+                    .tree
+                    .children
+                    .iter()
+                    .any(|entry| entry.name == relative_path)
+            );
+
+            let item = trash::os_limited::list()
+                .unwrap()
+                .into_iter()
+                .find(|item| item.original_path() == root.join(relative_path))
+                .expect("workspace item must be recoverable from system Trash");
+            trash::os_limited::restore_all([item]).unwrap();
+        }
+        assert_eq!(
+            fs::read_to_string(root.join("note.txt")).unwrap(),
+            "keep this file"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("notes/nested.txt")).unwrap(),
+            "keep nested contents"
         );
         fs::remove_dir_all(root).unwrap();
     }

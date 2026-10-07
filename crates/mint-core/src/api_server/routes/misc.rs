@@ -15,6 +15,71 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
         auth_label: _auth_label,
     } = ctx;
     match (method, route) {
+        ("GET", "/api/workspace-history") => {
+            let root = query_param(query, "root")
+                .map(|value| percent_decode(&value))
+                .unwrap_or_default();
+            let result = (|| -> Result<_, String> {
+                if root.trim().is_empty() {
+                    return Err("Workspace root is required".into());
+                }
+                let config = load_config().map_err(|e| e.to_string())?;
+                let root = crate::assert_path_capability(
+                    std::path::Path::new(&root),
+                    crate::Capability::Read,
+                    &config,
+                )
+                .map_err(|e| e.to_string())?;
+                crate::system::workspace_history::list(&root)
+            })();
+            match result {
+                Ok(entries) => {
+                    send_json_response(socket, "200 OK", &json!(entries).to_string()).await
+                }
+                Err(message) => {
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        &json!({ "message": message }).to_string(),
+                    )
+                    .await
+                }
+            }
+        }
+        ("POST", "/api/workspace-history/undo") => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct UndoWorkspaceRequest {
+                root: String,
+                revision: u64,
+                expected_id: Option<String>,
+            }
+            let result = (|| -> Result<_, String> {
+                let request: UndoWorkspaceRequest =
+                    serde_json::from_str(body).map_err(|e| e.to_string())?;
+                let config = load_config().map_err(|e| e.to_string())?;
+                let root = crate::assert_path_capability(
+                    std::path::Path::new(&request.root),
+                    crate::Capability::Write,
+                    &config,
+                )
+                .map_err(|e| e.to_string())?;
+                crate::workspace::undo_last(&root, request.revision, request.expected_id.as_deref())
+            })();
+            match result {
+                Ok(snapshot) => {
+                    send_json_response(socket, "200 OK", &json!(snapshot).to_string()).await
+                }
+                Err(message) => {
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        &json!({ "message": message }).to_string(),
+                    )
+                    .await
+                }
+            }
+        }
         ("POST", "/api/active-model") => {
             #[derive(Deserialize)]
             struct ActiveModelReq {

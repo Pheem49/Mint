@@ -5,7 +5,7 @@ import {
   mergeFileChanges,
   parseFileChangesFromProgress,
 } from '../agentProgress'
-import { catalogPlatform, conversationPlatform, mediaPlatform, runtimePlatform, type SlashResponse } from '../platform'
+import { catalogPlatform, conversationPlatform, mediaPlatform, runtimePlatform, workspacePlatform, type SlashResponse } from '../platform'
 import type { AgentProgress, ChatResponse, ChatSession, DocumentAttachment, PictureEntry, RuntimeStatus } from '../types'
 
 const {
@@ -27,6 +27,7 @@ import ChatPanel, { type ConversationActions, type ConversationViewModel } from 
 import ScreenCaptureDialog from './ScreenCaptureDialog'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import DesktopTitlebar from './DesktopTitlebar'
+import ErrorNotice from './ErrorNotice'
 import type { ModelInteraction } from '@/components/ModelPanel'
 import type { ToolSurface } from './ToolSurfacePage'
 import {
@@ -354,6 +355,7 @@ export default function MintDashboard() {
   const runGenerationRef = useRef(0)
   const conversationCursorRef = useRef<{ chatId: string; cursor: number } | null>(null)
   const historyLoadSerialRef = useRef(0)
+  const sessionListSerialRef = useRef(0)
   const [pendingApprovals, setPendingApprovals] = useState<Record<string, { token: string; approval: any }>>({})
   const autoApprovedChatIdRef = useRef<string | null>(null)
   const isCurrentSession = (chatId: string, generation: number) => matchesActiveSession(
@@ -866,8 +868,10 @@ export default function MintDashboard() {
   }
 
   const refreshChatSessions = useCallback(async () => {
+    const serial = ++sessionListSerialRef.current
     try {
       const sessions = await listChatSessions()
+      if (serial !== sessionListSerialRef.current) return
       setChatSessions((prev) => {
         if (
           prev.length === sessions.length &&
@@ -876,6 +880,7 @@ export default function MintDashboard() {
               s.id === sessions[i]?.id &&
               s.updatedAt === sessions[i]?.updatedAt &&
               s.title === sessions[i]?.title &&
+              s.workspacePath === sessions[i]?.workspacePath &&
               s.messageCount === sessions[i]?.messageCount &&
               s.totalBytes === sessions[i]?.totalBytes
           )
@@ -918,14 +923,41 @@ export default function MintDashboard() {
     })
   }, [conversationId])
 
+  const workspaceUpdateQueues = useRef(new Map<string, Promise<void>>())
   const handleUpdateSessionWorkspace = useCallback(async (sessionId: string, targetPath: string | null) => {
-    try {
+    // Preserve selection order if the user switches folders quickly.
+    const previous = workspaceUpdateQueues.current.get(sessionId) ?? Promise.resolve()
+    const update = previous.catch(() => {}).then(async () => {
       await updateChatSessionWorkspace(sessionId, targetPath)
       await refreshChatSessions()
+    })
+    workspaceUpdateQueues.current.set(sessionId, update)
+    try {
+      await update
     } catch (e) {
       console.error('Failed to update session workspace:', e)
+      setError(errorMessage(e))
+    } finally {
+      if (workspaceUpdateQueues.current.get(sessionId) === update) {
+        workspaceUpdateQueues.current.delete(sessionId)
+      }
     }
   }, [refreshChatSessions])
+
+  const workspaceBindingInFlight = useRef(new Set<string>())
+  useEffect(() => {
+    // Repair only the currently open, unassigned conversation when the user
+    // is working in a selected workspace. Never reassign other recent chats.
+    if (view !== 'workspace' || !workspacePath) return
+    const session = chatSessions.find((item) => item.id === conversationId)
+    if (!session || session.workspacePath) return
+    const key = `${conversationId}\0${workspacePath}`
+    if (workspaceBindingInFlight.current.has(key)) return
+    workspaceBindingInFlight.current.add(key)
+    void handleUpdateSessionWorkspace(conversationId, workspacePath).finally(() => {
+      workspaceBindingInFlight.current.delete(key)
+    })
+  }, [view, workspacePath, conversationId, chatSessions, handleUpdateSessionWorkspace])
 
   const handleBrowseFolderForMove = useCallback(async () => {
     try {
@@ -967,13 +999,6 @@ export default function MintDashboard() {
       changeView('chat')
       conversationActions.compose(query)
     })
-    const unlistenVision = window.api.onVisionReady((image) => {
-      createTrimmedImagePreview(image)
-        .catch(() => image)
-        .then((previewDataUri) => {
-          conversationActions.attachImage({ dataUri: image, previewDataUri, name: 'Screen capture' })
-        })
-    })
     const handleWindowFocus = () => {
       getRuntimeStatus().then(setStatus).catch(() => {})
       window.settingsApi?.getSettings?.().then((loaded: any) => {
@@ -1010,7 +1035,6 @@ export default function MintDashboard() {
       window.removeEventListener('focus', handleWindowFocus)
       unlistenPromise?.then?.((unlisten) => unlisten?.())
       unlistenSpotlight?.then?.((unlisten) => unlisten?.())
-      unlistenVision?.then?.((unlisten) => unlisten?.())
     }
   }, [])
 
@@ -1032,7 +1056,7 @@ export default function MintDashboard() {
     setTimeout(() => setToastMessage((current) => current === nextMessage ? '' : current), 3000)
   }
 
-  const openMintBrowser = async (url: string) => {
+  const openMintBrowser = async (url: string, throwOnError = false) => {
     if (!isDesktopApp) {
       window.open(url, '_blank', 'noopener,noreferrer')
       return
@@ -1042,7 +1066,32 @@ export default function MintDashboard() {
       const { invoke } = await import('@tauri-apps/api/core')
       await invoke('open_mint_browser', { url })
     } catch (error) {
+      if (throwOnError) throw error
       showToast(`Could not open browser: ${String(error)}`)
+    }
+  }
+
+  const openHtmlFile = async (root: string, relativePath: string, mode: 'external' | 'mint') => {
+    if (!isDesktopApp && !['localhost', '127.0.0.1', '[::1]', '::1'].includes(window.location.hostname)) {
+      throw new Error('HTML preview requires a browser on the same machine as the Mint backend.')
+    }
+    const popup = !isDesktopApp && mode === 'external' ? window.open('about:blank', '_blank') : null
+    if (popup) popup.opener = null
+    try {
+      const preview = await workspacePlatform.startHtmlPreview(root, relativePath, !isDesktopApp && mode === 'mint')
+      if (mode === 'mint') {
+        if (isDesktopApp) await openMintBrowser(preview.url, true)
+      } else if (isDesktopApp) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('run_desktop_action', { action: { type: 'open_url', target: preview.url } })
+      } else {
+        if (!popup) throw new Error('Allow browser popups, then open the HTML file again.')
+        popup.location.replace(preview.url)
+      }
+      showToast('HTML preview is running. Use Terminals to view or stop the server.')
+    } catch (error) {
+      popup?.close()
+      throw error
     }
   }
 
@@ -1205,9 +1254,10 @@ export default function MintDashboard() {
     setPlanMode(enabled)
   }
 
-  const updateWorkspacePath = (path: string) => {
+  const updateWorkspacePath = (path: string, persist = true) => {
     const next = path.trim()
     conversationActions.selectWorkspace(next)
+    if (persist) void handleUpdateSessionWorkspace(activeConversationRef.current, next || null)
   }
 
   useEffect(() => {
@@ -1718,12 +1768,7 @@ export default function MintDashboard() {
         if (targetWorkspacePath !== undefined) {
           updateWorkspacePath(targetWorkspacePath || '')
         } else {
-          const currentSession = chatSessions.find((s) => s.id === conversationId)
-          if (!currentSession || !currentSession.workspacePath) {
-            updateWorkspacePath('')
-          } else {
-            updateWorkspacePath(currentSession.workspacePath)
-          }
+          updateWorkspacePath(workspacePath)
         }
 
         if (typeof window !== 'undefined') {
@@ -1792,7 +1837,10 @@ export default function MintDashboard() {
         const wsChange = resp.effects.find((e) => e.kind === 'workspace_changed') as
           | { kind: 'workspace_changed'; path: string }
           | undefined
-        if (wsChange) conversationActions.selectWorkspace(wsChange.path)
+        if (wsChange) updateWorkspacePath(wsChange.path)
+        if (resp.effects.some((effect) => effect.kind === 'workspace_files_changed')) {
+          setWorkspaceRefreshRevision((revision) => revision + 1)
+        }
         const planModeChange = resp.effects.find((e) => e.kind === 'plan_mode_changed') as
           | { kind: 'plan_mode_changed'; enabled: boolean }
           | undefined
@@ -1866,11 +1914,11 @@ export default function MintDashboard() {
     if (session) {
       if (session.workspacePath) {
         if (session.workspacePath !== workspacePath) {
-          updateWorkspacePath(session.workspacePath)
+          updateWorkspacePath(session.workspacePath, false)
         }
       } else {
         if (workspacePath) {
-          updateWorkspacePath('')
+          updateWorkspacePath('', false)
         }
       }
     }
@@ -1881,9 +1929,9 @@ export default function MintDashboard() {
     }
   }
 
-  const handleNewChatInProject = useCallback((targetPath: string) => {
-    clearHistory('New chat', targetPath)
-  }, [])
+  const handleNewChatInProject = (targetPath: string) => {
+    void clearHistory('New chat', targetPath)
+  }
 
   async function deleteConversation(id: string) {
     if (id === 'cli') {
@@ -2258,6 +2306,10 @@ export default function MintDashboard() {
           onCheckForUpdates={checkForUpdatesFromMenu}
           onShowAbout={() => showToast('Mint Agent — AI workspace')}
           workspacePath={workspacePath}
+          workspaceActive={view === 'workspace' && !toolsPanelOpen}
+          workspaceRevision={workspaceRefreshRevision}
+          sending={sending}
+          onWorkspaceUndoError={showToast}
           terminalCount={toolSurfaces.filter((surface) => surface.kind === 'terminal').length}
           sourceNames={workspaceSourceNames}
           recentChanges={recentAgentChanges}
@@ -2265,6 +2317,7 @@ export default function MintDashboard() {
           onRefreshWorkspace={() => setWorkspaceRefreshRevision((revision) => revision + 1)}
         />
       )}
+      {error && <ErrorNotice key={error} message={error} onDismiss={() => setError('')} />}
       <div
         className={`app-body ${(sidebarCollapsed && window.innerWidth > 760) ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''} ${toolsPanelOpen ? 'tool-surface-active' : ''}`}
         style={{
@@ -2407,6 +2460,7 @@ export default function MintDashboard() {
                 onSetMessage={conversationActions.compose}
                 onWorkspaceReady={updateWorkspacePath}
                 refreshRevision={workspaceRefreshRevision}
+                onOpenHtml={openHtmlFile}
               />
             </Suspense>
           )}
@@ -2621,17 +2675,6 @@ export default function MintDashboard() {
           <div className="startup-loading-text">Loading Mint Agent</div>
         </div>
       </div>
-      {error && (
-        <div className="mint-error" style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 100, margin: 0, boxShadow: '0 8px 24px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span>{error}</span>
-          <button onClick={() => setError('')} style={{ background: 'transparent', border: 0, color: 'white', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', padding: 0 }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
-        </div>
-      )}
 
       {isSearchOpen && (
         <Suspense fallback={null}>

@@ -1,7 +1,9 @@
 pub(super) mod auth;
+pub(super) mod background_jobs;
 pub(super) mod chat;
 pub(super) mod cron_mcp;
 pub(super) mod gemini_live;
+pub(super) mod html_preview;
 pub(super) mod linked_folders;
 pub(super) mod media_gen;
 pub(super) mod misc;

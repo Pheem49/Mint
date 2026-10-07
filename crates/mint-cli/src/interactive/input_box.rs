@@ -276,10 +276,10 @@ pub(crate) fn compose_input_box(
     let agent_str = format!(" {DIM}{mode_label}{RESET} {MINT}{}{RESET}", model);
     // Background shell jobs (run_shell(background: true)) still running —
     // shown so they're never invisible between the start and finish notice.
-    let bg_running = mint_core::bg_shell::running_count();
+    let bg_running = mint_core::bg_shell::running_count_for(current_dir);
     let jobs_prefix = if bg_running > 0 {
         format!(
-            "{bg_running} bg shell{} · ",
+            "{bg_running} background terminal{} · /shells · ",
             if bg_running == 1 { "" } else { "s" }
         )
     } else {
@@ -307,10 +307,17 @@ pub(crate) fn compose_input_box(
         String::new()
     };
 
-    lines.push(format!(
-        "{}{}{}{}{}{}",
-        agent_str, status_padding, colored_jobs_prefix, DIM, path_rest, RESET
-    ));
+    if bg_running > 0 && agent_visible_len + path_visible_len >= width {
+        lines.push(format!(
+            "{BLUE}{bg_running} terminal{} · /shells{RESET} {DIM}{mode_label}{RESET}",
+            if bg_running == 1 { "" } else { "s" }
+        ));
+    } else {
+        lines.push(format!(
+            "{}{}{}{}{}{}",
+            agent_str, status_padding, colored_jobs_prefix, DIM, path_rest, RESET
+        ));
+    }
 
     // Compute and append suggestions
     let raw_input: String = input_chars.iter().collect();
@@ -1601,6 +1608,49 @@ mod tests {
 
         assert_eq!(chars.iter().collect::<String>(), "ask [Image #1]");
         assert_eq!(cursor, "ask [Image #1]".chars().count());
+    }
+
+    #[test]
+    fn classic_status_keeps_background_count_visible_during_history_browsing() {
+        let root = std::env::temp_dir().join(format!(
+            "mint-classic-bg-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let config = mint_core::MintConfig {
+            safety_enabled: false,
+            sandbox_mode: "off".into(),
+            ..Default::default()
+        };
+        let job = mint_core::bg_shell::start_background(&root, &config, "sleep 30").unwrap();
+        struct Cleanup(String, std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = mint_core::bg_shell::kill_job(&self.0);
+                let _ = std::fs::remove_dir(&self.1);
+            }
+        }
+        let _cleanup = Cleanup(job.id, root.clone());
+        let (lines, _, _) = compose_input_box(
+            &[],
+            0,
+            "",
+            &"model".repeat(100),
+            "\0history browsing",
+            None,
+            None,
+            &root,
+            false,
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("1 terminal · /shells"))
+        );
     }
 
     #[test]

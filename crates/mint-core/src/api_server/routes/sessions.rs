@@ -92,6 +92,46 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             send_json_response(socket, "500 Internal Server Error", "[]").await;
         }
 
+        ("POST", "/api/chat-sessions/workspace") => {
+            let value = serde_json::from_str::<Value>(body).unwrap_or(Value::Null);
+            let chat_id = value
+                .get("chatId")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|id| !id.is_empty());
+            let workspace = match value.get("workspacePath") {
+                Some(Value::Null) => Some(None),
+                Some(Value::String(path)) => Some(if path.trim().is_empty() {
+                    None
+                } else {
+                    Some(path.trim())
+                }),
+                _ => None,
+            };
+            let (Some(chat_id), Some(workspace)) = (chat_id, workspace) else {
+                send_json_response(
+                    socket,
+                    "400 Bad Request",
+                    "{\"error\":\"chatId and a string or null workspacePath are required\"}",
+                )
+                .await;
+                return;
+            };
+            match MemoryStore::open_default()
+                .and_then(|memory| memory.set_chat_session_workspace(chat_id, workspace))
+            {
+                Ok(()) => send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await,
+                Err(error) => {
+                    send_json_response(
+                        socket,
+                        "500 Internal Server Error",
+                        &json!({"error": error.to_string()}).to_string(),
+                    )
+                    .await
+                }
+            }
+        }
+
         ("POST", "/api/chat-sessions/delete") => {
             let chat_id = query_param(query, "chatId").unwrap_or_default();
             if let Ok(memory) = MemoryStore::open_default() {

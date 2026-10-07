@@ -61,8 +61,11 @@ pub(in crate::orchestration) async fn execute(
 
             match approved {
                 ApprovalOutcome::Approved if input.background => {
-                    let started = crate::bg_shell::start_background(root, config, command)
-                        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+                    let started = crate::bg_shell::with_context(
+                        crate::bg_shell::chat_context(root, chat_id),
+                        || crate::bg_shell::start_background(root, config, command),
+                    )
+                    .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
                     Ok(format!(
                         "job_id: {}\npid: {}\nstatus: running\nUse the 'shell_output' tool with this job_id to check on it, and 'kill_shell' to stop it.",
                         started.id,
@@ -78,11 +81,27 @@ pub(in crate::orchestration) async fn execute(
         }
         "shell_output" => {
             let job_id = required(&input.job_id, "job_id")?;
+            if !crate::bg_shell::accessible(
+                job_id,
+                &crate::bg_shell::chat_context(root, chat_id).owner,
+            ) {
+                return Err(OrchestrationError::Agent(
+                    "No accessible background job with that id".into(),
+                ));
+            }
             crate::bg_shell::poll_output(job_id)
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))
         }
         "kill_shell" => {
             let job_id = required(&input.job_id, "job_id")?;
+            if !crate::bg_shell::accessible(
+                job_id,
+                &crate::bg_shell::chat_context(root, chat_id).owner,
+            ) {
+                return Err(OrchestrationError::Agent(
+                    "No accessible background job with that id".into(),
+                ));
+            }
             crate::bg_shell::kill_job(job_id).map_err(|e| OrchestrationError::Agent(e.to_string()))
         }
         "verify" => {

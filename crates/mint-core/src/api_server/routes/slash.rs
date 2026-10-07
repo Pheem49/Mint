@@ -6,6 +6,18 @@ use super::super::*;
 /// `POST /api/slash` — run a slash command through the shared engine
 /// (`crate::slash`). Body: `{ "input": "/cron", "cwd": "/path" }`.
 pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStream) {
+    let owner = match background_request_owner(ctx.request_str) {
+        Ok(owner) => owner,
+        Err(message) => {
+            send_json_response(
+                socket,
+                "401 Unauthorized",
+                &json!({"message": message}).to_string(),
+            )
+            .await;
+            return;
+        }
+    };
     let RequestCtx {
         method,
         route,
@@ -41,7 +53,35 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                     return;
                 }
             };
-            let response = crate::slash::execute_async(&req, &mut config).await;
+            let trimmed = req.input.trim();
+            let (token, rest) = trimmed
+                .split_once(char::is_whitespace)
+                .unwrap_or((trimmed, ""));
+            let response = if token == "/shells" {
+                let cwd = req
+                    .cwd
+                    .as_deref()
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                match crate::bg_shell::shells_command(rest.trim(), &cwd, &owner, &config) {
+                    Ok(markdown) => crate::slash::SlashResponse::Message { markdown },
+                    Err(error) => crate::slash::SlashResponse::Message {
+                        markdown: error.to_string(),
+                    },
+                }
+            } else if token == "/preview" {
+                let cwd = req
+                    .cwd
+                    .as_deref()
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                match crate::system::html_preview::command(&cwd, rest, owner, &config) {
+                    Ok(markdown) => crate::slash::SlashResponse::Message { markdown },
+                    Err(markdown) => crate::slash::SlashResponse::Message { markdown },
+                }
+            } else {
+                crate::slash::execute_async(&req, &mut config).await
+            };
             if slash_persists_config(&response) {
                 let _ = save_config(&config);
             }

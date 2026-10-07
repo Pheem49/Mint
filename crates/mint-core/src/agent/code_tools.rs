@@ -543,6 +543,15 @@ pub fn apply_code_edits(
     }
     let mut applied = Vec::new();
     for (edit, preview) in edits.iter().zip(prepared) {
+        let pending = crate::system::workspace_history::begin_edit(&root, &preview.path).map_err(
+            |message| CodeInspectionError::Write {
+                path: preview.path.clone(),
+                source: std::io::Error::other(message),
+            },
+        )?;
+        if sha256(&read_optional_content(&preview.path)?) != preview.before_sha256 {
+            return Err(CodeInspectionError::StaleProposal(preview.path.clone()));
+        }
         if let Some(parent) = preview.path.parent() {
             fs::create_dir_all(parent).map_err(|source| CodeInspectionError::Write {
                 path: parent.to_path_buf(),
@@ -550,6 +559,12 @@ pub fn apply_code_edits(
             })?;
         }
         write_atomic(&preview.path, &edit.content)?;
+        pending
+            .commit()
+            .map_err(|message| CodeInspectionError::Write {
+                path: preview.path.clone(),
+                source: std::io::Error::other(message),
+            })?;
         applied.push(AppliedCodeEdit {
             path: preview.path,
             created: !preview.existed,

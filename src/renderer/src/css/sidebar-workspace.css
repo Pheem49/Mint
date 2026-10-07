@@ -1,5 +1,104 @@
 /* desktop: sidebar-workspace.css — split from styles.css, rules kept in original order */
 
+.workspace-file-menu {
+  position: fixed;
+  z-index: 10000;
+  width: 184px;
+  padding: 4px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-surface-raised, #202126);
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, .3));
+  -webkit-app-region: no-drag;
+}
+
+.workspace-file-menu button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm, 5px);
+  background: transparent;
+  color: var(--color-danger, #f87171);
+  font: inherit;
+  font-size: .8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-file-menu button:hover,
+.workspace-file-menu button:focus-visible {
+  background: var(--bg-surface-hover);
+}
+
+.workspace-undo-bar {
+  margin: 12px 8px;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-surface-raised);
+  color: var(--text-primary);
+  font-size: .78rem;
+  overflow-wrap: anywhere;
+}
+.workspace-undo-bar > span { display: block; margin-bottom: 6px; }
+.workspace-undo-bar button {
+  border: 0;
+  border-radius: var(--radius-sm, 5px);
+  padding: 6px 8px;
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workspace-undo-bar button:disabled { opacity: .5; cursor: default; }
+.workspace-undo-bar details { margin-top: 8px; color: var(--text-muted); }
+.workspace-undo-bar summary { cursor: pointer; }
+.workspace-undo-bar ol { padding-left: 18px; }
+.workspace-undo-bar li { margin: 6px 0; }
+.workspace-history-error { padding: 10px; color: var(--color-danger, #f87171); font-size: .8rem; }
+.workspace-file-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, .45);
+}
+.workspace-file-dialog {
+  width: min(420px, 100%);
+  padding: 20px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-surface-raised, #202126);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+}
+.workspace-file-dialog h3 { margin: 0 0 16px; overflow-wrap: anywhere; }
+.workspace-file-dialog label { display: grid; gap: 8px; font-size: .85rem; }
+.workspace-file-dialog input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm, 5px);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font: inherit;
+  box-sizing: border-box;
+}
+.workspace-file-dialog p { color: var(--color-danger, #f87171); font-size: .8rem; }
+.workspace-file-dialog > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.workspace-file-dialog button {
+  padding: 7px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm, 5px);
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
 .toggle-model-btn,
 .change-expression-btn,
 .accessory-cycle-btn,

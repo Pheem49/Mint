@@ -51,6 +51,7 @@ export type SlashEffect =
   | { kind: 'config_changed' }
   | { kind: 'provider_changed'; display: string }
   | { kind: 'workspace_changed'; path: string }
+  | { kind: 'workspace_files_changed' }
   | { kind: 'history_cleared' }
   | { kind: 'fast_mode_changed'; enabled: boolean }
   | { kind: 'multi_agent_changed'; enabled: boolean }
@@ -66,6 +67,9 @@ export type SlashResponse =
   | { kind: 'not_handled' }
 
 export interface MintPlatformApi {
+  listBackgroundJobs(workspace?: string): Promise<import("./types").BackgroundJob[]>
+  getBackgroundJob(id: string): Promise<import("./types").BackgroundJobOutput>
+  stopBackgroundJob(id: string): Promise<import("./types").BackgroundJob>
   authRegister(name: string | undefined, email: string, password: string): Promise<AuthUser>
   runSlashCommand(input: string, cwd?: string | null): Promise<SlashResponse>
   authLogin(email: string, password: string): Promise<AuthUser>
@@ -144,6 +148,10 @@ export interface MintPlatformApi {
   createWorkspaceFile(operation: WorkspaceOperation): Promise<import('./types').WorkspaceSnapshot>
   createWorkspaceFolder(operation: WorkspaceOperation): Promise<import('./types').WorkspaceSnapshot>
   deleteWorkspaceItem(operation: WorkspaceOperation): Promise<import('./types').WorkspaceSnapshot>
+  moveWorkspaceItem(operation: WorkspaceOperation, destination: string): Promise<import('./types').WorkspaceSnapshot>
+  startHtmlPreview(root: string, relativePath: string, mintBrowser?: boolean): Promise<{ url: string; jobId: string }>
+  listWorkspaceHistory(root: string): Promise<import('./types').WorkspaceHistoryEntry[]>
+  undoWorkspaceAction(root: string, revision: number, expectedId?: string): Promise<import('./types').WorkspaceSnapshot>
   selectWorkspaceDirectory(): Promise<string | null>
   selectLinkedFolderPath(): Promise<string | null>
   submitToolApproval(token: string, approved: boolean, answer?: string): Promise<void>
@@ -174,6 +182,10 @@ export type WorkspacePlatform = Pick<
   | 'createWorkspaceFile'
   | 'createWorkspaceFolder'
   | 'deleteWorkspaceItem'
+  | 'moveWorkspaceItem'
+  | 'startHtmlPreview'
+  | 'listWorkspaceHistory'
+  | 'undoWorkspaceAction'
 >
 
 let workspaceAdapter: WorkspacePlatform | undefined
@@ -278,6 +290,12 @@ export const mediaPlatform = {
 }
 
 /** Runtime capabilities and native picker seam. */
+export const backgroundPlatform = {
+  list: operation("listBackgroundJobs"),
+  output: operation("getBackgroundJob"),
+  stop: operation("stopBackgroundJob"),
+}
+
 export const runtimePlatform = {
   appIconPath: () => String(requireRendererPlatform().APP_ICON_PATH ?? './assets/icon.png'),
   getRuntimeStatus: operation('getRuntimeStatus'), setActiveModel: operation('setActiveModel'),
@@ -309,4 +327,8 @@ export const workspacePlatform: WorkspacePlatform = {
   createWorkspaceFile: (...args) => requireWorkspacePlatform().createWorkspaceFile(...args),
   createWorkspaceFolder: (...args) => requireWorkspacePlatform().createWorkspaceFolder(...args),
   deleteWorkspaceItem: (...args) => requireWorkspacePlatform().deleteWorkspaceItem(...args),
+  moveWorkspaceItem: (...args) => requireWorkspacePlatform().moveWorkspaceItem(...args),
+  startHtmlPreview: (...args) => requireWorkspacePlatform().startHtmlPreview(...args),
+  listWorkspaceHistory: (...args) => requireWorkspacePlatform().listWorkspaceHistory(...args),
+  undoWorkspaceAction: (...args) => requireWorkspacePlatform().undoWorkspaceAction(...args),
 }

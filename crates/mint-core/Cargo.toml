@@ -21,6 +21,7 @@ hmac.workspace = true
 hound = "3"
 ignore.workspace = true
 image.workspace = true
+libc = "0.2"
 quick-xml.workspace = true
 regex.workspace = true
 reqwest.workspace = true
@@ -35,10 +36,9 @@ srtlib.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
+trash = "5.2"
 tree-sitter.workspace = true
 tree-sitter-rust.workspace = true
 tree-sitter-typescript.workspace = true
 uuid.workspace = true
-
-
 

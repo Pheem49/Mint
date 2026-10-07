@@ -12,6 +12,7 @@ const SpotlightWindow = lazy(() => import('./components/SpotlightWindow'))
 const WidgetWindow = lazy(() => import('./components/WidgetWindow'))
 const ProactiveGlow = lazy(() => import('./components/ProactiveGlow'))
 const ScreenPicker = lazy(() => import('./components/ScreenPicker'))
+const LiveTranslateControls = lazy(() => import('./components/LiveTranslateControls'))
 const MintDashboard = lazyWithRetry(() => import('./components/MintDashboard'))
 function getCurrentRoute(): string {
   if (typeof window === 'undefined') return '/'
@@ -98,6 +99,13 @@ export default function App() {
     return (
       <Suspense fallback={null}>
         <ScreenPicker />
+      </Suspense>
+    )
+  }
+  if (route.startsWith('/live-translate-controls')) {
+    return (
+      <Suspense fallback={null}>
+        <LiveTranslateControls />
       </Suspense>
     )
   }

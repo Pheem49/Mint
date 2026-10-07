@@ -47,7 +47,9 @@ export const applyTheme = (cfg: any): void => {
   if (typeof document === 'undefined') return
 
   const rawTheme = cfg.theme || 'dark'
-  const surfaceStyle = cfg.surfaceStyle || (cfg.glassBlur === 'none' ? 'opaque' : 'glass')
+  // Match Settings: disabling glass also disables translucent surfaces, even
+  // when an older configuration still contains surfaceStyle: 'glass'.
+  const surfaceStyle = cfg.glassBlur === 'none' ? 'opaque' : (cfg.surfaceStyle || 'glass')
   const accentColor = cfg.accentColor || '#10b981'
   const rgb = hexToRgb(accentColor)
   const contrastText = getContrastText(accentColor)

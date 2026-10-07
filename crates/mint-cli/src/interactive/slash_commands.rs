@@ -237,6 +237,7 @@ async fn execute_core_slash(
                         session.history.clear();
                         ui.clear_transcript();
                     }
+                    SlashEffect::WorkspaceFilesChanged => {}
                     SlashEffect::ThinkingChanged { .. } => {
                         save_needed = true;
                     }
@@ -1625,8 +1626,11 @@ pub async fn handle_slash_command(
         }
 
         "/shells" => {
-            if rest.is_empty() {
-                let jobs = mint_core::bg_shell::list_jobs();
+            if rest.is_empty() || rest == "all" {
+                let jobs: Vec<_> = mint_core::bg_shell::list_jobs()
+                    .into_iter()
+                    .filter(|job| rest == "all" || job.workspace == session.current_dir)
+                    .collect();
                 if jobs.is_empty() {
                     ui.push_notice(
                         "No background shell jobs. The agent starts one when it calls run_shell with background: true."
@@ -1638,6 +1642,7 @@ pub async fn handle_slash_command(
                             mint_core::bg_shell::JobStatus::Running => {
                                 format!("{MINT}running{RESET}")
                             }
+                            mint_core::bg_shell::JobStatus::Stopping => "stopping".to_string(),
                             mint_core::bg_shell::JobStatus::Exited(0) => "exited(0)".to_string(),
                             mint_core::bg_shell::JobStatus::Exited(code) => {
                                 format!("{ERROR}exited({code}){RESET}")
@@ -1656,9 +1661,14 @@ pub async fn handle_slash_command(
                             ""
                         };
                         lines.push(format!(
-                            "  {:<6} [{status_str}] {DIM}{:>4}s{RESET}  {preview}{suffix}",
-                            job.id, job.elapsed_secs,
+                            "  {:<6} [{status_str}] {DIM}{:>4}s{RESET}  {preview}{suffix} · {}",
+                            job.id,
+                            job.elapsed_secs,
+                            job.workspace.display(),
                         ));
+                        if let Some(url) = &job.server_url {
+                            lines.push(format!("    Ready URL: {url}"));
+                        }
                     }
                     ui.push_command_output(lines.join("\n"));
                 }
@@ -1675,6 +1685,10 @@ pub async fn handle_slash_command(
                     Ok(job) => {
                         let mut lines =
                             vec![format!("{BLUE}Job {} — {}{RESET}", job.id, job.command)];
+                        lines.push(format!("Status: {:?} · {}s", job.status, job.elapsed_secs));
+                        if let Some(url) = &job.server_url {
+                            lines.push(format!("Ready URL: {url}"));
+                        }
                         if let Some(pid) = job.pid {
                             lines.push(format!(
                                 "{DIM}pid: {pid}  cwd: {}{RESET}",
@@ -1683,15 +1697,18 @@ pub async fn handle_slash_command(
                         }
                         lines.push(format!("{DIM}stdout:{RESET}\n{}", job.stdout));
                         lines.push(format!("{DIM}stderr:{RESET}\n{}", job.stderr));
+                        if job.truncated {
+                            lines.push("[Older output truncated]".into());
+                        }
                         ui.push_command_output(lines.join("\n"));
                     }
                     Err(_) => ui.push_notice("No such job."),
                 },
-                "kill" if !arg.is_empty() => match mint_core::bg_shell::kill_job(arg) {
+                "kill" | "stop" if !arg.is_empty() => match mint_core::bg_shell::kill_job(arg) {
                     Ok(msg) => ui.push_notice(msg),
                     Err(_) => ui.push_notice("No such job."),
                 },
-                _ => ui.push_notice("Usage: /shells [show <id>|kill <id>]"),
+                _ => ui.push_notice("Usage: /shells [all|show <id>|stop <id>|kill <id>]"),
             }
             Some(SlashResult::Handled)
         }

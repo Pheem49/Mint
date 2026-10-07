@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FileChange } from '../types'
 import WorkspaceContextPopover from './WorkspaceContextPopover'
+import { useWorkspaceUndo } from '../workspaceUndo'
 
 type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West'
 
@@ -20,6 +21,10 @@ interface DesktopTitlebarProps {
   onCheckForUpdates: () => void
   onShowAbout: () => void
   workspacePath: string
+  workspaceActive: boolean
+  workspaceRevision: number
+  sending: boolean
+  onWorkspaceUndoError: (message: string) => void
   terminalCount: number
   sourceNames: string[]
   recentChanges: FileChange[]
@@ -44,6 +49,10 @@ export default function DesktopTitlebar({
   onCheckForUpdates,
   onShowAbout,
   workspacePath,
+  workspaceActive,
+  workspaceRevision,
+  sending,
+  onWorkspaceUndoError,
   terminalCount,
   sourceNames,
   recentChanges,
@@ -57,6 +66,12 @@ export default function DesktopTitlebar({
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [hasEditableFocus, setHasEditableFocus] = useState(false)
   const rootRef = useRef<HTMLElement>(null)
+  const editableRef = useRef<HTMLElement | null>(null)
+  const history = useWorkspaceUndo(workspacePath, workspaceRevision, () => onRefreshWorkspace())
+  const undoWorkspace = workspaceActive && !hasEditableFocus
+  const undoErrorHandler = useRef(onWorkspaceUndoError)
+  undoErrorHandler.current = onWorkspaceUndoError
+  useEffect(() => { if (history.error) undoErrorHandler.current(history.error) }, [history.error])
 
   useEffect(() => {
     let mounted = true
@@ -116,11 +131,13 @@ export default function DesktopTitlebar({
   )
 
   const runEditCommand = (command: 'undo' | 'redo' | 'cut' | 'copy' | 'selectAll') => {
+    if (editableRef.current?.isConnected) editableRef.current.focus()
     if (!isEditable(document.activeElement) && command !== 'copy') return
     document.execCommand(command)
   }
 
   const pasteClipboard = async () => {
+    if (editableRef.current?.isConnected) editableRef.current.focus()
     if (!isEditable(document.activeElement)) return
     try {
       const text = await window.api.readClipboard()
@@ -152,7 +169,14 @@ export default function DesktopTitlebar({
   }, [])
 
   useEffect(() => {
-    const updateEditableFocus = () => setHasEditableFocus(isEditable(document.activeElement))
+    const updateEditableFocus = () => {
+      const target = document.activeElement
+      if (target instanceof Node && rootRef.current?.contains(target)) return
+      const editing = isEditable(target)
+      if (editing) editableRef.current = target as HTMLElement
+      else editableRef.current = null
+      setHasEditableFocus(editing)
+    }
     document.addEventListener('focusin', updateEditableFocus)
     document.addEventListener('focusout', updateEditableFocus)
     return () => {
@@ -173,7 +197,11 @@ export default function DesktopTitlebar({
       if (!modifier || editing) return
 
       const key = event.key.toLowerCase()
-      if (key === 'n') { event.preventDefault(); onNewChat() }
+      if (key === 'z' && !event.shiftKey && workspaceActive) {
+        event.preventDefault()
+        if (!history.busy && !sending) void history.undo()
+      }
+      else if (key === 'n') { event.preventDefault(); onNewChat() }
       else if (key === 'o') { event.preventDefault(); onOpenWorkspace() }
       else if (key === 'b' && event.shiftKey) { event.preventDefault(); onOpenBrowser() }
       else if (key === 'b') { event.preventDefault(); onToggleSidebar() }
@@ -186,7 +214,7 @@ export default function DesktopTitlebar({
     }
     window.addEventListener('keydown', handleShortcut)
     return () => window.removeEventListener('keydown', handleShortcut)
-  }, [zoom, onNewChat, onOpenWorkspace, onOpenBrowser, onOpenSettings, onToggleSidebar, onToggleTerminal])
+  }, [zoom, onNewChat, onOpenWorkspace, onOpenBrowser, onOpenSettings, onToggleSidebar, onToggleTerminal, workspaceActive, history.undo, history.busy, sending])
 
   const runMenuAction = (action: () => void | Promise<void>) => {
     void action()
@@ -202,7 +230,7 @@ export default function DesktopTitlebar({
       { label: 'Quit Mint', shortcut: 'Ctrl+Q', action: () => window.api.quitApp() },
     ],
     Edit: [
-      { label: 'Undo', shortcut: 'Ctrl+Z', disabled: !hasEditableFocus, action: () => runEditCommand('undo') },
+      { label: undoWorkspace ? history.entries[0]?.label || 'Undo workspace action' : 'Undo', shortcut: 'Ctrl+Z', disabled: undoWorkspace ? !history.entries.length || history.busy || sending : !hasEditableFocus, action: async () => { if (undoWorkspace) await history.undo(); else runEditCommand('undo') } },
       { label: 'Redo', shortcut: 'Ctrl+Shift+Z', disabled: !hasEditableFocus, action: () => runEditCommand('redo') },
       { label: 'Cut', shortcut: 'Ctrl+X', disabled: !hasEditableFocus, action: () => runEditCommand('cut') },
       { label: 'Copy', shortcut: 'Ctrl+C', action: () => runEditCommand('copy') },
@@ -253,6 +281,7 @@ export default function DesktopTitlebar({
                 className={`mint-titlebar-menu-button${openMenu === name ? ' is-open' : ''}`}
                 aria-haspopup="menu"
                 aria-expanded={openMenu === name}
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => setOpenMenu((current) => current === name ? null : name)}
               >
                 {name}
@@ -260,7 +289,7 @@ export default function DesktopTitlebar({
               {openMenu === name && (
                 <div className="mint-titlebar-menu" role="menu">
                   {menuItems[name].map((item) => (
-                    <button type="button" role="menuitem" key={item.label} disabled={item.disabled} onClick={() => runMenuAction(item.action)}>
+                    <button type="button" role="menuitem" key={item.label} disabled={item.disabled} onMouseDown={(event) => event.preventDefault()} onClick={() => runMenuAction(item.action)}>
                       <span>{item.label}</span>
                       {item.shortcut && <kbd>{item.shortcut}</kbd>}
                     </button>

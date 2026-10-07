@@ -40,11 +40,13 @@ pub(crate) struct CommandResult {
     pub(crate) stderr: Vec<u8>,
 }
 
-fn spawn_reader(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
+fn spawn_reader(
+    mut pipe: impl Read + Send + 'static,
+    buffer: std::sync::Arc<std::sync::Mutex<crate::bg_shell::CappedBuf>>,
+) -> std::thread::JoinHandle<Vec<u8>> {
     std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = pipe.read_to_end(&mut buf);
-        buf
+        crate::bg_shell::read_stream(&mut pipe, &buffer);
+        buffer.lock().unwrap().data.as_bytes().to_vec()
     })
 }
 
@@ -71,8 +73,12 @@ pub(crate) fn run_with_timeout(
     let mut child = cmd.spawn()?;
     let stdout_pipe = child.stdout.take().expect("stdout was piped");
     let stderr_pipe = child.stderr.take().expect("stderr was piped");
-    let stdout_handle = spawn_reader(stdout_pipe);
-    let stderr_handle = spawn_reader(stderr_pipe);
+    let stdout_buffer =
+        std::sync::Arc::new(std::sync::Mutex::new(crate::bg_shell::CappedBuf::new()));
+    let stderr_buffer =
+        std::sync::Arc::new(std::sync::Mutex::new(crate::bg_shell::CappedBuf::new()));
+    let stdout_handle = spawn_reader(stdout_pipe, stdout_buffer.clone());
+    let stderr_handle = spawn_reader(stderr_pipe, stderr_buffer.clone());
 
     let deadline = Instant::now() + timeout;
     loop {
@@ -93,6 +99,8 @@ pub(crate) fn run_with_timeout(
                 child,
                 stdout_handle,
                 stderr_handle,
+                stdout_buffer,
+                stderr_buffer,
             );
             let stderr = format!(
                 "[mint] Command exceeded {}s, so it was moved to run in the background instead \
@@ -183,6 +191,11 @@ pub fn run_shell_command(
     config: &MintConfig,
     chat_id: Option<&str>,
 ) -> Result<ShellOutput, ShellError> {
+    if crate::bg_shell::is_shutting_down() {
+        return Err(ShellError::Execute(std::io::Error::other(
+            "Mint backend is shutting down",
+        )));
+    }
     let classification = classify_shell_command(command);
     if classification.tier == SafetyTier::Blocked {
         return Err(ShellError::Blocked {

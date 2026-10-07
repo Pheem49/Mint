@@ -128,6 +128,7 @@ pub enum SlashEffect {
     WorkspaceChanged {
         path: String,
     },
+    WorkspaceFilesChanged,
     /// `/clear` — caller wipes the current conversation.
     HistoryCleared,
     FastModeChanged {
@@ -194,6 +195,10 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
     };
 
     match token.as_str() {
+        "/shells" if !req.is_cli() => match crate::bg_shell::shells_command(rest, &req.workspace(), &None, config) {
+            Ok(text) => message(text), Err(err) => error(err.to_string()),
+        },
+        "/preview" => match crate::system::html_preview::command(&req.workspace(), rest, None, config) { Ok(text) => message(text), Err(err) => error(err) },
         "/help" => cmd_help(req.is_cli()),
         "/init" => SlashResponse::ForwardToAgent {
             prompt: INIT_AGENTS_MD_PROMPT.to_string(),
@@ -270,6 +275,10 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             }
         }
         "/rewind" => cmd_rewind(req, rest),
+        "/history" | "/undo" => {
+            if !rest.trim().is_empty() { error(format!("Usage: {token}")) }
+            else { cmd_workspace_history(req, token == "/undo", config) }
+        }
         "/fast" => match parse_on_off(rest) {
             None if rest.is_empty() => needs_on_off("/fast", "Fast Mode (hide thinking)"),
             None => error("Usage: /fast [on|off]"),
@@ -572,6 +581,44 @@ fn cmd_bool_toggle(
                 ),
                 effects: vec![SlashEffect::ConfigChanged],
             }
+        }
+    }
+}
+
+fn cmd_workspace_history(req: &SlashRequest, undo: bool, config: &MintConfig) -> SlashResponse {
+    let capability = if undo {
+        crate::Capability::Write
+    } else {
+        crate::Capability::Read
+    };
+    let root = match crate::assert_path_capability(&req.workspace(), capability, config) {
+        Ok(root) => root,
+        Err(reason) => return error(reason),
+    };
+    if undo {
+        match crate::system::workspace_history::undo(&root, None) {
+            Ok(Some(entry)) => SlashResponse::Applied {
+                markdown: format!("✅ {}", entry.label),
+                effects: vec![SlashEffect::WorkspaceFilesChanged],
+            },
+            Ok(None) => message("There is no workspace action to undo."),
+            Err(reason) => error(reason),
+        }
+    } else {
+        match crate::system::workspace_history::list(&root) {
+            Ok(entries) if entries.is_empty() => message(
+                "No workspace file history yet. File edits are backed up before changes, including projects without Git.",
+            ),
+            Ok(entries) => message(format!(
+                "Recent workspace file actions (newest first):\n\n{}\n\nUse `/undo` to undo the latest action. Changed files and occupied restore paths are protected.",
+                entries
+                    .iter()
+                    .take(20)
+                    .map(|entry| format!("- {}", entry.label.trim_start_matches("Undo ")))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )),
+            Err(reason) => error(reason),
         }
     }
 }

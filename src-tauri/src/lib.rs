@@ -18,15 +18,15 @@ use mint_core::browser::{
 use desktop::{
     ActionResult, CaptureRect, DesktopAction, capture_screen, capture_translation_region,
     close_window, emit_to_main, execute_action, hide_window, integration_status,
-    open_desktop_window, position_widget, resize_window, translate_captured_region,
-    translate_screen_region,
+    open_desktop_window, position_widget, reset_live_translation_source, resize_window,
+    translate_captured_region,
 };
 use events::start_system_events;
 use headless::{run_next_task, start_headless_queue};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use tokio::sync::oneshot;
 
@@ -264,8 +264,8 @@ const MINT_BROWSER_SHELL_HEIGHT: u32 = 92;
 const MINT_BROWSER_SUGGESTIONS_HEIGHT: u32 = 164;
 static MINT_BROWSER_SUGGESTION_QUERY: LazyLock<Mutex<String>> =
     LazyLock::new(|| Mutex::new(String::new()));
-static PENDING_TRANSLATION_PREVIEW: LazyLock<Mutex<Option<String>>> =
-    LazyLock::new(|| Mutex::new(None));
+static LIVE_TRANSLATE_PASSTHROUGH: AtomicBool = AtomicBool::new(false);
+static LIVE_TRANSLATE_AREA_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 fn position_mint_browser_suggestions(app: &AppHandle) -> Result<(), String> {
     let browser = app
@@ -775,6 +775,34 @@ async fn delete_workspace_item(
 }
 
 #[tauri::command]
+async fn move_workspace_item(
+    operation: mint_core::workspace::WorkspaceOperation,
+    destination: String,
+) -> Result<mint_core::workspace::WorkspaceSnapshot, String> {
+    mint_core::workspace::move_item(&operation, &destination)
+}
+
+#[tauri::command]
+async fn list_workspace_history(
+    root: String,
+) -> Result<Vec<mint_core::system::workspace_history::HistoryEntry>, String> {
+    mint_core::system::workspace_history::list(std::path::Path::new(&root))
+}
+
+#[tauri::command]
+async fn undo_workspace_action(
+    root: String,
+    revision: u64,
+    expected_id: Option<String>,
+) -> Result<mint_core::workspace::WorkspaceSnapshot, String> {
+    mint_core::workspace::undo_last(
+        std::path::Path::new(&root),
+        revision,
+        expected_id.as_deref(),
+    )
+}
+
+#[tauri::command]
 async fn select_workspace_directory() -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(select_workspace_directory_blocking)
         .await
@@ -886,7 +914,12 @@ fn inspect_shell_command(command: String) -> mint_core::ShellClassification {
 }
 
 #[tauri::command]
-async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatResponse, String> {
+async fn send_chat_message(
+    app: AppHandle,
+    request: ChatRequest,
+    owner_token: Option<String>,
+) -> Result<ChatResponse, String> {
+    bind_background_owner(&request, owner_token)?;
     let mut config = load_config().map_err(|error| error.to_string())?;
     if let Some(ref path) = request.workspace_path {
         if !path.trim().is_empty()
@@ -1055,7 +1088,9 @@ async fn stream_chat_message(
     app: AppHandle,
     request: ChatRequest,
     on_event: Channel<DesktopStreamEvent>,
+    owner_token: Option<String>,
 ) -> Result<ChatResponse, String> {
+    bind_background_owner(&request, owner_token)?;
     let mut config = load_config().map_err(|error| error.to_string())?;
     if let Some(ref path) = request.workspace_path {
         if !path.trim().is_empty()
@@ -1745,11 +1780,133 @@ fn delete_subagent(source_path: String) -> Result<(), String> {
     core_delete_subagent(&source_path)
 }
 
+fn background_owner(token: Option<String>) -> Result<Option<String>, String> {
+    match token {
+        Some(token) => mint_core::session_user_id(&token)
+            .map(Some)
+            .ok_or_else(|| "401: Session expired".into()),
+        None => Ok(None),
+    }
+}
+fn bind_background_owner(request: &ChatRequest, token: Option<String>) -> Result<(), String> {
+    let owner = background_owner(token)?;
+    let chat = request
+        .chat_id
+        .as_deref()
+        .unwrap_or(mint_core::DEFAULT_CONVERSATION_ID);
+    if mint_core::bg_shell::bind_chat_owner(chat, owner) {
+        Ok(())
+    } else {
+        Err("403: Conversation belongs to another user".into())
+    }
+}
+
+#[tauri::command]
+async fn start_html_preview(
+    root: String,
+    relative_path: String,
+    owner_token: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let config = load_config().map_err(|e| e.to_string())?;
+    let owner = background_owner(owner_token)?;
+    let preview = tokio::task::spawn_blocking(move || {
+        mint_core::system::html_preview::start(
+            std::path::Path::new(&root),
+            &relative_path,
+            owner,
+            &config,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let url = preview["url"].as_str().ok_or("Preview URL unavailable")?;
+    reqwest::Client::new()
+        .head(url)
+        .timeout(std::time::Duration::from_secs(2))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?;
+    Ok(preview)
+}
+
+#[tauri::command]
+fn list_background_jobs(
+    workspace: Option<String>,
+    owner_token: Option<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let config = load_config().map_err(|e| e.to_string())?;
+    let workspace = workspace
+        .map(|path| {
+            mint_core::assert_path_capability(
+                std::path::Path::new(&path),
+                mint_core::Capability::Read,
+                &config,
+            )
+        })
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    let owner = background_owner(owner_token)?;
+    Ok(mint_core::bg_shell::list_json(&owner, workspace.as_deref())
+        .into_iter()
+        .filter(|j| {
+            j["workspacePath"].as_str().is_some_and(|p| {
+                mint_core::assert_path_capability(
+                    std::path::Path::new(p),
+                    mint_core::Capability::Read,
+                    &config,
+                )
+                .is_ok()
+            })
+        })
+        .collect())
+}
+#[tauri::command]
+fn get_background_job(
+    id: String,
+    owner_token: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let owner = background_owner(owner_token)?;
+    if !mint_core::bg_shell::accessible(&id, &owner) {
+        return Err("Background job not found".into());
+    }
+    let job = mint_core::bg_shell::job_json(&id, true).map_err(|e| e.to_string())?;
+    let config = load_config().map_err(|e| e.to_string())?;
+    let path = job["workspacePath"].as_str().ok_or("Missing workspace")?;
+    mint_core::assert_path_capability(
+        std::path::Path::new(path),
+        mint_core::Capability::Read,
+        &config,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(job)
+}
+#[tauri::command]
+fn stop_background_job(
+    id: String,
+    owner_token: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let job = get_background_job(id.clone(), owner_token)?;
+    let config = load_config().map_err(|e| e.to_string())?;
+    let path = job["workspacePath"].as_str().ok_or("Missing workspace")?;
+    let capability = if job["managedService"] == true {
+        mint_core::Capability::Read
+    } else {
+        mint_core::Capability::Write
+    };
+    mint_core::assert_path_capability(std::path::Path::new(path), capability, &config)
+        .map_err(|e| e.to_string())?;
+    mint_core::bg_shell::kill_job(&id).map_err(|e| e.to_string())?;
+    mint_core::bg_shell::job_json(&id, false).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn run_slash_command(
     app: AppHandle,
     input: String,
     cwd: Option<String>,
+    owner_token: Option<String>,
 ) -> Result<mint_core::slash::SlashResponse, String> {
     use mint_core::slash::{SlashEffect, SlashResponse};
     let mut config = load_config().map_err(|error| error.to_string())?;
@@ -1758,7 +1915,37 @@ async fn run_slash_command(
         cwd,
         surface: Some("desktop".to_string()),
     };
-    let response = mint_core::slash::execute_async(&request, &mut config).await;
+    let trimmed = request.input.trim();
+    let (token, rest) = trimmed
+        .split_once(char::is_whitespace)
+        .unwrap_or((trimmed, ""));
+    let response = if token == "/shells" {
+        let owner = background_owner(owner_token)?;
+        let cwd = request
+            .cwd
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        match mint_core::bg_shell::shells_command(rest.trim(), &cwd, &owner, &config) {
+            Ok(markdown) => SlashResponse::Message { markdown },
+            Err(error) => SlashResponse::Message {
+                markdown: error.to_string(),
+            },
+        }
+    } else if token == "/preview" {
+        let owner = background_owner(owner_token)?;
+        let cwd = request
+            .cwd
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        match mint_core::system::html_preview::command(&cwd, rest, owner, &config) {
+            Ok(markdown) => SlashResponse::Message { markdown },
+            Err(markdown) => SlashResponse::Message { markdown },
+        }
+    } else {
+        mint_core::slash::execute_async(&request, &mut config).await
+    };
 
     let persists_config = matches!(
         &response,
@@ -2145,6 +2332,12 @@ fn hide_desktop_window(app: AppHandle, label: String) -> Result<(), String> {
 fn close_desktop_window(app: AppHandle, label: String) -> Result<(), String> {
     close_window(&app, &label)?;
     if label == "screen-picker" {
+        if let Some(controls) = app.get_webview_window("live-translate-controls") {
+            let _ = controls.close();
+        }
+        LIVE_TRANSLATE_PASSTHROUGH.store(false, Ordering::SeqCst);
+        LIVE_TRANSLATE_AREA_ACTIVE.store(false, Ordering::SeqCst);
+        reset_live_translation_source();
         if let Some(main) = app.get_webview_window("main") {
             main.show().map_err(|error| error.to_string())?;
             main.set_focus().map_err(|error| error.to_string())?;
@@ -2189,11 +2382,6 @@ async fn run_native_plugin(name: String, instruction: String) -> Result<String, 
 }
 
 #[tauri::command]
-fn capture_silent_screen() -> Result<String, String> {
-    capture_screen()
-}
-
-#[tauri::command]
 async fn capture_chat_screen(app: AppHandle) -> Result<String, String> {
     let window = app
         .get_webview_window("main")
@@ -2209,12 +2397,6 @@ async fn capture_chat_screen(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn read_clipboard_image() -> Result<String, String> {
     desktop::read_clipboard_image()
-}
-
-#[tauri::command]
-async fn translate_capture_region(rect: CaptureRect) -> Result<String, String> {
-    let config = load_config().map_err(|error| error.to_string())?;
-    translate_screen_region(&config, rect).await
 }
 
 #[tauri::command]
@@ -2285,10 +2467,10 @@ async fn type_in_browser(
 }
 
 #[tauri::command]
-fn start_screen_capture(app: AppHandle, image: String) -> Result<(), String> {
-    *PENDING_TRANSLATION_PREVIEW
-        .lock()
-        .map_err(|_| "translation preview is unavailable".to_string())? = Some(image);
+fn start_live_translate(app: AppHandle) -> Result<(), String> {
+    LIVE_TRANSLATE_PASSTHROUGH.store(false, Ordering::SeqCst);
+    LIVE_TRANSLATE_AREA_ACTIVE.store(false, Ordering::SeqCst);
+    reset_live_translation_source();
     let main = app.get_webview_window("main");
     if let Some(window) = &main {
         window.hide().map_err(|error| error.to_string())?;
@@ -2304,17 +2486,107 @@ fn start_screen_capture(app: AppHandle, image: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn take_screen_capture_preview() -> Result<Option<String>, String> {
-    Ok(PENDING_TRANSLATION_PREVIEW
-        .lock()
-        .map_err(|_| "translation preview is unavailable".to_string())?
-        .take())
+fn open_live_translate_controls(app: AppHandle) -> Result<(), String> {
+    open_desktop_window(&app, "live-translate-controls")?;
+    let picker = app
+        .get_webview_window("screen-picker")
+        .ok_or_else(|| "live translation window is unavailable".to_string())?;
+    let controls = app
+        .get_webview_window("live-translate-controls")
+        .ok_or_else(|| "live translation controls are unavailable".to_string())?;
+    let picker_position = picker.inner_position().map_err(|error| error.to_string())?;
+    let picker_size = picker.inner_size().map_err(|error| error.to_string())?;
+    let controls_size = controls.outer_size().map_err(|error| error.to_string())?;
+    let x = picker_position.x + (picker_size.width as i32 - controls_size.width as i32) / 2;
+    let y = picker_position.y + 12;
+    controls
+        .set_position(tauri::PhysicalPosition::new(x, y))
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveTranslateGeometry {
+    x: i32,
+    y: i32,
+    scale_factor: f64,
+    window_capture: bool,
 }
 
 #[tauri::command]
-fn submit_screen_selection(app: AppHandle, image: String) {
-    emit_to_main(&app, "vision-ready", image);
-    let _ = close_desktop_window(app, "screen-picker".into());
+fn live_translate_geometry(app: AppHandle) -> Result<LiveTranslateGeometry, String> {
+    let window = app
+        .get_webview_window("screen-picker")
+        .ok_or_else(|| "live translation window is unavailable".to_string())?;
+    let position = window.inner_position().map_err(|error| error.to_string())?;
+    let scale_factor = window.scale_factor().map_err(|error| error.to_string())?;
+    let monitors = window
+        .available_monitors()
+        .map_err(|error| error.to_string())?;
+    let root_x = monitors
+        .iter()
+        .map(|monitor| monitor.position().x)
+        .min()
+        .unwrap_or(0);
+    let root_y = monitors
+        .iter()
+        .map(|monitor| monitor.position().y)
+        .min()
+        .unwrap_or(0);
+    Ok(LiveTranslateGeometry {
+        x: if matches!(std::env::var("XDG_SESSION_TYPE").as_deref(), Ok("x11")) {
+            position.x
+        } else {
+            position.x - root_x
+        },
+        y: if matches!(std::env::var("XDG_SESSION_TYPE").as_deref(), Ok("x11")) {
+            position.y
+        } else {
+            position.y - root_y
+        },
+        scale_factor,
+        window_capture: matches!(std::env::var("XDG_SESSION_TYPE").as_deref(), Ok("x11")),
+    })
+}
+
+fn apply_live_translate_passthrough(
+    window: &tauri::WebviewWindow,
+    enabled: bool,
+) -> Result<(), String> {
+    if enabled {
+        window
+            .set_ignore_cursor_events(true)
+            .map_err(|error| error.to_string())?;
+        if let Err(error) = window.set_focusable(false) {
+            let _ = window.set_ignore_cursor_events(false);
+            return Err(error.to_string());
+        }
+    } else {
+        window
+            .set_ignore_cursor_events(false)
+            .map_err(|error| error.to_string())?;
+        window
+            .set_focusable(true)
+            .map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+    }
+    LIVE_TRANSLATE_PASSTHROUGH.store(enabled, Ordering::SeqCst);
+    let _ = window.emit("live-translate-interaction-mode", !enabled);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_live_translate_passthrough(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let window = app
+        .get_webview_window("screen-picker")
+        .ok_or_else(|| "live translation window is unavailable".to_string())?;
+    apply_live_translate_passthrough(&window, enabled)?;
+    LIVE_TRANSLATE_AREA_ACTIVE.store(enabled, Ordering::SeqCst);
+    if !enabled {
+        reset_live_translation_source();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -2437,8 +2709,11 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
 fn install_shortcuts(app: &AppHandle) -> tauri::Result<()> {
     let main_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
     let spotlight_shortcut = Shortcut::new(Some(Modifiers::ALT), Code::Space);
+    let live_translate_shortcut =
+        Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyL);
     let main_handler = main_shortcut;
     let spotlight_handler = spotlight_shortcut;
+    let live_translate_handler = live_translate_shortcut;
     app.plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(move |app, shortcut, event| {
@@ -2455,12 +2730,20 @@ fn install_shortcuts(app: &AppHandle) -> tauri::Result<()> {
                     }
                 } else if shortcut == &spotlight_handler {
                     let _ = open_desktop_window(app, "spotlight");
+                } else if shortcut == &live_translate_handler
+                    && LIVE_TRANSLATE_AREA_ACTIVE.load(Ordering::SeqCst)
+                    && let Some(window) = app.get_webview_window("screen-picker")
+                    && window.is_visible().unwrap_or(false)
+                {
+                    let enabled = !LIVE_TRANSLATE_PASSTHROUGH.load(Ordering::SeqCst);
+                    let _ = apply_live_translate_passthrough(&window, enabled);
                 }
             })
             .build(),
     )?;
     let _ = app.global_shortcut().register(main_shortcut);
     let _ = app.global_shortcut().register(spotlight_shortcut);
+    let _ = app.global_shortcut().register(live_translate_shortcut);
     Ok(())
 }
 
@@ -2538,6 +2821,9 @@ pub fn run() {
             create_workspace_file,
             create_workspace_folder,
             delete_workspace_item,
+            move_workspace_item,
+            list_workspace_history,
+            undo_workspace_action,
             generate_images,
             generate_video,
             select_workspace_directory,
@@ -2580,6 +2866,10 @@ pub fn run() {
             save_subagent,
             delete_subagent,
             run_slash_command,
+            list_background_jobs,
+            start_html_preview,
+            get_background_job,
+            stop_background_job,
             list_cron_jobs,
             add_cron_job,
             remove_cron_job,
@@ -2613,10 +2903,8 @@ pub fn run() {
             run_desktop_action,
             get_integration_inventory,
             run_native_plugin,
-            capture_silent_screen,
             capture_chat_screen,
             read_clipboard_image,
-            translate_capture_region,
             capture_translation_frame,
             translate_captured_frame,
             get_smart_context,
@@ -2625,9 +2913,10 @@ pub fn run() {
             read_browser_page,
             click_browser_selector,
             type_in_browser,
-            start_screen_capture,
-            take_screen_capture_preview,
-            submit_screen_selection,
+            start_live_translate,
+            open_live_translate_controls,
+            live_translate_geometry,
+            set_live_translate_passthrough,
             submit_spotlight,
             set_ai_state,
             toggle_proactive,
@@ -2646,6 +2935,7 @@ pub fn run() {
             // the last window closing.
             if let tauri::RunEvent::Exit = event {
                 mint_core::close_all_mcp_sessions();
+                mint_core::bg_shell::shutdown();
             }
         });
 }

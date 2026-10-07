@@ -323,6 +323,7 @@ fn log_panic_to_file(message: &str) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let _background_shutdown = mint_core::bg_shell::ShutdownGuard;
     install_panic_hook();
     let mut cli = Cli::parse();
 

@@ -845,17 +845,16 @@ export async function listChatSessions(): Promise<ChatSession[]> {
 
 export async function updateChatSessionWorkspace(chatId: string, workspacePath: string | null): Promise<void> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
-    const API_BASE = getApiBase();
-    try {
-      await authFetch(`${API_BASE}/chat-sessions/workspace`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId, workspacePath })
-      });
-    } catch (e) {
-      console.error("Failed to update chat session workspace on local server:", e);
+    const res = await authFetch(`${getApiBase()}/chat-sessions/workspace`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId, workspacePath })
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => null)
+      throw new Error(data?.error || `Could not save conversation workspace (HTTP ${res.status})`)
     }
-    return;
+    return
   }
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('update_chat_session_workspace', { chatId, workspacePath })
@@ -1258,16 +1257,6 @@ export function installTauriAdapters() {
       startDragging: async () => {},
     };
 
-    (window as any).screenPickerApi = {
-      onScreenshot: () => {},
-      sendSelection: () => {},
-      startContinuousTranslation: () => {},
-      stopContinuousTranslation: () => {},
-      onTranslationResult: () => {},
-      closePicker: () => {},
-      setOverlayInteractable: () => {},
-    };
-
     (window as any).api = {
       sendMessage: async (message: string, imageDataUri?: string | null, audioDataUri?: string | null, documentAttachment?: DocumentAttachment | null) => {
         try {
@@ -1371,8 +1360,6 @@ export function installTauriAdapters() {
         })
       },
       startVision: () => {},
-      onVisionReady: async () => () => {},
-      captureSilentScreen: async () => '',
       getSmartContext: async () => {
         try {
           const res = await authFetch(`${API_BASE}/smart-context`);
@@ -1530,58 +1517,6 @@ export function installTauriAdapters() {
     startDragging: async () => {},
   }
 
-  window.screenPickerApi = {
-    onScreenshot: async (callback) => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      try {
-        const image = await captureSharedScreen()
-        callback(image)
-      } catch (reason) {
-        console.warn('Screen share capture failed, falling back to native capture:', reason)
-        void invoke<string>('capture_silent_screen').then(callback)
-      }
-    },
-    sendSelection: async (image) => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return void invoke('submit_screen_selection', { image })
-    },
-    startContinuousTranslation: (rect) => {
-      let translationTimer: ReturnType<typeof setInterval> | null = null
-      const translate = async () => {
-        const { invoke } = await import('@tauri-apps/api/core')
-        void invoke<string>('translate_capture_region', { rect })
-          .then((text) => window.dispatchEvent(new CustomEvent('mint-translation', { detail: text })))
-          .catch((reason) => {
-            window.dispatchEvent(new CustomEvent('mint-translation', { detail: String(reason) }))
-          })
-      }
-      translate()
-      translationTimer = setInterval(translate, 3000)
-      
-      // Clean up helper attached to window if needed
-      if ((window as any)._stopTranslate) (window as any)._stopTranslate()
-      ;(window as any)._stopTranslate = () => {
-        if (translationTimer) clearInterval(translationTimer)
-      }
-    },
-    stopContinuousTranslation: () => {
-      if ((window as any)._stopTranslate) {
-        (window as any)._stopTranslate()
-      }
-    },
-    onTranslationResult: (callback) => {
-      window.addEventListener('mint-translation', ((event: CustomEvent<string>) => {
-        callback(event.detail)
-      }) as EventListener)
-    },
-    closePicker: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      return invoke('close_desktop_window', { label: getCurrentWindow().label })
-    },
-    setOverlayInteractable: () => {},
-  }
-
   window.api = {
     sendMessage: (message, imageDataUri, audioDataUri, documentAttachment) => sendChatMessage(message, imageDataUri, audioDataUri, undefined, documentAttachment),
     closeWindow: async () => {
@@ -1627,22 +1562,7 @@ export function installTauriAdapters() {
     onSettingsChanged: settingsChanged,
     startVision: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
-      let image: string
-      try {
-        image = await captureSharedScreen()
-      } catch (reason) {
-        console.warn('Screen share capture failed before opening picker:', reason)
-        image = await invoke<string>('capture_silent_screen')
-      }
-      return invoke('start_screen_capture', { image })
-    },
-    onVisionReady: async (callback) => {
-      const { listen } = await import('@tauri-apps/api/event')
-      return listen<string>('vision-ready', (event) => callback(event.payload))
-    },
-    captureSilentScreen: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('capture_silent_screen')
+      return invoke('start_live_translate')
     },
     getSmartContext: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
@@ -1692,46 +1612,6 @@ export function installTauriAdapters() {
       const { invoke } = await import('@tauri-apps/api/core')
       return void invoke('set_ai_state', { state })
     },
-  }
-}
-
-async function captureSharedScreen(): Promise<string> {
-  // On Linux (especially under Wayland/WebKitGTK), getDisplayMedia often returns a black screen
-  // or fails silently. Bypass it to force fallback to native screenshot commands.
-  if (navigator.userAgent.toLowerCase().includes('linux')) {
-    throw new Error('Linux detected, bypassing getDisplayMedia to use native screenshot tools')
-  }
-
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    throw new Error('getDisplayMedia is not available')
-  }
-
-  const stream = await navigator.mediaDevices.getDisplayMedia({
-    video: true,
-    audio: false,
-  })
-  try {
-    const video = document.createElement('video')
-    video.srcObject = stream
-    video.muted = true
-    await video.play()
-    await new Promise<void>((resolve) => {
-      if (video.videoWidth > 0 && video.videoHeight > 0) {
-        resolve()
-      } else {
-        video.onloadedmetadata = () => resolve()
-      }
-    })
-
-    const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth || window.screen.width
-    canvas.height = video.videoHeight || window.screen.height
-    const context = canvas.getContext('2d')
-    if (!context) throw new Error('Unable to create screen capture canvas')
-    context.drawImage(video, 0, 0, canvas.width, canvas.height)
-    return canvas.toDataURL('image/png')
-  } finally {
-    stream.getTracks().forEach((track) => track.stop())
   }
 }
 
@@ -2088,6 +1968,36 @@ export async function deleteWorkspaceItem(operation: import('../shared/types').W
   if (typeof window === 'undefined' || !isTauriRuntime()) throw new Error('Workspace files are only available in the desktop app.')
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke('delete_workspace_item', { operation })
+}
+
+export async function moveWorkspaceItem(operation: import('../shared/types').WorkspaceOperation, destination: string): Promise<import('../shared/types').WorkspaceSnapshot> {
+  if (!isTauriRuntime()) throw new Error('Workspace file management is only available in the desktop app.')
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('move_workspace_item', { operation, destination })
+}
+
+export async function listWorkspaceHistory(root: string): Promise<import('../shared/types').WorkspaceHistoryEntry[]> {
+  if (!isTauriRuntime()) {
+    const response = await authFetch(`${getApiBase()}/workspace-history?root=${encodeURIComponent(root)}`)
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.message || 'Failed to read workspace history.')
+    return data
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('list_workspace_history', { root })
+}
+
+export async function undoWorkspaceAction(root: string, revision: number, expectedId?: string): Promise<import('../shared/types').WorkspaceSnapshot> {
+  if (!isTauriRuntime()) {
+    const response = await authFetch(`${getApiBase()}/workspace-history/undo`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ root, revision, expectedId }),
+    })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.message || 'Failed to undo workspace action.')
+    return data
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('undo_workspace_action', { root, revision, expectedId })
 }
 
 export async function selectWorkspaceDirectory(): Promise<string | null> {
@@ -2576,6 +2486,7 @@ export const readWorkspaceFile = async (path: string, workspacePath?: string): P
 
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
+  listBackgroundJobs, getBackgroundJob, stopBackgroundJob,
   runSlashCommand,
   authRegister,
   authLogin,
@@ -2622,6 +2533,10 @@ const _apiCheck: MintPlatformApi = {
   createWorkspaceFile,
   createWorkspaceFolder,
   deleteWorkspaceItem,
+  moveWorkspaceItem,
+  listWorkspaceHistory,
+  startHtmlPreview,
+  undoWorkspaceAction,
   selectWorkspaceDirectory,
   selectLinkedFolderPath,
   submitToolApproval,
@@ -2634,4 +2549,25 @@ const _apiCheck: MintPlatformApi = {
   undoGitCheckpoint,
   readWorkspaceFile,
   testMcpConnection,
+}
+
+
+async function backgroundRequest<T>(path: string, method = 'GET'): Promise<T> {
+  const response = await authFetch(`${getLocalApiBase()}/background-jobs${path}`, { method })
+  const value = await response.json()
+  if (!response.ok) throw new Error(`${response.status}: ${value.message || 'Background terminal request failed'}`)
+  return value as T
+}
+export async function listBackgroundJobs(workspace?: string): Promise<import('../shared/types').BackgroundJob[]> {
+  const value = await backgroundRequest<{jobs: import('../shared/types').BackgroundJob[]}>(workspace ? `?workspace=${encodeURIComponent(workspace)}` : '')
+  return value.jobs
+}
+export function getBackgroundJob(id: string) { return backgroundRequest<import('../shared/types').BackgroundJobOutput>(`/${encodeURIComponent(id)}`) }
+export function stopBackgroundJob(id: string) { return backgroundRequest<import('../shared/types').BackgroundJob>(`/${encodeURIComponent(id)}/stop`, 'POST') }
+
+export async function startHtmlPreview(root: string, relativePath: string, mintBrowser = false): Promise<{url: string; jobId: string}> {
+  const response = await authFetch(`${getLocalApiBase()}/html-preview`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, relativePath, mintBrowser}) })
+  const value = await response.json()
+  if (!response.ok) throw new Error(value.message || 'Could not start HTML preview')
+  return value
 }

@@ -54,7 +54,8 @@
   { "token": "/search-provider", "usage": "[name]", "description": "List web search providers or switch default provider", "category": "models", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/bg", "usage": "<query>", "description": "Run a query in the background, non-blocking", "category": "tools", "surfaces": ["cli"] },
   { "token": "/jobs", "usage": "[show|cancel <id>]", "description": "List, inspect, or cancel background jobs", "category": "tools", "surfaces": ["cli"] },
-  { "token": "/shells", "usage": "", "description": "List, inspect, or kill background shell jobs run_shell started", "category": "tools", "surfaces": ["cli"] },
+  { "token": "/preview", "usage": "<relative HTML path>", "description": "Serve workspace HTML locally and return its browser URL", "category": "tools", "surfaces": ["cli", "desktop", "web"] },
+  { "token": "/shells", "usage": "[all|show <id>|stop <id>|kill <id>]", "description": "List background terminals, view output, or stop a job", "category": "tools", "surfaces": ["cli", "desktop", "web"] },
   { "token": "/mcp", "usage": "", "description": "List configured MCP servers", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp add", "usage": "<name> <command> [args...]", "description": "Add an MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp remove", "usage": "<name>", "description": "Remove an MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
@@ -77,5 +78,7 @@
   { "token": "/multi-agent", "usage": "[on|off]", "description": "Show or toggle Multi-Agent Collaboration system", "category": "system", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/avatar", "usage": "[web|desktop|status|off]", "description": "Connect agent activity to Project Avatar (real-time 3D avatar)", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/rewind", "usage": "[step]", "description": "Rewind workspace to a previous git checkpoint snapshot", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/history", "usage": "", "description": "Show saved workspace file actions and backups", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/undo", "usage": "", "description": "Undo the latest workspace file action, with conflict checks", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/palette", "usage": "", "description": "Open interactive command palette and action menu", "category": "system", "surfaces": ["cli", "web", "desktop"] }
 ]

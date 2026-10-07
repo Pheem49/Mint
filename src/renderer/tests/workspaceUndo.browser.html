@@ -1,0 +1,92 @@
+<!-- Browser regression fixture: serve with Vite and open /tests/workspaceUndo.browser.html. Uses mocked native dialogs and workspace storage. -->
+<!doctype html><html><body><div id="root"></div><pre id="result">RUNNING</pre>
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import WorkspacePanel from '/src/components/WorkspacePanel.tsx';
+import DesktopTitlebar from '/shared/components/DesktopTitlebar.tsx';
+import { installWorkspacePlatform } from '/shared/platform.ts';
+let entries = [{ id: 'first', label: 'Undo Move to Trash: note.txt', path: 'note.txt', kind: 'trash' }];
+let undoCalls = 0, trashCalls = 0, confirmCalls = 0, textCommands = [];
+let confirmation;
+window.__TAURI_INTERNALS__ = { invoke: async (command) => {
+  if (command === 'plugin:dialog|message') { confirmCalls++; return new Promise(resolve => confirmation = resolve); }
+  return false;
+}};
+window.api = { readClipboard: async () => '', quitApp() {}, closeWindow() {} };
+const nativeExec = document.execCommand.bind(document);
+document.execCommand = (...args) => { textCommands.push(args[0]); return nativeExec(...args); };
+const noop = () => {};
+const root = '/tmp/undo-ui';
+const snapshot = () => ({ path: root, revision: undoCalls + trashCalls + 1,
+  tree: { name: 'Demo', path: '.', kind: 'directory', children: [{ name: 'note.txt', path: 'note.txt', kind: 'file', children: [] }] },
+  git: { isRepository: false, branches: [], remoteBranches: [], isDirty: false } });
+installWorkspacePlatform({
+  getWorkspaceSnapshot: async () => snapshot(), listWorkspaceHistory: async () => [...entries],
+  undoWorkspaceAction: async (_root, _rev, expected) => {
+    if (expected !== entries[0]?.id) throw new Error('stale history');
+    undoCalls++; entries.shift(); return snapshot();
+  },
+  deleteWorkspaceItem: async () => { trashCalls++; entries.unshift({ id: 'trash', label: 'Undo Move to Trash: note.txt', path: 'note.txt', kind: 'trash' }); return snapshot(); },
+  moveWorkspaceItem: async () => { throw new Error('Destination already exists'); },
+  getWorkspaceGitDiff: async () => [], getGitBranchInfo: async () => snapshot().git,
+  switchGitBranch: noop, createGitBranch: noop, checkoutRemoteGitBranch: noop, getGitGraph: async () => [],
+  createWorkspaceFile: noop, createWorkspaceFolder: noop,
+});
+createRoot(document.getElementById('root')).render(React.createElement(React.Fragment, null,
+  React.createElement(DesktopTitlebar, { sidebarCollapsed: false, onToggleSidebar: noop, onNewChat: noop, onOpenWorkspace: noop,
+    onOpenTerminal: noop, onToggleTerminal: noop, onOpenBrowser: noop, toolsPanelOpen: false, onToggleToolsPanel: noop,
+    onOpenSettings: noop, onCheckForUpdates: noop, onShowAbout: noop, workspacePath: root, workspaceActive: true,
+    workspaceRevision: 0, sending: false, onWorkspaceUndoError: noop, terminalCount: 0, sourceNames: [], recentChanges: [], onOpenReview: noop, onRefreshWorkspace: noop }),
+  React.createElement('textarea', { id: 'composer' }),
+  React.createElement(WorkspacePanel, { workspacePath: root, agentMode: true, sending: false,
+    onEnableAgentMode: noop, onSetMessage: noop, onWorkspaceReady: noop })));
+const sleep = () => new Promise(resolve => setTimeout(resolve, 25));
+async function until(check) { for (let i = 0; i < 160; i++) { if (check()) return; await sleep(); } throw new Error('Timed out'); }
+function assert(value, name) { if (!value) throw new Error(name); }
+const checks = [];
+function ok(name) { checks.push(name); }
+function click(element) { element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); element.click(); }
+function openMenu() { document.querySelector('.workspace-tree-row').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 100 })); }
+function button(container, label) { return [...document.querySelectorAll(container + ' button')].find(element => (element.querySelector('span')?.textContent || element.textContent) === label); }
+try {
+  await until(() => document.querySelector('.workspace-tree-row') && document.querySelector('.workspace-undo-bar button'));
+  const composer = document.getElementById('composer'); composer.focus(); await sleep();
+  const key = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'z', ctrlKey: true }); composer.dispatchEvent(key);
+  assert(!key.defaultPrevented && undoCalls === 0, 'text Ctrl+Z must stay local'); ok('text Ctrl+Z keeps browser text undo');
+  click(button('.mint-titlebar-nav', 'Edit') || [...document.querySelectorAll('.mint-titlebar-menu-button')].find(b => b.textContent === 'Edit'));
+  await sleep();
+  click(button('.mint-titlebar-menu', 'Undo')); await sleep();
+  assert(textCommands.includes('undo') && undoCalls === 0, 'Edit Undo must restore text focus'); ok('Edit Undo targets focused text');
+  const row = document.querySelector('.workspace-tree-row'); row.focus(); await sleep();
+  row.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'z', ctrlKey: true }));
+  await until(() => undoCalls === 1); ok('workspace Ctrl+Z invokes the labelled file action');
+  openMenu(); await until(() => document.querySelector('.workspace-file-menu'));
+  assert(trashCalls === 0 && confirmCalls === 0, 'right-click is not deletion'); ok('right-click only opens menu');
+  click(button('.workspace-file-menu', 'Rename…'));
+  await until(() => document.querySelector('.workspace-file-dialog'));
+  document.querySelector('.workspace-file-dialog').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await sleep();
+  // The unchanged name closes without changing files. Reopen with a new name.
+  openMenu(); await sleep(); click(button('.workspace-file-menu', 'Move…'));
+  await until(() => document.querySelector('.workspace-file-dialog'));
+  const input = document.querySelector('.workspace-file-dialog input');
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'taken.txt');
+  input.dispatchEvent(new Event('input', { bubbles: true })); await sleep();
+  document.querySelector('.workspace-file-dialog').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await until(() => document.querySelector('.workspace-file-dialog [role=alert]'));
+  assert(document.querySelector('.workspace-file-dialog [role=alert]').textContent.includes('already exists'), 'move collision must be visible'); ok('Move keeps dialog open for destination conflicts');
+  click(button('.workspace-file-dialog', 'Cancel')); await sleep();
+  openMenu(); await sleep(); click(button('.workspace-file-menu', 'Move to Trash'));
+  await until(() => confirmCalls === 1);
+  assert(trashCalls === 0, 'must wait for native confirmation'); confirmation('Cancel'); await sleep();
+  assert(trashCalls === 0, 'Cancel must preserve file'); ok('Trash waits for confirmation; Cancel preserves file');
+  openMenu(); await sleep(); click(button('.workspace-file-menu', 'Move to Trash'));
+  await until(() => confirmCalls === 2); confirmation('Move to Trash');
+  await until(() => trashCalls === 1 && document.querySelector('.workspace-undo-bar button'));
+  assert(document.querySelector('.workspace-undo-bar button').textContent.includes('note.txt'), 'undo must name target');
+  click(document.querySelector('.workspace-undo-bar button'));
+  await until(() => undoCalls === 2); ok('Trash shows named Undo and Undo invokes restoration');
+  document.getElementById('result').textContent = JSON.stringify({ status: 'PASS', checks });
+} catch (error) { document.getElementById('result').textContent = JSON.stringify({ status: 'FAIL', error: String(error), checks }); }
+</script></body></html>

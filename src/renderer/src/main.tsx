@@ -7,7 +7,7 @@ import { installTauriAdapters } from './tauri'
 import * as tauriPlatform from './tauri'
 import {
   checkoutRemoteGitBranch, createGitBranch, createWorkspaceFile, createWorkspaceFolder,
-  deleteWorkspaceItem, getGitBranchInfo, getGitGraph, getWorkspaceGitDiff, getWorkspaceSnapshot, switchGitBranch,
+  deleteWorkspaceItem, moveWorkspaceItem, startHtmlPreview, listWorkspaceHistory, undoWorkspaceAction, getGitBranchInfo, getGitGraph, getWorkspaceGitDiff, getWorkspaceSnapshot, switchGitBranch,
 } from './tauri'
 import { installRendererPlatform, installWorkspacePlatform } from '@shared/platform'
 
@@ -16,6 +16,7 @@ installRendererPlatform(tauriPlatform)
 installWorkspacePlatform({
   getWorkspaceSnapshot, getWorkspaceGitDiff, getGitBranchInfo, switchGitBranch, createGitBranch,
   checkoutRemoteGitBranch, getGitGraph, createWorkspaceFile, createWorkspaceFolder, deleteWorkspaceItem,
+  moveWorkspaceItem, startHtmlPreview, listWorkspaceHistory, undoWorkspaceAction,
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
