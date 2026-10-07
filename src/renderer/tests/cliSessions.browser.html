@@ -4,40 +4,79 @@
 <body><div id="root"></div><pre id="result">RUNNING</pre>
 <script type="module">
 import React from 'react';
+import '/shared/theme/tokens.css';
 import { createRoot } from 'react-dom/client';
+import WorkspaceSelector from '/shared/components/WorkspaceSelector.tsx';
 import CliSessionsView from '/shared/components/CliSessionsView.tsx';
 const demo='/projects/Demo', mint='/projects/Mint-CLI';
 const makeSession=(id,kind,workspacePath)=>({id,kind,workspacePath,title:`Task ${id}`,createdAt:'2026-10-05T15:10:24Z',messageCount:1});
 const sessions=[makeSession('app-demo','conversation',demo), ...Array.from({length:37},(_,i)=>makeSession(`cli::${i}`,'cli',mint))];
+const chatHost=document.createElement('div');document.body.append(chatHost);
+createRoot(chatHost).render(React.createElement(WorkspaceSelector,{currentPath:mint,recentPaths:[demo,mint,'/projects/Empty'],onSelectWorkspace:()=>{}}));
 const root=createRoot(document.getElementById('root'));
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const checks=[];
+let folderResult='/projects/Picked', folderCalls=0;
+let toast='';
 function check(condition,message){if(!condition)throw Error(message);checks.push(message)}
 async function waitFor(predicate){for(let i=0;i<100;i++){if(predicate())return;await sleep(20)}throw Error('Timed out waiting for UI')}
-function render(workspace=demo){root.render(React.createElement(CliSessionsView,{chatSessions:sessions,workspacePath:workspace,recentWorkspacePaths:['/projects/Empty'],activeConversationId:'app-demo',onSelectSession:()=>{},onDeleteSession:()=>{},onRenameSession:()=>{}}))}
-function choose(path){const select=document.querySelector('[aria-label="Project"]');select.value=path;select.dispatchEvent(new Event('change',{bubbles:true}))}
+function render(workspace=demo){root.render(React.createElement(CliSessionsView,{chatSessions:sessions,workspacePath:workspace,recentWorkspacePaths:[demo,mint,'/projects/Empty'],activeConversationId:'app-demo',onSelectSession:()=>{},onDeleteSession:()=>{},onRenameSession:()=>{},onSelectFolder:async()=>{folderCalls++;return folderResult},onShowToast:message=>{toast=message}}))}
+function trigger(){return document.querySelector('.code-header-controls .workspace-select-btn')}
+async function choose(path){
+  trigger().click();await waitFor(()=>document.querySelector('.workspace-select-menu'));
+  const option=[...document.querySelectorAll('.workspace-select-option')].find(item=>item.title===path);
+  check(!!option,`workspace available: ${path}`);option.click();
+  await waitFor(()=>!document.querySelector('.workspace-select-menu'));
+}
+
 function button(text){return [...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text)}
 function search(text){const input=document.querySelector('.code-search-input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,text);input.dispatchEvent(new Event('input',{bubbles:true}))}
 try {
   render();await waitFor(()=>button('Show all sessions'));
+  const chatTrigger=chatHost.querySelector('.workspace-select-btn');chatTrigger.click();await waitFor(()=>chatHost.querySelector('.workspace-select-menu'));
+  const chatPaths=[...chatHost.querySelectorAll('.workspace-select-option')].map(item=>item.title);
+  window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await waitFor(()=>!chatHost.querySelector('.workspace-select-menu'));
+  trigger().click();await waitFor(()=>document.querySelector('.code-header-controls .workspace-select-menu'));
+  const codePaths=[...document.querySelectorAll('.code-header-controls .workspace-select-option')].map(item=>item.title);
+  check(JSON.stringify(chatPaths)===JSON.stringify(codePaths),'chat and Code hub show the same workspace paths in the same order');
+  window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await waitFor(()=>!document.querySelector('.workspace-select-menu'));
   check(document.querySelector('.code-terminal-text').textContent.includes('37 CLI sessions outside this project'),'empty project explains real outside count');
   button('Show all sessions').click();await waitFor(()=>document.querySelectorAll('.code-session-row').length===37);
   check(!document.querySelector('.code-sessions-list').textContent.includes('Task app-demo'),'show all keeps app conversations excluded');
-  choose(mint);await waitFor(()=>button('Current Project').classList.contains('active'));
+  await choose(mint);await waitFor(()=>button('Current Project').classList.contains('active'));
   check(document.querySelector('.code-header-subtitle').textContent.includes('Mint-CLI'),'selector changes project scope');
-  choose(demo);await waitFor(()=>button('Show all sessions'));
-  choose('/projects/Empty');await waitFor(()=>document.querySelector('.code-header-subtitle').textContent.includes('Empty'));
+  await choose(demo);await waitFor(()=>button('Show all sessions'));
+  await choose('/projects/Empty');await waitFor(()=>document.querySelector('.code-header-subtitle').textContent.includes('Empty'));
   check(!!button('Show all sessions'),'recent project without sessions is selectable');
-  choose(mint);await waitFor(()=>document.querySelectorAll('.code-session-row').length===37);
+  await choose(mint);await waitFor(()=>document.querySelectorAll('.code-session-row').length===37);
   search('missing-task');await waitFor(()=>document.querySelector('.code-empty-terminal'));
   check(!button('Show all sessions'),'search miss does not claim the project is empty');
   search('');await waitFor(()=>document.querySelectorAll('.code-session-row').length===37);
   render();await sleep(50);
-  check(document.querySelector('[aria-label="Project"]').value===mint,'refresh does not reset local project selection');
-  render('/projects/Empty');await waitFor(()=>document.querySelector('[aria-label="Project"]').value==='/projects/Empty');
+  check(trigger().title===mint,'refresh does not reset local project selection');
+  render('/projects/Empty');await waitFor(()=>trigger().title==='/projects/Empty');
   check(true,'workspace prop changes update the initial scope');
   check(document.documentElement.scrollWidth<=innerWidth,'controls fit viewport without horizontal page overflow');
-  choose(mint);await waitFor(()=>document.querySelectorAll('.code-session-row').length===37);
+  await choose(mint);await waitFor(()=>document.querySelectorAll('.code-session-row').length===37);
+  trigger().click();await waitFor(()=>document.querySelector('.workspace-select-menu'));
+  check(document.activeElement===document.querySelector('[aria-label="Search workspaces"]'),'opening focuses workspace search');
+  const menu=document.querySelector('.workspace-select-menu');
+  check(menu.getBoundingClientRect().top>=trigger().getBoundingClientRect().bottom,'Code hub menu opens below its trigger');
+  check(menu.getBoundingClientRect().right<=innerWidth,'workspace menu fits viewport');
+  const input=document.querySelector('[aria-label="Search workspaces"]');
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Empty');input.dispatchEvent(new Event('input',{bubbles:true}));
+  await waitFor(()=>document.querySelectorAll('.workspace-select-option').length===1);
+  check(document.querySelector('.workspace-select-option').title==='/projects/Empty','workspace search filters paths');
+  window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+  await waitFor(()=>!document.querySelector('.workspace-select-menu'));
+  check(document.activeElement===trigger(),'Escape closes and restores trigger focus');
+  trigger().click();await waitFor(()=>button('Open folder…'));button('Open folder…').click();
+  await waitFor(()=>trigger().title==='/projects/Picked');
+  check(folderCalls===1,'Open folder selects returned directory');
+  folderResult=null;trigger().click();await waitFor(()=>button('Open folder…'));button('Open folder…').click();await sleep(30);
+  check(trigger().title==='/projects/Picked','cancelled folder dialog preserves selection');
+  await choose(mint);await waitFor(()=>document.querySelectorAll('.code-session-row').length===37);
+  if(new URLSearchParams(location.search).has('preview')){trigger().click();await waitFor(()=>document.querySelector('.workspace-select-menu'))}
   document.getElementById('result').textContent='PASS\n'+checks.join('\n');
 } catch(error){document.getElementById('result').textContent='FAIL\n'+error.stack;}
 </script></body></html>

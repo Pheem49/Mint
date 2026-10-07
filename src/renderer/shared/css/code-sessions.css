@@ -173,11 +173,21 @@
 }
 
 /* Sessions List (Linear-like Structured Rows) */
-.code-project-select {
-  max-width: 100%;
+.code-header-controls {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   min-width: 0;
-  flex: 0 1 220px;
-  text-overflow: ellipsis;
+}
+
+.code-header-controls .workspace-selector {
+  max-width: 100%;
+}
+
+.code-header-controls .workspace-select-btn {
+  min-height: 36px;
 }
 
 .code-show-all-btn {
@@ -185,7 +195,6 @@
   min-height: 36px;
 }
 
-.code-project-select:focus-visible,
 .code-show-all-btn:focus-visible {
   outline: 2px solid var(--interactive-fg, #a1a1aa);
   outline-offset: 2px;

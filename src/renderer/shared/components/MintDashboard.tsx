@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ChangeEvent, type CSSProperties, type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, type ChangeEvent, type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   compactAgentProgressForPersistence,
   mergeActivitySnapshots,
@@ -38,6 +38,7 @@ import {
   applyThemeStyles,
   parseUtcDate,
 } from '../utils/ui'
+import { workspacePaths } from '../utils/workspaces'
 import { executeSlashCommand } from '../utils/slashCommandProcessor'
 import { captureScreenForChat } from '../utils/screenCapture'
 import { useConversationCoordinator } from '../conversation/useConversationCoordinator'
@@ -416,18 +417,25 @@ export default function MintDashboard() {
   const [workspaceRefreshRevision, setWorkspaceRefreshRevision] = useState(0)
   const [recentWorkspacePaths, setRecentWorkspacePaths] = useState<string[]>(readRecentWorkspacePaths)
 
-  useEffect(() => {
-    const currentPath = workspacePath.trim()
-    if (!currentPath) return
-    const recent = [currentPath, ...readRecentWorkspacePaths().filter((path) => path !== currentPath)]
-      .slice(0, MAX_RECENT_WORKSPACES)
+  function rememberWorkspace(path: string) {
+    const recent = workspacePaths([path, ...readRecentWorkspacePaths()]).slice(0, MAX_RECENT_WORKSPACES)
     try {
       window.localStorage.setItem(RECENT_WORKSPACE_PATHS_KEY, JSON.stringify(recent))
     } catch {
       /* Keep the in-memory recent list usable when storage is unavailable. */
     }
     setRecentWorkspacePaths(recent)
+  }
+
+  useEffect(() => {
+    if (workspacePath.trim()) rememberWorkspace(workspacePath)
   }, [workspacePath])
+
+  async function selectCodeHubFolder() {
+    const selected = await selectLinkedFolderPath()
+    if (selected) rememberWorkspace(selected)
+    return selected
+  }
 
   const changeView = (newView: any, targetConversationId?: string) => {
     setMobileSidebarOpen(false)
@@ -549,6 +557,9 @@ export default function MintDashboard() {
   const [startupTimedOut, setStartupTimedOut] = useState(false)
   const [settingsConfig, setSettingsConfig] = useState<any>(null)
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
+  const availableWorkspacePaths = useMemo(() => workspacePaths(
+    recentWorkspacePaths, workspacePath, chatSessions.map(session => session.workspacePath),
+  ), [recentWorkspacePaths, workspacePath, chatSessions])
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const lastNativePasteTimeRef = useRef(0)
   const {
@@ -1659,7 +1670,7 @@ export default function MintDashboard() {
 
   async function selectWorkspace(path?: string) {
     try {
-      const selected = path || await selectWorkspaceDirectory()
+      const selected = path || await selectLinkedFolderPath()
       if (selected) {
         updateWorkspacePath(selected)
         changeView('workspace')
@@ -2181,7 +2192,7 @@ export default function MintDashboard() {
     status,
     workspacePath,
     chatId: conversationId,
-    recentWorkspacePaths,
+    recentWorkspacePaths: availableWorkspacePaths,
     chatEnd,
     welcomeInteraction: MOCK_WELCOME_INTERACTION,
     settingsConfig,
@@ -2207,7 +2218,7 @@ export default function MintDashboard() {
     onSetAgentMode: updateAgentMode,
     onSetPlanMode: isDesktopApp ? updatePlanMode : undefined,
     onSetProvider: changeProvider,
-    onSelectWorkspace: isDesktopApp ? selectWorkspace : undefined,
+    onSelectWorkspace: selectWorkspace,
     onWorkspaceChanged: () => setWorkspaceRefreshRevision((revision) => revision + 1),
     onApproval: handleApproval,
     onUpdateSettings: (updated) => setSettingsConfig(updated),
@@ -2550,7 +2561,8 @@ export default function MintDashboard() {
                 chatSessions={chatSessions}
                 activeConversationId={conversationId}
                 workspacePath={workspacePath}
-                recentWorkspacePaths={recentWorkspacePaths}
+                recentWorkspacePaths={availableWorkspacePaths}
+                onSelectFolder={selectCodeHubFolder}
                 onSelectSession={(id) => {
                   selectConversation(id)
                 }}

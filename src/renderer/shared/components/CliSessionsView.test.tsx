@@ -2,6 +2,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import CliSessionsView from './CliSessionsView'
+import { workspacePaths } from '../utils/workspaces'
 import type { ChatSession } from '../types'
 
 const demo = '/home/pheem49/vscode/Project/Demo'
@@ -50,17 +51,11 @@ describe('Code hub Current Project', () => {
     expect(html).toContain(`title="${demo}"`)
   })
 
-  it('offers projects from app conversations and recent folders even without CLI sessions', () => {
-    const html = render([
-      session('conversation-demo', 'conversation', demo),
-      session('cli::mint', 'cli', mint),
-    ], mint, ['/projects/Empty', `${mint}/`])
-    expect(html).toContain('aria-label="Project"')
-    expect(html).toContain(`value="${demo}"`)
-    expect(html).toContain('Project: Demo')
-    expect(html).toContain('Project: Mint-CLI')
-    expect(html).toContain('Project: Empty')
-    expect(html.match(new RegExp(`value="${mint}"`, 'g'))).toHaveLength(1)
+  it('uses the searchable workspace dialog trigger in Code hub', () => {
+    const html = render([session('cli::mint', 'cli', mint)], mint)
+    expect(html).toContain('aria-label="Change workspace: Mint-CLI"')
+    expect(html).toContain('aria-haspopup="dialog"')
+    expect(html).toContain(`title="${mint}"`)
   })
 
   it('counts CLI sessions outside an empty project and offers to show them all', () => {
@@ -70,12 +65,6 @@ describe('Code hub Current Project', () => {
     ], demo)
     expect(html).toContain('37 CLI sessions outside this project')
     expect(html).toMatch(/>Show all sessions<\/button>/)
-  })
-
-  it('distinguishes projects with the same folder name by their full paths', () => {
-    const html = render([session('cli::demo', 'cli', demo)], demo, ['/another/Demo'])
-    expect(html).toContain(`Project: ${demo}`)
-    expect(html).toContain('Project: /another/Demo')
   })
 
   it('does not offer a show-all empty-state action when no CLI sessions exist', () => {
@@ -116,4 +105,21 @@ describe('Code hub Current Project', () => {
     expect(html).not.toContain('Task cli::demo')
     expect(html).toContain('Select a project')
   })
+})
+
+
+describe('shared workspace catalog', () => {
+  it('includes session-only projects without changing the recent-folder order', () => {
+    expect(workspacePaths([mint, demo], mint, ['/home/pheem49', '/projects/FableMint', demo]))
+      .toEqual([mint, demo, '/home/pheem49', '/projects/FableMint'])
+  })
+  it('deduplicates equivalent paths and retains distinct folders with the same name', () => {
+    expect(workspacePaths([` ${mint}/ `, mint, '/another/Mint-CLI'], '', [undefined, 'C:\\Projects\\Demo', 'C:/Projects/Demo/']))
+      .toEqual([mint, '/another/Mint-CLI', 'C:/Projects/Demo'])
+  })
+})
+
+it('preserves absolute Windows drive roots when deduplicating workspace folders', () => {
+  expect(workspacePaths(['C:\\', 'C:/', '/'], 'C:/', ['C:/Projects/Demo/']))
+    .toEqual(['C:/', '/', 'C:/Projects/Demo'])
 })

@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import type { ChatSession } from '../types'
 import { parseUtcDate } from '../utils/ui'
+import { normalizeWorkspacePath, workspacePaths } from '../utils/workspaces'
+import WorkspaceSelector from './WorkspaceSelector'
 import '../css/code-sessions.css'
 
 export interface CliSessionsViewProps {
@@ -11,6 +13,7 @@ export interface CliSessionsViewProps {
   onSelectSession: (id: string) => void
   onDeleteSession: (id: string) => void
   onRenameSession: (id: string, newTitle: string) => void
+  onSelectFolder?: () => Promise<string | null>
   onRefreshSessions?: () => void
   onShowToast?: (message: string) => void
 }
@@ -41,10 +44,6 @@ function getFolderBasename(path?: string | null): string {
   return parts[parts.length - 1] || path
 }
 
-function normalizeWorkspacePath(path?: string | null): string {
-  const normalized = (path || '').trim().replace(/\\/g, '/')
-  return normalized.replace(/\/+$/, '') || (normalized.startsWith('/') ? '/' : '')
-}
 
 export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(function CliSessionsView({
   chatSessions,
@@ -54,6 +53,7 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
   onSelectSession,
   onDeleteSession,
   onRenameSession,
+  onSelectFolder,
   onRefreshSessions,
   onShowToast,
 }) {
@@ -68,11 +68,8 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
   }, [workspacePath])
   const currentWorkspace = selectedWorkspace
   const projectName = getFolderBasename(currentWorkspace)
-  const projectPaths = useMemo(() => {
-    const paths = [workspacePath, selectedWorkspace, ...(recentWorkspacePaths || []),
-      ...chatSessions.map((session) => session.workspacePath)]
-    return [...new Set(paths.map(normalizeWorkspacePath).filter(Boolean))].sort((a, b) => a.localeCompare(b))
-  }, [workspacePath, selectedWorkspace, recentWorkspacePaths, chatSessions])
+  const projectPaths = useMemo(() => workspacePaths(recentWorkspacePaths || [], selectedWorkspace),
+    [recentWorkspacePaths, selectedWorkspace])
 
   const onRefreshRef = useRef(onRefreshSessions)
   useEffect(() => {
@@ -198,26 +195,23 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
         </div>
 
         {/* Right side controls: Scope switch & refresh */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <select
-            className="code-sort-select code-project-select"
-            aria-label="Project"
-            title={currentWorkspace || 'Select a project'}
-            value={currentWorkspace}
-            onChange={(event) => {
-              setSelectedWorkspace(event.target.value)
-              setScopeFilter('workspace')
+        <div className="code-header-controls">
+          <WorkspaceSelector
+            currentPath={currentWorkspace}
+            recentPaths={projectPaths}
+            placement="below"
+            onSelectWorkspace={async (path) => {
+              try {
+                const selected = path || await onSelectFolder?.()
+                if (selected) {
+                  setSelectedWorkspace(normalizeWorkspacePath(selected))
+                  setScopeFilter('workspace')
+                }
+              } catch (error) {
+                onShowToast?.(`Could not open folder: ${error instanceof Error ? error.message : String(error)}`)
+              }
             }}
-          >
-            <option value="" disabled>Project: Select a project</option>
-            {projectPaths.map((path) => {
-              const name = getFolderBasename(path)
-              const duplicateName = projectPaths.some((other) => other !== path && getFolderBasename(other) === name)
-              return <option key={path} value={path} title={path}>
-                Project: {duplicateName ? path : name}
-              </option>
-            })}
-          </select>
+          />
           <div className="code-segmented-toggle">
             <button
               type="button"
