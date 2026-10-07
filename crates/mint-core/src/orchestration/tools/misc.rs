@@ -102,9 +102,10 @@ pub(in crate::orchestration) async fn execute(
                             || skill.name.to_ascii_lowercase().contains(&query_lower)
                         {
                             results.push(format!(
-                                "[Skill: {}]\n{}",
+                                "[Skill: {}]\nDescription: {}\nPath: {}\nRead through read_file before using this skill.",
                                 skill.name,
-                                truncate_for_context(&skill.content, 300)
+                                skill.description.as_deref().unwrap_or("No description provided"),
+                                skill.source_path
                             ));
                         }
                     }

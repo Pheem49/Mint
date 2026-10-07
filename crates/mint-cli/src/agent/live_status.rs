@@ -1494,10 +1494,13 @@ pub(super) fn skill_names_from_memory_recall(result: &str) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn skill_card(skill_name: &str) -> TaskEntry {
-    TaskEntry {
-        label: format!("Skill({skill_name})"),
-        output: vec!["Successfully loaded skill".to_string()],
+pub(super) fn skill_read_label(skill_name: &str, result: &str) -> String {
+    if result.starts_with(&format!("[Loaded skill: {skill_name}]\n")) {
+        format!("Loaded skill: {skill_name}")
+    } else if result.starts_with("Error:") || result.starts_with("Blocked") {
+        format!("Failed to read skill: {skill_name}")
+    } else {
+        format!("Read skill preview: {skill_name}")
     }
 }
 

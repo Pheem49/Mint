@@ -10,7 +10,7 @@ pub(in crate::orchestration) async fn execute(
     input: &AgentInput,
     root: &Path,
     config: &MintConfig,
-    _chat_id: &str,
+    chat_id: &str,
     approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
 ) -> Result<String, OrchestrationError> {
     match action {
@@ -21,7 +21,23 @@ pub(in crate::orchestration) async fn execute(
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
         }
         "read_file" => {
-            let path = workspace_path(root, required(&input.path, "path")?)?;
+            if input.start_line.is_none()
+                && input.end_line.is_none()
+                && let Some(skill) = crate::skills::skill_for_read_path(root, &input.path)
+            {
+                let memory = MemoryStore::open_default()?;
+                return crate::skills::read_skill_file(&memory, &skill, chat_id, config)
+                    .map_err(|error| OrchestrationError::Agent(error.to_string()));
+            }
+            // Explicit line-range reads are previews, never successful full skill loads.
+            // Known global skills may live outside the workspace, but still require
+            // the same path capability checks as any other file read.
+            let known_skill = crate::skills::skill_for_read_path(root, &input.path);
+            let path = if let Some(skill) = known_skill {
+                PathBuf::from(skill.source_path)
+            } else {
+                workspace_path(root, required(&input.path, "path")?)?
+            };
             let start = input.start_line.unwrap_or(1);
             let end = input.end_line.unwrap_or_else(|| start.saturating_add(239));
             Ok(read_code_file(&path, start, end, config)

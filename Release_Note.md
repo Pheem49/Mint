@@ -1,5 +1,9 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Unreleased
+
+- Changed agent skill discovery to a name/description/path catalog for workspace, global, and taught skills. Relevant skills load through capability-checked full-file reads; explicit skill selection and memory recall no longer preload bodies or claim a load. Successful reads persist exact content per canonical path and chat, reset on chat clear/delete, and require another read when the file changes. Only unchanged, fully retained content receives READ status, and that content is attached to every native/JSON request across history rebuilds and compaction. Project rule files remain mandatory context. CLI and Web/Desktop activities now show Reading skill, Loaded skill, failures, and partial previews separately, with matching parallel completions. Full successful skill reads bypass ordinary output truncation; unchanged exact bodies already present in the request count as READ even when they exceed the cached replay budget.
+
 - Scoped Desktop and Web Settings resets, typography, and form controls to the settings container. Background preloading of Settings no longer changes the sign-in page's font or shrinks its 48px inputs; selector specificity within Settings remains unchanged.
 
 - Refined sign-in and registration styling with a 24px card-radius fallback, 48px inputs and submit buttons, 16px input text, grouped headings with clearer spacing before fields, reduced background accent glows, and compact card padding on mobile.

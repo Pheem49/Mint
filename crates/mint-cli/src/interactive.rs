@@ -670,13 +670,13 @@ pub async fn run_interactive_chat_with_session(
 
                     let task_with_skill = format!(
                         "=== ACTIVATED SKILL: {} ===\n\
-                         {}\n\
+                         Description: {}\nPath: {}\nRead this skill file through read_file before using it.\n\
                          ===========================\n\n\
                          Task: {}",
-                        skill.name, skill.content, final_task
+                        skill.name, description, skill.source_path, final_task
                     );
 
-                    ui.push_notice(format!("Skill({}) loaded", skill.name));
+                    ui.push_notice(format!("Selected skill: {}", skill.name));
                     drop(ui);
 
                     match run_interactive_agent_turn(

@@ -387,6 +387,28 @@ where
     Ok((response, fallback))
 }
 
+// Full skill reads must reach the model exactly; other tools keep bounded output.
+fn model_tool_result(action: &str, result: &str) -> String {
+    if action.starts_with("browser_")
+        || (action == "read_file" && result.starts_with("[Loaded skill: "))
+    {
+        result.to_owned()
+    } else {
+        truncate(result)
+    }
+}
+
+fn tool_progress_input(root: &Path, decision: &AgentDecision) -> Value {
+    let mut input = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+    if decision.action == "read_file"
+        && let Some(skill) = crate::skills::skill_for_read_path(root, &decision.input.path)
+        && let Some(object) = input.as_object_mut()
+    {
+        object.insert("skill_name".into(), Value::String(skill.name));
+    }
+    input
+}
+
 /// Truncates `text` to at most `max_chars` characters (not bytes, so this
 /// never splits a multi-byte UTF-8 character) for injection into a "recent
 /// context" summary. Cheap no-op for the common case of a short message.
@@ -1498,7 +1520,7 @@ where
         let allow_subagent_dispatch = !chat_id.contains("::subagent::");
         let skills =
             crate::skills::learned_skills_context(Some(&root), Some(chat_id)).unwrap_or_default();
-        let mut observation = initial_observation(&resolved_task, &root, &skills);
+        let mut observation = initial_observation(&resolved_task, &root, "See the current skill catalog in system instructions.");
         let mut pending_image = image_data_uri;
         let mut pending_audio = audio_data_uri;
         let mut pending_video = video_data_uri;
@@ -1633,6 +1655,14 @@ where
             });
 
             let mut active_system_prompt = system_prompt.clone();
+            // Pin the catalog and only successfully read, unchanged skill bodies
+            // to every request, including after JSON history rebuilds/compaction.
+            let visible_history = if active_config.tool_calling_mode() == ToolCallingMode::Native { render_messages_as_text(&native_messages) } else { observation.clone() };
+            let skill_context = crate::skills::learned_skills_context_with_history(Some(&root), Some(chat_id), &visible_history)
+                .unwrap_or_default();
+            if !skill_context.is_empty() {
+                active_system_prompt.push_str(&format!("\n\n[Available skills and retained instructions]\n{skill_context}"));
+            }
             if let Some(ref model_name) = active_model_name {
                 active_system_prompt.push_str(&format!(
                     "\n\n[Active Environment Context]\n\
@@ -2296,7 +2326,7 @@ where
                         )
                     } else {
                         let input_val =
-                            serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+                            tool_progress_input(&root, &decision);
                         progress(AgentProgress::ToolStart {
                             action: decision.action.clone(),
                             input: input_val.clone(),
@@ -2376,7 +2406,7 @@ where
 
                     progress(AgentProgress::ToolEnd {
                         action: decision.action.clone(),
-                        input: serde_json::to_value(&decision.input).unwrap_or(Value::Null),
+                        input: tool_progress_input(&root, &decision),
                         result: result.clone(),
                         subagent: None,
                     });
@@ -2457,7 +2487,7 @@ where
                             _ => "[Screenshot captured — see attached image]".to_string(),
                         }
                     } else {
-                        if decision.action.starts_with("browser_") {result.clone()} else {truncate(&result)}
+                        model_tool_result(&decision.action, &result)
                     };
                     if matches!(
                         decision.action.as_str(),
@@ -2501,7 +2531,7 @@ where
                     step_tool_results.push((
                         call_id,
                         decision.action.clone(),
-                        serde_json::to_value(&decision.input).unwrap_or(Value::Null),
+                        tool_progress_input(&root, &decision),
                         final_result,
                     ));
                 } // end `for (call_id, decision) in decisions`
@@ -2827,7 +2857,7 @@ async fn run_parallel_subagent_batch(
         let call_id = call_id.clone();
         let thought = decision.thought.clone();
         let action = decision.action.clone();
-        let input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+        let input_val = tool_progress_input(&root, &decision);
         let action_key = action_fingerprint(decision);
         let name = decision.input.name.clone();
         let task_text = decision.input.instruction.clone();
@@ -2898,7 +2928,7 @@ async fn run_parallel_subagent_batch(
             *count += 1;
             *count
         };
-        let mut final_result = truncate(&tool_result);
+        let mut final_result = model_tool_result(&action, &tool_result);
         if action_count >= 3 && !action.starts_with("browser_") {
             final_result.push_str(
                 "\n\n[System Tip: You repeated the same tool action three or more times. \
@@ -2942,7 +2972,7 @@ async fn run_parallel_read_only_batch(
         let call_id = call_id.clone();
         let thought = decision.thought.clone();
         let action = decision.action.clone();
-        let input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+        let input_val = tool_progress_input(&root, &decision);
         let action_key = action_fingerprint(decision);
         let approve_mutex = &approve_mutex;
         let progress_mutex = &progress_mutex;
@@ -3088,7 +3118,7 @@ async fn run_parallel_read_only_batch(
                 _ => "[Screenshot captured — see attached image]".to_string(),
             }
         } else {
-            truncate(&result)
+            model_tool_result(&action, &result)
         };
 
         if action_count >= 3 && !action.starts_with("browser_") {
@@ -3364,10 +3394,15 @@ fn append_native_tool_results(
     }
     let mut tool_result_content: Vec<ContentBlock> = Vec::new();
     for (call_id, action, input_value, final_result) in results {
+        // Activity annotations are for the UI, not parameters of the provider tool schema.
+        let mut tool_input = input_value.clone();
+        if let Some(object) = tool_input.as_object_mut() {
+            object.remove("skill_name");
+        }
         assistant_content.push(ContentBlock::ToolUse {
             id: call_id.clone(),
             name: action.clone(),
-            input: input_value.clone(),
+            input: tool_input,
             thought_signature: signatures.get(call_id).cloned(),
         });
         tool_result_content.push(ContentBlock::ToolResult {
@@ -4472,5 +4507,20 @@ mod tests {
         rebuild_observation(task, root, &extended_trajectory, &mut buffer);
 
         assert!(buffer.contains("Step 3:\n- Thought: All done"));
+    }
+}
+
+#[cfg(test)]
+mod full_skill_result_tests {
+    use super::*;
+    #[test]
+    fn large_loaded_skill_results_reach_the_model_without_losing_middle_instructions() {
+        let content = format!(
+            "[Loaded skill: review]\n{}\nREQUIRED-MIDDLE-INSTRUCTION\n{}",
+            "a".repeat(40_000),
+            "z".repeat(40_000)
+        );
+        assert_eq!(model_tool_result("read_file", &content), content);
+        assert!(model_tool_result("run_shell", &"x".repeat(80_000)).len() < 20_000);
     }
 }

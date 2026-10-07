@@ -1001,13 +1001,26 @@ pub async fn run_code_agent_with_options(
                         return;
                     }
                     if action == "read_file"
-                        && let Some(path) = input.get("path").and_then(|v| v.as_str())
-                        && skill_name_for_read_path(path).is_some()
+                        && let Some(skill_name) = input
+                            .get("skill_name")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_owned)
+                            .or_else(|| {
+                                input
+                                    .get("path")
+                                    .and_then(|v| v.as_str())
+                                    .and_then(skill_name_for_read_path)
+                            })
                     {
-                        // The agent chose to read a skill file on its own initiative
-                        // (as opposed to the human typing `$skillname`). Skip the
-                        // generic explored-files grouping — ToolEnd below renders a
-                        // dedicated Skill(...) card for this instead.
+                        if let Ok(mut status) = progress_live_status.lock() {
+                            status.thinking = None;
+                            status.waiting_for_network = None;
+                            status.tasks.push(TaskEntry {
+                                label: format!("Reading skill: {skill_name}"),
+                                output: Vec::new(),
+                            });
+                            render_live_status(&mut status);
+                        }
                         return;
                     }
                     if let Some(label) = explored_action_label(&action, &input) {
@@ -1112,13 +1125,29 @@ pub async fn run_code_agent_with_options(
                         }
                         render_live_status(&mut status);
                     } else if action == "read_file"
-                        && let Some(path) = input.get("path").and_then(|v| v.as_str())
-                        && let Some(skill_name) = skill_name_for_read_path(path)
+                        && let Some(skill_name) = input
+                            .get("skill_name")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_owned)
+                            .or_else(|| {
+                                input
+                                    .get("path")
+                                    .and_then(|v| v.as_str())
+                                    .and_then(skill_name_for_read_path)
+                            })
                         && let Ok(mut status) = progress_live_status.lock()
                     {
                         status.thinking = None;
                         status.waiting_for_network = None;
-                        status.tasks.push(skill_card(&skill_name));
+                        if let Some(task) = status
+                            .tasks
+                            .iter_mut()
+                            .rev()
+                            .find(|task| task.label == format!("Reading skill: {skill_name}"))
+                        {
+                            task.label = skill_read_label(&skill_name, &result);
+                            task.output = command_output_preview(&result);
+                        }
                         render_live_status(&mut status);
                     } else if action == "memory_recall" {
                         let skill_names = skill_names_from_memory_recall(&result);
@@ -1128,7 +1157,10 @@ pub async fn run_code_agent_with_options(
                             status.thinking = None;
                             status.waiting_for_network = None;
                             for name in skill_names {
-                                status.tasks.push(skill_card(&name));
+                                status.tasks.push(TaskEntry {
+                                    label: format!("Found skill: {name}"),
+                                    output: Vec::new(),
+                                });
                             }
                             render_live_status(&mut status);
                         }
@@ -1600,6 +1632,26 @@ mod command_output_preview_tests {
 #[cfg(test)]
 mod skill_card_tests {
     use super::*;
+
+    #[test]
+    fn skill_labels_distinguish_full_load_failure_and_preview() {
+        assert_eq!(
+            skill_read_label("review", "[Loaded skill: review]\nbody"),
+            "Loaded skill: review"
+        );
+        assert_eq!(
+            skill_read_label("review", "Error: denied"),
+            "Failed to read skill: review"
+        );
+        assert_eq!(
+            skill_read_label("review", "Blocked by hook: denied"),
+            "Failed to read skill: review"
+        );
+        assert_eq!(
+            skill_read_label("review", "1 | header"),
+            "Read skill preview: review"
+        );
+    }
 
     #[test]
     fn recognizes_workspace_skill_paths() {

@@ -750,6 +750,10 @@ impl MemoryStore {
     pub fn clear_interactions_for_chat(&self, chat_id: &str) -> Result<usize, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
         let connection = self.connection()?;
+        connection.execute(
+            "DELETE FROM session_skill_reads WHERE chat_id = ?1",
+            params![chat_id],
+        )?;
         Ok(connection.execute(
             "DELETE FROM interaction_memories WHERE chat_id = ?1",
             params![chat_id],
@@ -763,6 +767,10 @@ impl MemoryStore {
         }
         let connection = self.connection()?;
         let transaction = connection.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM session_skill_reads WHERE chat_id = ?1",
+            params![chat_id],
+        )?;
         transaction.execute(
             "DELETE FROM interaction_memories WHERE chat_id = ?1",
             params![chat_id],
@@ -902,6 +910,37 @@ impl MemoryStore {
         )?;
         let rows = statement.query_map(params![limit as i64], learned_skill_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// A receipt contains the exact bytes returned by a successful full skill read.
+    /// It is not a claim that the model still has those bytes in its context.
+    pub fn record_skill_read(
+        &self,
+        chat_id: &str,
+        path: &str,
+        content: &str,
+    ) -> Result<(), MemoryError> {
+        self.connection()?.execute(
+            "INSERT INTO session_skill_reads (chat_id, path, content) VALUES (?1, ?2, ?3)
+             ON CONFLICT(chat_id, path) DO UPDATE SET content = excluded.content",
+            params![normalized_chat_id(chat_id), path, content],
+        )?;
+        Ok(())
+    }
+
+    pub fn skill_read_content(
+        &self,
+        chat_id: &str,
+        path: &str,
+    ) -> Result<Option<String>, MemoryError> {
+        Ok(self
+            .connection()?
+            .query_row(
+                "SELECT content FROM session_skill_reads WHERE chat_id = ?1 AND path = ?2",
+                params![normalized_chat_id(chat_id), path],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
 
     pub fn delete_learned_skill(&self, identifier: &str) -> Result<usize, MemoryError> {
@@ -1331,6 +1370,12 @@ fn initialize(
            content TEXT NOT NULL,
            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+         );
+         CREATE TABLE IF NOT EXISTS session_skill_reads (
+           chat_id TEXT NOT NULL,
+           path TEXT NOT NULL,
+           content TEXT NOT NULL,
+           PRIMARY KEY(chat_id, path)
          );
          CREATE TABLE IF NOT EXISTS workspace_sessions (
            workspace_path TEXT PRIMARY KEY,

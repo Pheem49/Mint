@@ -131,7 +131,8 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
 
   return {
     // Raw tool/action identifier, matching how the CLI labels activity (e.g. "[web_search]").
-    label: action,
+    label: action === 'read_file' && activityDetail(input, 'skill_name')
+      ? `Reading skill: ${activityDetail(input, 'skill_name')}` : action,
     target: formatActivityTarget(target),
     kind: activityKind(action, target),
     state: 'active',
@@ -271,6 +272,13 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
       const item = describeTool(event.data.action, event.data.input)
       activities.push(item)
 
+      // Keep each skill's lifecycle visible instead of hiding it in a files group.
+      if (event.data.action === 'read_file' && activityDetail(event.data.input, 'skill_name')) {
+        flushGroup()
+        timeline.push({ id: `skill-${nextId++}`, kind: 'activity', activity: item })
+        continue
+      }
+
       const actionKey = item.action || item.label
       if (!currentGroup || currentGroup.action !== actionKey) {
         flushGroup()
@@ -292,10 +300,21 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
         }
       }
     } else if (event.type === 'ToolEnd') {
+      const finished = describeTool(event.data.action, event.data.input)
       for (let index = activities.length - 1; index >= 0; index -= 1) {
         if (activities[index].state !== 'active') continue
-        activities[index].state = event.data.result.startsWith('Error:') ? 'error' : 'done'
+        if (activities[index].action !== finished.action || activities[index].target !== finished.target) continue
+        activities[index].state = /^(Error:|Blocked)/.test(event.data.result) ? 'error' : 'done'
         activities[index].result = event.data.result
+        if (event.data.action === 'read_file') {
+          const loaded = event.data.result.match(/^\[Loaded skill: ([^\n]+)\]\n/)
+          if (loaded) activities[index].label = `Loaded skill: ${loaded[1]}`
+          else if (activities[index].label.startsWith('Reading skill:')) {
+            activities[index].label = activities[index].state === 'error'
+              ? activities[index].label.replace('Reading skill:', 'Failed to read skill:')
+              : activities[index].label.replace('Reading skill:', 'Read skill preview:')
+          }
+        }
         if (activities[index].action === 'ask_user' && event.data.result.startsWith('User answered:')) {
           const answer = event.data.result.replace('User answered:', '').trim()
           activities[index].target = `(Answered: "${answer}") ${activities[index].target}`
