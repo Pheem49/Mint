@@ -708,6 +708,13 @@ pub enum AgentProgress {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         elapsed_ms: Option<u64>,
     },
+    /// Lifecycle of native context summarization, including actionable failures.
+    ContextCompaction {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent: Option<String>,
+        status: String,
+        message: String,
+    },
     /// Emitted while retrying a step after every configured provider was
     /// unreachable (`ChatError::NetworkUnavailable`) — distinct from
     /// `Thinking` because there's nothing to wait *on* here except the
@@ -2552,38 +2559,18 @@ where
                         ((total_tokens as f64 / window as f64) * 100.0).clamp(0.0, 255.0) as u8,
                     );
                     if (total_tokens as f64) >= (window as f64) * COMPACTION_TRIGGER_RATIO {
-                        match compact_native_messages(&active_config, &native_messages).await {
-                            Ok(Some((compacted, fallback_provider))) => {
-                                native_messages = compacted;
-                                let fallback_note = fallback_provider
-                                    .as_deref()
-                                    .map(|p| {
-                                        format!(
-                                            " (summary generated via fallback provider \
-                                             \"{p}\" — the primary provider failed for this \
-                                             call)"
-                                        )
-                                    })
-                                    .unwrap_or_default();
-                                progress(AgentProgress::Thought {
-                                    thought: format!(
-                                        "[Context] Compacted earlier steps to stay under the \
-                                     context window ({total_tokens}/{window} tokens before \
-                                     compaction){fallback_note}."
-                                    ),
-                                });
-                            }
-                            // Nothing worth compacting yet (too little history) — routine, no warning.
-                            Ok(None) => {}
-                            Err(error) => {
-                                progress(AgentProgress::Thought {
-                                    thought: format!(
-                                        "[Context] Context is approaching the model's window \
-                                     ({total_tokens}/{window} tokens) but compaction failed: \
-                                     {error}. Continuing without compacting this step."
-                                    ),
-                                });
-                            }
+                        let eligible = native_messages.len().saturating_sub(1) / 2 > COMPACTION_KEEP_RECENT_STEPS;
+                        if let Ok(Some((compacted, _))) = report_context_compaction(
+                            eligible,
+                            total_tokens,
+                            window,
+                            compact_native_messages(&active_config, &native_messages),
+                            &mut progress,
+                        ).await {
+                            native_messages = compacted;
+                            // Wait for actual usage from the next request, rather than
+                            // displaying the pre-compaction percentage as current.
+                            last_context_pct = None;
                         }
                     }
                 }
@@ -2776,6 +2763,13 @@ async fn dispatch_one_subagent(
                 action,
                 input,
                 result,
+                subagent: Some(subagent_name.clone()),
+            },
+            AgentProgress::ContextCompaction {
+                status, message, ..
+            } => AgentProgress::ContextCompaction {
+                status,
+                message,
                 subagent: Some(subagent_name.clone()),
             },
             other => other,

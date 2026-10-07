@@ -28,6 +28,52 @@ use std::sync::{
 };
 use unicode_width::UnicodeWidthStr;
 
+/// Sweep a white glow across the thinking text, fading to dim gray at the edges.
+fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
+    // Split at the first " (" to isolate the verb from the timer suffix.
+    let (verb, suffix) = if line.contains("Compacting context")
+        && let Some(idx) = line.find(" · ")
+    {
+        (&line[..idx], &line[idx..])
+    } else if let Some(idx) = line.find(" (") {
+        (&line[..idx], &line[idx..])
+    } else {
+        (line, "")
+    };
+
+    let chars: Vec<char> = verb.chars().collect();
+    let count = chars.len();
+    let period = (count * 2).max(16);
+    let spot = (tick % period) as f32 / period as f32 * count as f32;
+
+    let (dim_r, dim_g, dim_b) = crate::terminal_theme::THINKING_GLOW_DIM;
+    let (bright_r, bright_g, bright_b) = crate::terminal_theme::THINKING_GLOW_BRIGHT;
+    let mut spans: Vec<Span<'static>> = chars
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| {
+            let dist = ((i as f32 - spot).abs() / (count as f32 * 0.35)).min(1.0);
+            let brightness = ((1.0 - dist) * std::f32::consts::FRAC_PI_2).sin().powi(2);
+            let r = (dim_r as f32 + (bright_r as f32 - dim_r as f32) * brightness).round() as u8;
+            let g = (dim_g as f32 + (bright_g as f32 - dim_g as f32) * brightness).round() as u8;
+            let b = (dim_b as f32 + (bright_b as f32 - dim_b as f32) * brightness).round() as u8;
+            let style = Style::default()
+                .fg(Color::Rgb(r, g, b))
+                .add_modifier(Modifier::BOLD);
+            Span::styled(c.to_string(), style)
+        })
+        .collect();
+
+    if !suffix.is_empty() {
+        spans.push(Span::styled(
+            suffix.to_string(),
+            Style::default().fg(crate::terminal_theme::MUTED),
+        ));
+    }
+
+    Line::from(spans)
+}
+
 fn format_thinking_status(config: &mint_core::MintConfig) -> String {
     let model = active_model(&config.ai_provider, config);
     if !config.resolved_thinking_enabled_for_model(&config.ai_provider, model) {
@@ -1550,51 +1596,6 @@ impl ChatViewState {
             )
         }
 
-        /// Sweep a white glow across the thinking text, fading to dim gray at the edges.
-        fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
-            // Split at the first " (" to isolate the verb from the timer suffix.
-            let (verb, suffix) = if let Some(idx) = line.find(" (") {
-                (&line[..idx], &line[idx..])
-            } else {
-                (line, "")
-            };
-
-            let chars: Vec<char> = verb.chars().collect();
-            let count = chars.len();
-            let period = (count * 2).max(16);
-            let spot = (tick % period) as f32 / period as f32 * count as f32;
-
-            let (dim_r, dim_g, dim_b) = crate::terminal_theme::THINKING_GLOW_DIM;
-            let (bright_r, bright_g, bright_b) = crate::terminal_theme::THINKING_GLOW_BRIGHT;
-            let mut spans: Vec<Span<'static>> = chars
-                .iter()
-                .enumerate()
-                .map(|(i, &c)| {
-                    let dist = ((i as f32 - spot).abs() / (count as f32 * 0.35)).min(1.0);
-                    let brightness = ((1.0 - dist) * std::f32::consts::FRAC_PI_2).sin().powi(2);
-                    let r = (dim_r as f32 + (bright_r as f32 - dim_r as f32) * brightness).round()
-                        as u8;
-                    let g = (dim_g as f32 + (bright_g as f32 - dim_g as f32) * brightness).round()
-                        as u8;
-                    let b = (dim_b as f32 + (bright_b as f32 - dim_b as f32) * brightness).round()
-                        as u8;
-                    let style = Style::default()
-                        .fg(Color::Rgb(r, g, b))
-                        .add_modifier(Modifier::BOLD);
-                    Span::styled(c.to_string(), style)
-                })
-                .collect();
-
-            if !suffix.is_empty() {
-                spans.push(Span::styled(
-                    suffix.to_string(),
-                    Style::default().fg(crate::terminal_theme::MUTED),
-                ));
-            }
-
-            Line::from(spans)
-        }
-
         fn format_tool_status_line(line: &str) -> Line<'static> {
             if line.trim_start().starts_with('│') {
                 return Line::styled(
@@ -1989,7 +1990,7 @@ impl ChatViewState {
                 .map(|line| {
                     // Lines with a timing suffix: "Verb (elapsed · …)" —
                     // shimmer animation from bright white (left) to dim (right).
-                    if line.find(" (").is_some()
+                    if (line.find(" (").is_some() || line.contains("Compacting context"))
                         && !line.contains('└')
                         && !line.starts_with("      ")
                         && !line.contains('✓')
@@ -4750,5 +4751,22 @@ mod dialog_tests {
         assert_eq!(state.transcript[1].role, TranscriptRole::Assistant);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+}
+
+#[cfg(test)]
+mod context_compaction_shimmer_tests {
+    use super::*;
+    #[test]
+    fn full_screen_compaction_shimmers_only_the_label() {
+        let text = "✦ Compacting context · 12s • Esc to interrupt";
+        let first = shimmer_thinking_line(text, 0);
+        let next = shimmer_thinking_line(text, 12);
+        assert_ne!(first, next);
+        assert_eq!(
+            first.spans.last().unwrap().content,
+            " · 12s • Esc to interrupt"
+        );
+        assert_eq!(first.spans.last(), next.spans.last());
     }
 }

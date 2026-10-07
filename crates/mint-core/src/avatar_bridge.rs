@@ -559,6 +559,7 @@ impl AvatarBridge {
             AgentProgress::ThinkingDelta { .. } => {}
             AgentProgress::ExtendedThinking { .. } => {}
             AgentProgress::WaitingForNetwork { .. } => {}
+            AgentProgress::ContextCompaction { .. } => {}
             AgentProgress::PlanUpdated { .. } => {}
             AgentProgress::RunCompleted { .. } => {}
         }

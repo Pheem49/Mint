@@ -1,3 +1,5 @@
+import { ContextCompactionStatus } from './ContextCompactionStatus'
+import { activeCompactionFrom } from '../utils/contextCompaction'
 import { useEffect, useMemo, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
 import { hasAgentToolActivity, thoughtsFrom, extendedThoughtsFrom, mergeFileChanges, parseFileChangesFromProgress } from '../agentProgress'
 import { visibleInteractionsDuringRun } from '../conversation/syncView'
@@ -271,6 +273,7 @@ export default function ChatPanel({
   const throttledStreamedReply = useThrottledValue(streamedReply, STREAM_MARKDOWN_UPDATE_MS)
   const liveWebSources = useMemo(() => parseWebSearchSources(agentProgress), [agentProgress])
   const activeFallbackNotice = fallbackNotice(streamedResponse)
+  const compaction = activeCompactionFrom(agentProgress)
   const lastThinkingProgress = [...agentProgress].reverse().find(p => p.type === 'Thinking')
   let activeAgentName: string | null = null
   let activeModelName: string | null = null
@@ -1663,7 +1666,9 @@ export default function ChatPanel({
                 )}
                 <div className="message-bubble">
                   <span>
-                    {throttledStreamedReply ? (
+                    {compaction ? (
+                      <ContextCompactionStatus key={compaction.index} />
+                    ) : throttledStreamedReply ? (
                       renderFormattedMessage(throttledStreamedReply, liveWebSources)
                     ) : (
                       <div className="thinking-status">

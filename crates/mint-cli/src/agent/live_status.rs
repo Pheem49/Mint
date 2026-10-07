@@ -226,6 +226,8 @@ pub(super) fn print_table_block(table_lines: &[String], is_first: &mut bool) {
 pub(super) struct LiveStatus {
     pub(super) tui: Option<crate::interactive::TuiHandle>,
     pub(super) thinking: Option<String>,
+    pub(super) compaction_started: Option<Instant>,
+    pub(super) compaction_scopes: std::collections::BTreeMap<String, usize>,
     /// Context-window usage (0-100) as of the last completed step —
     /// mirrored here (not just built into `thinking`'s label text) so the
     /// 150ms elapsed-time ticker in `run_code_agent_with_options` can keep
@@ -537,8 +539,43 @@ pub(super) fn strip_ansi_escapes(s: &str) -> String {
     result
 }
 
+pub(super) fn compaction_label(elapsed: Duration) -> String {
+    format!(
+        "Compacting context · {}s • Esc to interrupt",
+        elapsed.as_secs()
+    )
+}
+
+pub(super) fn update_context_compaction(
+    status: &mut LiveStatus,
+    phase: &str,
+    scope: Option<&str>,
+    now: Instant,
+) {
+    let key = scope.unwrap_or("").to_owned();
+    if phase == "started" {
+        *status.compaction_scopes.entry(key).or_default() += 1;
+        status.compaction_started.get_or_insert(now);
+    } else {
+        if let Some(count) = status.compaction_scopes.get_mut(&key) {
+            *count -= 1;
+            if *count == 0 {
+                status.compaction_scopes.remove(&key);
+            }
+        }
+        if status.compaction_scopes.is_empty() {
+            status.compaction_started = None;
+        }
+    }
+    status.waiting_for_network = None;
+}
+
 pub(super) fn apply_wave_effect(text: &str, tick: usize) -> String {
-    let (label, metadata) = if let Some(idx) = text.rfind(" • Esc to interrupt)") {
+    let (label, metadata) = if text.starts_with("Compacting context")
+        && let Some(idx) = text.find(" · ")
+    {
+        (&text[..idx], &text[idx..])
+    } else if let Some(idx) = text.rfind(" • Esc to interrupt)") {
         if let Some(open_paren_idx) = text[..idx].rfind('(') {
             (&text[..open_paren_idx], &text[open_paren_idx..])
         } else {
@@ -721,6 +758,9 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
     let queue_box_will_show = status.queue_enabled && status.accepting_input;
     if !queue_box_will_show && let Some(display) = &thinking_display {
         lines.push(format!("  {display}"));
+    }
+    if status.compaction_started.is_some() {
+        lines.push("    Summarizing earlier steps to continue working".into());
     }
     // The queueing follow-up box (see `AgentOptions::queueing`) is appended
     // after everything above, so it's always the bottom-most thing in the
@@ -1729,5 +1769,76 @@ mod ramp_estimate_tests {
         assert_eq!(ramp_estimate(5000, ESTIMATE_RAMP_SECS), 5000);
         // Long after the ramp — still holds, doesn't keep climbing or wrap.
         assert_eq!(ramp_estimate(5000, 60.0), 5000);
+    }
+}
+
+#[cfg(test)]
+mod context_compaction_status_tests {
+    use super::*;
+    #[test]
+    fn compaction_lifecycle_keeps_its_timer_until_success_or_failure() {
+        let now = Instant::now();
+        let mut status = LiveStatus::default();
+        update_context_compaction(&mut status, "started", None, now);
+        assert_eq!(status.compaction_started, Some(now));
+        assert_eq!(
+            compaction_label(Duration::from_secs(12)),
+            "Compacting context · 12s • Esc to interrupt"
+        );
+        for phase in ["completed", "failed"] {
+            update_context_compaction(&mut status, phase, None, now);
+            assert!(status.compaction_started.is_none());
+            update_context_compaction(&mut status, "started", None, now);
+        }
+    }
+    #[test]
+    fn compaction_gradient_moves_while_timer_and_cancel_hint_stay_plain() {
+        let label = compaction_label(Duration::from_secs(12));
+        let first = apply_wave_effect(&label, 0);
+        let next = apply_wave_effect(&label, 12);
+        assert_ne!(first, next);
+        assert!(strip_ansi_escapes(&first).ends_with(" · 12s • Esc to interrupt"));
+        assert!(strip_ansi_escapes(&next).ends_with(" · 12s • Esc to interrupt"));
+        assert_eq!(
+            first.split_once(" · ").unwrap().1,
+            next.split_once(" · ").unwrap().1
+        );
+    }
+}
+
+#[cfg(test)]
+mod parallel_compaction_tests {
+    use super::*;
+    #[test]
+    fn one_child_finishing_does_not_clear_another_child_timer() {
+        let mut status = LiveStatus::default();
+        let now = Instant::now();
+        update_context_compaction(&mut status, "started", Some("A"), now);
+        update_context_compaction(
+            &mut status,
+            "started",
+            Some("B"),
+            now + Duration::from_secs(2),
+        );
+        update_context_compaction(&mut status, "completed", Some("A"), now);
+        assert_eq!(status.compaction_started, Some(now));
+        update_context_compaction(&mut status, "failed", Some("B"), now);
+        assert!(status.compaction_started.is_none());
+    }
+}
+
+#[cfg(test)]
+mod repeated_name_compaction_tests {
+    use super::*;
+    #[test]
+    fn repeated_child_name_keeps_timer_until_both_finish() {
+        let mut status = LiveStatus::default();
+        let now = Instant::now();
+        update_context_compaction(&mut status, "started", Some("reviewer"), now);
+        update_context_compaction(&mut status, "started", Some("reviewer"), now);
+        update_context_compaction(&mut status, "completed", Some("reviewer"), now);
+        assert_eq!(status.compaction_started, Some(now));
+        update_context_compaction(&mut status, "failed", Some("reviewer"), now);
+        assert!(status.compaction_started.is_none());
     }
 }

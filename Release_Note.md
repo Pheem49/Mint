@@ -22,6 +22,8 @@
 
 - Added the npm `mint-web` launcher as a shortcut for `mint web`, reusing the existing native binary lookup and preserving options and exit codes. Added launcher integration tests and documented the shortcut. Cargo-only installs continue to expose `mint web`.
 
+- Added explicit context-compaction lifecycle events around native agent summarization. TUI/classic CLI and Desktop/Web show an animated gradient `Compacting context` label with a compaction-only timer and English explanation (`Summarizing earlier steps to continue working`), then return to working status. Success and actionable failure notes remain in the activity history; failed summarization retains the original context. Short histories do not announce compaction, and post-compaction context percentages wait for fresh provider usage. GUI animation honors reduced-motion and forced-color settings. Subagent compactions track pending lifecycles, including concurrent invocations with the same name; the collective indicator stays active until every summarization finishes.
+
 - Scoped Desktop and Web Settings resets, typography, and form controls to the settings container. Background preloading of Settings no longer changes the sign-in page's font or shrinks its 48px inputs; selector specificity within Settings remains unchanged.
 
 - Refined sign-in and registration styling with a 24px card-radius fallback, 48px inputs and submit buttons, 16px input text, grouped headings with clearer spacing before fields, reduced background accent glows, and compact card padding on mobile.

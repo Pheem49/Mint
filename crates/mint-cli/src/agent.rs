@@ -798,18 +798,18 @@ pub async fn run_code_agent_with_options(
                         break;
                     }
                     if timer_tool_running.load(Ordering::Relaxed) == 0 {
-                        status.thinking = Some(
-                            if let Some((attempt, max_attempts)) = status.waiting_for_network {
-                                waiting_for_network_label(attempt, max_attempts)
-                            } else {
-                                let context_suffix = context_pct_suffix(status.context_pct);
-                                let tokens_suffix = live_tokens_suffix(&status);
-                                format!(
-                                    "{thinking_verb} ({}{tokens_suffix}{context_suffix} • Esc to interrupt)",
-                                    format_elapsed(timer_started_at.elapsed())
-                                )
-                            },
-                        );
+                        status.thinking = Some(if let Some(started) = status.compaction_started {
+                            compaction_label(started.elapsed())
+                        } else if let Some((attempt, max_attempts)) = status.waiting_for_network {
+                            waiting_for_network_label(attempt, max_attempts)
+                        } else {
+                            let context_suffix = context_pct_suffix(status.context_pct);
+                            let tokens_suffix = live_tokens_suffix(&status);
+                            format!(
+                                "{thinking_verb} ({}{tokens_suffix}{context_suffix} • Esc to interrupt)",
+                                format_elapsed(timer_started_at.elapsed())
+                            )
+                        });
                     }
                     render_live_status(&mut status);
                 }
@@ -885,6 +885,37 @@ pub async fn run_code_agent_with_options(
                         )
                     };
                     status.thinking = Some(label);
+                    render_live_status(&mut status);
+                }
+            }
+            AgentProgress::ContextCompaction {
+                subagent,
+                status: phase,
+                message,
+            } => {
+                if !options.fast_mode
+                    && let Ok(mut status) = progress_live_status.lock()
+                {
+                    update_context_compaction(
+                        &mut status,
+                        &phase,
+                        subagent.as_deref(),
+                        Instant::now(),
+                    );
+                    if phase == "started" {
+                        status.thinking = Some(compaction_label(Duration::ZERO));
+                    } else {
+                        print_timeline_note(&mut status, &message, started_at.elapsed(), None);
+                        status.context_pct = None;
+                        status.thinking = Some(if let Some(started) = status.compaction_started {
+                            compaction_label(started.elapsed())
+                        } else {
+                            format!(
+                                "{thinking_verb} ({} • Esc to interrupt)",
+                                format_elapsed(started_at.elapsed())
+                            )
+                        });
+                    }
                     render_live_status(&mut status);
                 }
             }

@@ -328,6 +328,11 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
         const hasRetry = currentGroup.items.some((it) => it.state === 'retry')
         currentGroup.state = hasActive ? 'active' : hasDone ? 'done' : hasRetry ? 'retry' : hasError ? 'error' : 'done'
       }
+    } else if (event.type === 'ContextCompaction') {
+      if (event.data.status !== 'started') {
+        flushGroup()
+        timeline.push({ id: `context-${nextId++}`, kind: 'thought', thought: event.data.subagent ? `[${event.data.subagent}] ${event.data.message}` : event.data.message })
+      }
     } else if (event.type === 'Thought') {
       const text = event.data?.thought?.trim()
       if (text) {

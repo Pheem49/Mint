@@ -74,6 +74,7 @@ export interface RunTelemetrySummary {
 
 export type AgentProgress =
   | { type: 'Thinking'; data: { elapsed_secs: number; agent_name?: string; model_name?: string } }
+  | { type: 'ContextCompaction'; data: { status: 'started' | 'completed' | 'failed'; message: string; subagent?: string } }
   | { type: 'Thought'; data: { thought: string } }
   | { type: 'ThinkingDelta'; data: { id: string; delta: string; elapsed_ms: number } }
   | { type: 'ExtendedThinking'; data: { id?: string; thought: string; elapsed_ms?: number } }
