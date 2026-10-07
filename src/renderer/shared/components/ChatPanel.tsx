@@ -37,6 +37,7 @@ import GitBranchSelector from './GitBranchSelector'
 import WorkspaceSelector from './WorkspaceSelector'
 import CodeReviewPage from './CodeReviewPage'
 import type { ToolSurface } from './ToolSurfacePage'
+import '../css/thinking-status.css'
 
 import { catalogPlatform, conversationPlatform, runtimePlatform } from '../platform'
 
@@ -1665,26 +1666,16 @@ export default function ChatPanel({
                     {throttledStreamedReply ? (
                       renderFormattedMessage(throttledStreamedReply, liveWebSources)
                     ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-soft, #94a3b8)' }}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', flexShrink: 0 }}>
-                          <circle cx="12" cy="12" r="10" stroke="rgba(255, 255, 255, 0.12)" />
-                          <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--accent)" strokeLinecap="round">
-                            <animateTransform
-                              attributeName="transform"
-                              type="rotate"
-                              from="0 12 12"
-                              to="360 12 12"
-                              dur="0.9s"
-                              repeatCount="indefinite"
-                            />
-                          </path>
-                        </svg>
-                         <span>
-                           {activeAgentName && activeModelName 
-                             ? `${activeAgentName} (${activeModelName}) is thinking... (${elapsedSeconds}s)`
-                             : `Thinking for ${elapsedSeconds}s (Esc to cancel)`
-                           }
-                         </span>
+                      <div className="thinking-status">
+                        <span className="thinking-status-label">
+                          <span aria-hidden="true">✦ </span>
+                          {activeAgentName && activeModelName
+                            ? `${activeAgentName} (${activeModelName}) is thinking...`
+                            : 'Thinking'}
+                        </span>
+                        <span className="thinking-status-meta">
+                          {` · ${elapsedSeconds}s · Esc to cancel`}
+                        </span>
                       </div>
                     )}
                   </span>

@@ -32,7 +32,7 @@
     "launch": "./target/release/mint-desktop",
     "start:rebuild": "npm run build:desktop:fast && ./target/release/mint-desktop",
     "test": "npm run test:interfaces && cargo test -p mint-core -p mint-cli",
-    "test:interfaces": "vitest run src/renderer/shared/platform.test.ts src/renderer/shared/conversation/coordinator.test.ts src/renderer/shared/conversation/syncView.test.ts src/renderer/shared/utils/cardJson.test.ts src/renderer/shared/utils/agentActivity.test.ts",
+    "test:interfaces": "vitest run src/renderer/shared/platform.test.ts src/renderer/shared/conversation/coordinator.test.ts src/renderer/shared/conversation/syncView.test.ts src/renderer/shared/utils/cardJson.test.ts src/renderer/shared/utils/agentActivity.test.ts src/renderer/shared/components/CliSessionsView.test.tsx",
     "cli": "node src/bin/index.js",
     "prepublishOnly": "npm run build:web",
     "postinstall": "cargo build -p mint-cli --release"

@@ -43,9 +43,9 @@ const MIN_WIDTH: u16 = 60;
 const MIN_HEIGHT: u16 = 12;
 const COPY_LIMIT: usize = 100 * 1024;
 const BACK_TO_BOTTOM_LABEL: &str = " ↓ Back to bottom · End ";
-const WATERMARK_FRAME_COUNT: u8 = 50;
+const WATERMARK_FRAME_COUNT: u8 = 200;
 const WATERMARK_TICK: std::time::Duration = std::time::Duration::from_millis(30);
-const WATERMARK_HOLD: std::time::Duration = std::time::Duration::from_secs(2);
+const WATERMARK_HOLD: std::time::Duration = std::time::Duration::from_secs(1);
 const WATERMARK_WIDTH: u16 = 39;
 const WATERMARK_HEIGHT: u16 = 17;
 
@@ -55,16 +55,25 @@ fn watermark_animation_at(
     let half_turn_frames = WATERMARK_FRAME_COUNT / 2;
     let half_turn = WATERMARK_TICK * half_turn_frames as u32;
     let hold_end = half_turn + WATERMARK_HOLD;
-    let reverse_end = hold_end + half_turn;
+    let full_turn_end = hold_end + half_turn;
+    // Ease each 3-second half turn into and out of its resting face.
+    let eased_frame = |step: u8| {
+        let progress = step as f32 / half_turn_frames as f32;
+        let eased = (1.0 - (progress * std::f32::consts::PI).cos()) * 0.5;
+        (eased * half_turn_frames as f32).round() as u8
+    };
     if elapsed < half_turn {
         let step = (elapsed.as_millis() / WATERMARK_TICK.as_millis()) as u8;
-        (Some(step), Some(WATERMARK_TICK * (step as u32 + 1)))
+        (
+            Some(eased_frame(step)),
+            Some(WATERMARK_TICK * (step as u32 + 1)),
+        )
     } else if elapsed < hold_end {
         (Some(half_turn_frames), Some(hold_end))
-    } else if elapsed < reverse_end {
+    } else if elapsed < full_turn_end {
         let step = ((elapsed - hold_end).as_millis() / WATERMARK_TICK.as_millis()) as u8;
         (
-            Some(half_turn_frames - step - 1),
+            Some((half_turn_frames + eased_frame(step)) % WATERMARK_FRAME_COUNT),
             Some(hold_end + WATERMARK_TICK * (step as u32 + 1)),
         )
     } else {
@@ -3947,27 +3956,30 @@ mod dialog_tests {
     }
 
     #[test]
-    fn watermark_animation_turns_to_leaf_holds_and_returns_to_m() {
-        let frames = (0..=350)
-            .map(|event| watermark_animation_at(std::time::Duration::from_millis(event * 10)).0)
-            .collect::<Vec<_>>();
-        assert_eq!(frames[0], Some(0));
-        assert_eq!(frames[3], Some(1));
-        assert_eq!(frames[74], Some(24));
-        assert_eq!(frames[75], Some(25));
-        assert_eq!(frames[100], Some(25));
-        assert_eq!(frames[274], Some(25));
-        assert_eq!(frames[275], Some(24));
-        assert_eq!(frames[347], Some(0));
-        assert_eq!(frames[350], None);
+    fn watermark_animation_eases_to_leaf_holds_then_continues_forward_to_m() {
+        let at = |ms| watermark_animation_at(std::time::Duration::from_millis(ms));
+        assert_eq!(at(0).0, Some(0));
+        // Slower movement near the endpoints, faster through the middle.
+        assert_eq!(at(300).0, Some(2));
+        assert_eq!(at(1500).0, Some(50));
+        assert_eq!(at(2700).0, Some(98));
         assert_eq!(
-            watermark_animation_at(std::time::Duration::from_millis(2749)),
-            (Some(25), Some(std::time::Duration::from_millis(2750)))
+            at(3000),
+            (Some(100), Some(std::time::Duration::from_millis(4000)))
         );
         assert_eq!(
-            watermark_animation_at(std::time::Duration::from_millis(3500)),
-            (None, None)
+            at(3999),
+            (Some(100), Some(std::time::Duration::from_millis(4000)))
         );
+        assert_eq!(at(4000).0, Some(100));
+        assert_eq!(at(4300).0, Some(102));
+        assert_eq!(at(5500).0, Some(150));
+        assert_eq!(at(6700).0, Some(198));
+        assert_eq!(
+            at(6999),
+            (Some(0), Some(std::time::Duration::from_millis(7000)))
+        );
+        assert_eq!(at(7000), (None, None));
     }
 
     fn make_key(code: KeyCode) -> KeyEvent {

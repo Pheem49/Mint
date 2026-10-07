@@ -701,26 +701,6 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
     // that — same information, anchored to the thing it describes instead
     // of to whatever happened to print last.
     let thinking_display = status.thinking.as_ref().map(|thinking| {
-        // Moon phases, forced to *text* presentation via `\u{FE0E}` so they
-        // stay single-column-width instead of the wide (2-column) emoji
-        // glyph — deliberate, even though it means some terminal fonts only
-        // ship one fallback glyph for all 8 text-style variants and the
-        // spin won't visibly animate there. Width consistency was chosen
-        // over guaranteed animation; swap to a plain-text spinner (e.g.
-        // Braille patterns) instead of dropping this selector if that
-        // trade-off ever needs to flip back.
-        let frames = &[
-            "🌑\u{FE0E}",
-            "🌒\u{FE0E}",
-            "🌓\u{FE0E}",
-            "🌔\u{FE0E}",
-            "🌕\u{FE0E}",
-            "🌖\u{FE0E}",
-            "🌗\u{FE0E}",
-            "🌘\u{FE0E}",
-        ];
-        let frame = frames[status.spinner_tick % frames.len()];
-
         let dots_frames = &["", ".", "..", "..."];
         let dots = dots_frames[(status.spinner_tick / 2) % dots_frames.len()];
 
@@ -735,7 +715,8 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
 
         let waved_thinking = apply_wave_effect(&custom_thinking, status.spinner_tick);
 
-        format!("{MINT}{frame}{RESET} {waved_thinking}")
+        // A single-column text star matches the GUI and joins the TUI glow.
+        format!("{MINT}✦{RESET} {waved_thinking}")
     });
     let queue_box_will_show = status.queue_enabled && status.accepting_input;
     if !queue_box_will_show && let Some(display) = &thinking_display {

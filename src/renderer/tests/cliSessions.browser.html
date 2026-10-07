@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>*{box-sizing:border-box}body{margin:0;background:#0b0b0c;color:#eee;font-family:Arial,sans-serif}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style></head>
+<body><div id="root"></div><pre id="result">RUNNING</pre>
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import CliSessionsView from '/shared/components/CliSessionsView.tsx';
+const demo='/projects/Demo', mint='/projects/Mint-CLI';
+const makeSession=(id,kind,workspacePath)=>({id,kind,workspacePath,title:`Task ${id}`,createdAt:'2026-10-05T15:10:24Z',messageCount:1});
+const sessions=[makeSession('app-demo','conversation',demo), ...Array.from({length:37},(_,i)=>makeSession(`cli::${i}`,'cli',mint))];
+const root=createRoot(document.getElementById('root'));
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const checks=[];
+function check(condition,message){if(!condition)throw Error(message);checks.push(message)}
+async function waitFor(predicate){for(let i=0;i<100;i++){if(predicate())return;await sleep(20)}throw Error('Timed out waiting for UI')}
+function render(workspace=demo){root.render(React.createElement(CliSessionsView,{chatSessions:sessions,workspacePath:workspace,recentWorkspacePaths:['/projects/Empty'],activeConversationId:'app-demo',onSelectSession:()=>{},onDeleteSession:()=>{},onRenameSession:()=>{}}))}
+function choose(path){const select=document.querySelector('[aria-label="Project"]');select.value=path;select.dispatchEvent(new Event('change',{bubbles:true}))}
+function button(text){return [...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text)}
+function search(text){const input=document.querySelector('.code-search-input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,text);input.dispatchEvent(new Event('input',{bubbles:true}))}
+try {
+  render();await waitFor(()=>button('Show all sessions'));
+  check(document.querySelector('.code-terminal-text').textContent.includes('37 CLI sessions outside this project'),'empty project explains real outside count');
+  button('Show all sessions').click();await waitFor(()=>document.querySelectorAll('.code-session-row').length===37);
+  check(!document.querySelector('.code-sessions-list').textContent.includes('Task app-demo'),'show all keeps app conversations excluded');
+  choose(mint);await waitFor(()=>button('Current Project').classList.contains('active'));
+  check(document.querySelector('.code-header-subtitle').textContent.includes('Mint-CLI'),'selector changes project scope');
+  choose(demo);await waitFor(()=>button('Show all sessions'));
+  choose('/projects/Empty');await waitFor(()=>document.querySelector('.code-header-subtitle').textContent.includes('Empty'));
+  check(!!button('Show all sessions'),'recent project without sessions is selectable');
+  choose(mint);await waitFor(()=>document.querySelectorAll('.code-session-row').length===37);
+  search('missing-task');await waitFor(()=>document.querySelector('.code-empty-terminal'));
+  check(!button('Show all sessions'),'search miss does not claim the project is empty');
+  search('');await waitFor(()=>document.querySelectorAll('.code-session-row').length===37);
+  render();await sleep(50);
+  check(document.querySelector('[aria-label="Project"]').value===mint,'refresh does not reset local project selection');
+  render('/projects/Empty');await waitFor(()=>document.querySelector('[aria-label="Project"]').value==='/projects/Empty');
+  check(true,'workspace prop changes update the initial scope');
+  check(document.documentElement.scrollWidth<=innerWidth,'controls fit viewport without horizontal page overflow');
+  choose(mint);await waitFor(()=>document.querySelectorAll('.code-session-row').length===37);
+  document.getElementById('result').textContent='PASS\n'+checks.join('\n');
+} catch(error){document.getElementById('result').textContent='FAIL\n'+error.stack;}
+</script></body></html>

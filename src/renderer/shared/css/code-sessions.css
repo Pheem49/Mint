@@ -173,6 +173,24 @@
 }
 
 /* Sessions List (Linear-like Structured Rows) */
+.code-project-select {
+  max-width: 100%;
+  min-width: 0;
+  flex: 0 1 220px;
+  text-overflow: ellipsis;
+}
+
+.code-show-all-btn {
+  margin-bottom: 16px;
+  min-height: 36px;
+}
+
+.code-project-select:focus-visible,
+.code-show-all-btn:focus-visible {
+  outline: 2px solid var(--interactive-fg, #a1a1aa);
+  outline-offset: 2px;
+}
+
 .code-sessions-list {
   display: flex;
   flex-direction: column;

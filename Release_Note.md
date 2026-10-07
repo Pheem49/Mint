@@ -4,6 +4,18 @@
 
 - Changed agent skill discovery to a name/description/path catalog for workspace, global, and taught skills. Relevant skills load through capability-checked full-file reads; explicit skill selection and memory recall no longer preload bodies or claim a load. Successful reads persist exact content per canonical path and chat, reset on chat clear/delete, and require another read when the file changes. Only unchanged, fully retained content receives READ status, and that content is attached to every native/JSON request across history rebuilds and compaction. Project rule files remain mandatory context. CLI and Web/Desktop activities now show Reading skill, Loaded skill, failures, and partial previews separately, with matching parallel completions. Full successful skill reads bypass ordinary output truncation; unchanged exact bodies already present in the request count as READ even when they exceed the cached replay budget.
 
+- Added a Project selector to the shared Web/Desktop Code hub, populated from session workspaces, recent folders, and the active workspace. Selecting a project filters the hub directly without reassigning the active chat. Empty projects now show the actual number of CLI sessions outside that project and a Show all sessions button; search misses keep their separate empty state.
+
+- Changed the Full-Screen TUI watermark to continue rotating in the same direction after the one-second leaf-face pause, completing a full revolution back to M. Both 3-second eased half-turns and click-to-animate behavior are retained. Updated the animation regression test to reject reverse rotation.
+
+- Slowed the Full-Screen TUI watermark to 3 seconds per half-turn with cosine easing and 200 angular frames for finer movement (up from 100). It holds the leaf face for one second between half-turns, for a seven-second cycle, preserving click-to-animate behavior and deadline-based polling. Updated timing and easing regression coverage.
+
+- Replaced the CLI Thinking moon-phase marker with the same single-column `✦` star used by Web/Desktop. The Full-Screen TUI's existing text glow now includes the star; elapsed time, randomized thinking verbs, and tool progress indicators are preserved. Classic CLI uses the same marker.
+
+- Updated the Web/Desktop waiting indicator to `✦ Thinking · 5s · Esc to cancel`: the decorative star shares the text glow, while elapsed time and the cancellation hint remain static. Active agent/model labels are retained with the same separators.
+
+- Replaced the Web/Desktop waiting-for-response spinner with a left-to-right text glow inspired by the Full-Screen TUI Thinking indicator. Theme text colors drive the effect; elapsed time and cancellation hints remain static. Reduced-motion and forced-colors preferences receive plain readable text. Streaming behavior and TUI remain unchanged.
+
 - Scoped Desktop and Web Settings resets, typography, and form controls to the settings container. Background preloading of Settings no longer changes the sign-in page's font or shrinks its 48px inputs; selector specificity within Settings remains unchanged.
 
 - Refined sign-in and registration styling with a 24px card-radius fallback, 48px inputs and submit buttons, 16px input text, grouped headings with clearer spacing before fields, reduced background accent glows, and compact card padding on mobile.

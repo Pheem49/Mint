@@ -2550,6 +2550,7 @@ export default function MintDashboard() {
                 chatSessions={chatSessions}
                 activeConversationId={conversationId}
                 workspacePath={workspacePath}
+                recentWorkspacePaths={recentWorkspacePaths}
                 onSelectSession={(id) => {
                   selectConversation(id)
                 }}

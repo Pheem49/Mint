@@ -1,0 +1,46 @@
+/* Match the TUI's quiet left-to-right glow; timing and cancel hints stay still. */
+.thinking-status {
+  color: var(--text-soft);
+  overflow-wrap: anywhere;
+}
+
+.thinking-status-label {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.thinking-status-meta {
+  font-variant-numeric: tabular-nums;
+}
+
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .thinking-status-label {
+    background-image: linear-gradient(
+      90deg,
+      var(--text-muted) 0%,
+      var(--text-muted) 35%,
+      var(--text-main) 50%,
+      var(--text-muted) 65%,
+      var(--text-muted) 100%
+    );
+    background-size: 250% 100%;
+    background-position: 100% 0;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: thinkingStatusSweep 2.4s linear infinite;
+  }
+}
+
+@keyframes thinkingStatusSweep {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
+}
+
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  .thinking-status-label {
+    animation: none;
+    background: none;
+    color: var(--text-main);
+  }
+}
