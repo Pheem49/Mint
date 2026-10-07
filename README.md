@@ -260,21 +260,18 @@ cp .env.example .env
 Open the `.env` file and insert your API keys (e.g. `GEMINI_API_KEY=your_key_here`).
 
 ### 2. Desktop Application
-Install the dependencies and start the application in development mode with HMR:
-```bash
-npm install
-npm run dev
-```
-To open the normal production-mode desktop app locally (without a Vite dev server):
-```bash
-npm start
-```
-`npm start` opens the existing local Desktop binary and only builds it when it does not exist. Use `npm run start:rebuild` to explicitly rebuild with the fast-release profile, `npm run start:release` to rebuild the fully optimized release profile before measuring performance or publishing, or `npm run launch` to require an existing binary without any fallback build.
-To compile and build a production standalone desktop package:
-```bash
-npm run tauri:build
-```
-*(The Vite renderer output is generated in `out/renderer` and can be manually built via `npm run build:web`)*
+Install dependencies once with `npm install`, then use these four Desktop commands:
+
+| Command | Behavior |
+| --- | --- |
+| `npm start` | Open the latest Desktop. Changed Rust/UI/build inputs trigger a fast release build; unchanged successful builds launch immediately. Build failures stop without opening an older binary. |
+| `npm run dev` | Open Desktop in development mode with UI hot reload. |
+| `npm run build:desktop` | Build the fully optimized Desktop and UI without opening it. |
+| `npm run package` | Build the optimized Desktop and native installers; Linux also gets a portable tarball. |
+
+The first `npm start` verifies the build once. Successful full builds and packages are reused by later starts. `npm start -- --rebuild` forces a fresh fast build; `npm start -- --release` requires a fully optimized build. Other arguments reach the Desktop executable, and the directory invoking the command remains its working directory.
+
+Old launch/build names remain compatibility aliases. `dev:desktop:ui` and `build:desktop:ui` are UI-only steps used internally by Tauri. `npm run build:ui` builds both Desktop and Web UI assets (`out/renderer` and `out/web`); `npm run build` remains its compatibility alias. CLI and Web commands are separate.
 
 ### 3. Native CLI
 Pick one way to get the global `mint` command:
@@ -289,13 +286,15 @@ Pick one way to get the global `mint` command:
   cargo install --path crates/mint-cli
   ```
   *(make sure `~/.cargo/bin` is on your shell's `$PATH`)*
-* **Dev alias** — recompiles on every run, so code changes apply instantly; best while actively editing Mint itself:
+* **Source checkout with automatic rebuilds:** use the Node launcher at `src/bin/index.js` as your `mint` command (requires Node.js and Cargo). On Linux, for example, link it into a directory on your PATH:
   ```bash
-  echo 'alias mint="cargo run --manifest-path $(pwd)/Cargo.toml -p mint-cli --"' >> ~/.bashrc  # or ~/.zshrc
-  source ~/.bashrc  # or ~/.zshrc
+  ln -s "$PWD/src/bin/index.js" ~/.local/bin/mint
   ```
+  If another `mint` command is earlier on PATH, replace that entry or adjust PATH. Back up an existing executable before replacing it.
 
-No alias set up? Everything below still works via `npm run cli -- <command>` in place of `mint <command>`. This uses the existing compiled CLI binary; use `npm run cli:rebuild -- <command>` after changing Rust code, or `npm run cli:dev -- <command>` while developing the CLI.
+From a source checkout, `npm run cli -- <command>` and the linked launcher compare CLI/Core source contents and build inputs with the last successful build. Changed inputs trigger a release build; unchanged inputs launch immediately. A failed build displays the compiler error and stops without opening an old binary. The first launch verifies the build once. `mint`, `mint web`, and `mint auto` use the directory where you invoke them as their working directory, even when the source checkout lives elsewhere.
+
+`npm run build:cli` still builds explicitly. Cargo-installed standalone binaries and distributed npm packages do not automatically rebuild source changes. `MINT_BIN` explicitly selects a binary and bypasses automatic rebuilding.
 
 ---
 
@@ -445,6 +444,7 @@ mint chat "<message>"
 | `mint setup` | Interactively manage enabled agent tools |
 | `mint plugins` | Centralized interactive management for built-in ecosystem plugins & skills |
 | `mint web` | Launch the web UI and local API server |
+| `mint-web` | Shortcut for `mint web` when installed via npm; forwards options such as `--dev` and `--tailscale` |
 | `mint web --tailscale` | Serve the built web UI privately over Tailscale HTTPS for mobile/PWA use |
 | `mint api` | Start only the local API server |
 | `mint gateway start` | Run headless: bridges + cron, no TUI — for VPS/systemd use |

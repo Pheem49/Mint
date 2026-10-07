@@ -16,6 +16,12 @@
 
 - Replaced the Web/Desktop waiting-for-response spinner with a left-to-right text glow inspired by the Full-Screen TUI Thinking indicator. Theme text colors drive the effect; elapsed time and cancellation hints remain static. Reduced-motion and forced-colors preferences receive plain readable text. Streaming behavior and TUI remain unchanged.
 
+- Consolidated Desktop workflows around `npm start`, `npm run dev`, `npm run build:desktop`, and `npm run package`. Start fingerprints Rust, UI, configuration, dependency locks, and build environment; it reuses successful unchanged builds and stops on failures or edits during compilation. Full builds/packages record successful receipts without opening the app. Previous names remain compatibility aliases, while Tauri uses explicitly named UI-only steps. Linux packaging retains the portable tarball and renamed deb installer. Builds with forwarded custom configuration/features cannot validate the default startup cache.
+
+- Source-checkout `mint` launches now fingerprint CLI/Core sources, Cargo inputs, and embedded catalogs/release notes. Changed or unverified builds compile the release CLI before launch; unchanged builds open immediately. Build failures and source changes during compilation stop without launching an older binary. Arguments and the invoking directory are preserved for CLI, web, and auto commands; explicit MINT_BIN overrides and packaged installs retain their existing behavior.
+
+- Added the npm `mint-web` launcher as a shortcut for `mint web`, reusing the existing native binary lookup and preserving options and exit codes. Added launcher integration tests and documented the shortcut. Cargo-only installs continue to expose `mint web`.
+
 - Scoped Desktop and Web Settings resets, typography, and form controls to the settings container. Background preloading of Settings no longer changes the sign-in page's font or shrinks its 48px inputs; selector specificity within Settings remains unchanged.
 
 - Refined sign-in and registration styling with a 24px card-radius fallback, 48px inputs and submit buttons, 16px input text, grouped headings with clearer spacing before fields, reduced background accent glows, and compact card padding on mobile.

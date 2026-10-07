@@ -9,10 +9,19 @@ cargo test -p mint-core -p mint-cli -p mint-desktop
 cargo check -p mint-desktop
 ```
 
+## Desktop commands
+
+- `npm start`: ตรวจ Rust/UI และ build แบบเร็วก่อนเปิดเมื่อโค้ดเปลี่ยน; ถ้า build ไม่ผ่านจะหยุด
+- `npm run dev`: เปิด Desktop สำหรับพัฒนา พร้อม UI hot reload
+- `npm run build:desktop`: build ตัวเต็มโดยไม่เปิดแอป
+- `npm run package`: build ตัวเต็มและสร้างแพ็กเกจติดตั้ง
+
+คำสั่งเดิมยังเป็น compatibility aliases; ขั้นตอน UI แยกไว้ให้ Tauri เรียกภายใน
+
 ## 📦 ข้อ 2 Build Desktop Bundles
 
 ```bash
-npm run tauri:build
+npm run package
 ```
 
 Tauri writes platform bundles under `target/release/bundle/`.

@@ -35,7 +35,7 @@ function findBinary() {
 
   for (const candidate of candidates) {
     try {
-      if (fs.existsSync(candidate)) {
+      if (fs.existsSync(candidate) && fs.realpathSync(candidate) !== fs.realpathSync(__filename)) {
         if (process.platform !== 'win32') {
           fs.accessSync(candidate, fs.constants.X_OK);
         }
@@ -49,29 +49,22 @@ function findBinary() {
   return null;
 }
 
-const binaryPath = findBinary();
-
-if (!binaryPath) {
-  console.error(
-    `\x1b[31mmint: native binary not found.\x1b[0m\n\n` +
-    `Build or install the binary with:\n` +
-    `  \x1b[32mcargo build -p mint-cli\x1b[0m              (fast debug build)\n` +
-    `  \x1b[32mcargo build -p mint-cli --release\x1b[0m    (optimized release build)\n` +
-    `  \x1b[32mcargo install --path crates/mint-cli\x1b[0m   (install permanently to ~/.cargo/bin)\n`
-  );
-  process.exit(1);
+async function main() {
+  const root = path.resolve(__dirname, '../..');
+  const sourceCheckout = fs.existsSync(path.join(root, '.git')) && fs.existsSync(path.join(root, 'crates/mint-cli/src/main.rs'));
+  // Explicit overrides and distributed packages keep their existing launch behavior.
+  const binaryPath = !process.env.MINT_BIN && sourceCheckout
+    ? await require('./auto-build').autoBuild(root)
+    : findBinary();
+  if (!binaryPath) throw new Error('native binary not found; run npm run build:cli first');
+  const child = spawn(binaryPath, process.argv.slice(2), { stdio: 'inherit' });
+  child.once('error', err => { console.error(`mint: ${err.message}`); process.exitCode = 1; });
+  child.once('close', (code, signal) => {
+    if (signal) process.kill(process.pid, signal);
+    else process.exitCode = code ?? 1;
+  });
 }
-
-// Forward every argument straight through to the Rust binary.
-const child = spawn(binaryPath, process.argv.slice(2), {
-  stdio: 'inherit'
-});
-
-child.on('error', (err) => {
-  console.error(`\x1b[31mmint: failed to spawn binary at ${binaryPath}:\x1b[0m`, err.message);
-  process.exit(1);
-});
-
-child.on('close', (code) => {
-  process.exit(code ?? 0);
+main().catch(err => {
+  console.error(`mint: ${err.message}`);
+  process.exitCode = err.exitCode || 1;
 });
