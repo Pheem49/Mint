@@ -1,0 +1,6 @@
+.voice-powered-orb { position: relative; width: 100%; height: 100%; }
+.voice-powered-orb canvas { display: block; width: 100%; height: 100%; }
+.voice-powered-orb__fallback {
+  position: absolute; inset: 12%; border-radius: 50%;
+  border: 2px solid var(--flavor-indigo); box-shadow: inset 0 0 30px var(--flavor-indigo), 0 0 24px color-mix(in srgb, var(--flavor-cyan) 35%, transparent);
+}

@@ -1,3 +1,4 @@
+import SelectField from '../SelectField'
 import React, { useEffect, useState } from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
 import { HF_MODELS } from '../../constants/models'
@@ -260,19 +261,19 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
 
             <div className="setting-row">
               <label>AI provider</label>
-              <select value={provider} onChange={(e) => handleProviderChange(e.target.value)}>
+              <SelectField aria-label="AI provider" value={provider} onValueChange={(nextValue) => handleProviderChange(nextValue)}>
                 {availableProviders.map(p => (
                   <option key={p.value} value={p.value}>{p.label}</option>
                 ))}
-              </select>
+              </SelectField>
             </div>
 
             <div className="setting-row">
               <label>Model name</label>
-              <select 
+              <SelectField aria-label="Model name"
                 value={isCustomModel ? 'custom' : model} 
-                onChange={(e) => {
-                  const val = e.target.value
+                onValueChange={(nextValue) => {
+                  const val = nextValue
                   if (val === 'custom') {
                     setModel('')
                   } else {
@@ -284,7 +285,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
                   <option key={m} value={m}>{m}</option>
                 ))}
                 <option value="custom">Custom...</option>
-              </select>
+              </SelectField>
             </div>
 
             {isCustomModel && (

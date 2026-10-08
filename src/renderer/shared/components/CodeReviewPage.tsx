@@ -1,3 +1,4 @@
+import SelectField from './SelectField'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { FileChange, GitBranchInfo, WorkspaceHistoryEntry } from '../types'
@@ -461,9 +462,9 @@ export default function CodeReviewPage({
       {tab === 'history' && <section id="review-history" role="tabpanel" aria-labelledby="review-history-tab" className="review-history-panel">
         {!workspacePath ? <p>Select a workspace to view file history.</p> : history.loading && history.entries.length === 0 ? <p>Loading file history…</p> : history.entries.length === 0 ? <p>No saved file history in this workspace.</p> : <>
           <label className="review-history-picker">Saved action
-            <select value={selectedHistory?.id || ''} onChange={event => setHistorySelection(event.target.value)}>
+            <SelectField aria-label="Saved action" value={selectedHistory?.id || ''} onValueChange={(nextValue) => setHistorySelection(nextValue)}>
               {history.entries.map((entry, index) => <option key={entry.id} value={entry.id}>{index === 0 ? 'Latest · ' : ''}{entry.label.replace(/^Undo /, '')}</option>)}
-            </select>
+            </SelectField>
           </label>
           {selectedHistory && <>
             <HistoryDetails entry={selectedHistory} />

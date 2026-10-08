@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
 
 export default defineConfig({
@@ -52,6 +53,7 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    tailwindcss(),
     {
       name: 'rewrite-html',
       configureServer(server) {
@@ -83,6 +85,8 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      '@/components/ui': resolve(__dirname, 'src/renderer/shared/components/ui'),
+      '@/lib/utils': resolve(__dirname, 'src/renderer/shared/lib/utils'),
       '@': resolve(__dirname, 'src/renderer/src-web'),
       '@shared': resolve(__dirname, 'src/renderer/shared')
     }

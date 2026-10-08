@@ -1,3 +1,4 @@
+import SelectField from '../SelectField'
 import React, { useState } from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
 import { GEMINI_LIVE_VOICES } from '../../constants/models'
@@ -84,14 +85,14 @@ export default function AudioTab({ config, updateField, apiKey }: AudioTabProps)
           <div className="form-grid single">
             <div className="setting-row">
               <label>Real-time model{liveLoading && <span style={{ marginLeft: 6, opacity: 0.5, fontSize: '0.8em' }}>loading…</span>}</label>
-              <select
+              <SelectField aria-label="Real-time model"
                 value={isCustomLiveModel ? 'custom' : config.geminiLiveModel}
-                onChange={(e) => {
-                  if (e.target.value === 'custom') {
+                onValueChange={(nextValue) => {
+                  if (nextValue === 'custom') {
                     setCustomLiveModel(true)
                   } else {
                     setCustomLiveModel(false)
-                    updateField('geminiLiveModel', e.target.value)
+                    updateField('geminiLiveModel', nextValue)
                   }
                 }}
               >
@@ -99,7 +100,7 @@ export default function AudioTab({ config, updateField, apiKey }: AudioTabProps)
                   <option key={model} value={model}>{model}</option>
                 ))}
                 <option value="custom">Custom...</option>
-              </select>
+              </SelectField>
               <p className="hint">
                 The model Gemini Live uses for realtime voice conversations.
                 "gemini-3.1-flash-live-preview" requires requesting allowlist access from Google first — if it
@@ -119,11 +120,11 @@ export default function AudioTab({ config, updateField, apiKey }: AudioTabProps)
             )}
             <div className="setting-row">
               <label>Live voice</label>
-              <select value={config.geminiLiveVoice} onChange={(e) => updateField('geminiLiveVoice', e.target.value)}>
+              <SelectField aria-label="Live voice" value={config.geminiLiveVoice} onValueChange={(nextValue) => updateField('geminiLiveVoice', nextValue)}>
                 {GEMINI_LIVE_VOICES.map((voiceName) => (
                   <option key={voiceName} value={voiceName}>{voiceName}</option>
                 ))}
-              </select>
+              </SelectField>
               <p className="hint">
                 The voice Gemini Live speaks with. Can also be changed mid-call from the Live overlay itself.
               </p>

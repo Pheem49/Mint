@@ -1,0 +1,80 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mint VoicePill interaction checks</title></head>
+<body style="background:#18181b;color:#f5f5f5;font-family:system-ui;margin:32px"><h1>Mint VoicePill</h1><div id="root" style="padding:24px 140px"></div><pre id="result">RUNNING</pre>
+<script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import VoicePill from '../shared/components/VoicePill';
+import {useNativeVoiceInput} from '../shared/utils/useNativeVoiceInput';
+import {useSpeechToText} from '../shared/utils/speech';
+const wait=(ms=60)=>new Promise(done=>setTimeout(done,ms));const lines=[];
+const assert=(ok,line)=>{if(!ok)throw Error(line);lines.push(line)};
+// Drive scheduled component frames deterministically; Chrome virtual-time timers can outrun compositor frames.
+const frames=new Map();let frameId=0;
+window.requestAnimationFrame=callback=>{frames.set(++frameId,callback);return frameId};
+window.cancelAnimationFrame=id=>frames.delete(id);
+const advanceFrames=count=>{const now=performance.now();for(let i=0;i<count;i++){const batch=[...frames.values()];frames.clear();batch.forEach(callback=>callback(now+i*20))}};
+const root=createRoot(document.getElementById('root'));
+const events=[];let setDisabled,unmountPill;
+const button=()=>document.querySelector('.voice-pill');
+const pointer=(type,x=180)=>button().dispatchEvent(new PointerEvent(type,{button:0,pointerId:7,isPrimary:true,clientX:x,bubbles:true,cancelable:true}));
+const tap=async()=>{pointer('pointerdown');await wait(30);pointer('pointerup');await wait()};
+const key=key=>button().dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));
+try {
+ function Fixture(){
+  const [disabled,disable]=React.useState(false);setDisabled=disable;
+  const [shown,show]=React.useState(true);unmountPill=()=>show(false);
+  return shown?React.createElement(VoicePill,{disabled,onStart:e=>events.push(['start',e]),onStop:e=>events.push(['stop',e])}):null;
+ }
+ root.render(React.createElement(Fixture));await wait(180);
+ assert(button().getAttribute('aria-pressed')==='false','idle microphone is not marked recording');
+ await tap();assert(button().getAttribute('aria-pressed')==='true','short tap latches recording');
+ advanceFrames(64);assert(button().querySelector('.voice-pill__time').textContent!=='0:00','elapsed clock advances');
+ const canvas=button().querySelector('canvas');const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+ assert(pixels.some((v,i)=>i%4===3&&v>0),'authored scrolling waveform renders canvas pixels ('+canvas.width+'x'+canvas.height+')');
+ await tap();assert(events.at(-1)[1].reason==='tap'&&button().getAttribute('aria-pressed')==='false','second tap stops latched recording');
+ pointer('pointerdown');await wait(360);pointer('pointerup');await wait();assert(events.at(-1)[1].reason==='release','held recording stops on release');
+ pointer('pointerdown');await wait();pointer('pointermove',140);await wait();assert(button().dataset.sliding!==undefined,'held left drag reveals cancel affordance');
+ pointer('pointermove',110);await wait();const count=events.length;pointer('pointerup',110);await wait();
+ assert(events.at(-1)[1].reason==='cancel'&&events.length===count,'crossing cancel distance cancels once without release result');
+ pointer('pointerdown');await wait();pointer('pointercancel');await wait();assert(events.at(-1)[1].reason==='cancel','pointer cancellation never submits');
+ key('Enter');await wait();assert(button().getAttribute('aria-pressed')==='true','keyboard starts recording');
+ key('Escape');await wait();assert(events.at(-1)[1].reason==='escape','Escape cancels keyboard recording');
+ await tap();window.dispatchEvent(new Event('blur'));await wait();assert(events.at(-1)[1].reason==='blur','window blur cancels latched recording');
+ await tap();setDisabled(true);await wait();assert(events.at(-1)[1].reason==='disabled'&&button().disabled,'disabling cancels microphone');
+ setDisabled(false);await wait();await tap();unmountPill();await wait();assert(events.at(-1)[1].reason==='unmount'&&frames.size===0,'unmount stops listening and animation frames');
+ const calls=[];let ready;
+ function NativeFixture(){
+  const voice=useNativeVoiceInput({startRecording:()=>new Promise(resolve=>{calls.push('start');ready=resolve}),
+   cancelRecording:async()=>{calls.push('discard')},stopRecordingAndTranscribe:async()=>{calls.push('transcribe');return 'Native words'},onSendVoiceMessage:async text=>calls.push('send:'+text)});
+  return React.createElement(VoicePill,{active:voice.isRecording,onStart:voice.startRecognition,
+   onStop:e=>['tap','release','key'].includes(e.reason)?voice.stopRecognition():voice.cancelRecognition()});
+ }
+ root.render(React.createElement(NativeFixture));await wait();pointer('pointerdown');await wait();
+ assert(button().getAttribute('aria-pressed')==='false'&&button().getAttribute('aria-busy')==='true','actual state waits for native device startup');
+ pointer('pointermove',110);pointer('pointerup',110);ready();await wait();
+ assert(calls.join(',')==='start,discard'&&button().getAttribute('aria-pressed')==='false','native pending-start cancellation discards without transcription');
+ pointer('pointerdown');await wait();ready();await wait();pointer('pointerup');await wait();
+ assert(button().getAttribute('aria-pressed')==='true','native success opens listening capsule');
+ await tap();await wait();assert(calls.at(-2)==='transcribe'&&calls.at(-1)==='send:Native words','normal native stop sends one transcript');
+ root.render(React.createElement('div'));await wait();
+ const instances=[],messages=[],sends=[];let denied=false;
+ class Recognition {
+  constructor(){instances.push(this)}
+  start(){setTimeout(()=>{if(denied){this.onerror?.({error:'not-allowed'});this.onend?.()}else this.onstart?.()},20)}
+  result(text){const result=[{transcript:text}];result.isFinal=true;this.onresult?.({resultIndex:0,results:[result]})}
+  stop(){setTimeout(()=>this.onend?.(),20)}
+  abort(){this.aborted=true;setTimeout(()=>this.onend?.(),20)}
+ }
+ window.SpeechRecognition=Recognition;
+ function WebFixture(){
+  const voice=useSpeechToText({language:'en',message:'Existing',sending:false,isSpeaking:false,onSetMessage:text=>messages.push(text),onSendVoiceMessage:async text=>sends.push(text)});
+  return React.createElement(VoicePill,{active:voice.isRecording,onStart:()=>voice.startRecognition(),
+   onStop:e=>['tap','release','key'].includes(e.reason)?voice.stopRecognition():voice.cancelRecognition()});
+ }
+ root.render(React.createElement(WebFixture));await wait();await tap();instances.at(-1).result('cancelled words');
+ key('Escape');await wait();assert(instances.at(-1).aborted&&messages.length===0&&sends.length===0,'Web cancellation aborts and discards recognized text');
+ await tap();instances.at(-1).result('hello');await tap();await wait();
+ assert(messages.join(',')==='Existing hello'&&sends.length===0,'Web normal stop preserves dictation into existing composer');
+ denied=true;await tap();await wait();assert(button().getAttribute('aria-pressed')==='false'&&!button().getAttribute('aria-busy'),'permission refusal returns to idle');
+ document.getElementById('result').textContent='PASS\n'+lines.join('\n');
+} catch(error){document.getElementById('result').textContent='FAIL: '+error.message+'\n'+lines.join('\n');console.error(error)}
+</script></body></html>

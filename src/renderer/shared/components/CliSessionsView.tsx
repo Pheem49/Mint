@@ -1,3 +1,4 @@
+import SelectField from './SelectField'
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import type { ChatSession } from '../types'
 import { parseUtcDate } from '../utils/ui'
@@ -231,16 +232,16 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
             </button>
           </div>
 
-          <select
+          <SelectField fullWidth={false} aria-label="Sort sessions"
             className="code-sort-select"
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
+            onValueChange={(nextValue) => setSortBy(nextValue as any)}
             title="Sort sessions"
           >
             <option value="recent">Recently active</option>
             <option value="messages">Most turns</option>
             <option value="oldest">Oldest first</option>
-          </select>
+          </SelectField>
 
           {onRefreshSessions && (
             <button

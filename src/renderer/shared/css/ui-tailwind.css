@@ -1,0 +1,19 @@
+/* Utilities for shared shadcn primitives; Mint retains its existing base styles. */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities) source(none);
+@source '../components/ui';
+@theme inline {
+  --color-background: var(--bg-overlay);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-contrast, #ffffff);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--pure-white);
+  --color-input: var(--border-default);
+  --color-accent: var(--bg-surface-hover);
+  --color-accent-foreground: var(--text-main);
+  --color-secondary: var(--bg-surface-soft);
+  --color-secondary-foreground: var(--text-main);
+  --color-muted-foreground: var(--text-muted);
+  --color-ring: var(--accent);
+}

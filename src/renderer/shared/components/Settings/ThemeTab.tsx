@@ -1,3 +1,4 @@
+import SelectField from '../SelectField'
 import React, { useState } from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
 import { THEME_PRESETS, ACCENT_FLAVORS, ThemePreset, AccentFlavor } from '../../theme/themes'
@@ -429,7 +430,7 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
         <div className="form-grid">
           <div className="setting-row">
             <label>Font family</label>
-            <select value={config.fontFamily} onChange={(e) => updateField('fontFamily', e.target.value)}>
+            <SelectField aria-label="Font family" value={config.fontFamily} onValueChange={(nextValue) => updateField('fontFamily', nextValue)}>
               <option value="'Prompt', sans-serif">Prompt (Thai & Latin - Default)</option>
               <option value="'Outfit', sans-serif">Outfit (Geometric Modern)</option>
               <option value="'Inter', sans-serif">Inter (Clean Sans-Serif)</option>
@@ -440,7 +441,7 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
               <option value="'Mitr', sans-serif">Mitr (Friendly Thai)</option>
               <option value="'Mali', cursive">Mali (Cute Thai Font)</option>
               <option value="'Fira Code', monospace">Fira Code (developer code font)</option>
-            </select>
+            </SelectField>
           </div>
           <div className="setting-row">
             <label>Font size</label>

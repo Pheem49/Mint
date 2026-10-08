@@ -1,3 +1,4 @@
+import SelectField from './SelectField'
 import React, { useState, useEffect } from 'react'
 import '../css/management-views.css'
 import { renderMcpSvgIcon, renderMcpHubSvgIcon } from '../constants/plugins'
@@ -688,20 +689,20 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                       </div>
                       <div className="management-form-group">
                         <label className="management-label">Authentication</label>
-                        <select
+                        <SelectField aria-label="Authentication"
                           className="management-input-field"
                           value={authType}
-                          onChange={(e) => {
-                            setAuthType(e.target.value as any)
+                          onValueChange={(nextValue) => {
+                            setAuthType(nextValue as any)
                             setTestStatus('idle')
                             setTestMessage('')
                           }}
-                          style={{ cursor: 'pointer' }}
+
                         >
                           <option value="none">None (Public)</option>
                           <option value="bearer">Bearer token</option>
                           <option value="custom">Custom headers (JSON)</option>
-                        </select>
+                        </SelectField>
                       </div>
                     </div>
 

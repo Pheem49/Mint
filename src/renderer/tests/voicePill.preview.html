@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mint VoicePill composer preview</title></head>
+<body><div id="root"></div><pre id="result">PREVIEW</pre><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import VoicePill from '../shared/components/VoicePill';
+import '../shared/theme/tokens.css';import '../src-web/css/chat.css';
+if(location.search.includes('mobile')) await import('../src-web/css/mobile.css');
+const frames=new Map();let id=0;
+window.requestAnimationFrame=cb=>{frames.set(++id,cb);return id};window.cancelAnimationFrame=id=>frames.delete(id);
+function Preview(){
+ return React.createElement('main',{style:{width:'min(760px,calc(100vw - 40px))',margin:'100px auto',fontFamily:'system-ui',color:'#eee'}},
+  React.createElement('h2',null,'Voice input'),React.createElement('p',null,'Tap to dictate · Hold to record · Slide left to cancel'),
+  React.createElement('div',{className:'input-area voice-active'},React.createElement('form',{id:'chat-form',className:'has-live-btn',onSubmit:e=>e.preventDefault()},
+   React.createElement('textarea',{id:'chat-input',placeholder:'Ask Mint anything…',rows:2}),
+   React.createElement('span',{className:'chat-tool-menu-wrap'},React.createElement('button',{id:'chat-tool-btn',type:'button'},'+')),
+   React.createElement('button',{id:'screen-capture-btn',type:'button','aria-label':'Capture screen'},'▣'),
+   React.createElement('div',{className:'model-selector-container',style:{minWidth:0}},React.createElement('button',{className:'model-selector-trigger',type:'button',style:{maxWidth:'100%',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}},'OpenAI ▾')),
+   React.createElement(VoicePill,{id:'voice-input-btn',className:'composer-voice-pill',ariaLabel:'Voice input'}),
+   React.createElement('button',{id:'gemini-live-btn',type:'button'},'◉'),React.createElement('button',{id:'send-btn',type:'button'},'↑'))));
+}
+createRoot(document.getElementById('root')).render(React.createElement(Preview));
+setTimeout(()=>{
+ const mic=document.getElementById('voice-input-btn');mic.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+ setTimeout(()=>{
+  const now=performance.now();for(let i=0;i<160;i++){const batch=[...frames.values()];frames.clear();batch.forEach(cb=>cb(now+i*20));}
+  const capsule=mic.querySelector('.voice-pill__capsule').getBoundingClientRect();
+  const model=document.querySelector('.model-selector-container').getBoundingClientRect();
+  const send=document.getElementById('send-btn').getBoundingClientRect();
+  const formStyle=getComputedStyle(document.getElementById('chat-form'));
+  const flat=formStyle.animationName==='none'&&formStyle.boxShadow==='none'&&getComputedStyle(document.getElementById('send-btn')).boxShadow==='none';
+  const ok=flat&&(capsule.left>=model.right||capsule.top>=model.bottom)&&capsule.right<=send.left&&capsule.left>=0&&capsule.right<=window.innerWidth;
+  document.getElementById('result').textContent=ok?'PASS: flat composer and VoicePill fit without glow or overlapping controls':'FAIL: composer glow or overlapping controls '+JSON.stringify({flat,animation:formStyle.animationName,shadow:formStyle.boxShadow,capsule:{left:capsule.left,right:capsule.right},model:{left:model.left,right:model.right},send:{left:send.left}});
+ },500);
+},500);
+</script><style>body{margin:0;background:#111114}#root{width:100%}#chat-form{width:100%}*{box-sizing:border-box}#result{color:#a1a1aa;text-align:center;font-family:system-ui;font-size:12px}.model-selector-container{grid-column:3;grid-row:2;align-self:center}.model-selector-trigger{background:#27272a;color:#ddd;border:0;border-radius:6px;padding:6px}</style></body></html>

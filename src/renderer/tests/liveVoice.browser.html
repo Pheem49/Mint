@@ -1,0 +1,29 @@
+<!doctype html><html><body><div id="root"></div><pre id="result">RUNNING</pre><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';import {useGeminiLiveVoice} from '../shared/utils/useGeminiLiveVoice';
+const wait=ms=>new Promise(r=>setTimeout(r,ms)),defer=()=>{let resolve;return {promise:new Promise(r=>resolve=r),resolve:v=>resolve(v)}};
+const results=[];const assert=(ok,msg)=>{if(!ok)throw Error(msg);results.push(msg)};
+let permission,session,voice,eventHandler;const calls=[],contexts=[];
+Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:()=>permission.promise}});
+class Node{connections=[];connect(n){this.connections.push(n)}disconnect(){this.connections=[]}}
+class Context{state='running';currentTime=0;sampleRate=48000;destination=new Node();sources=[];constructor(){contexts.push(this)}createAnalyser(){return Object.assign(new Node(),{frequencyBinCount:256,getByteFrequencyData:b=>b.fill(80)})}createMediaStreamSource(){return new Node()}createScriptProcessor(){return new Node()}createBuffer(n,length,rate){return{duration:length/rate,getChannelData:()=>new Float32Array(length)}}createBufferSource(){const n=Object.assign(new Node(),{start(){},stop(){this.stopped=true},stopped:false});this.sources.push(n);return n}close(){this.state='closed';return Promise.resolve()}resume(){return Promise.resolve()}}
+window.AudioContext=Context;
+const backend={startSession:cb=>{eventHandler=cb;calls.push('start');return session.promise},sendAudioChunk:async()=>{},stopSession:async id=>calls.push('stop:'+id)};
+function Harness(){voice=useGeminiLiveVoice(backend);return React.createElement('div',null,voice.isRecording?'recording':'idle')}
+let root=createRoot(document.getElementById('root'));root.render(React.createElement(Harness));await wait(100);
+const stream=()=>{const track={stopped:false,stop(){this.stopped=true}};return{track,getTracks:()=>[track]}};
+try{
+ permission=defer();session=defer();voice.setVoiceMode(true);await wait(50);voice.setVoiceMode(false);await wait(50);const late=stream();permission.resolve(late);await wait(100);
+ assert(late.track.stopped&&calls.length===0,'ending during microphone permission stops late tracks and never opens session');
+ permission=defer();session=defer();voice.setVoiceMode(true);await wait(50);const pending=stream();permission.resolve(pending);await wait(50);voice.setVoiceMode(false);await wait(50);session.resolve('late-session');await wait(100);
+ assert(pending.track.stopped&&calls.includes('stop:late-session')&&!voice.isRecording,'ending during connection closes the late backend session');
+ permission=defer();session=defer();voice.setVoiceMode(true);await wait(50);const live=stream();permission.resolve(live);await wait(50);session.resolve('live');await wait(100);
+ assert(voice.isRecording&&voice.analyserRef.current,'active call exposes its existing audio analyser');
+ eventHandler({type:'audioChunk',data:btoa('\0\0\0\0')});await wait(50);const ctx=contexts.at(-1);assert(ctx.sources.length===1,'normal streamed playback still works');
+ voice.setVoiceMode(false);await wait(100);
+ assert(live.track.stopped&&ctx.state==='closed'&&ctx.sources[0].stopped&&!voice.analyserRef.current,'ending releases microphone, output audio, analyser and audio context');
+ const count=ctx.sources.length;eventHandler({type:'audioChunk',data:btoa('\0\0')});await wait(50);assert(ctx.sources.length===count&&contexts.length===1,'late events cannot restart audio after call ends');
+ permission=defer();session=defer();voice.setVoiceMode(true);await wait(50);const closing=stream();permission.resolve(closing);await wait(50);session.resolve('closing');await wait(100);eventHandler({type:'closed'});await wait(100);
+ assert(closing.track.stopped&&contexts.at(-1).state==='closed'&&!voice.analyserRef.current&&voice.errorMessage,'server closure releases audio and exposes connection status');
+ root.unmount();document.getElementById('result').textContent='PASS\n'+results.join('\n');
+}catch(e){root.unmount();document.getElementById('result').textContent='FAIL: '+e.message+'\n'+results.join('\n');}
+</script></body></html>

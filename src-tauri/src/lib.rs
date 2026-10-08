@@ -1451,6 +1451,19 @@ async fn stop_mic_recording_and_transcribe(
         .map_err(|e| e.to_string())
 }
 
+/// Stops and discards a canceled recording without invoking a transcription provider.
+#[tauri::command]
+async fn cancel_mic_recording(state: tauri::State<'_, MicRecordingState>) -> Result<(), String> {
+    let handle = state.active.lock().map_err(|e| e.to_string())?.take();
+    if let Some(handle) = handle {
+        tokio::task::spawn_blocking(move || core_stop_mic_recording(handle))
+            .await
+            .map_err(|e| format!("recording thread panicked: {e}"))?
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn save_interaction_agent_activity(
     interaction_id: i64,
@@ -2842,6 +2855,7 @@ pub fn run() {
             stop_gemini_live_session,
             start_mic_recording,
             stop_mic_recording_and_transcribe,
+            cancel_mic_recording,
             submit_tool_approval,
             get_recent_interactions,
             get_conversation_snapshot,

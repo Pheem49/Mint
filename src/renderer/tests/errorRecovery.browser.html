@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Error recovery regression</title></head><body style="margin:0"><div id="root"></div><pre id="result">RUNNING</pre><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';import ChunkErrorBoundary from '../shared/components/ChunkErrorBoundary';
+const wait=ms=>new Promise(r=>setTimeout(r,ms)),results=[];const assert=(ok,msg)=>{if(!ok)throw Error(msg);results.push(msg)};
+let fail=true,micRequests=0;Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>{micRequests++;throw Error('Error page must not request microphone')}}});
+function BrokenRoute(){if(fail)throw Error('Fixture route failed to render');return React.createElement('h1',null,'Recovered chat')}
+const root=createRoot(document.getElementById('root'));root.render(React.createElement(ChunkErrorBoundary,null,React.createElement(BrokenRoute)));
+const frames=new Map();let id=0;window.requestAnimationFrame=cb=>{frames.set(++id,cb);return id};window.cancelAnimationFrame=id=>frames.delete(id);
+try{
+ await wait(400);for(let i=0;i<20;i++){const batch=[...frames.values()];frames.clear();batch.forEach(cb=>cb(performance.now()+i*20));}
+ const canvas=document.querySelector('.voice-powered-orb canvas');assert(canvas,'full application error renders the supplied orb');
+ assert(micRequests===0,'error page never requests microphone access');
+ assert(document.body.textContent.includes('Mint needs to refresh'),'recovery guidance is retained');
+ const gl=canvas.getContext('webgl2')||canvas.getContext('webgl');const px=new Uint8Array(canvas.width*canvas.height*4);gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,px);assert(px.some((v,i)=>i%4!==3&&v>40),'error orb shader renders visible pixels');
+ const refresh=[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Refresh'));assert(refresh,'refresh action remains available');
+ const rect=refresh.getBoundingClientRect();assert(rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight,'recovery actions fit viewport');
+ if(!location.search.includes('preview')){
+  fail=false;[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Back to Chat')).click();await wait(100);assert(document.body.textContent.includes('Recovered chat'),'Back to Chat retries the route');assert(location.hash==='#/','Back to Chat resets navigation');assert(frames.size===0,'recovering releases the orb animation frame');root.unmount();
+ }else document.getElementById('result').style.display='none';
+ document.getElementById('result').textContent='PASS\n'+results.join('\n');
+}catch(e){document.getElementById('result').textContent='FAIL: '+e.message+'\n'+results.join('\n');}
+</script></body></html>

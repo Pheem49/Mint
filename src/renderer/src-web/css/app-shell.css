@@ -399,23 +399,6 @@ h1 {
   }
 }
 
-@keyframes pulse-mic {
-  0% {
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
-    transform: scale(1);
-  }
-
-  50% {
-    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
-    transform: scale(1.05);
-  }
-
-  100% {
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
-    transform: scale(1);
-  }
-}
-
 @keyframes agent-activity-slide-up-fade {
   from {
     opacity: 0;
@@ -1109,17 +1092,6 @@ h1 {
   box-shadow: 0 0 8px currentColor;
 }
 
-@keyframes pulseRed {
-  from {
-    transform: scale(1);
-    box-shadow: 0 0 8px rgba(239, 68, 68, 0.3);
-  }
-  to {
-    transform: scale(1.1);
-    box-shadow: 0 0 16px rgba(239, 68, 68, 0.6);
-  }
-}
-
 @keyframes pulseGlow {
   0% {
     box-shadow: 0 0 10px rgba(143, 108, 245, 0.2), inset 0 0 10px rgba(143, 108, 245, 0.1);
@@ -1364,32 +1336,6 @@ h1 {
   -webkit-user-select: text !important;
   -moz-user-select: text !important;
   -ms-user-select: text !important;
-}
-
-/* Breathing voice-active aura glow */
-
-@keyframes aura-breathe-form {
-  0% {
-    box-shadow: 0 4px 15px color-mix(in srgb, var(--accent) 22%, transparent);
-  }
-  50% {
-    box-shadow: 0 4px 25px color-mix(in srgb, var(--accent) 42%, transparent);
-  }
-  100% {
-    box-shadow: 0 4px 15px color-mix(in srgb, var(--accent) 22%, transparent);
-  }
-}
-
-@keyframes aura-breathe-bar {
-  0% {
-    box-shadow: 0 -4px 15px color-mix(in srgb, var(--accent) 22%, transparent);
-  }
-  50% {
-    box-shadow: 0 -4px 25px color-mix(in srgb, var(--accent) 42%, transparent);
-  }
-  100% {
-    box-shadow: 0 -4px 15px color-mix(in srgb, var(--accent) 22%, transparent);
-  }
 }
 
 /* Rewind Floating Toast Banner */

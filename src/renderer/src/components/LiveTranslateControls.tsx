@@ -1,3 +1,4 @@
+import SelectField from '../../shared/components/SelectField'
 import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { emitTo } from '@tauri-apps/api/event'
@@ -48,10 +49,10 @@ export default function LiveTranslateControls() {
           <div><strong>Live translate</strong><small>Click through the frame</small></div>
         </div>
         <label className="live-translate-language">To
-          <select value={languageChoice} onChange={(event) => chooseLanguage(event.target.value)} aria-label="Target language">
+          <SelectField fullWidth={false} value={languageChoice} onValueChange={(nextValue) => chooseLanguage(nextValue)} aria-label="Target language">
             {LANGUAGES.map((language) => <option key={language} value={language}>{language}</option>)}
             <option value="custom">Other language…</option>
-          </select>
+          </SelectField>
         </label>
         {languageChoice === 'custom' && <input className="live-translate-custom-language" value={customLanguage} onChange={(event) => { setCustomLanguage(event.target.value); chooseLanguage('custom', event.target.value) }} maxLength={64} placeholder="Language name" aria-label="Custom target language" />}
         <button type="button" onClick={() => { void send({ type: paused ? 'resume' : 'pause' }).then((sent) => { if (sent) setPaused(!paused) }) }}>{paused ? 'Resume' : 'Pause'}</button>

@@ -110,7 +110,7 @@ pub fn apply_tui_theme(buffer: &mut Buffer, theme: TuiTheme) {
     for cell in &mut buffer.content {
         match theme {
             TuiTheme::Auto => {
-                if cell.fg == Color::White {
+                if cell.fg == Color::White && cell.bg != USER_MESSAGE_BACKGROUND {
                     cell.fg = Color::Reset;
                 }
                 if cell.bg == PANEL_BACKGROUND {
@@ -141,6 +141,7 @@ pub fn apply_tui_theme(buffer: &mut Buffer, theme: TuiTheme) {
                 cell.bg = match cell.bg {
                     Color::Reset => Color::Rgb(247, 249, 246),
                     PANEL_BACKGROUND => Color::Rgb(228, 238, 230),
+                    USER_MESSAGE_BACKGROUND => Color::Rgb(225, 225, 225),
                     Color::Gray => Color::Rgb(185, 215, 196),
                     other => other,
                 };
@@ -162,6 +163,7 @@ pub const WARNING: Color = Color::Yellow;
 pub const SELECTION_TEXT: Color = Color::Black;
 pub const SELECTION_BACKGROUND: Color = Color::Gray;
 pub const PANEL_BACKGROUND: Color = Color::Rgb(38, 48, 45); // #26302D
+pub const USER_MESSAGE_BACKGROUND: Color = Color::Rgb(64, 64, 64); // #404040
 /// Endpoints for the animated white glow used by the TUI thinking status.
 pub const THINKING_GLOW_DIM: (u8, u8, u8) = (100, 100, 110);
 pub const THINKING_GLOW_BRIGHT: (u8, u8, u8) = (255, 255, 255);

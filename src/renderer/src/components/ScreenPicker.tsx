@@ -1,3 +1,4 @@
+import SelectField from '../../shared/components/SelectField'
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { createFrameChangeTracker, sampleFrame } from './liveTranslateFrames'
@@ -340,10 +341,10 @@ export default function ScreenPicker() {
       {(phase === 'selecting' || interactive) && <div className="live-translate-toolbar">
         <div className="live-translate-brand"><span aria-hidden="true">◈</span><div><strong>Live translate</strong><small>{phase === 'selecting' ? 'Draw a frame around the text' : interactive ? 'Controls active · click-through off' : 'Click-through on · Alt+Shift+L for controls'}</small></div></div>
         <label className="live-translate-language">To
-          <select value={languageChoice} onChange={(event) => setLanguageChoice(event.target.value)} aria-label="Target language">
+          <SelectField fullWidth={false} value={languageChoice} onValueChange={(nextValue) => setLanguageChoice(nextValue)} aria-label="Target language">
             {LANGUAGES.map((language) => <option key={language} value={language}>{language}</option>)}
             <option value="custom">Other language…</option>
-          </select>
+          </SelectField>
         </label>
         {languageChoice === 'custom' && <input className="live-translate-custom-language" value={customLanguage} onChange={(event) => setCustomLanguage(event.target.value)} maxLength={64} placeholder="Language name" aria-label="Custom target language" />}
         {phase === 'selecting' ? (

@@ -1473,14 +1473,14 @@ impl ChatViewState {
     fn notice_visibility_changed_since_draw(&self, painted_visible: bool) -> bool {
         painted_visible != self.active_notice().is_some()
     }
-    fn transcript_text(&self) -> Text<'static> {
+    fn transcript_text(&self, width: u16) -> Text<'static> {
         let mut lines = Vec::new();
         let selected_start = self.selection_anchor.min(self.selection_head);
         let selected_end = self.selection_anchor.max(self.selection_head);
         let mut line_index = 0usize;
         for entry in &self.transcript {
             let role_header = match entry.role {
-                TranscriptRole::User => Some(("You", crate::terminal_theme::BLUE)),
+                TranscriptRole::User => None,
                 TranscriptRole::Assistant => Some(("Mint", crate::terminal_theme::ACCENT)),
                 TranscriptRole::Notice => None,
                 TranscriptRole::Command => Some(("Command", crate::terminal_theme::ACCENT)),
@@ -1489,7 +1489,7 @@ impl ChatViewState {
             if let Some((label, color)) = role_header {
                 let selected =
                     self.selection_mode && (selected_start..=selected_end).contains(&line_index);
-                lines.push(Line::from(Span::styled(
+                let header = Line::from(Span::styled(
                     format!("{label} ›"),
                     Style::default()
                         .fg(color)
@@ -1499,13 +1499,32 @@ impl ChatViewState {
                         } else {
                             Modifier::empty()
                         }),
-                )));
+                ));
+                lines.push(header);
                 line_index += 1;
             }
-            for content_line in &entry.rendered_lines {
+            let empty_user_line = [Line::default()];
+            let content_lines =
+                if entry.role == TranscriptRole::User && entry.rendered_lines.is_empty() {
+                    &empty_user_line[..]
+                } else {
+                    &entry.rendered_lines
+                };
+            for (content_index, content_line) in content_lines.iter().enumerate() {
                 let selected =
                     self.selection_mode && (selected_start..=selected_end).contains(&line_index);
                 let mut sel_line = content_line.clone();
+                if entry.role == TranscriptRole::User && content_index == 0 {
+                    sel_line.spans.insert(
+                        0,
+                        Span::styled(
+                            "You › ",
+                            Style::default()
+                                .fg(crate::terminal_theme::BLUE)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    );
+                }
                 if entry.role == TranscriptRole::Notice {
                     for span in &mut sel_line.spans {
                         if span.style.fg.is_none() {
@@ -1528,19 +1547,20 @@ impl ChatViewState {
                         span.style = span.style.add_modifier(Modifier::REVERSED);
                     }
                 }
-                lines.push(sel_line);
+                if entry.role == TranscriptRole::User {
+                    lines.extend(highlighted_user_content(sel_line, width));
+                } else {
+                    lines.push(sel_line);
+                }
                 line_index += 1;
             }
             let selected =
                 self.selection_mode && (selected_start..=selected_end).contains(&line_index);
-            lines.push(Line::styled(
-                "",
-                if selected {
-                    Style::default().add_modifier(Modifier::REVERSED)
-                } else {
-                    Style::default()
-                },
-            ));
+            let mut style = Style::default();
+            if selected {
+                style = style.add_modifier(Modifier::REVERSED);
+            }
+            lines.push(Line::styled("", style));
             line_index += 1;
         }
         Text::from(lines)
@@ -1548,8 +1568,18 @@ impl ChatViewState {
     fn plain_transcript_lines(&self) -> Vec<String> {
         let mut lines = Vec::new();
         for entry in &self.transcript {
+            if entry.role == TranscriptRole::User {
+                let mut content = entry.plain_lines.iter();
+                lines.push(format!(
+                    "You › {}",
+                    content.next().map_or("", String::as_str)
+                ));
+                lines.extend(content.cloned());
+                lines.push(String::new());
+                continue;
+            }
             if let Some(header) = match entry.role {
-                TranscriptRole::User => Some("You ›"),
+                TranscriptRole::User => None,
                 TranscriptRole::Assistant => Some("Mint ›"),
                 TranscriptRole::Notice => None,
                 TranscriptRole::Command => Some("Command ›"),
@@ -1902,7 +1932,7 @@ impl ChatViewState {
             help_area,
         );
 
-        let text = self.transcript_text();
+        let text = self.transcript_text(rows[1].width);
         let total = Paragraph::new(text.clone())
             .wrap(Wrap { trim: false })
             .line_count(rows[1].width.max(1));
@@ -2588,6 +2618,41 @@ impl ChatViewState {
             },
         }
     }
+}
+
+// Wrap first, then pad each visual row: a line background alone would leave
+// the unused columns after short text unpainted in the transcript paragraph.
+fn highlighted_user_content(line: Line<'static>, width: u16) -> Vec<Line<'static>> {
+    use ratatui::widgets::Widget;
+
+    let padding = u16::from(width > 2);
+    let inner_width = width.saturating_sub(padding * 2).max(1);
+    let background = Style::default()
+        .fg(crate::terminal_theme::TEXT)
+        .bg(crate::terminal_theme::USER_MESSAGE_BACKGROUND);
+    let paragraph = Paragraph::new(line)
+        .style(background)
+        .wrap(Wrap { trim: false });
+    let height = paragraph
+        .line_count(inner_width)
+        .max(1)
+        .min(u16::MAX as usize) as u16;
+    let area = Rect::new(0, 0, inner_width, height);
+    let mut buffer = Buffer::empty(area);
+    paragraph.render(area, &mut buffer);
+    (0..height)
+        .map(|y| {
+            let mut spans = vec![Span::styled(" ".repeat(padding as usize), background)];
+            let mut x = 0;
+            while x < inner_width {
+                let cell = &buffer[(x, y)];
+                spans.push(Span::styled(cell.symbol().to_owned(), cell.style()));
+                x += UnicodeWidthStr::width(cell.symbol()).max(1) as u16;
+            }
+            spans.push(Span::styled(" ".repeat(padding as usize), background));
+            Line::from(spans)
+        })
+        .collect()
 }
 
 #[derive(Default)]
@@ -4003,6 +4068,117 @@ mod dialog_tests {
             (Some(0), Some(std::time::Duration::from_millis(7000)))
         );
         assert_eq!(at(7000), (None, None));
+    }
+
+    #[test]
+    fn short_sent_user_message_starts_after_label_on_the_same_row() {
+        let mut state = ChatViewState::default();
+        state
+            .transcript
+            .push(TranscriptEntry::new(TranscriptRole::User, "ok เข้าใจละ"));
+        let text = state.transcript_text(58);
+        let mut terminal = Terminal::new(TestBackend::new(58, 4)).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_widget(
+                    Paragraph::new(text.clone()).wrap(Wrap { trim: false }),
+                    frame.area(),
+                );
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let first: String = (0..58).map(|x| buffer[(x, 0)].symbol()).collect();
+        assert!(first.contains("You › ok เข้าใจละ"));
+        assert_eq!(
+            buffer[(1, 1)].bg,
+            Color::Reset,
+            "short messages should occupy one shaded row"
+        );
+        assert_eq!(state.plain_transcript_lines(), vec!["You › ok เข้าใจละ", ""]);
+    }
+
+    #[test]
+    fn sent_user_message_background_covers_wrapped_text_at_terminal_width() {
+        let mut state = ChatViewState::default();
+        state.transcript.push(TranscriptEntry::new(
+            TranscriptRole::User,
+            format!("{}\nข้อความของฉัน", "hello ".repeat(24)),
+        ));
+        state
+            .transcript
+            .push(TranscriptEntry::new(TranscriptRole::Assistant, "Reply"));
+        for width in [60, 100] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+            terminal
+                .draw(|frame| {
+                    state.render(frame);
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let rows: Vec<String> = (0..40)
+                .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
+                .collect();
+            let start = rows.iter().position(|row| row.contains("You ›")).unwrap();
+            let end = rows.iter().position(|row| row.contains("Mint ›")).unwrap();
+            let padding = if width >= 80 { 2 } else { 1 };
+            for y in start..end - 1 {
+                for x in padding..width - padding {
+                    assert_eq!(
+                        buffer[(x, y as u16)].bg,
+                        Color::Rgb(64, 64, 64),
+                        "sent message background must fill every visual row, including padding"
+                    );
+                }
+                assert!(!rows[y].contains(['╭', '╮', '╰', '╯', '│']));
+            }
+            assert_eq!(
+                buffer[(padding, end as u16)].bg,
+                Color::Reset,
+                "assistant messages must remain outside the user background"
+            );
+            let mut light_buffer = buffer.clone();
+            crate::terminal_theme::apply_tui_theme(
+                &mut light_buffer,
+                crate::terminal_theme::TuiTheme::Light,
+            );
+            assert_eq!(
+                light_buffer[(padding, start as u16)].bg,
+                Color::Rgb(225, 225, 225)
+            );
+            let mut auto_buffer = buffer.clone();
+            crate::terminal_theme::apply_tui_theme(
+                &mut auto_buffer,
+                crate::terminal_theme::TuiTheme::Auto,
+            );
+            assert_eq!(
+                auto_buffer[(padding + 1, (start + 1) as u16)].fg,
+                Color::White,
+                "text on the dark user background must keep its contrast in Auto theme"
+            );
+            assert!(
+                end - start > 3,
+                "long user text must wrap within the background"
+            );
+            assert_eq!(
+                rows[start..end - 1]
+                    .iter()
+                    .map(|row| row.matches("hello").count())
+                    .sum::<usize>(),
+                24
+            );
+            assert!(
+                rows[start..end - 1]
+                    .iter()
+                    .any(|row| row.contains("ข้อความของฉัน"))
+            );
+        }
+        // Decorative boundaries must not enter keyboard copy or shift selection indices.
+        state.selection_anchor = 0;
+        state.selection_head = 1;
+        assert_eq!(
+            state.selected_text(),
+            format!("You › {}\nข้อความของฉัน", "hello ".repeat(24))
+        );
     }
 
     fn make_key(code: KeyCode) -> KeyEvent {

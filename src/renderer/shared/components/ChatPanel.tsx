@@ -31,6 +31,7 @@ import { RewindModal } from './RewindModal'
 import type { AgentProgress, ChatResponse, DiffHunk, FileChange, GitCheckpoint, RuntimeStatus } from '../types'
 import { numericSetting, shouldShowSessionDivider, formatSessionDividerLabel } from '../utils/ui'
 import { useVoiceInput } from '@/voiceInput'
+import VoicePill from './VoicePill'
 import { useGeminiLiveVoice } from '../utils/useGeminiLiveVoice'
 import GeminiLiveOverlay from './GeminiLiveOverlay'
 import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../utils/documentTypes'
@@ -697,6 +698,7 @@ export default function ChatPanel({
     voiceModeRef,
     startRecognition,
     stopRecognition,
+    cancelRecognition,
     scheduleVoiceListen,
     clearRestartTimer
   } = useVoiceInput({
@@ -720,8 +722,6 @@ export default function ChatPanel({
   const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || videoAttachments.length > 0 || documentName)
   const sendingImageMarkers = Array.from({ length: sendingImageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
   const sendingVideoMarkers = Array.from({ length: sendingVideoCount || 0 }, (_, index) => `[Video #${index + 1}]`).join(' ')
-  const voiceStatus = speakingText ? 'speaking' : (sending || voiceAwaitingResponse) ? 'thinking' : isRecording ? 'listening' : voiceMode ? 'ready' : 'off'
-  const voiceStatusLabel = voiceStatus === 'speaking' ? 'Speaking' : voiceStatus === 'thinking' ? 'Thinking' : voiceStatus === 'listening' ? 'Listening' : 'Ready'
 
   const getAvailableModels = (provider: string) => {
     switch (provider) {
@@ -991,16 +991,6 @@ export default function ChatPanel({
     speakNative(speechText, text)
   }
 
-  const toggleRecording = () => {
-    if (isRecording) {
-      stopRecognition()
-      cancelSpeech()
-      return
-    }
-
-    cancelSpeech()
-    startRecognition()
-  }
   const resizeInput = (element: HTMLTextAreaElement) => {
     element.style.height = 'auto'
     element.style.height = `${Math.min(element.scrollHeight, 120)}px`
@@ -1746,7 +1736,7 @@ export default function ChatPanel({
         <div ref={chatEnd} />
       </div>
 
-      <div className={`input-area ${voiceMode ? 'voice-active' : ''}`}>
+      <div className="input-area">
         {composerChanges.length > 0 && (
           <button
             type="button"
@@ -1806,27 +1796,6 @@ export default function ChatPanel({
           )}
           <BackgroundTerminals workspacePath={workspacePath} />
         </div>
-        {voiceMode && (
-          <div className="voice-mode-bar" data-state={voiceStatus}>
-            <span className="voice-mode-dot" />
-            {voiceTranscript ? (
-              voiceTranscript === 'Listening to microphone...' ||
-              voiceTranscript === 'Listening...' ||
-              voiceTranscript === 'No speech detected' ||
-              voiceTranscript === 'Sent audio to AI' ? (
-                <span>{voiceTranscript}</span>
-              ) : (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0, overflow: 'hidden' }}>
-                  <span>{voiceStatusLabel}:</span>
-                  <span className="voice-mode-transcript">"{voiceTranscript}"</span>
-                </span>
-              )
-            ) : (
-              <span>{voiceStatusLabel}</span>
-            )}
-          </div>
-        )}
-
         <SlashSuggestions
           ref={slashRef}
           message={message}
@@ -2034,27 +2003,43 @@ export default function ChatPanel({
             }}
             onUpdateSettings={onUpdateSettings}
           />
-          <button
-            id="mic-btn"
-            className={`${isRecording ? 'is-recording' : ''} ${voiceMode ? 'voice-mode-active' : ''}`}
-            type="button"
-            onClick={toggleRecording}
-            title={voiceMode ? 'Disable voice conversation' : 'Enable voice conversation'}
-            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-          >
-            {isRecording ? (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
-              </svg>
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                <line x1="12" y1="19" x2="12" y2="23"></line>
-                <line x1="8" y1="23" x2="16" y2="23"></line>
-              </svg>
-            )}
-          </button>
+          <VoicePill
+            id="voice-input-btn"
+            className="composer-voice-pill"
+            active={isRecording}
+            disabled={sending || voiceAwaitingResponse || geminiLive.voiceMode}
+            ariaLabel="Voice input"
+            title={isRecording ? 'Stop recording · Esc or slide left to cancel' : 'Tap to dictate · hold to record'}
+            accentColor="#f5f5f5"
+            iconColor="#a1a1aa"
+            background="#27272a"
+            size={28}
+            shape="pill"
+            reach={8}
+            mode="auto"
+            holdAfter={300}
+            reactive="simulated"
+            showTime
+            waveform
+            slideToCancel
+            cancelDistance={64}
+            attack={40}
+            release={240}
+            openDuration={200}
+            pressScale={0.95}
+            onStart={() => {
+              cancelSpeech()
+              return startRecognition()
+            }}
+            onStop={({ reason }) => {
+              cancelSpeech()
+              if (reason === 'release' || reason === 'tap' || reason === 'key') {
+                void stopRecognition()
+              } else {
+                void cancelRecognition()
+              }
+            }}
+          />
           {geminiLiveEnabled && (
             <button
               id="gemini-live-btn"
@@ -2094,6 +2079,9 @@ export default function ChatPanel({
             </button>
           )}
         </form>
+        {voiceMode && !isRecording && voiceTranscript && (
+          <p className="composer-voice-feedback" role="status">{voiceTranscript}</p>
+        )}
       </div>
       <p className="input-disclaimer">
         Mint Agent is an AI gateway. Responses via third-party APIs. Verify critical info.
@@ -2101,7 +2089,11 @@ export default function ChatPanel({
       {geminiLive.voiceMode && (
         <GeminiLiveOverlay
           status={
-            geminiLive.isPaused
+            geminiLive.errorMessage
+              ? 'error'
+              : !geminiLive.isRecording
+              ? 'connecting'
+              : geminiLive.isPaused
               ? 'paused'
               : geminiLive.isSpeaking
               ? 'speaking'
@@ -2112,6 +2104,7 @@ export default function ChatPanel({
           userTranscript={geminiLive.userTranscript}
           assistantTranscript={geminiLive.assistantTranscript}
           isPaused={geminiLive.isPaused}
+          analyserRef={geminiLive.analyserRef}
           onTogglePause={geminiLive.togglePause}
           onEndCall={() => geminiLive.setVoiceMode(false)}
           voice={settingsConfig?.geminiLiveVoice || 'Puck'}

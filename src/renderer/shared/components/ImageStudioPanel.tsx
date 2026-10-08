@@ -1,3 +1,4 @@
+import SelectField from './SelectField'
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import '../css/image-studio.css'
 import { mediaPlatform } from '../platform'
@@ -268,12 +269,12 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
               <label className="img-studio-label" htmlFor="img-studio-provider" style={{ display: 'flex', alignItems: 'center', width: '100%', height: '18px' }}>
                 <span>Provider</span>
               </label>
-              <select
+              <SelectField aria-label="Provider"
                 id="img-studio-provider"
                 className="img-studio-textarea"
-                style={{ padding: '8px 10px', height: '38px', cursor: 'pointer' }}
+
                 value={selectedProvider}
-                onChange={(e) => handleProviderChange(e.target.value)}
+                onValueChange={(nextValue) => handleProviderChange(nextValue)}
                 disabled={generating}
               >
                 {providers.available.map((prov) => (
@@ -281,19 +282,19 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                     {providerLabel(prov).replace(/^[^a-zA-Z0-9]+/, '') /* remove prefix symbol if preferred or keep it */}
                   </option>
                 ))}
-              </select>
+              </SelectField>
             </div>
 
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <label className="img-studio-label" htmlFor="img-studio-model" style={{ display: 'flex', alignItems: 'center', height: '18px' }}>
                 Model
               </label>
-              <select
+              <SelectField aria-label="Model"
                 id="img-studio-model"
                 className="img-studio-textarea"
-                style={{ padding: '8px 10px', height: '38px', cursor: 'pointer' }}
+
                 value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
+                onValueChange={(nextValue) => setSelectedModel(nextValue)}
                 disabled={generating}
               >
                 {modelOptions.map(({ value, label }) => (
@@ -303,7 +304,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                   <option key={selectedModel} value={selectedModel}>{selectedModel}</option>
                 )}
               <option value="custom">Custom model ID…</option>
-              </select>
+              </SelectField>
             </div>
           </div>
 

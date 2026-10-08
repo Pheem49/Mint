@@ -51,12 +51,17 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
   const [voiceAwaitingResponse, setVoiceAwaitingResponse] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
 
   const voiceModeRef = useRef(false)
   const voiceAwaitingResponseRef = useRef(false)
   const isPausedRef = useRef(false)
   const sessionIdRef = useRef<string | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const generationRef = useRef(0)
+  const playbackSourcesRef = useRef(new Set<AudioBufferSourceNode>())
+  const stopRef = useRef<() => void>(() => {})
   const micStreamRef = useRef<MediaStream | null>(null)
   const captureNodesRef = useRef<{ source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode } | null>(null)
   const nextPlaybackTimeRef = useRef(0)
@@ -76,6 +81,11 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
   const ensureAudioContext = useCallback((): AudioContext => {
     if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
       audioContextRef.current = new AudioContext()
+      analyserRef.current = audioContextRef.current.createAnalyser()
+      analyserRef.current.fftSize = 512
+      analyserRef.current.smoothingTimeConstant = 0.3
+      analyserRef.current.minDecibels = -90
+      analyserRef.current.maxDecibels = -10
     }
     return audioContextRef.current
   }, [])
@@ -94,6 +104,9 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
     const source = ctx.createBufferSource()
     source.buffer = buffer
     source.connect(ctx.destination)
+    if (analyserRef.current) source.connect(analyserRef.current)
+    playbackSourcesRef.current.add(source)
+    source.onended = () => { playbackSourcesRef.current.delete(source); source.disconnect() }
 
     const startAt = Math.max(ctx.currentTime, nextPlaybackTimeRef.current)
     source.start(startAt)
@@ -132,13 +145,16 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
         console.error('Gemini Live session error', event.message)
         transcriptRoleRef.current = null
         setAssistantTranscript(event.message)
+        setErrorMessage(event.message)
         break
       case 'closed':
+        stopRef.current()
         setIsRecording(false)
         setVoiceAwaitingResponse(false)
         setIsSpeaking(false)
         sessionIdRef.current = null
         transcriptRoleRef.current = null
+        setErrorMessage('Live connection closed')
         break
     }
   }, [playAudioChunk])
@@ -152,7 +168,17 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
   }, [])
 
   const stop = useCallback(() => {
+    ++generationRef.current
     stopCapture()
+    for (const source of playbackSourcesRef.current) {
+      try { source.stop(); source.disconnect() } catch { /* Already ended. */ }
+    }
+    playbackSourcesRef.current.clear()
+    analyserRef.current?.disconnect()
+    analyserRef.current = null
+    const context = audioContextRef.current
+    audioContextRef.current = null
+    if (context && context.state !== 'closed') void context.close().catch(error => console.error('Failed to close Live audio', error))
     const sessionId = sessionIdRef.current
     sessionIdRef.current = null
     setIsRecording(false)
@@ -167,6 +193,7 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
     nextPlaybackTimeRef.current = 0
     if (sessionId) stopSession(sessionId).catch((error) => console.error('Failed to stop Gemini Live session', error))
   }, [stopCapture, stopSession])
+  stopRef.current = stop
 
   const togglePause = useCallback(() => {
     setIsPaused((current) => {
@@ -177,7 +204,9 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
   }, [])
 
   const start = useCallback(async () => {
+    const generation = ++generationRef.current
     try {
+      setErrorMessage('')
       transcriptRoleRef.current = null
       setUserTranscript('')
       setAssistantTranscript('')
@@ -193,15 +222,27 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
       })
+      if (generation !== generationRef.current) {
+        stream.getTracks().forEach(track => track.stop())
+        return
+      }
       console.log('[gemini-live] microphone granted, starting session...')
       micStreamRef.current = stream
 
-      const sessionId = await startSession(handleEvent, workspacePath, chatId)
+      const sessionId = await startSession(event => {
+        if (generation === generationRef.current) handleEvent(event)
+      }, workspacePath, chatId)
+      if (generation !== generationRef.current) {
+        await stopSession(sessionId)
+        return
+      }
       console.log('[gemini-live] session started', sessionId)
       sessionIdRef.current = sessionId
 
       const ctx = ensureAudioContext()
       const source = ctx.createMediaStreamSource(stream)
+      if (ctx.state === 'suspended') await ctx.resume()
+      if (generation !== generationRef.current) { source.disconnect(); return }
       const processor = ctx.createScriptProcessor(CAPTURE_BUFFER_SIZE, 1, 1)
       const ratio = ctx.sampleRate / MIC_SAMPLE_RATE
 
@@ -223,20 +264,21 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
       }
 
       source.connect(processor)
+      if (analyserRef.current) source.connect(analyserRef.current)
       processor.connect(ctx.destination)
       captureNodesRef.current = { source, processor }
       setIsRecording(true)
       setVoiceAwaitingResponse(true)
     } catch (error) {
+      if (generation !== generationRef.current) return
       console.error('Failed to start Gemini Live voice session', error)
       // Keep voiceMode on so the error stays visible in the voice-mode bar instead of
       // vanishing the instant it appears; the user can dismiss it with the mic button.
       setAssistantTranscript(`Error: ${error instanceof Error ? error.message : String(error)}`)
-      stopCapture()
-      setIsRecording(false)
-      setVoiceAwaitingResponse(false)
+      setErrorMessage(error instanceof Error ? error.message : String(error))
+      stop()
     }
-  }, [handleEvent, workspacePath, chatId, ensureAudioContext, stopCapture, startSession, sendAudioChunk])
+  }, [handleEvent, workspacePath, chatId, ensureAudioContext, stop, startSession, stopSession, sendAudioChunk])
 
   useEffect(() => {
     if (voiceMode) {
@@ -271,6 +313,8 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
     isPaused,
     togglePause,
     isSpeaking,
+    analyserRef,
+    errorMessage,
     restart,
     startRecognition: noop,
     stopRecognition: noop,

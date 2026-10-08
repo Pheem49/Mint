@@ -1,0 +1,35 @@
+/* Fixed fallback colors remain readable when the route's theme fails to load. */
+.error-recovery {
+  --flavor-indigo: #6366f1;
+  --flavor-cyan: #06b6d4;
+  display: grid; place-items: center; padding: 28px 24px; box-sizing: border-box;
+  background: #09090b; font-family: Outfit, Inter, ui-sans-serif, system-ui, sans-serif;
+}
+.error-recovery-content { width: min(100%, 460px); display: flex; flex-direction: column; align-items: center; gap: 24px; }
+.error-recovery-orb { flex-shrink: 0; }
+.error-recovery-copy { text-align: center; }
+.error-recovery-copy .error-recovery-label { margin: 0 0 12px; font-size: 11px; font-weight: 600; letter-spacing: .12em; color: #a1a1aa; }
+.error-recovery-copy h1 { margin: 0 0 12px; color: #f4f4f5; font-size: clamp(24px, 4vw, 32px); font-weight: 500; letter-spacing: -.035em; line-height: 1.2; }
+.error-recovery-copy p { margin: 0; color: #a1a1aa; font-size: 14px; line-height: 1.7; }
+.error-recovery-actions { display: flex; justify-content: center; gap: 12px; width: 100%; }
+.error-recovery-actions button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 10px 16px; border: 1px solid #3f3f46;
+  border-radius: 10px; background: #18181b; color: #f4f4f5;
+  font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; box-shadow: none;
+}
+.error-recovery-actions button:last-child { background: #f4f4f5; border-color: #f4f4f5; color: #18181b; }
+.error-recovery-actions button:hover { background: #27272a; }
+.error-recovery-actions button:last-child:hover { background: #d4d4d8; }
+.error-recovery-actions button:focus-visible { outline: 2px solid #a5b4fc; outline-offset: 4px; }
+@media (max-width: 420px) {
+  .error-recovery { padding-inline: 20px; }
+  .error-recovery-actions { flex-direction: column-reverse; }
+}
+@media (max-height: 540px) {
+  .error-recovery { padding-block: 16px; }
+  .error-recovery-content { gap: 16px; }
+}
+@media (forced-colors: active) {
+  .error-recovery-actions button { border: 1px solid ButtonText; }
+}

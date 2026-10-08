@@ -599,6 +599,13 @@ export async function stopMicRecordingAndTranscribe(): Promise<string> {
   return invoke<string>('stop_mic_recording_and_transcribe')
 }
 
+/** Stops native recording and discards audio without contacting a transcription provider. */
+export async function cancelMicRecording(): Promise<void> {
+  if (!isTauriRuntime()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('cancel_mic_recording')
+}
+
 function withImagePlaceholder(message: string, imageDataUri?: string | null, videoDataUri?: string | null) {
   let finalMessage = message
   if (imageDataUri && !finalMessage.includes('[Image #1]')) {
