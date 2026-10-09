@@ -3,6 +3,7 @@ mod discord_rpc;
 mod events;
 mod headless;
 mod integrations;
+mod notifications;
 mod plugins;
 mod proactive;
 mod system;
@@ -2814,6 +2815,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            notifications::send_mint_notification,
             start_interactive_terminal,
             write_interactive_terminal,
             resize_interactive_terminal,

@@ -1,3 +1,5 @@
+import { Bell } from 'lucide-react'
+import NotificationsTab from '../../shared/components/Settings/NotificationsTab'
 import React, { useState, useEffect, useRef } from 'react'
 import '../css/settings/base.css'
 import '../../shared/css/settings/general.css'
@@ -44,7 +46,7 @@ export { DEFAULT_CONFIG }
 import { applyThemeStyles } from '../../shared/utils/ui'
 import { APP_VERSION } from '../../shared/version'
 
-type TabType = 'sect-general' | 'sect-profile' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
+type TabType = 'sect-notifications' | 'sect-general' | 'sect-profile' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
 
 interface SettingsNavItem {
   id: TabType
@@ -54,6 +56,7 @@ interface SettingsNavItem {
 }
 
 const SETTINGS_NAV: SettingsNavItem[] = [
+  { id: 'sect-notifications', label: 'Notifications', group: 'Workspace', icon: <Bell size={14} aria-hidden="true" /> },
   {
     id: 'sect-general',
     label: 'General',
@@ -694,6 +697,8 @@ export default function SettingsWindow() {
               onSaveWithoutClosing={handleSaveWithoutClosing}
             />
           )}
+
+          {activeTab === 'sect-notifications' && <NotificationsTab settings={config.notificationSettings} onChange={value => updateField('notificationSettings', value)} />}
 
           {activeTab === 'sect-profile' && (
             <ProfileTab

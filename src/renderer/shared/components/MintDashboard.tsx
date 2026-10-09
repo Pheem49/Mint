@@ -1,3 +1,6 @@
+import { shouldNotify } from '../utils/notificationSettings'
+import { deliverNotification, receiveProactiveNotification } from '../utils/notifications'
+import '../css/notification-notice.css'
 import { lazy, Suspense, type ChangeEvent, type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   compactAgentProgressForPersistence,
@@ -302,15 +305,6 @@ function describeApproval(payload: any): string {
   }
 }
 
-/** Fires the same notification mechanism as a finished AI reply, but only
- * while the window is unfocused — reused so both surfaces get identical
- * title/permission/dedupe behavior, just a different body string. */
-function notifyPendingApproval(payload: any) {
-  if (document.hidden || !document.hasFocus()) {
-    window.api?.notifyAiResponse?.(truncateForNotification(describeApproval(payload)))
-  }
-}
-
 export default function MintDashboard() {
   const isDesktopApp = isTauriRuntime()
   const [view, setViewState] = useState<DashboardView>(getInitialViewFromUrl)
@@ -494,6 +488,52 @@ export default function MintDashboard() {
   }, [])
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [error, setError] = useState('')
+  const [notificationNotice, setNotificationNotice] = useState<{ message: string; chatId?: string; type?: string } | null>(null)
+  const notificationNavigationRef = useRef(selectConversation)
+  notificationNavigationRef.current = selectConversation
+  const sendNotification = (body: string, chatId?: string, kind: 'replies' | 'approvals' | 'system' = 'replies') => deliverNotification(
+    () => shouldNotify(notificationConfigRef.current?.notificationSettings, kind, 'os')
+      ? window.api?.notifyAiResponse?.(truncateForNotification(body), chatId) : undefined,
+    setError,
+  )
+  const notifyPendingApproval = (payload: any, chatId?: string) => {
+    if (document.hidden || !document.hasFocus()) {
+      void sendNotification(describeApproval(payload), chatId ?? payload.chatId, 'approvals')
+    }
+  }
+  useEffect(() => {
+    let disposed = false
+    const cleanups: Array<() => void> = []
+    const register = (subscription: Promise<any> | undefined) => {
+      subscription?.then(unlisten => {
+        if (typeof unlisten !== 'function') return
+        if (disposed) unlisten()
+        else cleanups.push(unlisten)
+      }).catch(reason => { if (!disposed) setError(errorMessage(reason)) })
+    }
+    const openChat = (chatId?: string) => {
+      if (chatId) void notificationNavigationRef.current(chatId).catch(reason => setError(errorMessage(reason)))
+    }
+    const clicked = (event: Event) => openChat((event as CustomEvent).detail?.chatId)
+    window.addEventListener('mint:notification-click', clicked)
+    register(listen('notification-clicked', (event: { payload: { chatId?: string } }) => openChat(event.payload?.chatId)))
+    register(Promise.resolve(window.api?.onProactiveNotification?.((payload: any) => {
+      if (disposed) return
+      void receiveProactiveNotification(payload, document.hidden || !document.hasFocus(),
+        notice => { if (shouldNotify(notificationConfigRef.current?.notificationSettings, 'system', 'inApp')) setNotificationNotice(notice) },
+        (body, chatId) => sendNotification(body, chatId, 'system'))
+        .catch(reason => setError(errorMessage(reason)))
+    })))
+    const visible = () => { if (!document.hidden) window.api?.clearAiNotifications?.() }
+    document.addEventListener('visibilitychange', visible)
+    return () => {
+      disposed = true
+      cleanups.forEach(unlisten => unlisten())
+      window.removeEventListener('mint:notification-click', clicked)
+      document.removeEventListener('visibilitychange', visible)
+    }
+  }, [])
+
   // When `conversationId` changes we swap `message` to that chat's saved draft;
   // this ref tells the persist effect to skip the render right after that swap,
   // so the outgoing chat's text is never written under the incoming chat's key.
@@ -541,6 +581,12 @@ export default function MintDashboard() {
   const [dashboardDataReady, setDashboardDataReady] = useState(false)
   const [startupTimedOut, setStartupTimedOut] = useState(false)
   const [settingsConfig, setSettingsConfig] = useState<any>(null)
+  const notificationConfigRef = useRef(settingsConfig)
+  notificationConfigRef.current = settingsConfig
+  useEffect(() => {
+    if (!shouldNotify(settingsConfig?.notificationSettings, 'system', 'inApp')) setNotificationNotice(null)
+    if (settingsConfig?.notificationSettings?.enabled === false || settingsConfig?.notificationSettings?.os === false) window.api?.clearAiNotifications?.()
+  }, [settingsConfig])
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const availableWorkspacePaths = useMemo(() => workspacePaths(
     recentWorkspacePaths, workspacePath, chatSessions.map(session => session.workspacePath),
@@ -1360,7 +1406,7 @@ export default function MintDashboard() {
             })
           } else {
             setPendingApprovals((current) => ({ ...current, [originChatId]: payload }))
-            notifyPendingApproval(payload)
+            notifyPendingApproval(payload, originChatId)
           }
         },
         (id) => {
@@ -1370,7 +1416,7 @@ export default function MintDashboard() {
       ), isCurrentRun)
       flushPendingProgress()
       if (document.hidden || !document.hasFocus()) {
-        window.api?.notifyAiResponse?.(truncateForNotification(response.text))
+        await sendNotification(response.text || 'Mint finished your request.', originChatId)
       }
       const persistedProgress = compactAgentProgressForPersistence(progressSnapshot)
       if (persistedProgress.length > 0) {
@@ -2217,6 +2263,13 @@ export default function MintDashboard() {
           onOpenReview={(changes) => openReviewSurface({ id: `review:workspace:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: 'Recent agent changes', changes })}
           onRefreshWorkspace={() => setWorkspaceRefreshRevision((revision) => revision + 1)}
         />
+      )}
+      {notificationNotice && (
+        <section className="mint-notification-notice" role="status" data-kind={notificationNotice.type}>
+          <span>{notificationNotice.message}</span>
+          {notificationNotice.chatId && <button type="button" onClick={() => { void notificationNavigationRef.current(notificationNotice.chatId!); setNotificationNotice(null) }}>Open chat</button>}
+          <button type="button" aria-label="Dismiss notification" onClick={() => setNotificationNotice(null)}>×</button>
+        </section>
       )}
       {error && <ErrorNotice key={error} message={error} onDismiss={() => setError('')} />}
       <div

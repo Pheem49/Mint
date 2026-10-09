@@ -1,0 +1,11 @@
+.notifications-tab .toggle-row { gap: 20px; }
+.notifications-tab .toggle-row > div { min-width: 0; }
+.notifications-tab .toggle-row input:disabled + .settings-toggle-slider { opacity: .45; }
+.notifications-tab .toggle-row input:focus-visible + .settings-toggle-slider { outline: 2px solid var(--accent, #10b981); outline-offset: 3px; }
+.notifications-tab .settings-toggle-switch { flex-shrink: 0; }
+.notifications-permission-state { color: var(--text-main); }
+.notifications-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.notifications-feedback { color: var(--text-secondary, var(--text-muted)); overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .notifications-actions button { flex: 1 1 180px; }
+}

@@ -19,6 +19,7 @@ hmac.workspace = true
 image.workspace = true
 mint-core = { path = "../crates/mint-core" }
 portable-pty = "0.9"
+notify-rust = "4.18"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

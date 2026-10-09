@@ -50,9 +50,7 @@ function dispatchWebSettingsChanged(config: any) {
   window.dispatchEvent(new CustomEvent(WEB_SETTINGS_CHANGED_EVENT, { detail: config }))
 }
 
-/** The last browser Notification shown by notifyAiResponse's fallback
- * (non-Tauri) branch, so clearAiNotifications can dismiss it. */
-let lastAiNotification: Notification | null = null
+import { sendBrowserNotification, clearBrowserNotifications, openNotificationChat } from '../shared/utils/notifications'
 
 /**
  * Root-relative: the web build's SPA fallback serves index-web.html at deep
@@ -1397,20 +1395,8 @@ export function installTauriAdapters() {
         }
       },
       onSpotlightToChat: async () => () => {},
-      notifyAiResponse: async (preview: string) => {
-        if (typeof Notification === 'undefined') return
-        let permission = Notification.permission
-        if (permission === 'default') {
-          permission = await Notification.requestPermission()
-        }
-        if (permission === 'granted') {
-          lastAiNotification = new Notification('Mint Agent', { body: preview })
-        }
-      },
-      clearAiNotifications: () => {
-        lastAiNotification?.close()
-        lastAiNotification = null
-      },
+      notifyAiResponse: (preview: string, chatId?: string) => sendBrowserNotification(preview, chatId, openNotificationChat),
+      clearAiNotifications: clearBrowserNotifications,
       getTtsUrls: async () => [],
       setAiState: () => {},
     };
@@ -1590,19 +1576,10 @@ export function installTauriAdapters() {
       const { listen } = await import('@tauri-apps/api/event')
       return listen<string>('spotlight-to-chat', (event) => callback(event.payload))
     },
-    notifyAiResponse: async (preview) => {
-      const { isPermissionGranted, requestPermission, sendNotification } = await import('@tauri-apps/plugin-notification')
-      let granted = await isPermissionGranted()
-      if (!granted) {
-        granted = (await requestPermission()) === 'granted'
-      }
-      if (granted) {
-        sendNotification({ title: 'Mint Agent', body: preview })
-      }
+    notifyAiResponse: async (preview, chatId) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('send_mint_notification', { body: preview, chatId: chatId ?? null })
     },
-    // The plugin has no reliable cross-platform way to dismiss an
-    // already-shown OS notification from JS — best-effort no-op; there's
-    // simply nothing stale left for the next unfocused reply to build on.
     clearAiNotifications: () => {},
     getTtsUrls: async (text) => {
       const { invoke } = await import('@tauri-apps/api/core')

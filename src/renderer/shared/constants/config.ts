@@ -1,9 +1,11 @@
+import { DEFAULT_NOTIFICATION_SETTINGS } from '../utils/notificationSettings'
 /**
  * shared/constants/config.ts
  * Canonical DEFAULT_CONFIG — single source of truth for Desktop UI and Web UI settings.
  */
 
 export const DEFAULT_CONFIG = {
+  notificationSettings: { ...DEFAULT_NOTIFICATION_SETTINGS },
   theme: 'dark',
   tuiTheme: 'dark' as 'system' | 'dark' | 'light',
   accentColor: '#10b981',
