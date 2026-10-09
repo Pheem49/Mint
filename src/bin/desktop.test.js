@@ -90,3 +90,14 @@ test('custom Desktop build cannot validate the default start cache', t => {
   assert.equal(f.run().status, 0);
   assert.equal(f.builds().length, 2);
 });
+
+test('protocol source edits invalidate a cached Desktop build', t => {
+  const f = fixture(t);
+  const protocol = path.join(f.root, 'crates/mint-companion-protocol/src');
+  fs.mkdirSync(protocol, { recursive: true });
+  fs.writeFileSync(path.join(protocol, 'lib.rs'), 'v1');
+  assert.equal(f.run().status, 0);
+  fs.writeFileSync(path.join(protocol, 'lib.rs'), 'v2');
+  assert.equal(f.run().status, 0);
+  assert.equal(f.builds().length, 2);
+});

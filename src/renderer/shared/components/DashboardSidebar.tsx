@@ -3,7 +3,7 @@ import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon, renderS
 import { useAuthUser } from './AuthGate'
 import { runtimePlatform } from '../platform'
 
-export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'veo' | 'skills' | 'mcp' | 'plugins' | 'cron' | 'link' | 'code'
+export type DashboardView = 'chat' | 'pictures' | 'workspace' | 'imagine' | 'veo' | 'skills' | 'mcp' | 'plugins' | 'cron' | 'link' | 'code'
 
 interface ChatSessionItem {
   id: string
@@ -40,20 +40,6 @@ interface DashboardSidebarProps {
    * difference between the two, not something to unify.
    */
   promoteMediaStudios?: boolean
-  /** Desktop only — the inline Live2D companion character doesn't exist on web. */
-  modelVisible?: boolean
-  expressionIndex?: number
-  accessoryIndex?: number
-  expressions?: string[]
-  accessories?: string[]
-  interactionEnabled?: boolean
-  showInteractionGuide?: boolean
-  onToggleModel?: () => void
-  onSetExpressionIndex?: (index: number) => void
-  onSetAccessoryIndex?: (index: number) => void
-  onSetInteractionEnabled?: (enabled: boolean) => void
-  onSetShowInteractionGuide?: (visible: boolean) => void
-  onShowToast?: (message: string) => void
   activeWorkspacePath?: string
   recentWorkspacePaths?: string[]
   onBrowseFolder?: () => Promise<string | null>
@@ -64,16 +50,9 @@ interface DashboardSidebarProps {
 export default function DashboardSidebar({
   view,
   sidebarCollapsed,
-  modelVisible,
   sending,
   chatSessions,
   activeConversationId,
-  expressionIndex = 0,
-  accessoryIndex = 0,
-  expressions = [],
-  accessories = [],
-  interactionEnabled,
-  showInteractionGuide,
   onToggleSidebar,
   onSidebarResize,
   onSidebarResizeEnd,
@@ -82,12 +61,6 @@ export default function DashboardSidebar({
   onDeleteConversation,
   onRenameConversation,
   onSetView,
-  onToggleModel,
-  onSetExpressionIndex,
-  onSetAccessoryIndex,
-  onSetInteractionEnabled,
-  onSetShowInteractionGuide,
-  onShowToast,
   isSearchOpen,
   onSetSearchOpen,
   showWorkspaceTab,
@@ -191,18 +164,6 @@ export default function DashboardSidebar({
     }
     setEditingSessionId(null)
   }
-  const toggleInteractionGuide = () => {
-    const next = !showInteractionGuide
-    onSetShowInteractionGuide?.(next)
-    onShowToast?.(next ? 'Show interaction zones ⊹' : 'Hide interaction zones ⊹')
-  }
-
-  const toggleInteraction = () => {
-    const next = !interactionEnabled
-    onSetInteractionEnabled?.(next)
-    onShowToast?.(next ? 'Enable model interaction ⦸' : 'Disable model interaction ⦸')
-  }
-
   const conversationSessions = chatSessions.filter((session) => session.kind !== 'cli' && !session.id.startsWith('cli') && session.id !== 'conversation-default')
   const cliSessions = chatSessions.filter((session) => session.kind === 'cli' || session.id.startsWith('cli'))
 
@@ -560,18 +521,6 @@ export default function DashboardSidebar({
           <span>Workspace</span>
         </button>
       )}
-      {onToggleModel && (
-        <button className={`sidebar-top-action ${modelVisible ? 'is-active' : ''}`} onClick={onToggleModel} title="Live2D model">
-          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-              <circle cx="12" cy="7" r="4"></circle>
-            </svg>
-          </span>
-          <span>Live2D model</span>
-        </button>
-      )}
-
       <div className="sidebar-more-container" ref={moreContainerRef}>
         <button className={`sidebar-top-action ${isMoreOpen || (!promoteMediaStudios && (view === 'imagine' || view === 'veo')) || view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)} title="More" aria-expanded={isMoreOpen} aria-controls="sidebar-more-menu">
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
@@ -630,66 +579,6 @@ export default function DashboardSidebar({
         )}
       </div>
 
-
-      {modelVisible && (
-        <div className="sidebar-model-controls">
-          <button
-            className="change-expression-btn"
-            onClick={() => {
-              const next = (expressionIndex + 1) % expressions.length
-              onSetExpressionIndex?.(next)
-              onSetAccessoryIndex?.(0)
-              onShowToast?.(`Expression: ${expressions[next]}`)
-            }}
-          >
-            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
-                <line x1="9" y1="9" x2="9.01" y2="9"></line>
-                <line x1="15" y1="9" x2="15.01" y2="9"></line>
-              </svg>
-            </span>
-            <span>Expression</span>
-          </button>
-          <button
-            className="accessory-cycle-btn"
-            onClick={() => {
-              const next = (accessoryIndex + 1) % accessories.length
-              onSetAccessoryIndex?.(next)
-              onSetExpressionIndex?.(0)
-              onShowToast?.(`Accessory: ${accessories[next]}`)
-            }}
-          >
-            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 1 0 0-8c-2 0-4 1.33-6 4Z"></path>
-              </svg>
-            </span>
-            <span>Accessory</span>
-          </button>
-          <button className={`toggle-interaction-btn ${interactionEnabled ? 'active' : ''}`} onClick={toggleInteraction}>
-            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v5m-4 0V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v7m-4 0V5a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v9M4 22V13a3 3 0 0 1 6 0v0M4 22h14a2 2 0 0 0 2-2V11a2 2 0 0 0-2-2h-2"></path>
-              </svg>
-            </span>
-            <span className="mint-status-label">Interact</span>
-          </button>
-          <button className={`interaction-guide-btn ${showInteractionGuide ? 'active' : ''}`} onClick={toggleInteractionGuide}>
-            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="22" y1="12" x2="18" y2="12"></line>
-                <line x1="6" y1="12" x2="2" y2="12"></line>
-                <line x1="12" y1="6" x2="12" y2="2"></line>
-                <line x1="12" y1="22" x2="12" y2="18"></line>
-              </svg>
-            </span>
-            <span>Areas</span>
-          </button>
-        </div>
-      )}
 
       {sidebarCollapsed ? (
         <div className="sidebar-collapsed-sessions">

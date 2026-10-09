@@ -74,3 +74,6 @@ desktop.ini
 # Misc
 # ==========================
 *.pem
+
+# Tauri Companion generated capabilities/schema output
+/apps/mint-companion/src-tauri/gen/

@@ -31,15 +31,21 @@
     "start:release": "npm start -- --release",
     "launch": "npm start --",
     "start:rebuild": "npm start -- --rebuild",
-    "test": "npm run test:launchers && npm run test:interfaces && npm run test:device && cargo test -p mint-core -p mint-cli",
-    "test:launchers": "node --test src/bin/web.test.js src/bin/index.test.js src/bin/desktop.test.js",
+    "test": "npm run test:launchers && npm run test:interfaces && npm run test:styles && npm run test:device && npm run test:companion && cargo test -p mint-core -p mint-cli -p mint-companion-protocol -p mint-companion",
+    "test:launchers": "node --test src/bin/web.test.js src/bin/index.test.js src/bin/desktop.test.js src/bin/package.test.js",
     "test:interfaces": "vitest run src/renderer/shared/utils/contextCompaction.test.tsx src/renderer/shared/platform.test.ts src/renderer/shared/conversation/coordinator.test.ts src/renderer/shared/conversation/syncView.test.ts src/renderer/shared/utils/cardJson.test.ts src/renderer/shared/utils/agentActivity.test.ts src/renderer/shared/components/CliSessionsView.test.tsx src/renderer/shared/components/Settings/MemoryTab.test.tsx src/renderer/shared/theme/themeManager.test.ts src/renderer/shared/components/SelectField.test.tsx src/renderer/shared/components/VoicePill.test.tsx src/renderer/shared/utils/nativeRecordingSession.test.ts src/renderer/shared/components/GeminiLiveOverlay.test.tsx src/renderer/shared/utils/mcpResults.test.tsx",
     "cli": "node src/bin/index.js",
     "prepublishOnly": "npm run build:web",
     "postinstall": "cargo build -p mint-cli --release",
     "dev:desktop:ui": "vite",
     "build:ui": "npm run build:desktop:ui && npm run build:web",
-    "test:device": "node --test examples/device-mcp/server.test.mjs"
+    "test:device": "node --test examples/device-mcp/server.test.mjs",
+    "dev:companion": "npm run dev --workspace @mint/companion --",
+    "build:companion": "npm run build --workspace @mint/companion --",
+    "package:companion": "npm run package --workspace @mint/companion --",
+    "test:companion": "vitest run --root . apps/mint-companion/src/state.test.ts",
+    "typecheck:companion": "npm run typecheck --workspace @mint/companion",
+    "test:styles": "node --test src/bin/styles.test.js"
   },
   "keywords": [
     "mint",
@@ -99,8 +105,6 @@
     "material-icon-theme": "5.34.0",
     "mermaid": "^11.17.0",
     "ogl": "^1.0.11",
-    "pixi-live2d-display": "^0.4.0",
-    "pixi.js": "^6.5.10",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",
@@ -122,5 +126,34 @@
     "uuid": "^11.1.1",
     "brace-expansion": "^5.0.12",
     "@hono/node-server": "^2.0.5"
-  }
+  },
+  "workspaces": [
+    "apps/mint-companion"
+  ],
+  "files": [
+    "src",
+    "crates",
+    "scripts",
+    "examples",
+    "shared-modules",
+    "out/web",
+    "Cargo.toml",
+    "Cargo.lock",
+    "Release_Note.md",
+    "slash-commands.json",
+    "mcp-registry.json",
+    "README.md",
+    "LICENSE",
+    "vite.config.ts",
+    "vite.config.web.ts",
+    "tsconfig.json",
+    "tsconfig.node.json",
+    "components.json",
+    "src-tauri/Cargo.toml",
+    "src-tauri/src",
+    "src-tauri/build.rs",
+    "apps/mint-companion/src-tauri/Cargo.toml",
+    "apps/mint-companion/src-tauri/src",
+    "apps/mint-companion/src-tauri/build.rs"
+  ]
 }

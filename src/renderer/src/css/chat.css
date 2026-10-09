@@ -803,7 +803,6 @@
   transform: scale(0.95);
 }
 
-
 #chat-tool-btn,
 #screen-capture-btn {
   background: transparent;
@@ -1693,7 +1692,6 @@
   .code-review-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
   .code-review-file-list { border-left: 0; border-top: 1px solid var(--border); max-height: 180px; }
 }
-
 
 .agent-activity-card-history {
   padding-top: 0;
@@ -2671,7 +2669,7 @@ input:checked + .slider:before {
               transform 0.58s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.assistant-workspace.model-hidden .message {
+.assistant-workspace.chat-only .message {
   max-width: 100%;
 }
 
@@ -3745,7 +3743,6 @@ input:checked + .slider:before {
   color: var(--accent-contrast, #ffffff);
 }
 
-
 #send-btn {
   grid-column: 5;
   grid-row: 3;
@@ -3951,7 +3948,6 @@ input:checked + .slider:before {
   flex-shrink: 0;
 }
 
-
 .chat-header-actions {
   display: flex;
   align-items: center;
@@ -4055,7 +4051,6 @@ input:checked + .slider:before {
   color: var(--interactive-fg);
 }
 
-
 .drag-drop-overlay {
   animation: pulseGlow 1.2s infinite alternate ease-in-out;
 }
@@ -4144,7 +4139,6 @@ input:checked + .slider:before {
 #send-btn.stop-btn:hover {
   background: #dc2626 !important;
 }
-
 
 /* Message action buttons (Copy, Read Aloud, Like, Dislike) */
 

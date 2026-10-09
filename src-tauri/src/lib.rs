@@ -2801,6 +2801,7 @@ pub fn run() {
             start_cron_scheduler();
             start_webhooks();
             tauri::async_runtime::spawn(async {
+                mint_core::companion::start();
                 let _ = mint_core::start_api_server(3000).await;
             });
             if load_config()
@@ -2960,6 +2961,7 @@ pub fn run() {
             // runs at exit on its own. Fires for tray "Quit", `exit_app`, and
             // the last window closing.
             if let tauri::RunEvent::Exit = event {
+                mint_core::companion::shutdown();
                 mint_core::close_all_mcp_sessions();
                 mint_core::bg_shell::shutdown();
             }

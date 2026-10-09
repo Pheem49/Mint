@@ -3,6 +3,8 @@ members = [
   "crates/mint-core",
   "crates/mint-cli",
   "src-tauri",
+  "crates/mint-companion-protocol",
+  "apps/mint-companion/src-tauri",
 ]
 resolver = "2"
 

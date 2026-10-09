@@ -1,0 +1,20 @@
+[package]
+name = "mint-companion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "An optional Live2D companion for Mint"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+dirs.workspace = true
+futures-util.workspace = true
+mint-companion-protocol = { path = "../../../crates/mint-companion-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+uuid.workspace = true

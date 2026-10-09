@@ -98,3 +98,7 @@ To publish the repository package to the npm registry as a public scoped package
 
 
 
+
+## Mint Companion
+
+The optional character app is a separate npm workspace and Cargo binary in the same repo. Run `npm run dev:companion`, `npm run build:companion`, or `npm run package:companion -- --bundles deb|nsis|dmg` (choose one bundle type for your OS). Its UI builds to `out/companion`; the binary is `target/release/mint-companion`. Release jobs collect main Mint artifacts before building Companion, then attach `mint-companion_linux_x86_64.deb`, the Linux portable `.tar.gz`, `mint-companion_windows_x64.exe`, and `mint-companion_macos_arm64.dmg`. Both apps share the repo version but have independent application identifiers and installers. See `docs/MINT_COMPANION.md` for transport and manual GUI checks.

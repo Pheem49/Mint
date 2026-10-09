@@ -1,10 +1,5 @@
-/* web: sidebar-workspace.css — split from styles.css, rules kept in original order */
 
-.toggle-model-btn,
-.change-expression-btn,
-.accessory-cycle-btn,
-.toggle-interaction-btn,
-.interaction-guide-btn,
+/* web: sidebar-workspace.css — split from styles.css, rules kept in original order */
 .clear-btn,
 .settings-btn {
   -webkit-app-region: no-drag;
@@ -26,31 +21,9 @@
   white-space: nowrap;
   transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
 }
-
-.toggle-model-btn svg,
-.change-expression-btn svg,
-.accessory-cycle-btn svg,
-.toggle-interaction-btn svg,
-.interaction-guide-btn svg,
 .clear-btn svg,
 .settings-btn svg {
   flex: 0 0 auto;
-}
-
-.change-expression-btn:hover {
-  background: color-mix(in srgb, var(--flavor-amber) 15%, transparent);
-  border-color: color-mix(in srgb, var(--flavor-amber) 20%, transparent);
-  color: var(--flavor-amber);
-}
-
-.toggle-interaction-btn .interaction-off-mark {
-  opacity: 0;
-}
-
-.interaction-guide-btn:hover {
-  background: color-mix(in srgb, var(--flavor-cyan) 14%, transparent);
-  border-color: color-mix(in srgb, var(--flavor-cyan) 20%, transparent);
-  color: var(--flavor-cyan);
 }
 
 .clear-btn:hover {
@@ -375,56 +348,12 @@
   white-space: nowrap;
 }
 
-
 .sidebar-top-action {
   margin-bottom: 4px;
 }
 
 .sidebar-top-action:last-of-type {
   margin-bottom: 12px;
-}
-
-.sidebar-model-controls {
-  display: grid;
-  width: 100%;
-  align-items: stretch;
-  justify-items: stretch;
-  justify-content: stretch;
-  gap: 2px;
-  padding: 10px 0 18px;
-  border-top: 1px solid var(--border-subtle);
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: 6px;
-}
-
-.workspace-sidebar .toggle-model-btn,
-.workspace-sidebar .change-expression-btn,
-.workspace-sidebar .accessory-cycle-btn,
-.workspace-sidebar .toggle-interaction-btn,
-.workspace-sidebar .interaction-guide-btn {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  height: 32px;
-  justify-content: flex-start;
-  padding: 0 10px;
-  color: var(--text-soft);
-  font-weight: 400;
-  gap: 9px;
-}
-
-.workspace-sidebar .toggle-model-btn:hover,
-.workspace-sidebar .toggle-model-btn.active,
-.workspace-sidebar .change-expression-btn:hover,
-.workspace-sidebar .accessory-cycle-btn:hover,
-.workspace-sidebar .accessory-cycle-btn.active,
-.workspace-sidebar .toggle-interaction-btn:hover,
-.workspace-sidebar .toggle-interaction-btn.active,
-.workspace-sidebar .interaction-guide-btn:hover,
-.workspace-sidebar .interaction-guide-btn.active {
-  background: var(--surface-strong);
-  border-color: transparent;
-  color: var(--text-main);
 }
 
 .sidebar-section {
@@ -606,17 +535,11 @@
 .sidebar-chat-item.active:hover .mint-status-pill {
   display: none;
 }
-
 .app-body.sidebar-collapsed .sidebar-new-chat,
 .app-body.sidebar-collapsed .sidebar-top-action,
 .app-body.sidebar-collapsed .sidebar-settings,
 .app-body.sidebar-collapsed .sidebar-bottom-actions .clear-btn,
 .app-body.sidebar-collapsed .sidebar-bottom-actions .settings-btn,
-.app-body.sidebar-collapsed .workspace-sidebar .toggle-model-btn,
-.app-body.sidebar-collapsed .workspace-sidebar .change-expression-btn,
-.app-body.sidebar-collapsed .workspace-sidebar .accessory-cycle-btn,
-.app-body.sidebar-collapsed .workspace-sidebar .toggle-interaction-btn,
-.app-body.sidebar-collapsed .workspace-sidebar .interaction-guide-btn,
 .app-body.sidebar-collapsed .sidebar-project {
   width: 40px;
   height: 34px;
@@ -878,23 +801,6 @@
 }
 
 @media (max-width: 760px) {
-
-  .toggle-model-btn,
-  .change-expression-btn,
-.accessory-cycle-btn,
-  .toggle-interaction-btn,
-  .interaction-guide-btn {
-    width: 34px;
-    padding: 0;
-  }
-
-  .toggle-model-btn span,
-  .change-expression-btn span,
-.accessory-cycle-btn span,
-  .toggle-interaction-btn span,
-  .interaction-guide-btn span {
-    display: none;
-  }
 
   .sidebar-toggle {
     display: none;

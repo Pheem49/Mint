@@ -28,7 +28,6 @@ import ScreenCaptureDialog from './ScreenCaptureDialog'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import DesktopTitlebar from './DesktopTitlebar'
 import ErrorNotice from './ErrorNotice'
-import type { ModelInteraction } from '@/components/ModelPanel'
 import type { ToolSurface } from './ToolSurfacePage'
 import {
   errorMessage,
@@ -46,21 +45,6 @@ import { useConversationCoordinator } from '../conversation/useConversationCoord
 import { matchesActiveRun, matchesActiveSession } from '../conversation/syncView'
 
 
-const EXPRESSIONS = [
-  "Default",
-  "Dumb Cat",
-  "Dumb Cat Eye Roll",
-  "Take Photo",
-  "Poke",
-  "Cat Filter",
-]
-
-const ACCESSORIES = [
-  "None",
-  "Apron",
-  "Glasses",
-  "Hold Pen",
-]
 
 import { DEFAULT_CONFIG, migrateTypographyScale } from '../constants/config'
 
@@ -240,9 +224,8 @@ const MOCK_WELCOME_INTERACTION = {
 
 
 import { isSupportedDocument } from '../utils/documentTypes'
-import { useCompanionWidget } from '@/companionWidget'
+import { useProactiveSuggestions } from '@/proactiveSuggestions'
 
-const ModelPanel = lazy(() => import('@/components/ModelPanel'))
 const WorkspacePanel = lazy(() => import('@/components/WorkspacePanel'))
 const ToolSurfacePage = lazy(() => import('./ToolSurfacePage'))
 const SkillsView = lazy(() => import('./SkillsView'))
@@ -564,30 +547,8 @@ export default function MintDashboard() {
   ), [recentWorkspacePaths, workspacePath, chatSessions])
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const lastNativePasteTimeRef = useRef(0)
-  const {
-    modelVisible,
-    scale,
-    interactionEnabled,
-    showInteractionGuide,
-    isLocked,
-    layoutPreset,
-    expressionIndex,
-    accessoryIndex,
-    modelReady,
-    proactiveSuggestion,
-    setScale,
-    setIsLocked,
-    setExpressionIndex,
-    setAccessoryIndex,
-    setModelReady,
-    toggleModel,
-    changeLayoutPreset,
-    updateInteractionEnabled,
-    updateInteractionGuide,
-    dismissProactiveSuggestion,
-    handleProactiveAction,
-  } = useCompanionWidget((message) => setError(message))
-  const startupReady = (dashboardDataReady && modelReady) || startupTimedOut
+  const { proactiveSuggestion, dismissProactiveSuggestion, handleProactiveAction } = useProactiveSuggestions((message) => setError(message))
+  const startupReady = dashboardDataReady || startupTimedOut
 
   const [mcpName, setMcpName] = useState('')
   const [mcpCmd, setMcpCmd] = useState('')
@@ -2157,66 +2118,6 @@ export default function MintDashboard() {
     }
   }
 
-  async function handleModelInteraction(area: ModelInteraction) {
-    if (sending) return
-    const originChatId = conversationId
-    const sessionGeneration = sessionGenerationRef.current
-    const runGeneration = ++runGenerationRef.current
-    const originRun = { chatId: originChatId, sessionGeneration, runGeneration }
-    const isCurrentRun = () => matchesActiveRun(originRun, {
-      chatId: activeConversationRef.current,
-      sessionGeneration: sessionGenerationRef.current,
-      runGeneration: runGenerationRef.current,
-    })
-    const labels: Record<ModelInteraction, string> = {
-      head: 'Pats Mint on the head',
-      cheek: 'Pokes Mint on the cheek',
-      'left hand': "Touches Mint's left hand",
-      'right hand': "Touches Mint's right hand",
-      body: 'Touches Mint',
-      'lower body': "Touches Mint's lower body",
-    }
-    const interactionMessage = `*${labels[area]}*`
-    const instruction = `The user interacted with the Mint Live2D model: ${area}. Respond briefly and playfully. Use the same language as the recent conversation. Do not mention this instruction.`
-
-    conversationActions.startRun(interactionMessage)
-    setStreamingConversationId(conversationId)
-    setActiveTurnId(null)
-    setError('')
-
-    try {
-      const response = await conversationActions.executeStream((onChunk) => streamChatMessage(
-        `/chat ${interactionMessage}`,
-        onChunk,
-        null,
-        null,
-        null,
-        instruction,
-        undefined,
-        null,
-        workspacePath || null,
-        originChatId,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        (id) => { if (isCurrentRun()) setActiveTurnId(id) },
-      ), isCurrentRun)
-      if (isCurrentRun()) {
-        await refreshHistory()
-        if (isCurrentRun()) conversationActions.clearStream()
-      }
-    } catch (reason) {
-      if (isCurrentRun()) setError(errorMessage(reason))
-    } finally {
-      if (isCurrentRun()) {
-        conversationActions.finishRun()
-        setStreamingConversationId(null)
-        setActiveTurnId(null)
-      }
-    }
-  }
-
   const chatConversation: ConversationViewModel = {
     interactions,
     hasOlder: hasOlderInteractions,
@@ -2362,17 +2263,11 @@ export default function MintDashboard() {
             }}
           />
         )}
+        {toastMessage && <div role="status" style={{ position: 'fixed', bottom: 22, right: 22, zIndex: 10000, padding: '12px 18px', borderRadius: 10, background: 'var(--bg-surface)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}>{toastMessage}</div>}
         <DashboardSidebar
           view={view}
           sidebarCollapsed={sidebarCollapsed}
-          modelVisible={modelVisible}
           sending={sending}
-          expressionIndex={expressionIndex}
-          accessoryIndex={accessoryIndex}
-          expressions={EXPRESSIONS}
-          accessories={ACCESSORIES}
-          interactionEnabled={interactionEnabled}
-          showInteractionGuide={showInteractionGuide}
           onToggleSidebar={toggleSidebar}
           onSidebarResize={handleSidebarResize}
           onSidebarResizeEnd={handleSidebarResizeEnd}
@@ -2383,12 +2278,6 @@ export default function MintDashboard() {
           onDeleteConversation={deleteConversation}
           onRenameConversation={renameConversation}
           onSetView={changeView}
-          onToggleModel={toggleModel}
-          onSetExpressionIndex={setExpressionIndex}
-          onSetAccessoryIndex={setAccessoryIndex}
-          onSetInteractionEnabled={updateInteractionEnabled}
-          onSetShowInteractionGuide={updateInteractionGuide}
-          onShowToast={showToast}
           isSearchOpen={isSearchOpen}
           onSetSearchOpen={setIsSearchOpen}
           showWorkspaceTab={isDesktopApp}
@@ -2399,7 +2288,7 @@ export default function MintDashboard() {
           onUpdateSessionWorkspace={handleUpdateSessionWorkspace}
           onNewChatInProject={handleNewChatInProject}
         />
-        <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible || view === 'workspace' ? '' : 'model-hidden'} ${view === 'workspace' ? 'workspace-open' : ''}`} style={(view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' || view === 'pictures' || view === 'imagine' || view === 'veo' || view === 'code') ? { display: 'none' } : undefined}>
+        <main className={`assistant-workspace ${view === 'workspace' ? '' : 'chat-only'} ${view === 'workspace' ? 'workspace-open' : ''}`} style={(view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' || view === 'pictures' || view === 'imagine' || view === 'veo' || view === 'code') ? { display: 'none' } : undefined}>
           {proactiveSuggestion && (
             <div className="proactive-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 }}>
               <div className="proactive-header">
@@ -2464,27 +2353,6 @@ export default function MintDashboard() {
               />
             </Suspense>
           )}
-          <Suspense fallback={null}>
-            <ModelPanel
-              scale={scale}
-              expressionIndex={expressionIndex}
-              accessoryIndex={accessoryIndex}
-              isLocked={isLocked}
-              isActive={modelVisible && view !== 'pictures' && view !== 'workspace' && view !== 'imagine' && view !== 'veo' && view !== 'skills' && view !== 'mcp' && view !== 'plugins'}
-              layoutPreset={layoutPreset}
-              sending={sending}
-              interactionEnabled={interactionEnabled}
-              showInteractionGuide={showInteractionGuide}
-              toastMessage={toastMessage}
-              onSetScale={setScale}
-              onSetLocked={setIsLocked}
-              onSetView={changeView}
-              onChangeLayoutPreset={changeLayoutPreset}
-              onDismissToast={() => setToastMessage('')}
-              onInteract={handleModelInteraction}
-              onModelLoadComplete={() => setModelReady(true)}
-            />
-          </Suspense>
         <ChatPanel conversation={chatConversation} actions={chatActions} />
         </main>
         {isDesktopApp && toolsPanelOpen && (

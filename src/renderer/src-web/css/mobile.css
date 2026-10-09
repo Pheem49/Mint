@@ -83,11 +83,11 @@
     display: none;
   }
 
-  :root.mint-keyboard-open .assistant-workspace.model-hidden .conversation-panel.is-empty .input-area {
+  :root.mint-keyboard-open .assistant-workspace.chat-only .conversation-panel.is-empty .input-area {
     margin: auto 0 0;
   }
 
-  :root.mint-keyboard-open .assistant-workspace.model-hidden .input-area {
+  :root.mint-keyboard-open .assistant-workspace.chat-only .input-area {
     padding-bottom: 6px;
   }
 
@@ -246,7 +246,7 @@
     flex: 1 1 auto;
   }
 
-  .assistant-workspace.model-hidden .chat-panel-split-wrapper.no-preview .conversation-panel {
+  .assistant-workspace.chat-only .chat-panel-split-wrapper.no-preview .conversation-panel {
     height: 100%;
     min-height: 0;
     flex: 1 1 auto;
@@ -274,13 +274,13 @@
     min-height: 44px;
   }
 
-  .assistant-workspace.model-hidden .chat-container {
+  .assistant-workspace.chat-only .chat-container {
     min-height: 0;
     padding: calc(64px + env(safe-area-inset-top)) 12px 12px;
     -webkit-overflow-scrolling: touch;
   }
 
-  .assistant-workspace.model-hidden .input-area {
+  .assistant-workspace.chat-only .input-area {
     min-width: 0;
     margin: 0;
     padding: 8px 10px calc(6px + env(safe-area-inset-bottom));
@@ -288,7 +288,7 @@
     border-top: 1px solid var(--border);
   }
 
-  .assistant-workspace.model-hidden .conversation-panel.is-empty .input-area {
+  .assistant-workspace.chat-only .conversation-panel.is-empty .input-area {
     margin: auto 0 0;
     transform: none;
   }
@@ -464,7 +464,7 @@
     border-right: 1px solid var(--border-default);
   }
 
-  .assistant-workspace.model-hidden .input-area {
+  .assistant-workspace.chat-only .input-area {
     background: var(--mobile-chrome-bg);
     backdrop-filter: var(--mobile-chrome-filter);
     -webkit-backdrop-filter: var(--mobile-chrome-filter);

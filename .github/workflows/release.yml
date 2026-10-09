@@ -53,8 +53,14 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --no-deps
 
+      - name: Check Companion UI
+        run: |
+          npm run typecheck:companion
+          npm run test:companion
+          npm run build:ui --workspace @mint/companion
+
       - name: Run Rust tests
-        run: cargo test -p mint-core -p mint-cli
+        run: cargo test -p mint-core -p mint-cli -p mint-companion-protocol -p mint-companion
 
       - name: Build desktop bundle
         run: npm run tauri:build
@@ -74,6 +80,16 @@ jobs:
           cp target/release/bundle/tar/mint-agent.tar.gz release-artifacts/mint-agent_linux_x86_64.tar.gz
           cp target/release/mint release-artifacts/mint-cli_linux_x86_64
           sha256sum release-artifacts/mint-cli_linux_x86_64 | cut -d' ' -f1 > release-artifacts/mint-cli_linux_x86_64.sha256
+
+      - name: Build Companion package
+        run: npm run package:companion -- --bundles deb
+
+      - name: Collect Companion artifacts
+        run: |
+          cp target/release/bundle/deb/*Companion*.deb release-artifacts/mint-companion_linux_x86_64.deb
+          mkdir -p target/release/mint-companion-portable
+          cp target/release/mint-companion target/release/mint-companion-portable/
+          tar -czf release-artifacts/mint-companion_linux_x86_64.tar.gz -C target/release mint-companion-portable
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -135,6 +151,13 @@ jobs:
           Copy-Item target/release/bundle/nsis/*-setup.exe release-artifacts/mint-agent_windows_x64.exe
           Copy-Item target/release/mint.exe release-artifacts/mint-cli_windows_x64.exe
           (Get-FileHash release-artifacts/mint-cli_windows_x64.exe -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content release-artifacts/mint-cli_windows_x64.exe.sha256 -NoNewline
+
+      - name: Build Companion installer
+        run: npm run package:companion -- --bundles nsis
+
+      - name: Collect Companion artifact
+        shell: pwsh
+        run: Copy-Item target/release/bundle/nsis/*Companion*-setup.exe release-artifacts/mint-companion_windows_x64.exe
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -201,6 +224,12 @@ jobs:
           cp target/release/bundle/dmg/*.dmg release-artifacts/mint-agent_macos_arm64.dmg
           cp target/release/mint release-artifacts/mint-cli_macos_arm64
           shasum -a 256 release-artifacts/mint-cli_macos_arm64 | cut -d' ' -f1 > release-artifacts/mint-cli_macos_arm64.sha256
+
+      - name: Build Companion bundle
+        run: npm run package:companion -- --bundles dmg
+
+      - name: Collect Companion artifact
+        run: cp target/release/bundle/dmg/*Companion*.dmg release-artifacts/mint-companion_macos_arm64.dmg
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

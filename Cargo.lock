@@ -3344,6 +3344,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "mint-companion"
+version = "1.16.0"
+dependencies = [
+ "dirs",
+ "futures-util",
+ "mint-companion-protocol",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
+]
+
+[[package]]
+name = "mint-companion-protocol"
+version = "1.16.0"
+dependencies = [
+ "dirs",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mint-core"
 version = "1.16.0"
 dependencies = [
@@ -3365,6 +3390,7 @@ dependencies = [
  "image",
  "jsonschema",
  "libc",
+ "mint-companion-protocol",
  "quick-xml 0.39.4",
  "regex",
  "reqwest 0.12.28",

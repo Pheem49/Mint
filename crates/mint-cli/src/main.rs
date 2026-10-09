@@ -332,6 +332,7 @@ async fn main() -> Result<()> {
     }
 
     let mut config = load_config()?;
+    mint_core::companion::start();
     if let Some(ref m) = cli.model {
         apply_temporary_model_override(&mut config, m);
     }
@@ -380,6 +381,7 @@ async fn main() -> Result<()> {
     // its shutdown signal) funnels back here on a clean exit. `SESSIONS` is a
     // `static`, so `McpSession::Drop` won't run at process teardown — do it
     // explicitly so we don't leave orphaned MCP server processes behind.
+    mint_core::companion::shutdown();
     mint_core::close_all_mcp_sessions();
     Ok(())
 }

@@ -83,6 +83,7 @@ where
 /// Owns one persisted turn, including its cross-process queue lease. Dropping a
 /// cancelled task marks its prompt interrupted instead of leaving it running.
 struct TurnLease {
+    chat_id: String,
     memory: MemoryStore,
     id: i64,
     heartbeat: tokio::task::JoinHandle<()>,
@@ -93,6 +94,7 @@ struct TurnLease {
 impl TurnLease {
     async fn start(memory: &MemoryStore, chat_id: &str, text: &str) -> Result<Self, MemoryError> {
         let id = memory.start_turn(chat_id, text)?;
+        crate::companion::queued(chat_id, id, text);
         let _ = TURN_START_LISTENER.try_with(|listener| {
             if listener.chat_id == chat_id {
                 (listener.callback)(id);
@@ -108,6 +110,7 @@ impl TurnLease {
             }
         });
         let mut lease = Self {
+            chat_id: chat_id.to_owned(),
             memory: memory.clone(),
             id,
             heartbeat,
@@ -116,7 +119,15 @@ impl TurnLease {
         };
         loop {
             match memory.claim_turn(chat_id, id) {
-                Ok(true) => return Ok(lease),
+                Ok(true) => {
+                    crate::companion::update(
+                        chat_id,
+                        id,
+                        mint_companion_protocol::Status::Thinking,
+                        None,
+                    );
+                    return Ok(lease);
+                }
                 Ok(false) => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
                 Err(error) => {
                     lease.fail();
@@ -150,6 +161,12 @@ impl TurnLease {
         self.memory
             .finish_turn(self.id, summary, provider, model, fallback_provider)?;
         self.finished = true;
+        crate::companion::update(
+            &self.chat_id,
+            self.id,
+            mint_companion_protocol::Status::Completed,
+            Some(summary.to_owned()),
+        );
         Ok(())
     }
 
@@ -165,12 +182,24 @@ impl TurnLease {
     fn fail(&mut self) {
         self.persist_activity();
         let _ = self.memory.end_turn(self.id, "failed");
+        crate::companion::update(
+            &self.chat_id,
+            self.id,
+            mint_companion_protocol::Status::Failed,
+            None,
+        );
         self.finished = true;
     }
 
     fn interrupt(&mut self) {
         self.persist_activity();
         let _ = self.memory.end_turn(self.id, "interrupted");
+        crate::companion::update(
+            &self.chat_id,
+            self.id,
+            mint_companion_protocol::Status::Interrupted,
+            None,
+        );
         self.finished = true;
     }
 }
@@ -181,6 +210,12 @@ impl Drop for TurnLease {
         if !self.finished {
             self.persist_activity();
             let _ = self.memory.end_turn(self.id, "interrupted");
+            crate::companion::update(
+                &self.chat_id,
+                self.id,
+                mint_companion_protocol::Status::Interrupted,
+                None,
+            );
         }
     }
 }
@@ -305,7 +340,17 @@ where
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
     let enriched = enrich_request(config, &memory, &resolved_request)?;
-    let response = match stream_chat(config, &enriched, on_chunk).await {
+    let response = match {
+        let mut on_chunk = on_chunk;
+        let chat = turn.chat_id.clone();
+        let id = turn.id;
+        stream_chat(config, &enriched, move |chunk: String| {
+            crate::companion::chunk(&chat, id, &chunk);
+            on_chunk(chunk);
+        })
+    }
+    .await
+    {
         Ok(response) => response,
         Err(error) => {
             turn.fail();
@@ -389,7 +434,17 @@ where
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
     let enriched = enrich_request(config, &memory, &resolved_request)?;
-    let (response, fallback) = match stream_chat_with_fallback(config, &enriched, on_chunk).await {
+    let (response, fallback) = match {
+        let mut on_chunk = on_chunk;
+        let chat = turn.chat_id.clone();
+        let id = turn.id;
+        stream_chat_with_fallback(config, &enriched, move |chunk: String| {
+            crate::companion::chunk(&chat, id, &chunk);
+            on_chunk(chunk);
+        })
+    }
+    .await
+    {
         Ok(result) => result,
         Err(error) => {
             turn.fail();
@@ -1655,7 +1710,32 @@ where
             memory.set_chat_session_workspace(chat_id, Some(root.to_string_lossy().as_ref()))?;
             let mut turn = run_control::run(TurnLease::start(&memory, chat_id, task)).await?;
             let record_activity = Arc::clone(&turn.activity);
+            let progress_chat_id = turn.chat_id.clone();
+            let companion_turn_id = turn.id;
+            let chunk_chat_id = turn.chat_id.clone();
+            let mut on_chunk = move |chunk: String| {
+                crate::companion::chunk(&chunk_chat_id, companion_turn_id, &chunk);
+                on_chunk(chunk);
+            };
+            let approval_chat_id = turn.chat_id.clone();
+            let mut approve = move |request: &AgentApproval| {
+                crate::companion::update(
+                    &approval_chat_id,
+                    companion_turn_id,
+                    mint_companion_protocol::Status::Waiting,
+                    None,
+                );
+                let result = approve(request);
+                crate::companion::update(
+                    &approval_chat_id,
+                    companion_turn_id,
+                    mint_companion_protocol::Status::Thinking,
+                    None,
+                );
+                result
+            };
             let mut progress = move |event: AgentProgress| {
+                crate::companion::progress(&progress_chat_id, companion_turn_id, &event);
                 if let Ok(mut lock) = record_activity.lock() {
                     lock.push(event.clone());
                 }

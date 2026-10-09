@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What Mint is
 
 A local-first AI assistant with **one Rust core, three surfaces**: a terminal CLI, a Tauri v2
-desktop app (with a Live2D companion), and a web UI. The same chat/memory/agent/tools/safety
+desktop app and a web UI, plus an optional separate Mint Companion Live2D app. The same chat/memory/agent/tools/safety
 logic backs all three, plus messaging bridges (Telegram, Discord, Slack, LINE, WhatsApp,
 Signal, Gmail) that share the CLI's conversation.
 
@@ -46,6 +46,8 @@ debuginfo.
   `pub use group::member;` pattern when adding a module.
 - **`crates/mint-cli`** — the `mint` binary. `main.rs` is the clap command tree; interactive
   chat + slash handling under `src/interactive/`.
+- **`apps/mint-companion`** — optional Tauri/React character app; it connects to running Mint processes through `mint-companion-protocol`, without linking `mint-core`. For Companion transport, lifecycle, packaging, or GUI changes, read `docs/MINT_COMPANION.md`.
+- **`crates/mint-companion-protocol`** — shared local wire types; changes also invalidate CLI/Desktop launcher build caches.
 - **`src-tauri`** — the `mint-desktop` binary (lib crate `mint_desktop_lib`). Tauri IPC
   commands, tray, global shortcuts, screen capture, proactive suggestions, headless task queue.
 - **`src/renderer`** — React 19 + TS + Vite frontend:

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import * as PIXI from 'pixi.js'
+import type { Status } from './state'
 
 // Ensure PIXI is available globally for the live2d library
 ;(window as any).PIXI = PIXI
@@ -11,6 +12,8 @@ interface Live2DStageProps {
   isLocked: boolean
   isActive?: boolean
   onLoadComplete?: () => void
+  onLoadError?: (message: string) => void
+  status?: Status | 'idle'
 }
 
 // Map Expression Index to Live2D Expression Name
@@ -49,7 +52,7 @@ const clampToUnitCircle = (x: number, y: number) => {
   }
 }
 
-export default function Live2DStage({ scale, expressionIndex, accessoryIndex, isLocked, isActive = true, onLoadComplete }: Live2DStageProps) {
+export default function Live2DStage({ scale, expressionIndex, accessoryIndex, isLocked, isActive = true, onLoadComplete, onLoadError, status = 'idle' }: Live2DStageProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const modelRef = useRef<any>(null)
@@ -59,6 +62,17 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
   const baseWidthRef = useRef<number | null>(null)
   const baseHeightRef = useRef<number | null>(null)
   const pointerInsideRef = useRef(false)
+  const live = useRef({ scale, expressionIndex, accessoryIndex, isLocked, isActive, status, changedAt: performance.now() })
+  if (live.current.status !== status) live.current.changedAt = performance.now()
+  Object.assign(live.current, { scale, expressionIndex, accessoryIndex, isLocked, isActive, status })
+  const expressions = useRef<Record<string, Array<{ Id: string; Value: number; Blend: string }>>>({})
+  const reducedMotion = useRef(window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const update = () => { reducedMotion.current = query.matches }
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
 
   useEffect(() => {
     if (isActive && !shouldRender) {
@@ -73,7 +87,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
 
     // The model idles for most of a chat session. Keep its animation smooth
     // without reserving a 60 FPS GPU budget until the user actually hovers it.
-    app.ticker.maxFPS = interactive && !isLocked ? INTERACTION_MAX_FPS : IDLE_MAX_FPS
+    app.ticker.maxFPS = interactive && !live.current.isLocked ? INTERACTION_MAX_FPS : IDLE_MAX_FPS
     if (model) {
       model.autoUpdate = active
       model.renderable = active
@@ -141,6 +155,12 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
         }
         
         const model = await Live2DModel.from(json)
+        const modelDirectory = modelUrl.slice(0, modelUrl.lastIndexOf('/') + 1)
+        await Promise.all((json.FileReferences.Expressions || []).map(async (entry: { Name: string; File: string }) => {
+          const result = await fetch(modelDirectory + entry.File)
+          if (!result.ok) throw new Error(`Expression could not load: ${entry.Name}`)
+          expressions.current[entry.Name] = (await result.json()).Parameters
+        }))
         if (!isMounted) {
           model.destroy()
           return
@@ -166,13 +186,13 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
           const widthScale = stageWidth / baseWidth
           const heightScale = stageHeight / baseHeight
           
-          const modelScale = Math.min(widthScale, heightScale) * 1.85 * scale
+          const modelScale = Math.min(widthScale, heightScale) * 1.45 * live.current.scale
           m.scale.set(modelScale)
           
-          // Center-center alignment with 55% Y offset
+          // Center the character within the floating stage.
           m.anchor.set(0.5, 0.5)
           m.x = stageWidth / 2
-          m.y = stageHeight / 2 + stageHeight * 0.55
+          m.y = stageHeight / 2 + stageHeight * 0.28
         }
 
         fitModel()
@@ -192,20 +212,39 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
           const focus = model.internalModel.focusController
           const coreModel = model.internalModel.coreModel as {
             setParameterValueById: (parameterId: string, value: number) => void
+            addParameterValueById: (parameterId: string, value: number) => void
+            getParameterValueById: (parameterId: string) => number
           }
 
           coreModel.setParameterValueById('Param77', focus.x * 10)
           coreModel.setParameterValueById('Param78', focus.y)
           coreModel.setParameterValueById('Param83', focus.x)
           coreModel.setParameterValueById('Param86', focus.y)
+          // The Cubism update restores its saved baseline after each frame,
+          // so accessories and expressions can be composed without accumulation.
+          for (const name of [EXPRESSION_MAP[live.current.expressionIndex], ACCESSORY_MAP[live.current.accessoryIndex]]) {
+            for (const parameter of name ? expressions.current[name] || [] : []) {
+              const value = coreModel.getParameterValueById(parameter.Id)
+              coreModel.setParameterValueById(parameter.Id, parameter.Blend === 'Overwrite' ? parameter.Value : parameter.Blend === 'Multiply' ? value * parameter.Value : value + parameter.Value)
+            }
+          }
+          if (!reducedMotion.current) {
+            const elapsed = (performance.now() - live.current.changedAt) / 1000
+            const state = live.current.status
+            const angle = state === 'thinking' ? Math.sin(elapsed * 1.1) * 3 : state === 'working' ? Math.sin(elapsed * 1.5) * 2 : 0
+            const nod = state === 'responding' ? Math.sin(elapsed * 2) * 2 : state === 'completed' && elapsed < 1 ? Math.sin(elapsed * Math.PI * 2) * 5 : 0
+            coreModel.addParameterValueById('ParamAngleZ', angle)
+            coreModel.addParameterValueById('ParamAngleY', nod)
+          }
+
         })
 
-        applyExpressionAndAccessory(model, expressionIndex, accessoryIndex)
-        setRenderActive(isActive && document.visibilityState === 'visible')
+        setRenderActive(live.current.isActive && document.visibilityState === 'visible')
         setLoading(false)
         onLoadComplete?.()
       } catch (err) {
         console.error('Failed to load Live2D model:', err)
+        onLoadError?.(String(err))
         setLoading(false)
         onLoadComplete?.()
       }
@@ -249,12 +288,12 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
       const widthScale = stageWidth / baseWidth
       const heightScale = stageHeight / baseHeight
       
-      const modelScale = Math.min(widthScale, heightScale) * 1.85 * scale
+      const modelScale = Math.min(widthScale, heightScale) * 1.45 * live.current.scale
       model.scale.set(modelScale)
       
       model.anchor.set(0.5, 0.5)
       model.x = stageWidth / 2
-      model.y = stageHeight / 2 + stageHeight * 0.55
+      model.y = stageHeight / 2 + stageHeight * 0.28
     }
 
     const resizeObserver = new ResizeObserver(() => {
@@ -354,32 +393,6 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     }
   }, [isLocked, isActive])
 
-  // Update expressions & accessories dynamically
-  useEffect(() => {
-    if (!modelRef.current) return
-    applyExpressionAndAccessory(modelRef.current, expressionIndex, accessoryIndex)
-  }, [expressionIndex, accessoryIndex])
-
-  const applyExpressionAndAccessory = (model: any, exprIdx: number, accIdx: number) => {
-    const expManager = model.internalModel?.motionManager?.expressionManager
-    if (!expManager) return
-
-    const exprName = EXPRESSION_MAP[exprIdx]
-    const accName = ACCESSORY_MAP[accIdx]
-
-    if (!exprName && !accName) {
-      expManager.resetExpression()
-      return
-    }
-
-    // Apply the active expression or accessory
-    if (exprName) {
-      model.expression(exprName)
-    } else if (accName) {
-      model.expression(accName)
-    }
-  }
-
   return (
     <div
       ref={containerRef}
@@ -393,7 +406,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
       }}
     >
       {loading && (
-        <div style={{ position: 'absolute', color: '#9f7aea', fontSize: '14px', fontFamily: 'Outfit, sans-serif' }}>
+        <div style={{ position: 'absolute', color: 'var(--accent)', fontSize: '14px', fontFamily: 'inherit' }}>
           Loading Shiroko Live2D model...
         </div>
       )}

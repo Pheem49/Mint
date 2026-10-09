@@ -41,54 +41,6 @@
   color: var(--danger);
 }
 
-.toggle-model-btn.active {
-  background: color-mix(in srgb, var(--accent) 26%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
-  color: var(--text-on-accent);
-}
-
-.accessory-cycle-btn:hover,
-.accessory-cycle-btn.active {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
-  color: var(--mint-200);
-}
-
-.toggle-interaction-btn:hover,
-.toggle-interaction-btn.active {
-  background: color-mix(in srgb, var(--status-speaking) 14%, transparent);
-  border-color: color-mix(in srgb, var(--status-speaking) 24%, transparent);
-  color: var(--status-speaking);
-}
-
-.toggle-interaction-btn:not(.active) {
-  color: var(--status-error);
-}
-
-.toggle-interaction-btn:not(.active):hover {
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
-  border-color: color-mix(in srgb, var(--danger) 22%, transparent);
-  color: var(--danger);
-}
-
-.toggle-interaction-btn:not(.active) .interaction-off-mark {
-  opacity: 1;
-}
-
-.interaction-guide-btn.active {
-  background: color-mix(in srgb, var(--flavor-cyan) 22%, transparent);
-  border-color: color-mix(in srgb, var(--flavor-cyan) 34%, transparent);
-}
-
-.toggle-model-btn:hover,
-.toggle-model-btn.active,
-.change-expression-btn:hover,
-.accessory-cycle-btn:hover,
-.accessory-cycle-btn.active,
-.toggle-interaction-btn:hover,
-.toggle-interaction-btn.active,
-.interaction-guide-btn:hover,
-.interaction-guide-btn.active,
 .clear-btn:hover,
 .settings-btn:hover,
 .minimize-btn:hover,
@@ -96,10 +48,6 @@
   background: var(--surface-strong);
   border-color: transparent;
   color: var(--text-main);
-}
-
-.toggle-interaction-btn:not(.active) {
-  color: var(--danger);
 }
 
 .close-btn:hover {

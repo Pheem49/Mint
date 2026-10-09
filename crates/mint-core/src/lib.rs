@@ -10,6 +10,7 @@
 pub mod agent;
 pub mod avatar_bridge;
 pub mod browser;
+pub mod companion;
 pub mod cron;
 pub mod eval;
 pub mod git;

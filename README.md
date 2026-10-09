@@ -35,7 +35,7 @@ mint code agent "inspect this repo and fix the failing tests"
 
 Powered by a high-performance Rust **Agent Execution Harness** (`mint-core`), Mint wraps foundation models (Claude, GPT-4o, Gemini, Ollama, DeepSeek) with deterministic tool execution, verification gates, subagent DAG orchestration, memory compaction, and human-in-the-loop safety guardrails.
 
-It follows you wherever you already are: message it from Telegram, Discord, Slack, LINE, or WhatsApp like you'd message a person, no desktop window required. It's also a native desktop app with a Live2D companion, a web application, and a full terminal agent for coding tasks — all backed by the exact same execution harness and safety policies, so chat, memory, knowledge, tools, and safety behave identically no matter which door you walk in through.
+It follows you wherever you already are: message it from Telegram, Discord, Slack, LINE, or WhatsApp like you'd message a person, no desktop window required. It's also a native desktop app with an optional, separate Mint Companion Live2D app, a web application, and a full terminal agent for coding tasks — all backed by the exact same execution harness and safety policies, so chat, memory, knowledge, tools, and safety behave identically no matter which door you walk in through.
 
 See the [Roadmap](ROADMAP.md) for the project direction, [Contributing Guide](CONTRIBUTING.md) to help improve Mint, and [Release Notes](Release_Note.md) for what's new. Read the [Agent Harness Architecture Guide](docs/AGENT_HARNESS.md) for deep technical details. Questions and ideas belong in [GitHub Discussions](https://github.com/Pheem49/Mint/discussions).
 
@@ -88,8 +88,12 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ---
 
-### 2. <img src="assets/live2d.svg" width="18" height="18" valign="middle" /> Interactive Live2D Desktop Assistant
-- An interactive anime avatar (**Shiroko**) on your desktop with gaze tracking, expression/accessory toggles, and interaction zones (Head, Cheek, Hands, Body) that trigger animations and message toasts.
+### 2. <img src="assets/live2d.svg" width="18" height="18" valign="middle" /> Mint Companion — Optional Live2D App
+- **Shiroko** lives in a separate floating desktop app, with gaze tracking, expressions, accessories, and interaction areas.
+- Connect to a running Mint CLI, Desktop, or Web backend on the same machine. Select the instance and conversation to follow thinking, tool use, queued chat, completion, and failures.
+- Chat shares the selected conversation's memory and queue. Tools and approvals stay in Mint. Companion waits offline when Mint is closed and never starts another backend.
+- Development: `npm run dev:companion`. Build: `npm run build:companion`. Package: `npm run package:companion -- --bundles deb` (Linux), `nsis` (Windows), or `dmg` (macOS).
+- See [Companion architecture and operation](docs/MINT_COMPANION.md).
 
 ---
 
@@ -396,7 +400,7 @@ shown by `mint web --tailscale` and try again.
 
 The desktop app adds Spotlight, a system tray widget, and a background
 task-queue window on top of everything in "What Mint Can Do" above. The
-sidebar, Live2D interaction state, and area-guide visibility persist locally,
+sidebar state persists locally; Companion keeps character and window preferences separately,
 so the dashboard restores its previous state after a restart.
 
 ## Native CLI

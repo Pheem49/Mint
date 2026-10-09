@@ -27,7 +27,7 @@ function digest(inputs) {
   return hash.digest('hex');
 }
 function fingerprint() {
-  const source = digest(['src/bin/desktop.js', 'src-tauri', 'crates/mint-core', 'src/renderer', 'public', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain', 'rust-toolchain.toml', '.cargo', 'package.json', 'package-lock.json', 'vite.config.ts', 'tsconfig.json', 'tsconfig.node.json', '.env', '.env.local', '.env.production', '.env.production.local', 'Release_Note.md', 'slash-commands.json', 'mcp-registry.json']);
+  const source = digest(['src/bin/desktop.js', 'src-tauri', 'crates/mint-core', 'crates/mint-companion-protocol', 'src/renderer', 'public', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain', 'rust-toolchain.toml', '.cargo', 'package.json', 'package-lock.json', 'vite.config.ts', 'tsconfig.json', 'tsconfig.node.json', '.env', '.env.local', '.env.production', '.env.production.local', 'Release_Note.md', 'slash-commands.json', 'mcp-registry.json']);
   const env = Object.keys(process.env).filter(k => /^(CARGO_|RUST|VITE_|TAURI_|CC$|CXX$|AR$)/.test(k)).sort().map(k => [k, process.env[k]]);
   return crypto.createHash('sha256').update(source).update(JSON.stringify(env)).digest('hex');
 }

@@ -132,6 +132,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 /// loopback so only its local web proxy can reach the API directly.
 pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error> {
     let listener = TcpListener::bind(addr).await?;
+    crate::companion::start();
     // API server banner removed to prevent duplicate output
 
     // Start background messaging bridges (Telegram, Discord, Slack)

@@ -62,3 +62,14 @@ test('source edits during build do not launch or mark the build current', t => {
   assert.match(result.stderr, /changed during build/);
   assert.equal(f.run().status, 0); assert.equal(f.builds().length, 2);
 });
+
+test('protocol source edits rebuild the CLI before connecting Companion', t => {
+  const f = fixture(t);
+  const protocol = path.join(f.root, 'crates/mint-companion-protocol/src');
+  fs.mkdirSync(protocol, { recursive: true });
+  fs.writeFileSync(path.join(protocol, 'lib.rs'), 'v1');
+  assert.equal(f.run().status, 0);
+  fs.writeFileSync(path.join(protocol, 'lib.rs'), 'v2');
+  assert.equal(f.run().status, 0);
+  assert.equal(f.builds().length, 2);
+});
