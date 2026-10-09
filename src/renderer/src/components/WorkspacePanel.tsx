@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import WorkspacePreviewActions from '@shared/components/WorkspacePreviewActions'
+import WorkspacePaneResizer from '@shared/components/WorkspacePaneResizer'
 import { WorkspaceSnapshotReader } from '@shared/utils/workspaceSnapshot'
 import { detectArtifactType } from '@shared/components/ArtifactPreviewPanel'
 import { workspacePlatform } from '@shared/platform'
@@ -334,7 +335,8 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
   }
 
   return (
-    <section className="workspace-panel">
+    <section className="workspace-panel" id="workspace-file-panel">
+      <WorkspacePaneResizer />
       <header className="workspace-panel-header">
         <div className="workspace-title-group">
           <span className="workspace-title-icon material-icon folder" aria-hidden="true">

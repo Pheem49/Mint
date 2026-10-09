@@ -1766,3 +1766,29 @@
   background: var(--border-subtle, rgba(255, 255, 255, 0.08));
   margin: 4px 2px;
 }
+
+/* The resize target stays inside the panel so its overflow cannot clip it. */
+.workspace-pane-resizer {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 8px;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.workspace-pane-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 8px 3px;
+  border-radius: 2px;
+  background: var(--border-default);
+  transition: background 0.15s ease;
+}
+.workspace-pane-resizer:hover::after,
+.workspace-pane-resizer:focus-visible::after,
+.is-workspace-resizing .workspace-pane-resizer::after { background: var(--border-focus); }
+.workspace-pane-resizer:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.workspace-pane-resizer[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .workspace-pane-resizer::after { transition: none; } }
+@media (forced-colors: active) { .workspace-pane-resizer::after { background: Highlight; } }

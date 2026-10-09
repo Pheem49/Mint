@@ -648,7 +648,20 @@ h1 {
 /* Workspace is a two-pane working view: files on the left, conversation on
    the right. The file tree and conversation share the workspace. */
 .assistant-workspace.workspace-open {
-  grid-template-columns: minmax(360px, 0.6fr) minmax(460px, 1.4fr);
+  grid-template-columns: var(--workspace-panel-width, 400px) minmax(0, 1fr);
+}
+
+.assistant-workspace.workspace-open.is-workspace-resizing { transition: none; }
+
+.assistant-workspace.workspace-open[data-workspace-stacked="true"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 0.4fr) minmax(0, 0.6fr);
+  gap: 0;
+}
+
+.assistant-workspace.workspace-open[data-workspace-stacked="true"] .chat-panel-split-wrapper {
+  grid-column: 1;
+  grid-row: 2;
 }
 
 .assistant-workspace.workspace-open .workspace-panel {
