@@ -5,5 +5,6 @@ pub mod bridge_health;
 pub mod channels;
 pub mod hooks;
 pub mod mcp;
+pub mod mcp_result;
 pub mod oauth;
 pub mod plugins;

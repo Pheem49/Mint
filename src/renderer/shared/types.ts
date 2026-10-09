@@ -72,14 +72,24 @@ export interface RunTelemetrySummary {
   retriesCount: number
 }
 
+export type ToolStatus = 'success' | 'failed' | 'timed_out' | 'cancelled'
+export interface McpArtifact {
+  id: string; name: string; mimeType: string; kind: 'image' | 'file' | 'link'; size: number
+  chatId: string; callId: string; server: string; uri?: string
+}
+
 export type AgentProgress =
+  | { type: 'ToolDiscovery'; data: { server: string; tool: string; message: string } }
+  | { type: 'DeviceState'; data: { callId: string; server: string; tool: string; update: { state: 'accepted' | 'running' | 'verified' | 'failed' | 'unconfirmed'; deviceId?: string | null; operationId?: string | null; target: Record<string, unknown> | null; actual: Record<string, unknown> | null; observationSeq?: number | null; elapsedSecs: number; message: string } } }
+  | { type: 'ToolProgress'; data: { callId: string; server: string; tool: string; update: { progress: number; total?: number; message?: string; elapsedSecs: number } } }
+  | { type: 'ToolArtifacts'; data: { callId: string; artifacts: McpArtifact[]; warnings: string[] } }
   | { type: 'Thinking'; data: { elapsed_secs: number; agent_name?: string; model_name?: string } }
   | { type: 'ContextCompaction'; data: { status: 'started' | 'completed' | 'failed'; message: string; subagent?: string } }
   | { type: 'Thought'; data: { thought: string } }
   | { type: 'ThinkingDelta'; data: { id: string; delta: string; elapsed_ms: number } }
   | { type: 'ExtendedThinking'; data: { id?: string; thought: string; elapsed_ms?: number } }
-  | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown>; subagent?: string } }
-  | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string; subagent?: string } }
+  | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown>; subagent?: string; callId?: string } }
+  | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string; subagent?: string; callId?: string; status?: ToolStatus } }
   | { type: 'PlanUpdated'; data: { plan: ActivePlan } }
   | { type: 'RunCompleted'; data: { summary: RunTelemetrySummary } }
 

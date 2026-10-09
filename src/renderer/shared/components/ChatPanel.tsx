@@ -1,3 +1,4 @@
+import McpToolResults from './McpToolResults'
 import { ContextCompactionStatus } from './ContextCompactionStatus'
 import { activeCompactionFrom } from '../utils/contextCompaction'
 import { useEffect, useMemo, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
@@ -1656,6 +1657,7 @@ export default function ChatPanel({
                   />
                 )}
                 <div className="message-bubble">
+                  <McpToolResults progress={agentProgress} running />
                   <span>
                     {compaction ? (
                       <ContextCompactionStatus key={compaction.index} />

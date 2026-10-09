@@ -1147,6 +1147,20 @@ impl ChatViewState {
         }
     }
 
+    fn push_mcp_activity(&mut self, activity: Option<&serde_json::Value>) {
+        if let Some(events) = activity.and_then(serde_json::Value::as_array) {
+            for value in events {
+                if let Ok(event) = serde_json::from_value::<mint_core::AgentProgress>(value.clone())
+                    && let Some(notes) = crate::agent::mcp_progress_notes(&event)
+                {
+                    for note in notes {
+                        self.push_notice(note);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn reload_transcript_with(
         &mut self,
         memory: &mint_core::MemoryStore,
@@ -1162,6 +1176,7 @@ impl ChatViewState {
             for row in rows {
                 self.transcript
                     .push(TranscriptEntry::new(TranscriptRole::User, row.user_text));
+                self.push_mcp_activity(row.agent_activity.as_ref());
                 match row.status.as_str() {
                     "completed" => self
                         .transcript
@@ -1255,6 +1270,7 @@ impl ChatViewState {
                 // Incoming new interaction from an external client (Web/Desktop)
                 self.transcript
                     .push(TranscriptEntry::new(TranscriptRole::User, &row.user_text));
+                self.push_mcp_activity(row.agent_activity.as_ref());
                 match row.status.as_str() {
                     "completed" => self.transcript.push(TranscriptEntry::new(
                         TranscriptRole::Assistant,
@@ -1282,20 +1298,25 @@ impl ChatViewState {
             } else if row.id == self.last_interaction_id {
                 // Status update for an external interaction that was previously queued/running
                 if row.status == "completed" {
-                    if let Some(last) = self.transcript.last_mut() {
+                    let mut append = false;
+                    if let Some(last) = self.transcript.last() {
                         if last.role == TranscriptRole::Notice
                             && (last.text.starts_with("Mint is responding")
                                 || last.text.starts_with("Queued for this session"))
                         {
-                            *last = TranscriptEntry::new(TranscriptRole::Assistant, &row.ai_text);
-                            changed = true;
+                            self.transcript.pop();
+                            append = true;
                         } else if last.role != TranscriptRole::Assistant {
-                            self.transcript.push(TranscriptEntry::new(
-                                TranscriptRole::Assistant,
-                                &row.ai_text,
-                            ));
-                            changed = true;
+                            append = true;
                         }
+                    }
+                    if append {
+                        self.push_mcp_activity(row.agent_activity.as_ref());
+                        self.transcript.push(TranscriptEntry::new(
+                            TranscriptRole::Assistant,
+                            &row.ai_text,
+                        ));
+                        changed = true;
                     }
                 } else if row.status == "running" {
                     if let Some(last) = self.transcript.last_mut() {
@@ -1320,6 +1341,7 @@ impl ChatViewState {
                         {
                             *last = TranscriptEntry::new(TranscriptRole::Notice, msg);
                             changed = true;
+                            self.push_mcp_activity(row.agent_activity.as_ref());
                         }
                     }
                 }
@@ -4017,6 +4039,109 @@ mod dialog_tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
+
+    #[test]
+    fn device_saved_activity_survives_tui_reload_and_external_sync() {
+        let root = std::env::temp_dir().join(format!(
+            "mint-device-tui-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let memory = mint_core::MemoryStore::open(root.join("memory.sqlite"));
+        let chat = "device-history";
+        let mut state = ChatViewState {
+            chat_id: chat.into(),
+            current_dir: root.clone(),
+            ..Default::default()
+        };
+        state.reload_transcript_with(&memory, chat, &root);
+        let turn = memory.start_turn(chat, "Move motor").unwrap();
+        memory.claim_turn(chat, turn).unwrap();
+        let activity = serde_json::json!([{"type":"DeviceState","data":{"callId":"one","server":"motor","tool":"move","update":{"state":"verified","target":{"rpm":100},"actual":{"rpm":100},"elapsedSecs":2,"message":"Observed motor"}}}]);
+        memory
+            .set_interaction_agent_activity_json(turn, &activity.to_string())
+            .unwrap();
+        memory
+            .finish_turn(turn, "done", "test", "model", None)
+            .unwrap();
+        assert!(state.refresh_shared_transcript_with(&memory));
+        assert!(
+            state
+                .transcript
+                .iter()
+                .any(|entry| entry.text.contains("Verified")),
+            "external sync omitted device activity"
+        );
+        assert!(!state.refresh_shared_transcript_with(&memory));
+        state.reload_transcript_with(&memory, chat, &root);
+        assert_eq!(
+            state
+                .transcript
+                .iter()
+                .filter(|entry| entry.text.contains("Verified"))
+                .count(),
+            1
+        );
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Verified"));
+        assert!(rendered.contains("rpm"));
+        assert!(rendered.contains("100"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn device_and_discovery_events_render_inside_full_screen_tui() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let tui = TuiHandle {
+            state: Arc::clone(&state),
+            interrupted: Arc::new(AtomicBool::new(false)),
+            queued: Arc::new(Mutex::new(Vec::new())),
+        };
+        let mut events = vec![
+            serde_json::json!({"type":"ToolDiscovery","data":{"server":"motor","tool":"set_speed","message":"Reading device schema"}}),
+        ];
+        for phase in ["accepted", "verified"] {
+            events.push(serde_json::json!({"type":"DeviceState","data":{"callId":"one","server":"motor","tool":"set_speed","update":{"state":phase,"target":{"rpm":100},"actual":{"rpm":100},"elapsedSecs":2,"message":"Observed motor"}}}));
+        }
+        events.push(serde_json::json!({"type":"ToolArtifacts","data":{"callId":"one","artifacts":[],"warnings":["Sample attachment unavailable"]}}));
+        for event in events {
+            crate::agent::publish_mcp_progress(Some(&tui), &serde_json::from_value(event).unwrap());
+        }
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| {
+                state.lock().unwrap().render(frame);
+            })
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Reading device schema"));
+        assert!(rendered.contains("Accepted"));
+        assert!(rendered.contains("Verified"));
+        assert!(rendered.contains("target"));
+        assert!(rendered.contains("actual"));
+        assert!(rendered.contains("Sample attachment unavailable"));
+    }
 
     #[test]
     fn mint_watermark_frames_fit_available_terminal_height() {

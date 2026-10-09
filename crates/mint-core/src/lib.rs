@@ -47,6 +47,7 @@ pub use media::video_gen;
 pub use integrations::bridge_health;
 pub use integrations::hooks;
 pub use integrations::mcp;
+pub use integrations::mcp_result;
 pub use integrations::oauth;
 pub use integrations::plugins;
 
@@ -235,13 +236,56 @@ pub static ACTIVE_AGENTS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<String, tokio::task::AbortHandle>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
+pub fn unregister_agent(chat_id: &str, task_id: tokio::task::Id) {
+    let mut agents = ACTIVE_AGENTS.lock().unwrap();
+    if agents
+        .get(chat_id)
+        .is_some_and(|handle| handle.id() == task_id)
+    {
+        agents.remove(chat_id);
+    }
+}
+
 pub fn cancel_agent(chat_id: &str) -> bool {
+    let turns = crate::orchestration::run_control::cancel(chat_id);
+    let mcp_calls = crate::mcp::cancel_mcp_calls(chat_id);
     let mut agents = ACTIVE_AGENTS.lock().unwrap();
     if let Some(handle) = agents.remove(chat_id) {
-        handle.abort();
+        if mcp_calls == 0 {
+            handle.abort();
+        } else {
+            // Give the cooperative MCP wait time to record its terminal status;
+            // the abort remains a bounded fallback if the server cannot be reached.
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+                handle.abort();
+            });
+        }
         true
     } else {
-        false
+        mcp_calls > 0 || turns > 0
+    }
+}
+
+#[cfg(test)]
+mod agent_registration_tests {
+    #[tokio::test]
+    async fn agent_registration_cleanup_keeps_a_new_run_cancellable() {
+        let chat = uuid::Uuid::new_v4().to_string();
+        let previous = tokio::spawn(std::future::pending::<()>());
+        let next = tokio::spawn(std::future::pending::<()>());
+        super::ACTIVE_AGENTS
+            .lock()
+            .unwrap()
+            .insert(chat.clone(), next.abort_handle());
+        super::unregister_agent(&chat, previous.id());
+        let cancellable = super::cancel_agent(&chat);
+        previous.abort();
+        next.abort();
+        assert!(
+            cancellable,
+            "completion of a cancelled run must not unregister its replacement"
+        );
     }
 }
 

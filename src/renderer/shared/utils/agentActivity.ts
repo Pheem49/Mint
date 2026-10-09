@@ -12,6 +12,7 @@ export interface AgentActivity {
   kind: 'file' | 'folder' | 'search' | 'terminal' | 'tool' | 'calc'
   state: 'active' | 'done' | 'error' | 'retry'
   action?: string
+  callId?: string
   /** Raw ToolEnd output text, shown when the row is expanded in the UI. */
   result?: string
 }
@@ -270,6 +271,7 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
   for (const event of progress) {
     if (event.type === 'ToolStart') {
       const item = describeTool(event.data.action, event.data.input)
+      item.callId = event.data.callId
       activities.push(item)
 
       // Keep each skill's lifecycle visible instead of hiding it in a files group.
@@ -303,8 +305,9 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
       const finished = describeTool(event.data.action, event.data.input)
       for (let index = activities.length - 1; index >= 0; index -= 1) {
         if (activities[index].state !== 'active') continue
+        if (event.data.callId && activities[index].callId !== event.data.callId) continue
         if (activities[index].action !== finished.action || activities[index].target !== finished.target) continue
-        activities[index].state = /^(Error:|Blocked)/.test(event.data.result) ? 'error' : 'done'
+        activities[index].state = event.data.status ? (event.data.status === 'success' ? 'done' : 'error') : /^(Error:|Blocked|User denied)/.test(event.data.result) ? 'error' : 'done'
         activities[index].result = event.data.result
         if (event.data.action === 'read_file') {
           const loaded = event.data.result.match(/^\[Loaded skill: ([^\n]+)\]\n/)

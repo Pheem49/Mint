@@ -391,6 +391,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                 }
                             });
 
+                            let registered_task_id = join_handle.id();
                             let abort_handle = join_handle.abort_handle();
                             if !chat_id_str.is_empty() {
                                 crate::ACTIVE_AGENTS
@@ -403,10 +404,10 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             tokio::spawn(async move {
                                 let _ = join_handle.await;
                                 if !chat_id_str_cleanup.is_empty() {
-                                    crate::ACTIVE_AGENTS
-                                        .lock()
-                                        .unwrap()
-                                        .remove(&chat_id_str_cleanup);
+                                    crate::unregister_agent(
+                                        &chat_id_str_cleanup,
+                                        registered_task_id,
+                                    );
                                 }
                             });
                         } else {
@@ -535,6 +536,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                 }
                             });
 
+                            let registered_task_id = join_handle.id();
                             let abort_handle = join_handle.abort_handle();
                             if !chat_id_str.is_empty() {
                                 crate::ACTIVE_AGENTS
@@ -547,10 +549,10 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             tokio::spawn(async move {
                                 let _ = join_handle.await;
                                 if !chat_id_str_cleanup.is_empty() {
-                                    crate::ACTIVE_AGENTS
-                                        .lock()
-                                        .unwrap()
-                                        .remove(&chat_id_str_cleanup);
+                                    crate::unregister_agent(
+                                        &chat_id_str_cleanup,
+                                        registered_task_id,
+                                    );
                                 }
                             });
                         }

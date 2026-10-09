@@ -603,7 +603,7 @@ mint mcp call filesystem list_directory \
 | Command | Purpose |
 | --- | --- |
 | `mint mcp add <name> <cmd\|url> [--args … --env K=V …]` | Add a local command or remote URL server |
-| `mint mcp edit <name> [--command] [--args …] [--env K=V …] [--icon\|--no-icon]` | Change one or more fields in place |
+| `mint mcp edit <name> [--command] [--args …] [--env K=V …] [--icon\|--no-icon] [--timeout-secs N]` | Change one or more fields in place |
 | `mint mcp disable <name>` / `mint mcp enable <name>` | Turn a server off/on without removing it |
 | `mint mcp allow <server> <tool>` / `mint mcp disallow <server> <tool>` | Grant/revoke a tool (`*` = all) |
 | `mint mcp reauth <server>` | Re-run a server's OAuth login |
@@ -615,6 +615,30 @@ Desktop/Web **Settings → MCP Servers** panel:
 - **Segmented Toggle:** Switch seamlessly between **Remote Server (URL / SSE)** and **Local Command (stdio)**.
 - **Pre-flight Live Testing:** Dedicated `Test Connection` button to verify network reachability and discover exposed tools before saving.
 - **Enterprise Security Warning:** Explicit risk notice and safety acknowledgement requirement before adding custom remote endpoints.
+
+#### Tool results and long-running calls
+
+In agent chat, MCP tools can return text, PNG/JPEG/WebP/GIF images, embedded resources (text or binary files), and resource links. Desktop/Web show image previews, full-size viewing, downloads, and links directly from tool events, including after reloading conversation history. CLI prints attachment locations. Image-capable models receive images as image content; binary payloads are excluded from tool observations and saved activity. If your selected model does not accept images, disable **Let the model inspect MCP images** in MCP settings (configuration: `mcpImageInput: false`). Attachments remain available in chat.
+
+Attachments are stored in `mcp-artifacts/` beside `mint-config.json`, with UUID references in conversation activity. The decoded limits are **20 MiB per attachment** and **50 MiB per tool result**. Invalid, unsupported, oversized, or unsavable attachments produce warnings while preserving the tool's text and status. Resource links are not fetched automatically; custom resource URIs are displayed as text. Only validated image formats are previewed; other files are downloads.
+
+Tool calls default to a **300-second timeout**. Set **Tool timeout** for a server in MCP settings, or use:
+
+```bash
+mint mcp edit blender --timeout-secs 600
+```
+
+The saved server field is `timeoutSecs` (1–3600). Tool discovery/initialization retain their shorter deadlines. During a call, Mint shows elapsed time and, when supplied by the server, progress messages and a percentage. Progress does not extend the deadline. Calls without progress notifications still work.
+
+In the Full-Screen TUI, use `/mcp` → Edit → Tool timeout. All chat surfaces also accept `/mcp edit blender timeout 600` (`timeoutSecs` and `timeout-secs` are aliases). Invalid values or canceling the edit preserve the previous setting.
+
+Canceling a chat also cancels its active MCP subagent calls. Mint sends `notifications/cancelled` with the original request ID and stops waiting without closing the shared server connection. Cancellation is best effort: a server or physical device may continue working, so canceled/timed-out calls show that remote completion is unconfirmed and are not automatically retried by the transport. Active jobs are limited to the open chat runtime and are not resumed after restarting Mint. Completed attachments and status remain in history. `isError: true` is recorded as a failed tool call, including any diagnostic attachments.
+
+Mint validates every MCP command against the server's discovered `inputSchema` before sending it, including raw CLI/API calls. Agent chat automatically reads the full tool definition before its first command proposal is executed; definitions stay available after context compaction and are refreshed when the catalog changes. Servers must support `tools/list` with usable schemas. Unknown tools and invalid arguments are rejected without sending a command.
+
+Discovery, pagination, validation, and dispatch use the same live session. If that session disconnects or changes, Mint rejects the invocation instead of reconnecting halfway through it. A later explicit invocation can reconnect and discover the replacement server's schemas. Canceling during discovery or approval interrupts the current agent turn and its subagents; a new user turn gets fresh cancellation state. Native tool feedback uses the actual result status, including denied approvals.
+
+For custom devices, [the runnable Device MCP example](examples/device-mcp/README.md) provides `get_status`, `set_speed`, `stop`, and `capture_photo` with a mock motor/camera adapter. Tools opting into [Mint Device v1](examples/device-mcp/contract.md) automatically wait for a fresh observation of the same operation. Chat distinguishes accepted commands from verified device completion and shows target/actual readings. USB/Serial/MQTT belongs in your adapter; the example uses simulated hardware only.
 
 ### Interactive Commands
 

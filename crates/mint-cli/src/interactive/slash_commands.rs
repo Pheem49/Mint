@@ -3232,8 +3232,11 @@ fn handle_mcp_slash(
                             None,
                             Some((!value.is_empty()).then(|| value.to_string())),
                         ),
+                        "timeout" | "timeoutsecs" | "timeout-secs" => {
+                            crate::mcp::set_timeout(name, value)
+                        }
                         _ => {
-                            ui.push_notice("Editable fields: command | args | icon");
+                            ui.push_notice("Editable fields: command | args | icon | timeout");
                             return;
                         }
                     };
@@ -3246,7 +3249,7 @@ fn handle_mcp_slash(
                         Err(e) => ui.push_notice(format!("MCP error: {e}")),
                     }
                 }
-                _ => ui.push_notice("/mcp edit usage: <name> command|args|icon <value>"),
+                _ => ui.push_notice("/mcp edit usage: <name> command|args|icon|timeout <value>"),
             }
         }
 
@@ -3855,6 +3858,11 @@ fn mcp_edit_flow(session: &mut InteractiveSession, ui: &mut dyn CommandUi, name:
         ChoiceItem::with_description("command", &srv.command, "command"),
         ChoiceItem::with_description("args", srv.args.join(" "), "args"),
         ChoiceItem::with_description("icon", srv.icon.as_deref().unwrap_or("(none)"), "icon"),
+        ChoiceItem::with_description(
+            "Tool timeout",
+            format!("{} seconds", srv.timeout_secs.unwrap_or(300)),
+            "timeout",
+        ),
         ChoiceItem::with_description("Back", "Cancel edit", "back"),
     ];
     let Ok(Some(idx)) = ui.prompt_choice(&format!("Edit {name}"), "Select field to edit", &fields)
@@ -3862,6 +3870,17 @@ fn mcp_edit_flow(session: &mut InteractiveSession, ui: &mut dyn CommandUi, name:
         return;
     };
     let result = match fields[idx].value.as_str() {
+        "timeout" => {
+            let current = srv.timeout_secs.unwrap_or(300).to_string();
+            let Ok(Some(value)) = ui.prompt_text(
+                &format!("Edit {name}"),
+                "Tool timeout (seconds, 1–3600)",
+                Some(&current),
+            ) else {
+                return;
+            };
+            crate::mcp::set_timeout(name, &value)
+        }
         "command" => {
             let value = ui
                 .prompt_text(&format!("Edit {name}"), "Command", Some(&srv.command))
@@ -3927,6 +3946,110 @@ fn mcp_edit_flow(session: &mut InteractiveSession, ui: &mut dyn CommandUi, name:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_tui_timeout_edit_persists_and_invalid_or_cancel_preserves_it() {
+        if std::env::var_os("MINT_TIMEOUT_REVIEW_CHILD").is_none() {
+            let dir = std::env::temp_dir().join(format!("mint-tui-timeout-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("config.json");
+            let mut cfg = MintConfig::default();
+            cfg.extra.insert(
+                "mcpServers".into(),
+                serde_json::json!({"timer":{"command":"cat"}}),
+            );
+            std::fs::write(&path, serde_json::to_vec(&cfg).unwrap()).unwrap();
+            let output=std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact","interactive::slash_commands::tests::review_tui_timeout_edit_persists_and_invalid_or_cancel_preserves_it","--nocapture"])
+                .env("MINT_TIMEOUT_REVIEW_CHILD","1").env("MINT_CONFIG_PATH",&path).output().unwrap();
+            std::fs::remove_dir_all(dir).unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        struct TimeoutUi {
+            answer: Option<String>,
+        }
+        impl CommandUi for TimeoutUi {
+            fn push_notice_str(&mut self, _: &str) {}
+            fn push_command_output_str(&mut self, _: &str) {}
+            fn set_status(&mut self, _: Vec<String>) {}
+            fn clear_status(&mut self) {}
+            fn prompt_choice(
+                &mut self,
+                _: &str,
+                _: &str,
+                options: &[ChoiceItem],
+            ) -> anyhow::Result<Option<usize>> {
+                Ok(options.iter().position(|o| o.value == "timeout"))
+            }
+            fn prompt_text(
+                &mut self,
+                _: &str,
+                _: &str,
+                _: Option<&str>,
+            ) -> anyhow::Result<Option<String>> {
+                Ok(self.answer.take())
+            }
+            fn prompt_confirm(&mut self, _: &str, _: bool) -> anyhow::Result<bool> {
+                Ok(false)
+            }
+            fn prompt_multi_choice(
+                &mut self,
+                _: &str,
+                _: &str,
+                _: &[ChoiceItem],
+            ) -> anyhow::Result<Option<Vec<usize>>> {
+                Ok(None)
+            }
+            fn report_error(&mut self, _: &anyhow::Error) {}
+        }
+        let mut session = InteractiveSession {
+            chat_id: mint_core::CHAT_CLI_ID.into(),
+            config: mint_core::load_config().unwrap(),
+            current_dir: std::env::current_dir().unwrap(),
+            fast_mode: false,
+            plan_mode: false,
+            pending_image: None,
+            history: Vec::new(),
+            jobs: BackgroundJobs::new(),
+        };
+        for value in [1, 300, 3600] {
+            mcp_edit_flow(
+                &mut session,
+                &mut TimeoutUi {
+                    answer: Some(value.to_string()),
+                },
+                "timer",
+            );
+            assert_eq!(
+                session.config.extra["mcpServers"]["timer"]["timeoutSecs"],
+                value
+            );
+            assert_eq!(
+                mint_core::load_config().unwrap().extra["mcpServers"]["timer"]["timeoutSecs"],
+                value
+            );
+        }
+        let before = std::fs::read(mint_core::config_path().unwrap()).unwrap();
+        for answer in [Some("0"), Some("3601"), Some("1.5"), Some("nope"), None] {
+            mcp_edit_flow(
+                &mut session,
+                &mut TimeoutUi {
+                    answer: answer.map(str::to_string),
+                },
+                "timer",
+            );
+            assert_eq!(
+                std::fs::read(mint_core::config_path().unwrap()).unwrap(),
+                before
+            );
+        }
+    }
 
     /// Commands that are dispatched but deliberately left undocumented —
     /// shortcuts for another command's own token, not gaps in `SLASH_COMMANDS`.

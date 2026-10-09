@@ -1070,11 +1070,10 @@ async fn call_ollama(
     let native = request.messages.is_some()
         && config.tool_calling_mode() == crate::config::ToolCallingMode::Native;
     let mut body = if native {
-        let messages = request.messages.as_deref().unwrap_or(&[]);
         let mut payload = json!({
             "model": model,
             "stream": false,
-            "messages": ollama_native_messages(messages),
+            "messages": ollama_request_messages(request),
         });
         if let Some(tools) = &request.tools {
             payload["tools"] = json!(
@@ -1133,6 +1132,19 @@ async fn call_ollama(
 /// Unlike OpenAI, Ollama expects tool-call `arguments` as a JSON object (not a
 /// stringified JSON blob) and doesn't require a `tool_call_id` on tool-result
 /// messages.
+fn ollama_request_messages(request: &ChatRequest) -> Vec<Value> {
+    let history = request.messages.as_deref().unwrap_or(&[]);
+    let mut result = ollama_native_messages(history);
+    if !request.system_instruction.is_empty() && !history.iter().any(|m| m.role == ChatRole::System)
+    {
+        result.insert(
+            0,
+            json!({"role":"system","content":request.system_instruction}),
+        );
+    }
+    result
+}
+
 fn ollama_native_messages(messages: &[ChatMessage]) -> Vec<Value> {
     let mut result = Vec::new();
     for message in messages {
@@ -1694,7 +1706,7 @@ fn ollama_stream_payload(
         let mut value = json!({
             "model": model,
             "stream": true,
-            "messages": ollama_native_messages(request.messages.as_deref().unwrap_or(&[])),
+            "messages": ollama_request_messages(request),
         });
         if let Some(tools) = &request.tools {
             value["tools"] = json!(
@@ -3200,6 +3212,32 @@ mod tests {
         assert_eq!(payload["system"][0]["type"], "text");
         assert_eq!(payload["system"][0]["text"], "You are Mint.");
         assert_eq!(payload["system"][0]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn review_anthropic_tool_results_preserve_failure_and_success_flags() {
+        for (text, is_error) in [
+            ("User denied MCP tool call", true),
+            ("MCP call was not approved; user feedback", true),
+            ("Error: literal diagnostic label", false),
+        ] {
+            let request = native_request(
+                vec![ChatMessage {
+                    role: ChatRole::Tool,
+                    content: vec![ContentBlock::ToolResult {
+                        tool_use_id: "mcp-call".into(),
+                        content: text.into(),
+                        is_error,
+                    }],
+                }],
+                None,
+            );
+            let payload =
+                anthropic_chat_payload(&MintConfig::default(), "claude-x", &request, false)
+                    .unwrap();
+            assert_eq!(payload["messages"][0]["content"][0]["is_error"], is_error);
+            assert_eq!(payload["messages"][0]["content"][0]["content"], text);
+        }
     }
 
     #[test]

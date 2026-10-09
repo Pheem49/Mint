@@ -40,3 +40,14 @@ describe('skill reading activity', () => {
     expect(view.items[0].label).toBe('Read skill preview: review')
   })
 })
+
+describe('MCP tool outcomes', () => {
+  it('uses the explicit failure status even when diagnostic text has no error prefix', () => {
+    const input = { server: 'blender', tool: 'render' }
+    const view = activitiesFrom([
+      { type: 'ToolStart', data: { callId: 'render-1', action: 'mcp_tool', input } },
+      { type: 'ToolEnd', data: { callId: 'render-1', action: 'mcp_tool', input, result: 'render failed', status: 'failed' } },
+    ] as any)
+    expect(view.items[0].state).toBe('error')
+  })
+})

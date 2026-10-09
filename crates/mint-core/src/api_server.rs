@@ -323,6 +323,21 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
             }
 
             match (method, route) {
+                ("GET", route) if route.starts_with("/api/mcp-artifacts/") => {
+                    let id = route.trim_start_matches("/api/mcp-artifacts/").to_owned();
+                    let artifact = tokio::task::spawn_blocking(move || crate::integrations::mcp_result::read_artifact(&id)).await;
+                    match artifact {
+                        Ok(Ok((entry, bytes))) => {
+                            let mime = if entry.kind == "image" { entry.mime_type.as_str() } else { "application/octet-stream" };
+                            let disposition = if entry.kind == "image" {"inline"} else {"attachment"};
+                            let header = format!("HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nContent-Disposition: {disposition}; filename=\"{}\"\r\nX-Content-Type-Options: nosniff\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n", bytes.len(), entry.id);
+                            let mut socket = socket;
+                            let _ = socket.write_all(header.as_bytes()).await;
+                            let _ = socket.write_all(&bytes).await;
+                        }
+                        _ => send_json_response(socket, "404 Not Found", "{\"error\":\"Artifact unavailable\"}").await,
+                    }
+                }
                 ("POST", "/api/html-preview") => {
                     routes::html_preview::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
                 }

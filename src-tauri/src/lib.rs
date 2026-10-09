@@ -947,6 +947,7 @@ async fn send_chat_message(
             orchestrate_chat_with_fallback(&config_clone, &clean_request).await
         });
 
+        let registered_task_id = join_handle.id();
         let abort_handle = join_handle.abort_handle();
         if !chat_id_str.is_empty() {
             mint_core::ACTIVE_AGENTS
@@ -958,10 +959,7 @@ async fn send_chat_message(
         let res = join_handle.await;
 
         if !chat_id_str.is_empty() {
-            mint_core::ACTIVE_AGENTS
-                .lock()
-                .unwrap()
-                .remove(&chat_id_str);
+            mint_core::unregister_agent(&chat_id_str, registered_task_id);
         }
 
         let (response, _) = match res {
@@ -1044,6 +1042,7 @@ async fn send_chat_message(
         .await
     });
 
+    let registered_task_id = join_handle.id();
     let abort_handle = join_handle.abort_handle();
     if !chat_id_str.is_empty() {
         mint_core::ACTIVE_AGENTS
@@ -1055,10 +1054,7 @@ async fn send_chat_message(
     let res = join_handle.await;
 
     if !chat_id_str.is_empty() {
-        mint_core::ACTIVE_AGENTS
-            .lock()
-            .unwrap()
-            .remove(&chat_id_str);
+        mint_core::unregister_agent(&chat_id_str, registered_task_id);
     }
 
     let res = match res {
@@ -1138,6 +1134,7 @@ async fn stream_chat_message(
             .await
         });
 
+        let registered_task_id = join_handle.id();
         let abort_handle = join_handle.abort_handle();
         if !chat_id_str.is_empty() {
             mint_core::ACTIVE_AGENTS
@@ -1149,10 +1146,7 @@ async fn stream_chat_message(
         let res = join_handle.await;
 
         if !chat_id_str.is_empty() {
-            mint_core::ACTIVE_AGENTS
-                .lock()
-                .unwrap()
-                .remove(&chat_id_str);
+            mint_core::unregister_agent(&chat_id_str, registered_task_id);
         }
 
         let (response, _) = match res {
@@ -1259,6 +1253,7 @@ async fn stream_chat_message(
         .await
     });
 
+    let registered_task_id = join_handle.id();
     let abort_handle = join_handle.abort_handle();
     if !chat_id_str.is_empty() {
         mint_core::ACTIVE_AGENTS
@@ -1270,10 +1265,7 @@ async fn stream_chat_message(
     let res = join_handle.await;
 
     if !chat_id_str.is_empty() {
-        mint_core::ACTIVE_AGENTS
-            .lock()
-            .unwrap()
-            .remove(&chat_id_str);
+        mint_core::unregister_agent(&chat_id_str, registered_task_id);
     }
 
     let avatar_bridge = app.state::<mint_core::avatar_bridge::AvatarBridge>();
@@ -1315,6 +1307,25 @@ async fn stream_chat_message(
 async fn cancel_chat_message(chat_id: String) -> Result<(), String> {
     mint_core::cancel_agent(&chat_id);
     Ok(())
+}
+
+#[tauri::command]
+async fn read_mcp_artifact(id: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        use base64::Engine as _;
+        let (entry, bytes) = mint_core::integrations::mcp_result::read_artifact(&id)?;
+        let mime = if entry.kind == "image" {
+            entry.mime_type
+        } else {
+            "application/octet-stream".into()
+        };
+        Ok(format!(
+            "data:{mime};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]
@@ -2820,6 +2831,7 @@ pub fn run() {
             reauth_mcp_server,
             list_mcp_server_tools,
             test_mcp_connection,
+            read_mcp_artifact,
             fetch_provider_models,
             fetch_image_provider_models,
             fetch_video_provider_models,

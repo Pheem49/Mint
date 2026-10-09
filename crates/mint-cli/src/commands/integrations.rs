@@ -38,6 +38,9 @@ pub enum McpCommand {
     /// Change a configured server in place — only the flags you pass are touched.
     Edit {
         name: String,
+        /// Maximum tool-call duration, including sending and receiving.
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=3600))]
+        timeout_secs: Option<u64>,
         #[arg(long)]
         command: Option<String>,
         /// Repeatable; replaces the arg list. Passing none leaves args unchanged.
@@ -215,6 +218,7 @@ pub async fn handle_mcp(command: McpCommand) -> Result<()> {
         }
         McpCommand::Edit {
             name,
+            timeout_secs,
             command,
             args,
             env,
@@ -230,6 +234,9 @@ pub async fn handle_mcp(command: McpCommand) -> Result<()> {
                 icon,
             )?;
             if existed {
+                if let Some(timeout) = timeout_secs {
+                    mint_core::mcp::set_mcp_timeout(&name, timeout)?;
+                }
                 println!("updated {name}");
             } else {
                 println!("{ERROR}not found:{RESET} {name}");

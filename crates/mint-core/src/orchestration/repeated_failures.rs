@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use super::{OrchestrationError, ToolResultEntry, shell_result_failed};
+use super::{OrchestrationError, ToolResultEntry};
 
 const WARN_AFTER: usize = 3;
 const STOP_AFTER: usize = 5;
@@ -29,25 +29,24 @@ impl RepeatedFailures {
         results: &mut [ToolResultEntry],
     ) -> Result<Vec<String>, OrchestrationError> {
         let mut warnings = Vec::new();
-        for (_, tool, input, result) in results {
+        for ToolResultEntry {
+            action: tool,
+            input,
+            text: result,
+            status,
+            ..
+        } in results
+        {
             let error = result.split("\n\n[System Tip:").next().unwrap_or(result);
             let error = error
                 .split(". No tool was executed for this call.")
                 .next()
                 .unwrap_or(error);
-            let failed = error.starts_with("Error")
-                || error.starts_with("Blocked")
-                || error.starts_with("Skipped")
-                || (matches!(
-                    tool.as_str(),
-                    "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter"
-                ) && shell_result_failed(error));
+            let failed = *status != crate::mcp_result::ToolStatus::Success;
             if !failed {
-                // A successful invocation of the same tool breaks its streak.
-                // A denied/intercepted edit is not evidence of task progress.
-                if !error.starts_with("User denied") && !error.starts_with("User did not approve") {
-                    self.tools.remove(tool);
-                }
+                // Typed success breaks the streak, even if a diagnostic's
+                // literal text resembles a denied approval or an error.
+                self.tools.remove(tool);
                 continue;
             }
             let fingerprint = fingerprint(tool, input, error);

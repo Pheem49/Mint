@@ -2284,6 +2284,7 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
                             url: Some(target.to_string()),
                             headers: None,
                             transport: Some("sse".to_string()),
+                            timeout_secs: None,
                         }
                     } else {
                         crate::McpServer {
@@ -2295,6 +2296,7 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
                             url: None,
                             headers: None,
                             transport: None,
+                            timeout_secs: None,
                         }
                     };
                     match crate::upsert_server_in(config, name, server) {
@@ -2344,9 +2346,21 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
         "edit" => {
             let mut parts = args.splitn(3, char::is_whitespace);
             let (Some(name), Some(field)) = (parts.next(), parts.next()) else {
-                return error("Usage: /mcp edit <name> command|args|icon <value>");
+                return error("Usage: /mcp edit <name> command|args|icon|timeout <value>");
             };
             let value = parts.next().unwrap_or("").trim();
+            if matches!(
+                field.to_ascii_lowercase().as_str(),
+                "timeout" | "timeoutsecs" | "timeout-secs"
+            ) {
+                return match crate::mcp::parse_mcp_timeout(value)
+                    .and_then(|seconds| crate::mcp::set_server_timeout_in(config, name, seconds))
+                {
+                    Ok(true) => applied(format!("🔌 Updated `{name}` tool timeout.")),
+                    Ok(false) => error(format!("No MCP server named `{name}`.")),
+                    Err(e) => error(e),
+                };
+            }
             let edit = match field.to_ascii_lowercase().as_str() {
                 "command" if !value.is_empty() => (Some(value.to_string()), None, None),
                 "command" => return error("`/mcp edit <name> command <value>` needs a value"),
@@ -2360,7 +2374,7 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
                     None,
                     Some((!value.is_empty()).then(|| value.to_string())),
                 ),
-                _ => return error("Editable fields: command | args | icon"),
+                _ => return error("Editable fields: command | args | icon | timeout"),
             };
             match crate::update_server_in(config, name, edit.0, edit.1, None, edit.2) {
                 Ok(true) => applied(format!("🔌 Updated `{name}`.")),
@@ -2702,6 +2716,44 @@ mod tests {
             execute(&req("/mcp disable ghost"), &mut cfg),
             SlashResponse::Message { .. }
         ));
+    }
+
+    #[test]
+    fn review_timeout_slash_validates_without_corrupting_config_on_every_surface() {
+        for surface in ["cli", "desktop", "web"] {
+            let mut cfg = MintConfig::default();
+            execute(&req_surface("/mcp add timer sh -c cat", surface), &mut cfg);
+            for (field, value) in [("timeout", 1), ("timeoutSecs", 300), ("timeout-secs", 3600)] {
+                let response = execute(
+                    &req_surface(&format!("/mcp edit timer {field} {value}"), surface),
+                    &mut cfg,
+                );
+                assert!(
+                    matches!(response, SlashResponse::Applied { .. }),
+                    "timeout edit was not applied on {surface}"
+                );
+                assert_eq!(cfg.extra["mcpServers"]["timer"]["timeoutSecs"], value);
+            }
+            let saved = cfg.extra.clone();
+            for invalid in ["0", "3601", "1.5", "banana", ""] {
+                assert!(matches!(
+                    execute(
+                        &req_surface(&format!("/mcp edit timer timeout {invalid}"), surface),
+                        &mut cfg
+                    ),
+                    SlashResponse::Message { .. }
+                ));
+                assert_eq!(cfg.extra, saved, "invalid input modified config");
+            }
+            assert!(matches!(
+                execute(
+                    &req_surface("/mcp edit ghost timeout 600", surface),
+                    &mut cfg
+                ),
+                SlashResponse::Message { .. }
+            ));
+            assert_eq!(cfg.extra, saved);
+        }
     }
 
     #[test]

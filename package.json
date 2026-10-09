@@ -31,14 +31,15 @@
     "start:release": "npm start -- --release",
     "launch": "npm start --",
     "start:rebuild": "npm start -- --rebuild",
-    "test": "npm run test:launchers && npm run test:interfaces && cargo test -p mint-core -p mint-cli",
+    "test": "npm run test:launchers && npm run test:interfaces && npm run test:device && cargo test -p mint-core -p mint-cli",
     "test:launchers": "node --test src/bin/web.test.js src/bin/index.test.js src/bin/desktop.test.js",
-    "test:interfaces": "vitest run src/renderer/shared/utils/contextCompaction.test.tsx src/renderer/shared/platform.test.ts src/renderer/shared/conversation/coordinator.test.ts src/renderer/shared/conversation/syncView.test.ts src/renderer/shared/utils/cardJson.test.ts src/renderer/shared/utils/agentActivity.test.ts src/renderer/shared/components/CliSessionsView.test.tsx src/renderer/shared/components/Settings/MemoryTab.test.tsx src/renderer/shared/theme/themeManager.test.ts src/renderer/shared/components/SelectField.test.tsx src/renderer/shared/components/VoicePill.test.tsx src/renderer/shared/utils/nativeRecordingSession.test.ts src/renderer/shared/components/GeminiLiveOverlay.test.tsx",
+    "test:interfaces": "vitest run src/renderer/shared/utils/contextCompaction.test.tsx src/renderer/shared/platform.test.ts src/renderer/shared/conversation/coordinator.test.ts src/renderer/shared/conversation/syncView.test.ts src/renderer/shared/utils/cardJson.test.ts src/renderer/shared/utils/agentActivity.test.ts src/renderer/shared/components/CliSessionsView.test.tsx src/renderer/shared/components/Settings/MemoryTab.test.tsx src/renderer/shared/theme/themeManager.test.ts src/renderer/shared/components/SelectField.test.tsx src/renderer/shared/components/VoicePill.test.tsx src/renderer/shared/utils/nativeRecordingSession.test.ts src/renderer/shared/components/GeminiLiveOverlay.test.tsx src/renderer/shared/utils/mcpResults.test.tsx",
     "cli": "node src/bin/index.js",
     "prepublishOnly": "npm run build:web",
     "postinstall": "cargo build -p mint-cli --release",
     "dev:desktop:ui": "vite",
-    "build:ui": "npm run build:desktop:ui && npm run build:web"
+    "build:ui": "npm run build:desktop:ui && npm run build:web",
+    "test:device": "node --test examples/device-mcp/server.test.mjs"
   },
   "keywords": [
     "mint",

@@ -67,6 +67,7 @@ export type SlashResponse =
   | { kind: 'not_handled' }
 
 export interface MintPlatformApi {
+  readMcpArtifact(id: string): Promise<string>
   listBackgroundJobs(workspace?: string): Promise<import("./types").BackgroundJob[]>
   getBackgroundJob(id: string): Promise<import("./types").BackgroundJobOutput>
   stopBackgroundJob(id: string): Promise<import("./types").BackgroundJob>
@@ -283,6 +284,7 @@ export const catalogPlatform = {
 
 /** Image and video generation and saved media seam. */
 export const mediaPlatform = {
+  readMcpArtifact: operation('readMcpArtifact'),
   generateImages: operation('generateImages'), getImageGenProviders: operation('getImageGenProviders'),
   fetchImageProviderModels: operation('fetchImageProviderModels'), listSavedPictures: operation('listSavedPictures'),
   generateVideo: operation('generateVideo'), getVideoGenProviders: operation('getVideoGenProviders'),

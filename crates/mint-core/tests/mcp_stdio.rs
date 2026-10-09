@@ -27,16 +27,17 @@ fn calls_stdio_mcp_tool() {
         "mcpServers".into(),
         json!({
             "fake": {
-                "command": "sh",
-                "args": [
-                    "-c",
-                    // The client blocks on the `initialize` response before sending
-                    // `notifications/initialized` or the tool call (see McpSession::start),
-                    // so this must answer id 1 as soon as it's read rather than draining
-                    // all three lines before replying once — otherwise it deadlocks
-                    // waiting for input the client will never send.
-                    "read init; printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\\n'; read ready; read call; printf '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"ok\":true}}\\n'"
-                ]
+                "command": "python3",
+                "args": ["-u","-c",r#"
+import sys,json
+for line in sys.stdin:
+ r=json.loads(line);m=r.get('method')
+ if m=='initialize': result={}
+ elif m=='tools/list': result={'tools':[{'name':'ping','inputSchema':{'type':'object'}}]}
+ elif m=='tools/call': result={'ok':True}
+ else: continue
+ print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
+"#]
             }
         }),
     );

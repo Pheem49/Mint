@@ -61,7 +61,7 @@
   { "token": "/mcp remove", "usage": "<name>", "description": "Remove an MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp enable", "usage": "<name>", "description": "Re-enable a disabled MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp disable", "usage": "<name>", "description": "Turn an MCP server off without removing it", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
-  { "token": "/mcp edit", "usage": "<name> command|args|icon <value>", "description": "Change one field of a configured MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/mcp edit", "usage": "<name> command|args|icon|timeout <value>", "description": "Change one field of a configured MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp allow", "usage": "<server> <tool>", "description": "Allow an MCP tool", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp disallow", "usage": "<server> <tool>", "description": "Remove a tool from a server's allowlist (* clears it)", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp reauth", "usage": "<server>", "description": "Re-run a server's OAuth login (e.g. expired token)", "category": "tools", "surfaces": ["cli", "web", "desktop"] },

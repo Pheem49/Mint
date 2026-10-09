@@ -448,6 +448,12 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
         </div>
       )}
 
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
+        <input type="checkbox" checked={config.mcpImageInput !== false}
+          onChange={(e) => updateField('mcpImageInput', e.target.checked)} />
+        Let the model inspect MCP images (disable for models without image input)
+      </label>
+
       {/* MCP Server Detail */}
       {detailMcpName && (() => {
         const item = mcpListItems.find((i) => i.name === detailMcpName)
@@ -494,6 +500,15 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                     <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--interactive-fg)', textTransform: 'none', letterSpacing: '0.5px', margin: '0 0 12px' }}>
                       Server Config
                     </h4>
+                    <label className="management-form-group" style={{ marginBottom: 12 }}>
+                      Tool timeout (seconds)
+                      <input type="number" min={1} max={3600} defaultValue={srvConfig.timeoutSecs ?? 300}
+                        key={item.name} onBlur={(e) => {
+                          const value = Number(e.currentTarget.value)
+                          if (Number.isInteger(value) && value >= 1 && value <= 3600) handleUpdateMcpServerField(item.name, 'timeoutSecs', value)
+                          else e.currentTarget.value = String(srvConfig.timeoutSecs ?? 300)
+                        }} />
+                    </label>
                     {srvConfig.url ? (
                       <div style={{ display: 'grid', gap: '12px' }}>
                         <div className="management-form-group">

@@ -515,6 +515,83 @@ fn tui_approval(
     })
 }
 
+pub(crate) fn mcp_progress_notes(event: &AgentProgress) -> Option<Vec<String>> {
+    Some(match event {
+        AgentProgress::ToolDiscovery {
+            server,
+            tool,
+            message,
+        } => vec![format!("[MCP discovery {server}/{tool}] {message}")],
+        AgentProgress::DeviceState {
+            server,
+            tool,
+            update,
+            ..
+        } => vec![format!(
+            "[Device {server}/{tool}] {:?}: {} (target {}, actual {})",
+            update.state, update.message, update.target, update.actual
+        )],
+        AgentProgress::ToolProgress {
+            server,
+            tool,
+            update,
+            ..
+        } => {
+            let detail = update
+                .total
+                .map(|total| format!("{:.0}%", update.progress / total * 100.0))
+                .unwrap_or_else(|| format!("{}s", update.elapsed_secs));
+            vec![format!(
+                "[MCP {server}/{tool}] {detail} {}",
+                update.message.as_deref().unwrap_or_default()
+            )]
+        }
+        AgentProgress::ToolArtifacts {
+            artifacts,
+            warnings,
+            ..
+        } => {
+            let mut notes = artifacts
+                .iter()
+                .map(|artifact| {
+                    let location = artifact.uri.clone().unwrap_or_else(|| {
+                        mint_core::integrations::mcp_result::artifact_directory()
+                            .unwrap_or_default()
+                            .join(&artifact.id)
+                            .display()
+                            .to_string()
+                    });
+                    format!("[MCP {}] {}: {location}", artifact.kind, artifact.name)
+                })
+                .collect::<Vec<_>>();
+            notes.extend(
+                warnings
+                    .iter()
+                    .map(|warning| format!("[MCP warning] {warning}")),
+            );
+            notes
+        }
+        _ => return None,
+    })
+}
+
+pub(crate) fn publish_mcp_progress(
+    tui: Option<&crate::interactive::TuiHandle>,
+    event: &AgentProgress,
+) -> bool {
+    let Some(notes) = mcp_progress_notes(event) else {
+        return false;
+    };
+    for note in notes {
+        if let Some(tui) = tui {
+            tui.push_notice(note);
+        } else {
+            println!("{note}");
+        }
+    }
+    true
+}
+
 pub async fn run_code_agent_with_options(
     task: &str,
     root: &Path,
@@ -832,6 +909,9 @@ pub async fn run_code_agent_with_options(
     );
     let progress_cb = |progress: AgentProgress| {
         avatar_bridge.on_agent_progress(&progress);
+        if publish_mcp_progress(options.tui.as_ref(), &progress) {
+            return;
+        }
         match progress {
             AgentProgress::Thinking {
                 elapsed_secs,
@@ -990,6 +1070,7 @@ pub async fn run_code_agent_with_options(
                 action,
                 input,
                 subagent,
+                ..
             } => {
                 progress_tool_running.fetch_add(1, Ordering::Relaxed);
                 if !options.fast_mode
@@ -1083,6 +1164,7 @@ pub async fn run_code_agent_with_options(
                 input,
                 result,
                 subagent,
+                ..
             } => {
                 let remaining = progress_tool_running
                     .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |running| {
@@ -1207,6 +1289,10 @@ pub async fn run_code_agent_with_options(
                     status.web_sources.extend(sources);
                 }
             }
+            AgentProgress::ToolDiscovery { .. }
+            | AgentProgress::DeviceState { .. }
+            | AgentProgress::ToolProgress { .. }
+            | AgentProgress::ToolArtifacts { .. } => {}
             AgentProgress::PlanUpdated { plan } => {
                 if let Ok(mut status) = progress_live_status.lock() {
                     status.thinking = None;

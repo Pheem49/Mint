@@ -2486,6 +2486,7 @@ export const readWorkspaceFile = async (path: string, workspacePath?: string): P
 
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
+  readMcpArtifact,
   listBackgroundJobs, getBackgroundJob, stopBackgroundJob,
   runSlashCommand,
   authRegister,
@@ -2570,4 +2571,15 @@ export async function startHtmlPreview(root: string, relativePath: string, mintB
   const value = await response.json()
   if (!response.ok) throw new Error(value.message || 'Could not start HTML preview')
   return value
+}
+
+/** Loads artifacts by ID; no server-provided filesystem path is accepted. */
+export async function readMcpArtifact(id: string): Promise<string> {
+  if (isTauriRuntime()) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke<string>('read_mcp_artifact', { id })
+  }
+  const response = await authFetch(`${getApiBase()}/mcp-artifacts/${encodeURIComponent(id)}`)
+  if (!response.ok) throw new Error('Artifact unavailable')
+  return URL.createObjectURL(await response.blob())
 }

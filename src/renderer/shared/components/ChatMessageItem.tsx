@@ -6,6 +6,7 @@ import StockCard from './StockCard'
 import CalculationCard from './CalculationCard'
 import ImageSearchCard from './ImageSearchCard'
 import ImageGenCard from './ImageGenCard'
+import McpToolResults from './McpToolResults'
 import { parseUtcDate } from '../utils/ui'
 import { parseWebSearchSources } from '../utils/agentActivity'
 
@@ -215,6 +216,7 @@ const ChatMessageItem = React.memo(
               {interaction.status === 'running' && <span>Mint is responding…</span>}
               {interaction.status === 'failed' && <span>This turn failed. Send the prompt again to retry.</span>}
               {interaction.status === 'interrupted' && <span>This turn was interrupted. Send the prompt again to retry.</span>}
+              <McpToolResults progress={progress} running={interaction.status === 'running'} interrupted={interaction.status === 'interrupted'} />
               {fallbackWeatherData && <WeatherCard data={fallbackWeatherData} />}
               {fallbackStockData && <StockCard data={fallbackStockData} />}
               {fallbackCalcData && <CalculationCard data={fallbackCalcData} />}
