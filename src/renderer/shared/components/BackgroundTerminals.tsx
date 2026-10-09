@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ChevronDown, Terminal } from 'lucide-react'
 import { backgroundPlatform, runtimePlatform } from '../platform'
 import type { BackgroundJob, BackgroundJobOutput } from '../types'
 import './background-terminals.css'
@@ -140,17 +141,30 @@ export function BackgroundTerminals({ workspacePath }: { workspacePath?: string 
   }}>
     <button type="button" className={`background-terminal-trigger ${count ? 'has-active' : ''}`} ref={trigger}
       aria-expanded={open} aria-controls="background-terminal-panel" onClick={() => setOpen(previous => !previous)}>
-      <span aria-hidden="true">▸</span> {error ? 'Status unavailable' : loading ? 'Terminals…' : count ? `${count} background terminal${count === 1 ? '' : 's'}` : 'Terminals'} <span aria-hidden="true">▾</span>
+      <Terminal className="background-terminal-trigger-icon" size={14} aria-hidden="true" />
+      <span>{error ? 'Status unavailable' : loading ? 'Terminals…' : 'Terminals'}</span>
+      {count > 0 && <span className="background-terminal-count" aria-label={`${count} active background terminals`}>{count}</span>}
+      <ChevronDown className={`background-terminal-chevron ${open ? 'is-open' : ''}`} size={13} aria-hidden="true" />
     </button>
     {notice && <span className="background-terminal-notice" role="status">{notice}</span>}
     {open && <section id="background-terminal-panel" className="background-terminal-panel" aria-label="Background terminals" style={{ width: panelSize.width, maxHeight: panelSize.height }}>
-      <header><strong>Background terminals · {all ? 'All workspaces' : workspaceName(workspacePath || '') || 'No workspace'}</strong>
-        <button ref={closeButton} type="button" onClick={close} aria-label="Close background terminals">×</button></header>
+      <header className="background-terminal-panel-header">
+        <span className="background-terminal-heading-icon" aria-hidden="true">›_</span>
+        <span className="background-terminal-panel-title">
+          <strong>Background terminals</strong>
+          <small>{all ? 'All workspaces' : workspaceName(workspacePath || '') || 'No workspace'}</small>
+        </span>
+        <button ref={closeButton} type="button" onClick={close} aria-label="Close background terminals">×</button>
+      </header>
       <label className="background-terminal-filter"><input type="checkbox" checked={all} onChange={event => { setAll(event.target.checked); setSelected(null) }} /> All workspaces</label>
       {error && <p role="status" className="background-terminal-error">{error}</p>}
       {actionError && <p role="alert" className="background-terminal-error">{actionError}</p>}
       <div className="background-terminal-list">
-        {!visible.length && <p>{loading ? 'Loading terminals…' : error ? 'Waiting for connection…' : 'No background terminals in this workspace.'}</p>}
+        {!visible.length && <div className="background-terminal-empty" role="status">
+          <span aria-hidden="true">›_</span>
+          <strong>{loading ? 'Loading terminals…' : error ? 'Waiting for connection…' : 'No background terminals'}</strong>
+          {!loading && !error && <small>Commands started in the background will appear here.</small>}
+        </div>}
         {[...visible].reverse().map(job => <article key={job.id} className="background-terminal-job">
           <div className="background-terminal-job-heading"><strong>{job.id}</strong><span className={`background-terminal-state ${job.status}`}>{job.status}</span><span>{elapsed(job.elapsedSeconds)}</span></div>
           <code title={job.command}>{job.command}</code>

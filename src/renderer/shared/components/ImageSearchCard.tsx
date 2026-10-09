@@ -22,71 +22,59 @@ function ImageTile({ image }: { image: ImageSearchHit }) {
   const initialSrc = resolveMediaUrl(image.thumbnailUrl || image.imageUrl)
   const [src, setSrc] = useState(initialSrc)
 
-  if (broken || !src) {
-    return null
-  }
   const sourceUrl = /^https?:\/\//.test(image.sourceUrl) ? image.sourceUrl : image.imageUrl
 
   return (
-    <div
+    <article
       style={{
-        position: 'relative',
-        display: 'block',
+        display: 'flex',
+        flex: '0 0 116px',
+        flexDirection: 'column',
         borderRadius: '10px',
         overflow: 'hidden',
-        aspectRatio: '1 / 1',
         background: 'var(--surface-strong)',
         border: '1px solid var(--border)',
-        textDecoration: 'none',
       }}
     >
-      <a href={sourceUrl} target="_blank" rel="noopener noreferrer" title={image.title} style={{ display: 'block', width: '100%', height: '100%' }}>
-        <img
-          src={src}
-          alt={image.title}
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          onError={() => {
-            const fallback = resolveMediaUrl(image.imageUrl)
-            if (src !== fallback && fallback) {
-              setSrc(fallback)
-            } else {
-              setBroken(true)
-            }
-          }}
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-        />
+      <a href={sourceUrl} target="_blank" rel="noopener noreferrer" title={image.title} style={{ display: 'block', width: '100%', aspectRatio: '1 / 1', flexShrink: 0, textDecoration: 'none' }}>
+        {broken || !src ? (
+          <span style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px', boxSizing: 'border-box', color: 'var(--text-muted, #94a3b8)', fontSize: '11px', lineHeight: 1.4, textAlign: 'center' }}>
+            Preview unavailable · Open source
+          </span>
+        ) : (
+          <img
+            src={src}
+            alt={image.title}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => {
+              const fallback = resolveMediaUrl(image.imageUrl)
+              if (src !== fallback && fallback) {
+                setSrc(fallback)
+              } else {
+                setBroken(true)
+              }
+            }}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        )}
       </a>
-      {image.title && (
-        <div
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: 24,
-            padding: '6px 8px',
-            fontSize: '11px',
-            lineHeight: 1.3,
-            color: '#f8fafc',
-            background: 'linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0))',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            pointerEvents: 'none',
-          }}
+      <div style={{ minWidth: 0, padding: '7px 8px', display: 'grid', gap: '5px' }}>
+        {image.title && (
+          <div title={image.title} style={{ fontSize: '11px', lineHeight: 1.3, color: 'var(--text-primary, inherit)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {image.title}
+          </div>
+        )}
+        <a
+          href={resolveMediaUrl(image.imageUrl)}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ justifySelf: 'start', color: 'var(--interactive-fg-hover)', fontSize: '10px', lineHeight: 1.4, textDecoration: 'underline', textUnderlineOffset: '2px' }}
         >
-          {image.title}
-        </div>
-      )}
-      <a
-        href={resolveMediaUrl(image.imageUrl)}
-        target="_blank"
-        rel="noopener noreferrer"
-        style={{ position: 'absolute', right: 6, bottom: 5, zIndex: 1, padding: '2px 5px', borderRadius: 4, background: 'var(--surface-strong)', color: 'var(--interactive-fg-hover)', fontSize: 10 }}
-      >
-        View full image
-      </a>
-    </div>
+          View full image
+        </a>
+      </div>
+    </article>
   )
 }
 
@@ -140,7 +128,7 @@ export default function ImageSearchCard({ data }: { data: ImageSearchData }) {
           IMAGE SEARCH
         </span>
         {data?.query && (
-          <span style={{ fontSize: '13px', color: queryColor }}>
+          <span title={data.query} style={{ minWidth: 0, fontSize: '13px', color: queryColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             &ldquo;{data.query}&rdquo;
           </span>
         )}
@@ -153,9 +141,11 @@ export default function ImageSearchCard({ data }: { data: ImageSearchData }) {
       ) : (
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
+            display: 'flex',
             gap: '8px',
+            overflowX: 'auto',
+            paddingBottom: '4px',
+            scrollbarWidth: 'thin',
           }}
         >
           {images.map((image, idx) => (

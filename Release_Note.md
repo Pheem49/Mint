@@ -6,6 +6,28 @@
 
 - Connected Desktop system/background notifications to a themed in-app notice; notification clicks open their originating conversation, Web clears all outstanding notifications, and delivery failures appear without interrupting chat completion. Desktop delivery now uses an awaitable native command with OS action handling.
 
+- Refined the Desktop Workspace context popover with a consistent icon set, grouped workspace/Git/review/terminal rows, clearer status badges, and a distinct sources surface.
+
+- Refined the Background terminals composer trigger with a terminal icon, active-job count badge, and chevron that reflects the popover state.
+
+- Restyled the Background terminals popover with a clearer workspace header, themed scope filter, readable empty state, and consistent job/output surfaces and controls across Desktop and Web.
+
+- Increased Saved Pictures card height slightly by changing media tiles from 4:3 to 5:4 across Desktop and Web.
+
+- Changed the Saved Pictures gallery to show 20 items initially and load 20 more per request.
+
+- Resized the Saved Pictures gallery to show at most five larger cards per desktop row, widened the aligned gallery content, and set four-, three-, two-, and one-column layouts at narrower breakpoints.
+
+- Improved Saved Pictures in Desktop and Web: clicking a photo opens a full-size contain-fit preview (Escape or backdrop closes it), videos open with playback controls, delete controls stay visible on touch and keyboard focus, and failed thumbnails show retry and open-file actions.
+
+- Styled the MCP server timeout as a shared management form field and updated the Allowed tools “Allow all (*)” control with a compact themed toggle row, hover/focus feedback, and consistent accent color.
+
+- Completed MCP server page styling with dedicated responsive header actions and search sizing, consistent Installed section spacing, and visible keyboard focus for installed server icons.
+
+- Moved the MCP image-input setting above the Installed section and styled it as a responsive, theme-aware setting row with clear checkbox focus and hover states.
+
+- Fixed Web/Desktop image search result cards: titles and full-image links now have separate space below each thumbnail, preventing overlap, and results use consistent square thumbnails in a horizontally scrollable row instead of stretching across the chat width. Long search queries are truncated cleanly. If a remote thumbnail and its full-image fallback both fail to load, the card remains visible with an “Open source” link instead of disappearing.
+
 - Fixed an MCP lock-order deadlock between notification draining, raw resource/prompt requests, and checked stdio tool dispatch. Notification draining now releases the session registry before waiting for a session, so a blocked server cannot prevent unrelated tool calls. Added a regression test that verifies concurrent notification draining and tool execution, with bounded waits and worker cleanup on failure.
 
 - Fixed the five MCP/Device review findings: cancellation during discovery/approval now interrupts the run and propagates to subagents without contaminating later turns; paginated catalogs, validated commands, and Device polls stay bound to one live session with no mid-invocation reconnect; native tool feedback and repeated-failure tracking use typed status for denied/intercepted approvals and successful diagnostic text; Full-Screen TUI and shared slash commands expose validated 1–3600-second timeouts; and `mint_core::mcp_result` follows the core's flat module exports. Session loss after Device dispatch retains the receipt and reports unconfirmed completion. Added regression coverage and updated connector guidance.

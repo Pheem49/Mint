@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { FileCode2, FolderOpen, GitBranch, Paperclip, RefreshCw, Terminal } from 'lucide-react'
 import { workspacePlatform } from '../platform'
 import type { FileChange, GitBranchInfo } from '../types'
 
@@ -91,39 +92,39 @@ export default function WorkspaceContextPopover({
       {open && (
         <section className="workspace-context-popover" role="dialog" aria-label="Workspace context">
           <header className="workspace-context-heading">
-            <span>Workspace context</span>
+            <span className="workspace-context-heading-title"><FolderOpen size={16} aria-hidden="true" /> Workspace context</span>
             <button type="button" onClick={handleRefresh} disabled={isRefreshing} title="Refresh workspace status" aria-label="Refresh workspace status">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 2 5.5"/><path d="M20 4v7h-7"/></svg>
+              <RefreshCw className={isRefreshing ? 'is-refreshing' : ''} size={15} aria-hidden="true" />
             </button>
           </header>
 
           <button type="button" className="workspace-context-row" onClick={() => { onOpenWorkspace(); setOpen(false) }}>
-            <span className="workspace-context-icon">▰</span>
+            <span className="workspace-context-icon"><FolderOpen size={16} aria-hidden="true" /></span>
             <span className="workspace-context-copy"><strong>{workspaceLabel(workspacePath)}</strong><small title={workspacePath}>{workspacePath || 'Choose a project folder'}</small></span>
             <span className="workspace-context-action">Open</span>
           </button>
 
           <div className="workspace-context-row is-static">
-            <span className="workspace-context-icon">⌘</span>
+            <span className="workspace-context-icon"><GitBranch size={16} aria-hidden="true" /></span>
             <span className="workspace-context-copy"><strong>{gitInfo?.isRepository ? (gitInfo.currentBranch || gitInfo.detachedHead || 'Detached HEAD') : 'No Git repository'}</strong><small>{gitInfo?.isRepository ? (gitInfo.isDirty ? 'Working tree has changes' : 'Working tree is clean') : 'Git status is unavailable'}</small></span>
             {gitInfo?.isRepository && <span className={`workspace-context-status${gitInfo.isDirty ? ' is-dirty' : ''}`}>{gitInfo.isDirty ? 'Changed' : 'Clean'}</span>}
           </div>
 
           <button type="button" className="workspace-context-row" disabled={!hasReview} onClick={() => { onOpenReview(recentChanges); setOpen(false) }}>
-            <span className="workspace-context-icon">▣</span>
+            <span className="workspace-context-icon"><FileCode2 size={16} aria-hidden="true" /></span>
             <span className="workspace-context-copy"><strong>Recent agent changes</strong><small>{hasReview ? `${recentChanges.length} file${recentChanges.length === 1 ? '' : 's'} changed in this run` : 'No changes in the current run'}</small></span>
             {hasReview && <span className="workspace-context-diff"><b>+{additions}</b><i>-{deletions}</i></span>}
           </button>
 
           <div className="workspace-context-row is-static">
-            <span className="workspace-context-icon">›_</span>
+            <span className="workspace-context-icon"><Terminal size={16} aria-hidden="true" /></span>
             <span className="workspace-context-copy"><strong>Terminal</strong><small>{terminalCount === 0 ? 'No terminal tabs open' : `${terminalCount} tab${terminalCount === 1 ? '' : 's'} open`}</small></span>
             <span className="workspace-context-status">{terminalCount}</span>
           </div>
 
           <div className="workspace-context-sources">
-            <div className="workspace-context-sources-heading"><span>Sources</span><span>{uniqueSources.length}</span></div>
-            {uniqueSources.length === 0 ? <p>No files attached to this message.</p> : uniqueSources.slice(0, 3).map((name) => <p key={name} title={name}>▣ {name}</p>)}
+            <div className="workspace-context-sources-heading"><span><Paperclip size={13} aria-hidden="true" /> Sources</span><span>{uniqueSources.length}</span></div>
+            {uniqueSources.length === 0 ? <p>No files attached to this message.</p> : uniqueSources.slice(0, 3).map((name) => <p key={name} title={name}><FileCode2 size={13} aria-hidden="true" /> {name}</p>)}
             {uniqueSources.length > 3 && <p className="workspace-context-more">+{uniqueSources.length - 3} more sources</p>}
           </div>
         </section>

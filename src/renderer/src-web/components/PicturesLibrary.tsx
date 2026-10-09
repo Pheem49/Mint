@@ -24,16 +24,46 @@ interface PictureCardItemProps {
   filterType: 'photo' | 'video'
   index: number
   onDeleteClick: (picture: PictureEntry) => void
+  onPreview: (picture: PictureEntry) => void
 }
 
-const PictureCardItem = memo(({ picture, filterType, index, onDeleteClick }: PictureCardItemProps) => {
+const PictureCardItem = memo(({ picture, filterType, index, onDeleteClick, onPreview }: PictureCardItemProps) => {
   const isVideo = filterType === 'video'
+  const fullSrc = getPictureSrc(picture, false)
+  const thumbnailSrc = getPictureSrc(picture, true)
+  const [imageSrc, setImageSrc] = useState(thumbnailSrc)
+  const [imageFailed, setImageFailed] = useState(false)
+  const [usedFullSize, setUsedFullSize] = useState(false)
+
+  useEffect(() => {
+    setImageSrc(thumbnailSrc)
+    setImageFailed(false)
+    setUsedFullSize(false)
+  }, [picture.id, thumbnailSrc])
+
+  const handleImageError = () => {
+    if (!usedFullSize && thumbnailSrc !== fullSrc) {
+      setUsedFullSize(true)
+      setImageSrc(fullSrc)
+    } else {
+      setImageFailed(true)
+    }
+  }
+
+  const retryImage = (event: { stopPropagation: () => void }) => {
+    event.stopPropagation()
+    setImageFailed(false)
+    setUsedFullSize(false)
+    setImageSrc(thumbnailSrc)
+  }
+
   return (
     <article className="picture-card" key={picture.id}>
       <button
         type="button"
         className="picture-card-delete-btn"
         title="Delete item"
+        aria-label={`Delete ${picture.message || picture.filename}`}
         onClick={(e) => {
           e.stopPropagation()
           onDeleteClick(picture)
@@ -45,66 +75,30 @@ const PictureCardItem = memo(({ picture, filterType, index, onDeleteClick }: Pic
         </svg>
       </button>
       {isVideo ? (
-        <div style={{ position: 'relative', width: '100%', aspectRatio: '4 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a1a' }}>
-          {picture.thumbnailPath || picture.thumbnailUrl ? (
-            <img
-              src={getPictureSrc(picture, true)}
-              alt={picture.message || picture.filename}
-              loading={index < 8 ? 'eager' : 'lazy'}
-              decoding="async"
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              onError={(e) => {
-                const img = e.currentTarget
-                if (!img.dataset.fallback) {
-                  img.dataset.fallback = 'true'
-                  img.src = getPictureSrc(picture, false)
-                }
-              }}
-            />
-          ) : (
-            <video
-              src={getPictureSrc(picture, false)}
-              preload="metadata"
-              style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
-            />
-          )}
-          <div style={{
-            position: 'absolute',
-            top: '8px',
-            left: '8px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            backgroundColor: 'rgba(0, 0, 0, 0.75)',
-            color: '#fff',
-            padding: '4px 8px',
-            borderRadius: '4px',
-            fontSize: '11px',
-            fontWeight: 600,
-            pointerEvents: 'none',
-            backdropFilter: 'blur(4px)',
-            border: '1px solid rgba(255, 255, 255, 0.1)'
-          }}>
-            <span>📹 Video</span>
+        <button type="button" className="picture-card-preview" onClick={() => onPreview(picture)} aria-label={`Preview video ${picture.message || picture.filename}`}>
+          <video src={fullSrc} preload="metadata" muted />
+          <span className="picture-video-badge">Video</span>
+          <span className="picture-open-hint">▶ Play video</span>
+        </button>
+      ) : imageFailed ? (
+        <div className="picture-load-error" role="status">
+          <span>Could not load this picture</span>
+          <div>
+            <button type="button" onClick={retryImage}>Try again</button>
+            <a href={fullSrc} target="_blank" rel="noreferrer">Open file</a>
           </div>
         </div>
       ) : (
-        <div style={{ position: 'relative', width: '100%', aspectRatio: '4 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a1a' }}>
+        <button type="button" className="picture-card-preview" onClick={() => onPreview(picture)} aria-label={`View picture ${picture.message || picture.filename}`}>
           <img
-            src={getPictureSrc(picture, true)}
+            src={imageSrc}
             alt={picture.message || picture.filename}
             loading={index < 8 ? 'eager' : 'lazy'}
             decoding="async"
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            onError={(e) => {
-              const img = e.currentTarget
-              if (!img.dataset.fallback) {
-                img.dataset.fallback = 'true'
-                img.src = getPictureSrc(picture, false)
-              }
-            }}
+            onError={handleImageError}
           />
-        </div>
+          <span className="picture-open-hint">View full image</span>
+        </button>
       )}
       <div className="picture-card-meta"><span>{picture.message || picture.filename}</span></div>
     </article>
@@ -120,8 +114,10 @@ interface PicturesLibraryProps {
 
 export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPictures }: PicturesLibraryProps) {
   const [filterType, setFilterType] = useState<'photo' | 'video'>('photo')
-  const [visibleCount, setVisibleCount] = useState(24)
+  const [visibleCount, setVisibleCount] = useState(20)
   const [deletingPicture, setDeletingPicture] = useState<PictureEntry | null>(null)
+  const [previewPicture, setPreviewPicture] = useState<PictureEntry | null>(null)
+  const [previewFailed, setPreviewFailed] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
   const filteredPictures = useMemo(() => {
@@ -151,8 +147,27 @@ export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPi
   )
 
   useEffect(() => {
-    setVisibleCount(24)
+    setVisibleCount(20)
   }, [view, pictures, filterType])
+
+  useEffect(() => {
+    if (!previewPicture) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewPicture(null)
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [previewPicture])
+
+  const openPreview = (picture: PictureEntry) => {
+    setPreviewFailed(false)
+    setPreviewPicture(picture)
+  }
 
   const handleDeleteConfirm = async () => {
     if (!deletingPicture) return
@@ -228,6 +243,7 @@ export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPi
                 filterType={filterType}
                 index={index}
                 onDeleteClick={setDeletingPicture}
+                onPreview={openPreview}
               />
             ))}
           </div>
@@ -236,13 +252,37 @@ export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPi
               <button
                 type="button"
                 className="pictures-load-more-btn"
-                onClick={() => setVisibleCount((prev) => prev + 24)}
+                onClick={() => setVisibleCount((prev) => prev + 20)}
               >
                 Load More ({filteredPictures.length - visibleCount} remaining)
               </button>
             </div>
           )}
         </>
+      )}
+
+      {previewPicture && typeof document !== 'undefined' && createPortal(
+        <div className="picture-preview-overlay" role="presentation" onClick={() => setPreviewPicture(null)}>
+          <section className="picture-preview-dialog" role="dialog" aria-modal="true" aria-label={previewPicture.message || previewPicture.filename} onClick={(event) => event.stopPropagation()}>
+            <header className="picture-preview-header">
+              <span title={previewPicture.message || previewPicture.filename}>{previewPicture.message || previewPicture.filename}</span>
+              <button type="button" className="picture-preview-close" autoFocus aria-label="Close preview" onClick={() => setPreviewPicture(null)}>×</button>
+            </header>
+            <div className="picture-preview-content">
+              {previewFailed ? (
+                <div className="picture-preview-error" role="status">
+                  <span>Could not load this file.</span>
+                  <a href={getPictureSrc(previewPicture, false)} target="_blank" rel="noreferrer">Open file</a>
+                </div>
+              ) : filterType === 'video' ? (
+                <video src={getPictureSrc(previewPicture, false)} controls onError={() => setPreviewFailed(true)} />
+              ) : (
+                <img src={getPictureSrc(previewPicture, false)} alt={previewPicture.message || previewPicture.filename} onError={() => setPreviewFailed(true)} />
+              )}
+            </div>
+          </section>
+        </div>,
+        document.body
       )}
 
       {deletingPicture && typeof document !== 'undefined' && createPortal(
