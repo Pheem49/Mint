@@ -124,6 +124,26 @@ pub(crate) fn log_api_err(context: &str, error: &dyn std::fmt::Display) {
 /// duplicate Discord gateway connections, duplicate replies to the owner).
 mod routes;
 
+/// Observe terminal shutdown without taking ownership of the host's lifetime.
+/// Embedded hosts must also request their own exit: stopping this HTTP server
+/// alone leaves a GUI event loop alive after Tokio intercepts the OS signal.
+pub async fn shutdown_on_signal(on_shutdown: impl FnOnce()) {
+    let shutdown = async {
+        #[cfg(unix)]
+        {
+            if let Ok(mut signal) =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            {
+                tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = signal.recv() => {} }
+                return;
+            }
+        }
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    shutdown.await;
+    on_shutdown();
+}
+
 pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
     start_api_server_on(SocketAddr::from(([0, 0, 0, 0], port))).await
 }
@@ -140,18 +160,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
     // Start the cron scheduler so scheduled agent tasks fire while this server is up
     crate::start_cron_scheduler();
 
-    let shutdown = async {
-        #[cfg(unix)]
-        {
-            if let Ok(mut signal) =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            {
-                tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = signal.recv() => {} }
-                return;
-            }
-        }
-        let _ = tokio::signal::ctrl_c().await;
-    };
+    let shutdown = shutdown_on_signal(|| {});
     tokio::pin!(shutdown);
     loop {
         let accepted = tokio::select! {

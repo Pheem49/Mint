@@ -2790,6 +2790,13 @@ pub fn run() {
                 .unwrap_or_else(|_| mint_core::avatar_bridge::AvatarBridgeConfig::from_env()),
         ))
         .setup(|app| {
+            // The embedded API also observes these signals, but its completion
+            // does not stop Tauri's event loop. Keep the host watcher independent
+            // so Ctrl+C still exits when the API port could not be bound.
+            let shutdown_app = app.handle().clone();
+            tauri::async_runtime::spawn(mint_core::api_server::shutdown_on_signal(move || {
+                shutdown_app.exit(0);
+            }));
             if let Some(main_window) = app.get_webview_window("main") {
                 allow_media_permission_requests(&main_window);
             }
