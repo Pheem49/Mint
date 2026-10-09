@@ -46,6 +46,7 @@ import { executeSlashCommand } from '../utils/slashCommandProcessor'
 import { captureScreenForChat } from '../utils/screenCapture'
 import { useConversationCoordinator } from '../conversation/useConversationCoordinator'
 import { matchesActiveRun, matchesActiveSession } from '../conversation/syncView'
+import { navigateToProject } from '../conversation/projectNavigation'
 
 
 
@@ -430,7 +431,10 @@ export default function MintDashboard() {
         }
         return prev
       }
-      const mappedView: DashboardView = (next === 'veo_studio' ? 'veo' : next) as DashboardView
+      const requestedView: DashboardView = (next === 'veo_studio' ? 'veo' : next) as DashboardView
+      // The Web app can select a project for chat context, but its local file
+      // browser is Desktop-only. Keep any Workspace navigation on Web in chat.
+      const mappedView: DashboardView = !isDesktopApp && requestedView === 'workspace' ? 'chat' : requestedView
       const targetPath = getCleanPathForView(mappedView, targetConversationId || conversationId)
       if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
         window.history.pushState({}, '', targetPath)
@@ -950,21 +954,6 @@ export default function MintDashboard() {
       }
     }
   }, [refreshChatSessions])
-
-  const workspaceBindingInFlight = useRef(new Set<string>())
-  useEffect(() => {
-    // Repair only the currently open, unassigned conversation when the user
-    // is working in a selected workspace. Never reassign other recent chats.
-    if (view !== 'workspace' || !workspacePath) return
-    const session = chatSessions.find((item) => item.id === conversationId)
-    if (!session || session.workspacePath) return
-    const key = `${conversationId}\0${workspacePath}`
-    if (workspaceBindingInFlight.current.has(key)) return
-    workspaceBindingInFlight.current.add(key)
-    void handleUpdateSessionWorkspace(conversationId, workspacePath).finally(() => {
-      workspaceBindingInFlight.current.delete(key)
-    })
-  }, [view, workspacePath, conversationId, chatSessions, handleUpdateSessionWorkspace])
 
   const handleBrowseFolderForMove = useCallback(async () => {
     try {
@@ -1725,15 +1714,32 @@ export default function MintDashboard() {
     conversationActions.compose(message.trim() ? `Search web: ${message.trim()}` : 'Search web: ')
   }
 
-  async function selectWorkspace(path?: string) {
+  const projectSelectionSerialRef = useRef(0)
+  async function selectWorkspace(path?: string, showWorkspace = false) {
+    const targetView = isDesktopApp && (showWorkspace || view === 'workspace') ? 'workspace' : 'chat'
+    const selection = ++projectSelectionSerialRef.current
+    const generation = sessionGenerationRef.current
+    const isCurrent = () => selection === projectSelectionSerialRef.current
+      && generation === sessionGenerationRef.current
     try {
       const selected = path || await selectLinkedFolderPath()
-      if (selected) {
-        updateWorkspacePath(selected)
-        changeView('workspace')
+      if (selected && isCurrent()) {
+        await navigateToProject(selected, {
+          listSessions: async () => {
+            const serial = ++sessionListSerialRef.current
+            const sessions = await listChatSessions()
+            if (isCurrent() && serial === sessionListSerialRef.current) setChatSessions(sessions)
+            return sessions
+          },
+          currentSessionId: () => activeConversationRef.current,
+          openSession: (session, nextView) => selectConversation(session.id, session, nextView),
+          newChat: (targetPath, nextView) => clearHistory('New chat', targetPath, nextView),
+          showCurrentView: nextView => changeView(nextView, activeConversationRef.current),
+          isCurrent,
+        }, targetView)
       }
     } catch (reason) {
-      setError(errorMessage(reason))
+      if (isCurrent()) setError(errorMessage(reason))
     }
   }
 
@@ -1760,7 +1766,7 @@ export default function MintDashboard() {
       })
   }
 
-  async function clearHistory(action: 'New chat' | 'Clear history', targetWorkspacePath?: string | null) {
+  async function clearHistory(action: 'New chat' | 'Clear history', targetWorkspacePath?: string | null, targetView: 'chat' | 'workspace' = 'chat') {
     const originChatId = conversationId
     const generation = sessionGenerationRef.current
     try {
@@ -1770,7 +1776,7 @@ export default function MintDashboard() {
         setInteractions([])
         setAgentActivitySnapshots({})
         conversationActions.switchSession()
-        setViewState('chat')
+        setViewState(targetView)
 
         if (targetWorkspacePath !== undefined) {
           updateWorkspacePath(targetWorkspacePath || '')
@@ -1910,14 +1916,14 @@ export default function MintDashboard() {
     setThinkingExpanded((current) => ({ ...current, [key]: open }))
   }
 
-  async function selectConversation(id: string) {
+  async function selectConversation(id: string, selectedSession?: ChatSession, targetView: 'chat' | 'workspace' = 'chat') {
     window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, id)
     touchActiveTimestamp()
     activateConversation(id)
     const generation = sessionGenerationRef.current
-    changeView('chat', id)
+    changeView(targetView, id)
     conversationActions.switchSession()
-    const session = chatSessions.find((item) => item.id === id)
+    const session = selectedSession ?? chatSessions.find((item) => item.id === id)
     if (session) {
       if (session.workspacePath) {
         if (session.workspacePath !== workspacePath) {
@@ -2243,7 +2249,7 @@ export default function MintDashboard() {
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={toggleSidebar}
           onNewChat={() => clearHistory('New chat')}
-          onOpenWorkspace={() => selectWorkspace()}
+          onOpenWorkspace={() => selectWorkspace(undefined, true)}
           onOpenTerminal={openTerminalSurface}
           onToggleTerminal={toggleTerminalSurface}
           onOpenBrowser={() => openNativeBrowser()}
@@ -2395,6 +2401,7 @@ export default function MintDashboard() {
           {view === 'workspace' && (
             <Suspense fallback={<LazyPanelFallback />}>
               <WorkspacePanel
+                key={workspacePath}
                 agentMode={agentMode}
                 sending={sending}
                 workspacePath={workspacePath}

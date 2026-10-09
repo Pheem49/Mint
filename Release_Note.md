@@ -1,5 +1,9 @@
 # Release Notes - Mint Agent v1.16.0
 
+- Review fixes: Desktop Ctrl+O/File → Open workspace now opens the selected project's latest chat or New Chat with its file tree visible, and project selection preserves an already open Workspace view without clearing the current draft. Companion descriptors are removed explicitly on normal Desktop/CLI exit, with synchronized publication preventing a late-starting listener from recreating a stale descriptor during shutdown. Project switches also remount the file panel and discard stale snapshots, canonical-path callbacks and load errors so an old tree cannot be applied to a new root. Added navigation, snapshot and descriptor lifecycle regressions.
+
+- Fixed the Desktop/Web project picker moving the open conversation into the selected project. Selecting a project now opens its most recently updated conversation, or New Chat in that project when none exists; existing conversation ownership remains unchanged. Selection reads fresh session metadata, ignores CLI/internal sessions, preserves the draft when the target conversation is already open, and rejects stale results after another navigation. Removed implicit assignment of unassigned conversations on entering Workspace; explicit sidebar moves remain available. Added project navigation regression tests.
+
 - Separated Live2D into the optional Mint Companion Tauri app in the same repository. Mint Desktop/Web no longer load or bundle Shiroko/Cubism or wait for model readiness; proactive suggestions, the existing widget, and Project Avatar remain in Mint. Companion provides a floating character, manual/automatic expressions, accessories, interaction areas, local instance/session selection, and plain chat using Mint's existing memory and queue. Added an authenticated loopback protocol with session/turn snapshots, shared orchestration status, request deduplication, reconnect without message replay, independent preferences, and separate Linux/Windows/macOS packaging workflows. Added transport, state, endpoint, and npm packaging tests and operating documentation. CLI/Desktop launcher caches track the shared protocol crate; the npm CLI package retains the complete Rust workspace without shipping the Live2D assets.
 
 - Added a shared Notifications settings tab for Desktop and Web with a master switch, reply/approval/system categories, OS and in-app delivery controls, permission status, and test delivery. Saved preferences now filter notifications and preserve existing behavior for older configs.
@@ -11,6 +15,8 @@
 - Refined the Background terminals composer trigger with a terminal icon, active-job count badge, and chevron that reflects the popover state.
 
 - Restyled the Background terminals popover with a clearer workspace header, themed scope filter, readable empty state, and consistent job/output surfaces and controls across Desktop and Web.
+
+- Fixed Web project selection opening the Desktop-only Workspace view, which left the chat constrained to one column beside an empty file-browser stub. Web now keeps the chat layout when selecting a project and routes Workspace navigation back to chat; Desktop behavior is unchanged.
 
 - Increased Saved Pictures card height slightly by changing media tiles from 4:3 to 5:4 across Desktop and Web.
 

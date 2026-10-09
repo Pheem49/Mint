@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { WorkspaceSnapshotReader } from '@shared/utils/workspaceSnapshot'
 import { workspacePlatform } from '@shared/platform'
 import { announceWorkspaceChange, useWorkspaceUndo } from '@shared/workspaceUndo'
 import type { WorkspaceSnapshot, WorkspaceTreeEntry } from '@shared/types'
@@ -94,7 +95,14 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
   const [tree, setTree] = useState<WorkspaceTreeEntry | null>(null)
   const [revision, setRevision] = useState(0)
   const revisionRef = useRef(0)
-  const refreshInFlightRef = useRef(false)
+  const snapshotReaderRef = useRef<WorkspaceSnapshotReader | null>(null)
+  const mountedRef = useRef(false)
+  useEffect(() => {
+    mountedRef.current = true
+    const reader = new WorkspaceSnapshotReader(operation => workspacePlatform.getWorkspaceSnapshot(operation))
+    snapshotReaderRef.current = reader
+    return () => { mountedRef.current = false; reader.dispose(); snapshotReaderRef.current = null }
+  }, [])
   const [error, setError] = useState('')
   const [menu, setMenu] = useState<WorkspaceMenu | null>(null)
   const [editTarget, setEditTarget] = useState<{ entry: WorkspaceTreeEntry; mode: 'rename' | 'move'; value: string } | null>(null)
@@ -182,6 +190,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
   }
 
   const applySnapshot = useCallback((snapshot: WorkspaceSnapshot) => {
+    if (!mountedRef.current || workspacePathRef.current !== workspacePath) return
     setTree(snapshot.tree)
     revisionRef.current = snapshot.revision
     setRevision(snapshot.revision)
@@ -244,16 +253,12 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
       setTree(null)
       return
     }
-    if (refreshInFlightRef.current) return
-
-    refreshInFlightRef.current = true
     try {
       setError('')
-      applySnapshot(await workspacePlatform.getWorkspaceSnapshot({ root: workspacePath, relativePath: '', revision: revisionRef.current }))
+      const snapshot = await snapshotReaderRef.current?.refresh({ root: workspacePath, relativePath: '', revision: revisionRef.current })
+      if (snapshot) applySnapshot(snapshot)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
-    } finally {
-      refreshInFlightRef.current = false
+      if (mountedRef.current && workspacePathRef.current === workspacePath) setError(reason instanceof Error ? reason.message : String(reason))
     }
   }, [applySnapshot, workspacePath])
 
