@@ -54,7 +54,7 @@
   { "token": "/search-provider", "usage": "[name]", "description": "List web search providers or switch default provider", "category": "models", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/bg", "usage": "<query>", "description": "Run a query in the background, non-blocking", "category": "tools", "surfaces": ["cli"] },
   { "token": "/jobs", "usage": "[show|cancel <id>]", "description": "List, inspect, or cancel background jobs", "category": "tools", "surfaces": ["cli"] },
-  { "token": "/preview", "usage": "<relative HTML path>", "description": "Serve workspace HTML locally and return its browser URL", "category": "tools", "surfaces": ["cli", "desktop", "web"] },
+  { "token": "/preview", "usage": "<relative HTML, Markdown, or image path>", "description": "Serve workspace HTML, Markdown, or images locally and return its browser URL", "category": "tools", "surfaces": ["cli", "desktop", "web"] },
   { "token": "/shells", "usage": "[all|show <id>|stop <id>|kill <id>]", "description": "List background terminals, view output, or stop a job", "category": "tools", "surfaces": ["cli", "desktop", "web"] },
   { "token": "/mcp", "usage": "", "description": "List configured MCP servers", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp add", "usage": "<name> <command> [args...]", "description": "Add an MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },

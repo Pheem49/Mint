@@ -1,13 +1,16 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { openArtifactInMintBrowser } from '../utils/artifactBrowser'
 import { runtimePlatform } from '../platform'
 import { renderFormattedMessage } from '../utils/markdown'
 import { ChatCodeBlock } from './ChatCodeBlock'
 
-export type ArtifactType = 'html' | 'svg' | 'markdown' | 'code'
+export type ArtifactType = 'html' | 'svg' | 'markdown' | 'image' | 'code'
 export type ViewportMode = 'desktop' | 'tablet' | 'mobile'
 
 export interface ArtifactFile {
   path: string
+  workspacePath?: string
+  url?: string
   content?: string
   type?: ArtifactType
 }
@@ -21,6 +24,7 @@ interface Props {
 export function detectArtifactType(filePath: string): ArtifactType {
   const lower = filePath.toLowerCase()
   if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'html'
+  if (/\.(png|jpe?g|gif|webp|ico)$/.test(lower)) return 'image'
   if (lower.endsWith('.svg')) return 'svg'
   if (lower.endsWith('.md') || lower.endsWith('.markdown')) return 'markdown'
   return 'code'
@@ -51,7 +55,16 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
   const [content, setContent] = useState<string>(artifact?.content || '')
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
+  const [openingBrowser, setOpeningBrowser] = useState(false)
+  const [browserError, setBrowserError] = useState<string | null>(null)
+  const browserInFlight = useRef(false)
+  const currentArtifact = useRef(artifact)
+  currentArtifact.current = artifact
   const [copied, setCopied] = useState<boolean>(false)
+
+  const [reloadRevision, setReloadRevision] = useState(0)
+  const requestRevision = useRef(0)
+  const sourceWorkspace = artifact?.workspacePath ?? workspacePath
 
   const filePath = artifact?.path || ''
   const fileName = useMemo(() => {
@@ -68,31 +81,45 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
   const language = useMemo(() => getFileLanguage(filePath), [filePath])
 
   const fetchContent = useCallback(async () => {
-    if (!filePath) return
-    setLoading(true)
+    const revision = ++requestRevision.current
     setError(null)
-    try {
-      const text = await runtimePlatform.readWorkspaceFile(filePath, workspacePath)
-      setContent(text)
-    } catch (err: any) {
-      // If content was already supplied in artifact, fallback to it
-      if (artifact?.content) {
-        setContent(artifact.content)
-      } else {
-        setError(err?.message || 'Unable to read file content')
-      }
-    } finally {
+    setReloadRevision((value) => value + 1)
+    if (!filePath) return
+    // Served previews load directly. Text is only needed when their Code tab is selected.
+    if (artifactType === 'image' || (artifact?.url && activeTab === 'preview')) {
       setLoading(false)
+      if (artifactType === 'image' && !artifact?.url) setError('No image preview URL is available')
+      return
     }
-  }, [filePath, workspacePath, artifact])
+    setLoading(true)
+    try {
+      const text = await runtimePlatform.readWorkspaceFile(filePath, sourceWorkspace)
+      if (requestRevision.current === revision) setContent(text)
+    } catch (err: unknown) {
+      if (requestRevision.current !== revision) return
+      if (artifact?.content !== undefined) setContent(artifact.content)
+      else setError(err instanceof Error ? err.message : 'Unable to read file content')
+    } finally {
+      if (requestRevision.current === revision) setLoading(false)
+    }
+  }, [filePath, sourceWorkspace, artifact, artifactType, activeTab])
 
   useEffect(() => {
-    if (artifact?.content) {
-      setContent(artifact.content)
+    setActiveTab('preview')
+    setBrowserError(null)
+    setContent(artifact?.content ?? '')
+    setError(null)
+  }, [artifact])
+
+  useEffect(() => {
+    if (artifact?.content !== undefined && activeTab === 'preview') {
+      setLoading(false)
+      setError(null)
     } else {
-      fetchContent()
+      void fetchContent()
     }
-  }, [artifact, fetchContent])
+    return () => { requestRevision.current += 1 }
+  }, [artifact, activeTab, fetchContent])
 
   const handleCopyPath = async () => {
     if (!filePath) return
@@ -105,19 +132,21 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
     }
   }
 
-  const handleOpenExternal = () => {
-    if (!content) return
-    const mimeType =
-      artifactType === 'html'
-        ? 'text/html'
-        : artifactType === 'svg'
-          ? 'image/svg+xml'
-          : artifactType === 'markdown'
-            ? 'text/markdown'
-            : 'text/plain'
-    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` })
-    const url = URL.createObjectURL(blob)
-    window.open(url, '_blank')
+  const handleOpenInMintBrowser = async () => {
+    if (!artifact || browserInFlight.current) return
+    browserInFlight.current = true
+    setOpeningBrowser(true)
+    setBrowserError(null)
+    try {
+      await openArtifactInMintBrowser(artifact, sourceWorkspace)
+    } catch (reason: unknown) {
+      if (currentArtifact.current === artifact) {
+        setBrowserError(reason instanceof Error ? reason.message : String(reason))
+      }
+    } finally {
+      browserInFlight.current = false
+      setOpeningBrowser(false)
+    }
   }
 
   if (!artifact) return null
@@ -234,7 +263,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
             >
               Preview
             </button>
-            <button
+            {artifactType !== 'image' && <button
               type="button"
               onClick={() => setActiveTab('code')}
               style={{
@@ -250,7 +279,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
               }}
             >
               Code
-            </button>
+            </button>}
           </div>
 
           {/* Viewport switcher for HTML */}
@@ -353,8 +382,11 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
 
           <button
             type="button"
-            onClick={handleOpenExternal}
-            title="Open preview in new window"
+            onClick={() => { void handleOpenInMintBrowser() }}
+            disabled={openingBrowser}
+            aria-label="Open in Mint Browser (Mint Auto)"
+            aria-busy={openingBrowser}
+            title={openingBrowser ? 'Opening Mint Browser…' : 'Open in Mint Browser (Mint Auto)'}
             style={{
               background: 'none',
               border: 'none',
@@ -395,6 +427,12 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
           </button>
         </div>
       </header>
+
+      {browserError && (
+        <div role="alert" style={{ padding: '8px 14px', fontSize: '0.8rem', color: 'var(--status-error, #f87171)', flexShrink: 0 }}>
+          Could not open Mint Browser: {browserError}
+        </div>
+      )}
 
       {/* Main Content Area */}
       <div
@@ -448,16 +486,29 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
               transition: 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
             }}
           >
+            {/* Served documents use their own loopback origin so relative assets can load. */}
             <iframe
               title={fileName}
-              srcDoc={content}
-              sandbox="allow-scripts allow-forms allow-modals"
+              key={reloadRevision}
+              src={artifact.url}
+              srcDoc={artifact.url ? undefined : content}
+              sandbox={artifact.url ? 'allow-scripts allow-forms allow-modals allow-same-origin' : 'allow-scripts allow-forms allow-modals'}
               style={{
                 width: '100%',
                 height: '100%',
                 border: 'none',
                 background: '#ffffff',
               }}
+            />
+          </div>
+        ) : artifactType === 'image' || (artifactType === 'svg' && artifact.url) ? (
+          <div style={{ width: '100%', height: '100%', padding: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <img
+              key={reloadRevision}
+              src={artifact.url}
+              alt={fileName}
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              onError={() => setError('Unable to load image. Check that the preview server is still running.')}
             />
           </div>
         ) : artifactType === 'svg' ? (

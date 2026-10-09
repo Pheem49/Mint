@@ -25,18 +25,21 @@ pub fn start(
     let root = assert_path_capability(root, Capability::Read, config).map_err(|e| e.to_string())?;
     let file = super::workspace::resolve(&root, relative)?;
     assert_path_capability(&file, Capability::Read, config).map_err(|e| e.to_string())?;
+    let extension = file
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if !file.is_file()
-        || !file
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm"))
+        || !(matches!(extension.as_str(), "html" | "htm" | "md" | "markdown") || is_image(&file))
     {
-        return Err("Select an existing HTML file inside the workspace".into());
+        return Err("Select an existing HTML, Markdown, or image file inside the workspace".into());
     }
     if Path::new(relative)
         .components()
         .any(|p| p.as_os_str().to_string_lossy().starts_with('.'))
     {
-        return Err("Hidden files cannot be served by HTML preview".into());
+        return Err("Hidden files cannot be served by preview".into());
     }
     let mut servers = SERVERS.lock().map_err(|e| e.to_string())?;
     servers.retain(|_, (id, _)| {
@@ -97,6 +100,15 @@ pub fn start(
     Ok(serde_json::json!({"url": format!("{base}/{encoded}"), "jobId": id}))
 }
 
+fn is_image(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        matches!(
+            e.to_ascii_lowercase().as_str(),
+            "svg" | "png" | "jpg" | "jpeg" | "webp" | "gif" | "ico"
+        )
+    })
+}
+
 fn reply(stream: &mut TcpStream, code: &str, message: &str) -> std::io::Result<()> {
     write!(
         stream,
@@ -141,16 +153,15 @@ fn serve(
         return reply(&mut stream, "405 Method Not Allowed", "Read-only preview");
     }
     let address = stream.local_addr()?.to_string();
-    if headers.get("host").is_none_or(|host| host != &address)
-        || (headers
-            .get("sec-fetch-site")
-            .is_some_and(|s| s == "cross-site")
-            && headers
-                .get("sec-fetch-mode")
-                .is_none_or(|m| m != "navigate"))
-    {
+    if headers.get("host").is_none_or(|host| host != &address) {
         return reply(&mut stream, "403 Forbidden", "Preview access denied");
     }
+    let cross_site_resource = headers
+        .get("sec-fetch-site")
+        .is_some_and(|s| s == "cross-site")
+        && headers
+            .get("sec-fetch-mode")
+            .is_none_or(|m| m != "navigate");
     let raw = target
         .split('?')
         .next()
@@ -199,6 +210,13 @@ fn serve(
     }) else {
         return reply(&mut stream, "403 Forbidden", "Path denied");
     };
+    // The app can embed images across origins. Other cross-site subresources stay blocked;
+    // no CORS permission is granted to read either images or workspace source files.
+    if cross_site_resource
+        && !(headers.get("sec-fetch-dest").is_some_and(|d| d == "image") && is_image(&path))
+    {
+        return reply(&mut stream, "403 Forbidden", "Preview access denied");
+    }
     if !path.is_file() {
         return reply(&mut stream, "404 Not Found", "File not found");
     }
@@ -211,6 +229,7 @@ fn serve(
         .as_str()
     {
         "html" | "htm" => "text/html; charset=utf-8",
+        "md" | "markdown" => "text/plain; charset=utf-8",
         "css" => "text/css; charset=utf-8",
         "js" | "mjs" => "text/javascript; charset=utf-8",
         "json" | "map" => "application/json",
@@ -253,7 +272,7 @@ pub fn command(
 ) -> Result<String, String> {
     let path = path.trim();
     if path.is_empty() {
-        return Ok("Usage: /preview <workspace-relative HTML file>".into());
+        return Ok("Usage: /preview <workspace-relative HTML, Markdown, or image file>".into());
     }
     let path = if path.starts_with('"') && path.ends_with('"') && path.len() > 1 {
         &path[1..path.len() - 1]
@@ -262,9 +281,118 @@ pub fn command(
     };
     let preview = start(root, path, owner, config)?;
     Ok(format!(
-        "HTML preview: {}\n\nBackground terminal: `{}` · `/shells stop {}`",
+        "File preview: {}\n\nBackground terminal: `{}` · `/shells stop {}`",
         preview["url"].as_str().unwrap_or(""),
         preview["jobId"].as_str().unwrap_or(""),
         preview["jobId"].as_str().unwrap_or("")
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    struct PreviewFixture {
+        root: PathBuf,
+        job: Option<String>,
+    }
+    impl Drop for PreviewFixture {
+        fn drop(&mut self) {
+            if let Some(id) = &self.job {
+                let _ = crate::bg_shell::kill_job(id);
+            }
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+    #[tokio::test]
+    async fn workspace_image_preview_streams_binary_with_the_correct_content_type() {
+        let root =
+            std::env::temp_dir().join(format!("mint-image-preview-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        let mut fixture = PreviewFixture {
+            root: root.clone(),
+            job: None,
+        };
+        let bytes = [137, 80, 78, 71, 13, 10, 26, 10, 0, 255];
+        std::fs::write(root.join("assets/photo.PNG"), bytes).unwrap();
+        let config = MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            ..MintConfig::default()
+        };
+        let result = start(&root, "assets/photo.PNG", None, &config);
+        assert!(
+            result.is_ok(),
+            "a workspace image must be previewable: {result:?}"
+        );
+        let preview = result.unwrap();
+        fixture.job = Some(preview["jobId"].as_str().unwrap().into());
+        let client = reqwest::Client::new();
+        let url = preview["url"].as_str().unwrap();
+        let response = client
+            .get(url)
+            .header("sec-fetch-site", "cross-site")
+            .header("sec-fetch-mode", "no-cors")
+            .header("sec-fetch-dest", "image")
+            .timeout(Duration::from_secs(2))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["content-type"], "image/png");
+        assert_eq!(response.bytes().await.unwrap().as_ref(), &bytes);
+        std::fs::write(root.join("assets/style.css"), "body { color: red }").unwrap();
+        let css_url = url.replace("photo.PNG", "style.css");
+        let asset = client.get(&css_url).send().await.unwrap();
+        assert_eq!(asset.status(), 200);
+        assert!(
+            asset.headers()["content-type"]
+                .to_str()
+                .unwrap()
+                .starts_with("text/css")
+        );
+        let blocked = client
+            .get(&css_url)
+            .header("sec-fetch-site", "cross-site")
+            .header("sec-fetch-mode", "no-cors")
+            .header("sec-fetch-dest", "image")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(blocked.status(), 403);
+        let hidden = client
+            .get(url.replace("photo.PNG", ".secret.png"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(hidden.status(), 403);
+    }
+    #[tokio::test]
+    async fn markdown_browser_preview_is_readable_text_instead_of_a_download() {
+        let root =
+            std::env::temp_dir().join(format!("mint-markdown-preview-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut fixture = PreviewFixture {
+            root: root.clone(),
+            job: None,
+        };
+        std::fs::write(root.join("README.md"), "# Hello\n\nMint").unwrap();
+        let config = MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            ..MintConfig::default()
+        };
+        let preview = start(&root, "README.md", None, &config)
+            .expect("Markdown needs a URL that Mint Browser can open");
+        fixture.job = Some(preview["jobId"].as_str().unwrap().into());
+        let response = reqwest::Client::new()
+            .get(preview["url"].as_str().unwrap())
+            .timeout(Duration::from_secs(2))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.headers()["content-type"],
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(response.text().await.unwrap(), "# Hello\n\nMint");
+    }
 }

@@ -7,7 +7,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
         .peer_addr()
         .map_or(true, |address| !address.ip().is_loopback())
     {
-        send_json_response(socket, "403 Forbidden", "{\"message\":\"HTML preview requires a browser on the same machine as the Mint backend.\"}").await;
+        send_json_response(socket, "403 Forbidden", "{\"message\":\"File preview requires a browser on the same machine as the Mint backend.\"}").await;
         return;
     }
     let owner = match background_request_owner(ctx.request_str) {
@@ -30,7 +30,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             .to_string();
         let path = body["relativePath"]
             .as_str()
-            .ok_or("Missing HTML path")?
+            .ok_or("Missing preview path")?
             .to_string();
         let mint = body["mintBrowser"].as_bool().unwrap_or(false);
         let mut config = load_config().map_err(|e| e.to_string())?;
@@ -55,7 +55,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             .error_for_status()
             .map_err(|e| e.to_string())?;
         if mint {
-            crate::enable_browser_tools(&mut config);
+            if crate::enable_browser_tools(&mut config) {
+                crate::save_config(&config).map_err(|e| e.to_string())?;
+            }
             crate::browser::spawn_automation_browser_with_url(&config, Some(url)).await?;
         }
         Ok::<_, String>(preview)

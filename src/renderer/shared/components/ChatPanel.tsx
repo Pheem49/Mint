@@ -296,7 +296,7 @@ export default function ChatPanel({
 
   const openArtifact = (artifact: ArtifactFile) => {
     if (onOpenArtifact) onOpenArtifact(artifact)
-    else setActiveArtifact(artifact)
+    else setActiveArtifact({ ...artifact, workspacePath: artifact.workspacePath ?? workspacePath })
   }
 
   const openReview = (title: string, changes: FileChange[]) => {

@@ -18,16 +18,35 @@
   border: 0;
   border-radius: var(--radius-sm, 5px);
   background: transparent;
-  color: var(--color-danger, #f87171);
+  color: var(--text-primary);
   font: inherit;
   font-size: .8rem;
   text-align: left;
   cursor: pointer;
 }
 
-.workspace-file-menu button:hover,
-.workspace-file-menu button:focus-visible {
+.workspace-file-menu button:not(:disabled):hover,
+.workspace-file-menu button:not(:disabled):focus-visible {
   background: var(--bg-surface-hover);
+}
+
+.workspace-file-menu button:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+.workspace-file-menu button.is-danger {
+  color: var(--status-error);
+}
+
+.workspace-file-menu button.is-danger:not(:disabled):hover,
+.workspace-file-menu button.is-danger:not(:disabled):focus-visible {
+  background: color-mix(in srgb, var(--status-error) 12%, transparent);
+}
+
+.workspace-file-menu button:disabled {
+  color: var(--text-muted);
+  cursor: default;
 }
 
 .workspace-undo-bar {

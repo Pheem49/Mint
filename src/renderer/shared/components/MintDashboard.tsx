@@ -1,3 +1,4 @@
+import { createWorkspacePreview } from '../utils/workspacePreview'
 import { shouldNotify } from '../utils/notificationSettings'
 import { deliverNotification, receiveProactiveNotification } from '../utils/notifications'
 import '../css/notification-notice.css'
@@ -1162,12 +1163,21 @@ export default function MintDashboard() {
   const openArtifactSurface = (artifact: import('./ArtifactPreviewPanel').ArtifactFile) => {
     setToolsPanelOpen(true)
     const fileName = artifact.path.replace(/\\/g, '/').split('/').pop() || artifact.path
-    const id = `preview:${artifact.path}`
+    artifact = { ...artifact, workspacePath: artifact.workspacePath ?? workspacePath }
+    const id = `preview:${JSON.stringify([artifact.workspacePath, artifact.path])}`
     setToolSurfaces((current) => {
       const next = current.filter((surface) => surface.id !== id)
       return [...next, { id, kind: 'preview', title: fileName, artifact }]
     })
     setActiveSurfaceId(id)
+  }
+
+  const openWorkspacePreview = async (root: string, path: string) => {
+    const artifact = await createWorkspacePreview(root, path, {
+      readWorkspaceFile: (file, workspace) => runtimePlatform.readWorkspaceFile(file, workspace),
+      startHtmlPreview: (workspace, file) => workspacePlatform.startHtmlPreview(workspace, file),
+    })
+    openArtifactSurface(artifact)
   }
 
   const openReviewSurface = (review: Extract<ToolSurface, { kind: 'review' }>) => {
@@ -2410,6 +2420,7 @@ export default function MintDashboard() {
                 onWorkspaceReady={updateWorkspacePath}
                 refreshRevision={workspaceRefreshRevision}
                 onOpenHtml={openHtmlFile}
+                onOpenPreview={openWorkspacePreview}
               />
             </Suspense>
           )}

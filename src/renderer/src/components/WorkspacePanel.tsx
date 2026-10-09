@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import WorkspacePreviewActions from '@shared/components/WorkspacePreviewActions'
 import { WorkspaceSnapshotReader } from '@shared/utils/workspaceSnapshot'
+import { detectArtifactType } from '@shared/components/ArtifactPreviewPanel'
 import { workspacePlatform } from '@shared/platform'
 import { announceWorkspaceChange, useWorkspaceUndo } from '@shared/workspaceUndo'
 import type { WorkspaceSnapshot, WorkspaceTreeEntry } from '@shared/types'
@@ -13,6 +15,7 @@ import {
 
 
 interface WorkspacePanelProps {
+  onOpenPreview?: (root: string, path: string) => Promise<void>
   onOpenHtml?: (root: string, path: string, mode: 'external' | 'mint') => Promise<void>
   agentMode: boolean
   sending: boolean
@@ -91,7 +94,7 @@ function TreeNode({ entry, level, onContextMenu }: { entry: WorkspaceTreeEntry; 
   )
 }
 
-export default function WorkspacePanel({ agentMode, sending, workspacePath, onEnableAgentMode, onSetMessage, onWorkspaceReady, refreshRevision = 0, onOpenHtml }: WorkspacePanelProps) {
+export default function WorkspacePanel({ agentMode, sending, workspacePath, onEnableAgentMode, onSetMessage, onWorkspaceReady, refreshRevision = 0, onOpenHtml, onOpenPreview }: WorkspacePanelProps) {
   const [tree, setTree] = useState<WorkspaceTreeEntry | null>(null)
   const [revision, setRevision] = useState(0)
   const revisionRef = useRef(0)
@@ -151,10 +154,15 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
     event.stopPropagation()
     if (trashInFlightRef.current) return
     const bounds = event.currentTarget.getBoundingClientRect()
+    const type = detectArtifactType(entry.name)
+    const previewActions = entry.kind === 'file'
+      ? Number(!!onOpenPreview && type !== 'code') + Number(!!onOpenHtml && type === 'html')
+      : 0
+    const menuHeight = 132 + previewActions * 34
     setMenu({
       entry,
       x: Math.max(8, Math.min(event.clientX || bounds.left, window.innerWidth - 200)),
-      y: Math.max(8, Math.min(event.clientY || bounds.bottom, window.innerHeight - (entry.kind === 'file' && /\.html?$/i.test(entry.name) ? 200 : 132))),
+      y: Math.max(8, Math.min(event.clientY || bounds.bottom, window.innerHeight - menuHeight)),
       trigger: event.currentTarget,
     })
   }
@@ -206,6 +214,18 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
     setMutationPending(true)
     setError('')
     try { await onOpenHtml(root, entry.path, mode) }
+    catch (reason) { if (workspacePathRef.current === root) setError(reason instanceof Error ? reason.message : String(reason)) }
+    finally { setMutationPending(false) }
+  }
+
+  const openPreview = async () => {
+    if (!menu || !onOpenPreview || mutationPending) return
+    const { entry } = menu
+    const root = workspacePath
+    closeMenu()
+    setMutationPending(true)
+    setError('')
+    try { await onOpenPreview(root, entry.path) }
     catch (reason) { if (workspacePathRef.current === root) setError(reason instanceof Error ? reason.message : String(reason)) }
     finally { setMutationPending(false) }
   }
@@ -364,13 +384,15 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
       </div>
       {menu && createPortal(
         <div ref={menuRef} className="workspace-file-menu" role="menu" aria-label={`Actions for ${menu.entry.name}`} style={{ left: menu.x, top: menu.y }} onContextMenu={(event) => event.preventDefault()}>
-          {onOpenHtml && menu.entry.kind === 'file' && /\.html?$/i.test(menu.entry.name) && <>
-            <button type="button" role="menuitem" disabled={mutationPending} onClick={() => { void openHtml('external') }}>Open in Browser</button>
-            <button type="button" role="menuitem" disabled={mutationPending} onClick={() => { void openHtml('mint') }}>Preview in Mint</button>
-          </>}
+          <WorkspacePreviewActions
+            entry={menu.entry}
+            pending={mutationPending}
+            onOpenHtml={onOpenHtml ? () => { void openHtml('external') } : undefined}
+            onPreview={onOpenPreview ? () => { void openPreview() } : undefined}
+          />
           <button type="button" role="menuitem" onClick={() => openMoveDialog('rename')}>Rename…</button>
           <button type="button" role="menuitem" onClick={() => openMoveDialog('move')}>Move…</button>
-          <button type="button" role="menuitem" onClick={handleMoveToTrash}>Move to Trash</button>
+          <button type="button" role="menuitem" className="is-danger" onClick={handleMoveToTrash}>Move to Trash</button>
         </div>,
         document.body,
       )}

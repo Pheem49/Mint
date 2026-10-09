@@ -493,7 +493,7 @@ export default function ToolSurfacePage({
 
       <div className={`tool-surface-content${active ? '' : ' is-launcher'}`}>
         {!active && renderLauncher()}
-        {active?.kind === 'preview' && <ArtifactPreviewPanel artifact={active.artifact} onClose={() => active && onClose(active.id)} workspacePath={workspacePath || undefined} />}
+        {active?.kind === 'preview' && <ArtifactPreviewPanel key={active.id} artifact={active.artifact} onClose={() => active && onClose(active.id)} workspacePath={workspacePath || undefined} />}
         {active?.kind === 'review' && (
           <CodeReviewPage
             title={active.reviewTitle}
