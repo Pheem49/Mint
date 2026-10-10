@@ -2,6 +2,11 @@ use std::path::Path;
 
 use super::super::*;
 
+fn is_skill_edit(root: &Path, path: &Path) -> Result<bool, OrchestrationError> {
+    crate::skills::skill_edit_requires_approval(root, path)
+        .map_err(|error| OrchestrationError::Agent(error.to_string()))
+}
+
 /// Handles the subset of `execute_tool` actions related to files.
 /// Only called for actions `execute_tool` has already routed here, so the
 /// fallback arm is unreachable in practice.
@@ -102,12 +107,22 @@ pub(in crate::orchestration) async fn execute(
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            let approved = approve_cb(&AgentApproval::ApplyPatch {
-                path: patch.path.to_string_lossy().into_owned(),
-                hunks: patch.hunks.clone(),
-                diff,
-            })
-            .map_err(OrchestrationError::Agent)?;
+            let approval = if is_skill_edit(root, &proposal.edits[0].path)?
+                || is_skill_edit(root, &root.join(&patch.path))?
+            {
+                AgentApproval::SkillWrite {
+                    path: patch.path.to_string_lossy().into_owned(),
+                    content: edit.content.clone(),
+                    diff,
+                }
+            } else {
+                AgentApproval::ApplyPatch {
+                    path: patch.path.to_string_lossy().into_owned(),
+                    hunks: patch.hunks.clone(),
+                    diff,
+                }
+            };
+            let approved = approve_cb(&approval).map_err(OrchestrationError::Agent)?;
 
             match approved {
                 ApprovalOutcome::Approved => {
@@ -138,12 +153,22 @@ pub(in crate::orchestration) async fn execute(
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            let approved = approve_cb(&AgentApproval::WriteFile {
-                path: path_str.to_owned(),
-                content: input.file_content.clone(),
-                diff,
-            })
-            .map_err(OrchestrationError::Agent)?;
+            let approval = if is_skill_edit(root, &proposal.edits[0].path)?
+                || is_skill_edit(root, &root.join(path_str))?
+            {
+                AgentApproval::SkillWrite {
+                    path: path_str.to_owned(),
+                    content: edit.content.clone(),
+                    diff,
+                }
+            } else {
+                AgentApproval::WriteFile {
+                    path: path_str.to_owned(),
+                    content: input.file_content.clone(),
+                    diff,
+                }
+            };
+            let approved = approve_cb(&approval).map_err(OrchestrationError::Agent)?;
 
             match approved {
                 ApprovalOutcome::Approved => {
@@ -159,5 +184,111 @@ pub(in crate::orchestration) async fn execute(
         _ => unreachable!(
             "execute_tool routed an unhandled action into tools::files::execute: {action}"
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn skill_writes_require_separate_approval_even_when_file_edits_are_allowed() {
+        let root =
+            std::env::temp_dir().join(format!("mint-skill-approval-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let config = MintConfig {
+            allowed_write_paths: vec![root.clone()],
+            allowed_read_paths: vec![root.clone()],
+            ..MintConfig::default()
+        };
+        let input = AgentInput {
+            path: ".agents/skills/example/SKILL.md".into(),
+            file_content: "---\ndescription: example\n---\nOriginal instructions".into(),
+            ..Default::default()
+        };
+        let mut requests = Vec::new();
+        let mut approve = |approval: &AgentApproval| {
+            let value = serde_json::to_value(approval).unwrap();
+            requests.push(value.clone());
+            Ok(if value.get("SkillWrite").is_some() {
+                ApprovalOutcome::Denied
+            } else {
+                ApprovalOutcome::Approved
+            })
+        };
+        execute(
+            "write_file",
+            &input,
+            &root,
+            &config,
+            "skill-test",
+            &mut approve,
+        )
+        .await
+        .unwrap();
+        assert!(
+            !root.join(&input.path).exists(),
+            "ordinary file approval must not authorize skill creation"
+        );
+        assert!(
+            requests[0]["SkillWrite"]["diff"]
+                .as_str()
+                .unwrap()
+                .contains("Original instructions")
+        );
+
+        let path = root.join(&input.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &input.file_content).unwrap();
+        let patch = AgentInput {
+            patch: Some(AgentPatch {
+                path: PathBuf::from(&input.path),
+                hunks: vec![CodePatchHunk {
+                    old_text: "Original instructions".into(),
+                    new_text: "Changed instructions".into(),
+                    replace_all: false,
+                }],
+            }),
+            ..Default::default()
+        };
+        execute(
+            "apply_patch",
+            &patch,
+            &root,
+            &config,
+            "skill-test",
+            &mut |approval| {
+                Ok(
+                    if serde_json::to_value(approval)
+                        .unwrap()
+                        .get("SkillWrite")
+                        .is_some()
+                    {
+                        ApprovalOutcome::Denied
+                    } else {
+                        ApprovalOutcome::Approved
+                    },
+                )
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), input.file_content);
+        execute(
+            "apply_patch",
+            &patch,
+            &root,
+            &config,
+            "skill-test",
+            &mut |_| Ok(ApprovalOutcome::Approved),
+        )
+        .await
+        .unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("Changed instructions")
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

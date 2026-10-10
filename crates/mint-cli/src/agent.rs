@@ -387,6 +387,10 @@ fn tui_approval(
         _ => ApprovalOutcome::Denied,
     };
     Ok(match approval {
+        AgentApproval::SkillWrite { path, diff, .. } => yes_no(
+            "Save skill?",
+            format!("Changes instructions used in future tasks.\nPath: {path}\n\n{diff}"),
+        ),
         AgentApproval::WriteFile { path, diff, .. } => tui_persistable_approval(
             tui,
             "write_file",
@@ -667,6 +671,21 @@ pub async fn run_code_agent_with_options(
         let _guard = ApprovalGuard(Arc::clone(&approve_approval_active));
 
         match approval {
+            AgentApproval::SkillWrite { path, diff, .. } => {
+                let (additions, deletions) = diff_stats(diff);
+                print_diff_header("Save skill", path, additions, deletions);
+                print_colored_diff(diff);
+                Ok(
+                    if confirm_pausing_interrupt(
+                        "Save these instructions for future tasks?",
+                        &approve_approval_active,
+                    ) {
+                        ApprovalOutcome::Approved
+                    } else {
+                        ApprovalOutcome::Denied
+                    },
+                )
+            }
             AgentApproval::WriteFile { path, diff, .. } => confirm_with_persistence(
                 "write_file",
                 path,

@@ -1,3 +1,4 @@
+import { requiresExplicitApproval } from '../utils/approval'
 import { createWorkspacePreview } from '../utils/workspacePreview'
 import { shouldNotify } from '../utils/notificationSettings'
 import { deliverNotification, receiveProactiveNotification } from '../utils/notifications'
@@ -1019,7 +1020,7 @@ export default function MintDashboard() {
     const unlistenPromise = listen('tool-approval-requested', (event: { payload: any }) => {
       const chatId = event.payload.chatId as string | undefined
       if (!chatId) return
-      if (sessionAutoApprovedRef.current && autoApprovedChatIdRef.current === chatId) {
+      if (sessionAutoApprovedRef.current && autoApprovedChatIdRef.current === chatId && !requiresExplicitApproval(event.payload.approval)) {
         submitToolApproval(event.payload.token, true).catch((err) => {
           console.error("Auto approval failed:", err)
         })
@@ -1279,7 +1280,7 @@ export default function MintDashboard() {
     const pendingApproval = pendingApprovals[chatId]
     if (!pendingApproval) return
     try {
-      if (autoApproveSession) {
+      if (autoApproveSession && !requiresExplicitApproval(pendingApproval.approval)) {
         sessionAutoApprovedRef.current = true
         autoApprovedChatIdRef.current = chatId
         setSessionAutoApproved(true)
@@ -1399,7 +1400,7 @@ export default function MintDashboard() {
         shouldUseAgentMode ? planMode : false,
         options.pinnedMcpServer ?? null,
         (payload) => {
-          if (sessionAutoApprovedRef.current && autoApprovedChatIdRef.current === originChatId) {
+          if (sessionAutoApprovedRef.current && autoApprovedChatIdRef.current === originChatId && !requiresExplicitApproval(payload.approval)) {
             submitToolApproval(payload.token, true).catch((err) => {
               console.error("Auto approval failed:", err)
             })

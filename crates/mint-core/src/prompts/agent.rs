@@ -492,6 +492,7 @@ pub fn build_system_prompt(
         || allowed_actions.contains(&"apply_patch")
     {
         rules.push("4. Shell commands and file edits require user approval. Mint handles approval after you request the tool.");
+        rules.push("4a. SKILL CHANGES: Create or edit reusable skills only when the user asks for that work. Otherwise complete the current task and suggest the skill in your summary. Use write_file or apply_patch for skill files so Mint can show the concrete diff and request approval for each change. A general file or session permission does not authorize changing persistent skill instructions. After approval, report the saved skill path and what changed.");
     }
     if allowed_actions.contains(&"run_shell") {
         rules.push("5. Shell commands are classified as readOnly, test, network, or mutating. Only policy-allowed modes may run after approval. Never request destructive commands such as rm -rf, git reset --hard, git checkout --, or git clean -f.");

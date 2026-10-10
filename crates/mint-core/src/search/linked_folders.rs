@@ -447,7 +447,7 @@ fn parse_model_notes(
 /// Fire-and-forget: after a chat turn, ask the model (in a second, separate
 /// call) whether it touched on a linked folder's topic closely enough to be
 /// worth a note, and if so append one to `<folder>/mint-notes/<date>.md`.
-/// Mirrors [`crate::orchestration::spawn_auto_skill_write`] — never blocks or
+/// Like background memory extraction, this never blocks or
 /// fails the turn that triggered it.
 pub fn spawn_linked_folder_note(
     config: MintConfig,

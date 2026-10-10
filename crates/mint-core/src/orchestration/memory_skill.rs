@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::*;
 
@@ -240,33 +240,17 @@ pub fn spawn_auto_memory_update(
     });
 }
 
-/// Fire-and-forget: after a task finishes and passes [`looks_skill_worthy`], ask the
-/// model (in a second, separate call) whether the task was a genuinely reusable
-/// problem worth turning into a skill, and if so write
-/// `<root>/.agents/skills/<slug>/SKILL.md`. Mirrors [`spawn_auto_memory_update`] —
-/// never blocks or fails the already-returned [`AgentResult`].
-pub fn spawn_auto_skill_write(
-    config: MintConfig,
-    task: String,
-    summary: String,
-    root: PathBuf,
-    existing_skills: String,
-) {
-    tokio::spawn(async move {
-        if let Err(e) = auto_write_skill(&config, &task, &summary, &root, &existing_skills).await {
-            eprintln!("Auto skill write failed: {:?}", e);
-        }
-    });
-}
-
+/// Reflect on a completed task and present a concrete skill diff to the user.
+/// The proposal runs within the turn so it uses the surface's approval channel.
 pub(super) async fn auto_write_skill(
     config: &MintConfig,
     task: &str,
     summary: &str,
     root: &Path,
     existing_skills: &str,
-) -> Result<(), OrchestrationError> {
-    let system_instruction = r#"You are a background agent that decides whether a just-completed
+    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+) -> Result<Option<String>, OrchestrationError> {
+    let system_instruction = r#"You propose instructions for user review and decide whether a just-completed
 coding/agent task is worth turning into a reusable skill for future sessions.
 
 A task is skill-worthy only if it was non-trivial (took real investigation or multiple
@@ -341,28 +325,28 @@ Worth saving:
     };
 
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&clean_json) else {
-        return Ok(());
+        return Ok(None);
     };
     let Some(obj) = value.as_object() else {
-        return Ok(());
+        return Ok(None);
     };
     if !obj
         .get("should_save")
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
     {
-        return Ok(());
+        return Ok(None);
     }
     let (Some(slug), Some(content)) = (
         obj.get("slug").and_then(|v| v.as_str()),
         obj.get("content").and_then(|v| v.as_str()),
     ) else {
-        return Ok(());
+        return Ok(None);
     };
 
     let slug = slugify(slug);
     if slug.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
     let skill_dir = root.join(".agents").join("skills").join(&slug);
@@ -379,12 +363,38 @@ Worth saving:
         .unwrap_or(0);
     let content = set_skill_revision(content, previous_revision + 1);
 
-    std::fs::create_dir_all(&skill_dir)
-        .map_err(|e| OrchestrationError::Agent(format!("unable to create {skill_dir:?}: {e}")))?;
-    std::fs::write(&skill_path, &content)
-        .map_err(|e| OrchestrationError::Agent(format!("unable to write SKILL.md: {e}")))?;
+    save_skill_proposal(config, root, &skill_path, &content, approve).map(Some)
+}
 
-    Ok(())
+/// Apply only the approved content, rechecking both policy and the current file.
+fn save_skill_proposal(
+    config: &MintConfig,
+    root: &Path,
+    path: &Path,
+    content: &str,
+    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+) -> Result<String, OrchestrationError> {
+    let edit = CodeEdit {
+        path: path.to_owned(),
+        content: content.to_owned(),
+    };
+    let proposal = propose_code_edits(root, std::slice::from_ref(&edit), config)
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+    let outcome = approve(&AgentApproval::SkillWrite {
+        path: path.to_string_lossy().into_owned(),
+        content: content.to_owned(),
+        diff: proposal.edits[0].diff.clone(),
+    })
+    .map_err(OrchestrationError::Agent)?;
+    if outcome != ApprovalOutcome::Approved || run_control::cancelled() {
+        return Ok(format!("Skill proposal was not saved: {}", path.display()));
+    }
+    apply_code_edits(root, &[edit], &proposal.approval_token, config)
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+    Ok(format!(
+        "Skill saved with your approval: {}",
+        path.display()
+    ))
 }
 
 /// Full current `SKILL.md` content of every existing workspace skill under
@@ -931,6 +941,68 @@ Emit at most {MAX_FACT_OPS_PER_TURN} ops."#
 
     apply_fact_ops(&memory, &clean_json, workspace, chat_id, &known_ids);
     Ok(())
+}
+
+#[cfg(test)]
+mod skill_approval_tests {
+    use super::*;
+
+    #[test]
+    fn generated_skill_is_saved_only_after_approval_of_the_exact_diff() {
+        let root =
+            std::env::temp_dir().join(format!("mint-generated-skill-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let config = MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            allowed_write_paths: vec![root.clone()],
+            ..MintConfig::default()
+        };
+        let path = root.join(".agents/skills/example/SKILL.md");
+        let content = "---\ndescription: example\nrevisions: 1\n---\nReusable instructions\n";
+        for outcome in [
+            ApprovalOutcome::Denied,
+            ApprovalOutcome::Intercepted("later".into()),
+        ] {
+            save_skill_proposal(&config, &root, &path, content, &mut |approval| {
+                match approval {
+                    AgentApproval::SkillWrite {
+                        content: proposed,
+                        diff,
+                        ..
+                    } => {
+                        assert_eq!(proposed, content);
+                        assert!(diff.contains("+Reusable instructions"));
+                    }
+                    _ => panic!("skill proposal must use separate approval"),
+                }
+                Ok(outcome.clone())
+            })
+            .unwrap();
+            assert!(!root.join(".agents").exists());
+        }
+        save_skill_proposal(&config, &root, &path, content, &mut |_| {
+            Ok(ApprovalOutcome::Approved)
+        })
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), content);
+        let updated = content.replace("revisions: 1", "revisions: 2");
+        save_skill_proposal(&config, &root, &path, &updated, &mut |_| {
+            Ok(ApprovalOutcome::Denied)
+        })
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), content);
+        // A concurrent edit while the user is reviewing must never be overwritten.
+        let result = save_skill_proposal(&config, &root, &path, &updated, &mut |_| {
+            std::fs::write(&path, "Edited by the user").unwrap();
+            Ok(ApprovalOutcome::Approved)
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "Edited by the user"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[cfg(test)]

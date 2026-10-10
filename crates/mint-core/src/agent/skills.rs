@@ -239,6 +239,55 @@ fn is_rules_file(path: &Path) -> bool {
         .is_some_and(|parent| parent.ends_with(".cursor/rules"))
 }
 
+/// Skill sources and their installed resources change persistent instructions.
+/// Include taught source files even when they use an ordinary filename or have
+/// been deleted and are about to be recreated. Lookup failures fail closed.
+pub(crate) fn skill_edit_requires_approval(root: &Path, path: &Path) -> Result<bool, SkillError> {
+    if is_skill_tree_path(root, path) {
+        return Ok(true);
+    }
+    skill_edit_requires_approval_with_memory(&MemoryStore::open_default()?, root, path)
+}
+
+fn is_skill_tree_path(root: &Path, path: &Path) -> bool {
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| matches!(name.to_ascii_lowercase().as_str(), "skill.md" | "skill.txt"))
+    {
+        return true;
+    }
+    let mut directories = vec![root.join(".agents/skills"), root.join("skills")];
+    if let Some(home) = dirs::home_dir() {
+        directories.push(home.join(".config/mint/mint-skills"));
+    }
+    directories.into_iter().any(|directory| {
+        path.starts_with(&directory)
+            || directory
+                .canonicalize()
+                .is_ok_and(|canonical| path.starts_with(canonical))
+    })
+}
+
+fn skill_edit_requires_approval_with_memory(
+    memory: &MemoryStore,
+    root: &Path,
+    path: &Path,
+) -> Result<bool, SkillError> {
+    if is_skill_tree_path(root, path) {
+        return Ok(true);
+    }
+    let target = path.canonicalize().unwrap_or_else(|_| path.to_owned());
+    // Match the complete registry, including sources outside the workspace.
+    Ok(memory
+        .learned_skill_sources()?
+        .into_iter()
+        .any(|source_path| {
+            let source = Path::new(&source_path);
+            source.canonicalize().unwrap_or_else(|_| source.to_owned()) == target
+        }))
+}
+
 /// Resolve only a file the skill catalog actually advertises, including taught/global skills.
 pub fn skill_for_read_path(root: &Path, path: &str) -> Option<LearnedSkill> {
     let canonical = root.join(path).canonicalize().ok()?;
@@ -393,6 +442,44 @@ mod tests {
         load_skills_from_dir(&root.join(".agents/skills"), &mut skills);
         let memory = MemoryStore::open(root.join("memory.sqlite"));
         (root, memory, skills)
+    }
+
+    #[test]
+    fn protects_skill_resources_and_flat_skills_but_not_ordinary_source_files() {
+        let (root, memory, _) = fixture();
+        for path in [
+            ".agents/skills/build/scripts/build.sh",
+            "skills/deploy.md",
+            "skills/example/skill.txt",
+            ".codex/skills/example/SKILL.md",
+        ] {
+            assert!(
+                skill_edit_requires_approval_with_memory(&memory, &root, &root.join(path)).unwrap(),
+                "{path}"
+            );
+        }
+        assert!(
+            !skill_edit_requires_approval_with_memory(&memory, &root, &root.join("src/skills.rs"))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn edits_to_taught_skill_sources_require_approval_outside_skill_directories() {
+        let (root, memory, _) = fixture();
+        let path = root.join("playbook.md");
+        fs::write(&path, "Reusable instructions").unwrap();
+        memory
+            .add_learned_skill("playbook", &path.to_string_lossy(), "Reusable instructions")
+            .unwrap();
+        assert!(skill_edit_requires_approval_with_memory(&memory, &root, &path).unwrap());
+        fs::remove_file(&path).unwrap();
+        // A registered source remains protected when recreated.
+        assert!(skill_edit_requires_approval_with_memory(&memory, &root, &path).unwrap());
+        assert!(
+            !skill_edit_requires_approval_with_memory(&memory, &root, &root.join("app.rs"))
+                .unwrap()
+        );
     }
 
     #[test]

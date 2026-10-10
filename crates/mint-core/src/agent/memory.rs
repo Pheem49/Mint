@@ -903,6 +903,14 @@ impl MemoryStore {
         )?)
     }
 
+    /// Source lookup for edit policy without loading every skill's full body.
+    pub(crate) fn learned_skill_sources(&self) -> Result<Vec<String>, MemoryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare("SELECT source_path FROM learned_skills")?;
+        let rows = statement.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     pub fn learned_skills(&self, limit: usize) -> Result<Vec<LearnedSkill>, MemoryError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(

@@ -659,6 +659,12 @@ pub struct AskUserOption {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentApproval {
+    /// Persistent agent instructions need a decision for each concrete diff.
+    SkillWrite {
+        path: String,
+        content: String,
+        diff: String,
+    },
     WriteFile {
         path: String,
         content: String,
@@ -2392,6 +2398,20 @@ where
                             on_chunk(remainder.to_owned());
                         }
 
+                        if config.auto_skill_writing && allow_subagent_dispatch && !run_control::cancelled() && looks_skill_worthy(step, &action_counts) {
+                            match auto_write_skill(config, task, &summary, &root, &skills, &mut approve).await {
+                                Ok(Some(message)) => {
+                                    on_chunk(format!("\n\n{message}"));
+                                    summary.push_str(&format!("\n\n{message}"));
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    let message = format!("Skill proposal was not saved: {error}");
+                                    on_chunk(format!("\n\n{message}"));
+                                    summary.push_str(&format!("\n\n{message}"));
+                                }
+                            }
+                        }
                         memory.save_workspace_session(
                             &root.to_string_lossy(),
                             &summary,
@@ -2410,15 +2430,6 @@ where
                             summary.clone(),
                             turn.id,
                         );
-                        if config.auto_skill_writing && looks_skill_worthy(step, &action_counts) {
-                            spawn_auto_skill_write(
-                                config.clone(),
-                                task.to_string(),
-                                summary.clone(),
-                                root.clone(),
-                                skills.clone(),
-                            );
-                        }
                         let run_summary = RunTelemetrySummary {
                             run_id: format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
                             task: task.to_string(),

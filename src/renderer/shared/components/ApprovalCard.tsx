@@ -27,9 +27,10 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
   const details = renderApprovalDetails(pendingApproval.approval)
   const writeFile = pendingApproval.approval?.WriteFile
   const applyPatch = pendingApproval.approval?.ApplyPatch
+  const skillWrite = pendingApproval.approval?.SkillWrite
   const runShell = pendingApproval.approval?.RunShell
-  const targetFilePath = writeFile?.path || applyPatch?.path || 'Code Change'
-  const diffText = writeFile?.diff || applyPatch?.diff
+  const targetFilePath = skillWrite?.path || writeFile?.path || applyPatch?.path || 'Code Change'
+  const diffText = skillWrite?.diff || writeFile?.diff || applyPatch?.diff
   const isAskUser = !!pendingApproval.approval?.AskUser
   const mcpTool = pendingApproval.approval?.McpTool
   const MCP_ALLOW_ALL_SENTINEL = '__mcp_allow_all__'
@@ -57,6 +58,7 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
 
   // Get badge label based on action type
   const getToolMeta = () => {
+    if (skillWrite) return { badge: 'Skill Change', badgeClass: 'edit' }
     if (runShell) return { badge: 'Run Command', badgeClass: details.isDangerous ? 'dangerous' : 'command' }
     if (writeFile || applyPatch) return { badge: 'File Edit', badgeClass: 'edit' }
     if (mcpTool) return { badge: `MCP: ${mcpTool.server}`, badgeClass: 'mcp' }
@@ -67,7 +69,12 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
   const toolMeta = getToolMeta()
 
   // Standard non-AskUser choices
-  const actionChoices = mcpTool
+  const actionChoices = skillWrite
+    ? [
+        { key: '1', title: 'Allow once', variant: 'approve', action: () => onApproval(true, false) },
+        { key: '2', title: 'Reject', variant: 'cancel', action: () => onApproval(false) },
+      ]
+    : mcpTool
     ? [
         {
           key: '1',

@@ -224,7 +224,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         "/autoskill" => cmd_bool_toggle(
             rest,
             "/autoskill",
-            "Auto Skill Writing",
+            "Skill Suggestions (approval required to save)",
             config.auto_skill_writing,
             |cfg, v| cfg.auto_skill_writing = v,
             config,

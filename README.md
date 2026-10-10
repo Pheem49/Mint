@@ -538,7 +538,7 @@ mint learn ./skill.md
 
 ### Skills (`mint skills`)
 
-Reusable instruction sets the agent loads into context. Besides the ones Mint writes for itself after a hard task, you can install skills from a local file/folder, or straight from a GitHub repo/URL — resolved via the community [`npx skills`](https://github.com/vercel-labs/skills) CLI, so any skill written for Claude Code, Cursor, or the many other agents it supports works with Mint too, no conversion needed:
+Reusable instruction sets the agent loads into context. Mint can suggest a skill after a hard task when `/autoskill on` is enabled (off by default). Every proposed creation or update needs your approval before saving; general session approval does not cover skill changes. You can install skills from a local file/folder, or straight from a GitHub repo/URL — resolved via the community [`npx skills`](https://github.com/vercel-labs/skills) CLI, so any skill written for Claude Code, Cursor, or the many other agents it supports works with Mint too, no conversion needed:
 
 ```bash
 # Local file or folder — goes to Mint's global config (~/.config/mint/mint-skills)

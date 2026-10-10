@@ -1045,7 +1045,7 @@ pub async fn handle_slash_command(
                 session.config.auto_skill_writing = rest == "on";
                 match mint_core::save_config(&session.config) {
                     Ok(()) => println!(
-                        "{DIM}Auto skill writing set to: {}{RESET}\n",
+                        "{DIM}Skill suggestions (approval required to save) set to: {}{RESET}\n",
                         if session.config.auto_skill_writing {
                             "Enabled"
                         } else {
@@ -1058,7 +1058,7 @@ pub async fn handle_slash_command(
                 println!("{WARN}Usage: /autoskill [on|off]{RESET}\n");
             } else {
                 println!(
-                    "{DIM}When enabled, the agent may write a new .agents/skills/<name>/SKILL.md after finishing a non-trivial, reusable task.{RESET}"
+                    "{DIM}When enabled, the agent proposes a skill after a reusable task. Each proposed diff needs your approval before saving.{RESET}"
                 );
                 let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
                 let current = if session.config.auto_skill_writing {
@@ -1066,12 +1066,12 @@ pub async fn handle_slash_command(
                 } else {
                     &options[1]
                 };
-                match prompt_interactive_select("Auto Skill Writing", &options, current) {
+                match prompt_interactive_select("Skill Suggestions", &options, current) {
                     Ok(Some(sel)) => {
                         session.config.auto_skill_writing = sel.starts_with("on");
                         match mint_core::save_config(&session.config) {
                             Ok(()) => println!(
-                                "{DIM}Auto skill writing set to: {}{RESET}\n",
+                                "{DIM}Skill suggestions (approval required to save) set to: {}{RESET}\n",
                                 if session.config.auto_skill_writing {
                                     "Enabled"
                                 } else {
