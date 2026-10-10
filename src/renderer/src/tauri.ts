@@ -2304,7 +2304,7 @@ export const readWorkspaceFile = async (path: string, workspacePath?: string): P
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
   readMcpArtifact,
-  listBackgroundJobs, getBackgroundJob, stopBackgroundJob,
+  listBackgroundJobs, getBackgroundJob, stopBackgroundJob, deleteBackgroundJob,
   runSlashCommand,
   authRegister,
   authLogin,
@@ -2383,6 +2383,7 @@ export async function listBackgroundJobs(workspace?: string): Promise<import('..
 }
 export async function getBackgroundJob(id: string) { if (isTauriRuntime()) { const { invoke } = await import('@tauri-apps/api/core'); return invoke<import('../shared/types').BackgroundJobOutput>('get_background_job', { id, ownerToken: getStoredAuthToken() }) } return backgroundRequest<import('../shared/types').BackgroundJobOutput>(`/${encodeURIComponent(id)}`) }
 export async function stopBackgroundJob(id: string) { if (isTauriRuntime()) { const { invoke } = await import('@tauri-apps/api/core'); return invoke<import('../shared/types').BackgroundJob>('stop_background_job', { id, ownerToken: getStoredAuthToken() }) } return backgroundRequest<import('../shared/types').BackgroundJob>(`/${encodeURIComponent(id)}/stop`, 'POST') }
+export async function deleteBackgroundJob(id: string) { if (isTauriRuntime()) { const { invoke } = await import('@tauri-apps/api/core'); await invoke('remove_background_job', { id, ownerToken: getStoredAuthToken() }); return } await backgroundRequest<{deleted: boolean}>(`/${encodeURIComponent(id)}`, 'DELETE') }
 
 export async function startHtmlPreview(root: string, relativePath: string, mintBrowser = false): Promise<{url: string; jobId: string}> {
   if (isTauriRuntime()) { const { invoke } = await import('@tauri-apps/api/core'); return invoke('start_html_preview', { root, relativePath, ownerToken: getStoredAuthToken() }) }

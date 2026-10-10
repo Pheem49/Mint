@@ -48,7 +48,7 @@ import { executeSlashCommand } from '../utils/slashCommandProcessor'
 import { captureScreenForChat } from '../utils/screenCapture'
 import { useConversationCoordinator } from '../conversation/useConversationCoordinator'
 import { matchesActiveRun, matchesActiveSession } from '../conversation/syncView'
-import { navigateToProject } from '../conversation/projectNavigation'
+import { isPersistedConversation, navigateToProject } from '../conversation/projectNavigation'
 
 
 
@@ -1264,7 +1264,10 @@ export default function MintDashboard() {
   const updateWorkspacePath = (path: string, persist = true) => {
     const next = path.trim()
     conversationActions.selectWorkspace(next)
-    if (persist) void handleUpdateSessionWorkspace(activeConversationRef.current, next || null)
+    const activeId = activeConversationRef.current
+    if (persist && isPersistedConversation(activeId, chatSessions)) {
+      void handleUpdateSessionWorkspace(activeId, next || null)
+    }
   }
 
   useEffect(() => {

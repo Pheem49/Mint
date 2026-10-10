@@ -1002,6 +1002,21 @@ h1 {
     transform: translateX(-50%);
   }
 
+  .assistant-workspace.workspace-open .conversation-panel.is-empty {
+    position: relative;
+  }
+
+  .assistant-workspace.workspace-open .conversation-panel.is-empty .input-area {
+    position: absolute;
+    top: auto;
+    right: 0;
+    bottom: 44px;
+    left: 0;
+    width: auto;
+    margin: 0;
+    transform: none;
+  }
+
   .assistant-workspace:not(.workspace-open) .conversation-panel.is-empty .input-disclaimer {
     position: absolute;
     right: 32px;

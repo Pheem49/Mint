@@ -351,7 +351,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                 ("POST", "/api/html-preview") => {
                     routes::html_preview::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
                 }
-                ("GET" | "POST", route) if route == "/api/background-jobs" || route.starts_with("/api/background-jobs/") => {
+                ("GET" | "POST" | "DELETE", route) if route == "/api/background-jobs" || route.starts_with("/api/background-jobs/") => {
                     routes::background_jobs::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
                 }
 

@@ -979,6 +979,22 @@ fn wait_stop_completion(job: &JobRecord) {
     }
 }
 
+/// Remove a finished job and its buffered output from the registry.
+pub fn remove_job(job_id: &str) -> Result<(), ShellError> {
+    let mut jobs = BG_SHELL_JOBS.lock().unwrap();
+    let job = jobs
+        .get(job_id)
+        .ok_or_else(|| ShellError::JobNotFound(job_id.to_owned()))?;
+    if matches!(
+        *job.status.lock().unwrap(),
+        JobStatus::Running | JobStatus::Stopping
+    ) {
+        return Err(ShellError::JobStillRunning(job_id.to_owned()));
+    }
+    jobs.remove(job_id);
+    Ok(())
+}
+
 /// Sends a termination signal to a running job's whole process group
 /// (SIGTERM, escalating to SIGKILL shortly after if it's still alive; on
 /// Windows, `taskkill /T` kills the whole process tree directly). Does not

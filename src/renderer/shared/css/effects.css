@@ -1,0 +1,15 @@
+/* Preserve blur, shader quality and resolution; stop decorative movement. */
+[data-reduced-effects="true"] .assistant-workspace.chat-only::before,
+[data-reduced-effects="true"] .assistant-workspace.chat-only::after {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  html .assistant-workspace.chat-only::before,
+  html .assistant-workspace.chat-only::after { animation: none; }
+}
+[data-effects-hidden="true"] .assistant-workspace.chat-only::before,
+[data-effects-hidden="true"] .assistant-workspace.chat-only::after,
+.app-body.pictures-open .assistant-workspace.chat-only::before,
+.app-body.pictures-open .assistant-workspace.chat-only::after {
+  animation-play-state: paused;
+}

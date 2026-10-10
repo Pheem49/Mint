@@ -3,7 +3,7 @@
  * Syntax-highlighted code block with copy + download actions.
  * Shared by both Desktop and Web ChatPanel — do NOT duplicate this.
  */
-import { useState, useMemo } from 'react'
+import { memo, useState, useMemo } from 'react'
 import { renderHighlightedCode } from '../utils/syntaxHighlight'
 
 interface Props {
@@ -12,7 +12,7 @@ interface Props {
   key?: any
 }
 
-export function ChatCodeBlock({ code, language }: Props) {
+export const ChatCodeBlock = memo(function ChatCodeBlock({ code, language }: Props) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -49,6 +49,10 @@ export function ChatCodeBlock({ code, language }: Props) {
   }, [code])
 
   const showLineNumbers = lineCount > 1
+  const highlightedCode = useMemo(
+    () => renderHighlightedCode(code, cleanLang, showLineNumbers),
+    [code, cleanLang, showLineNumbers],
+  )
 
   return (
     <div className="chat-code-block-container" style={{ whiteSpace: 'normal' }}>
@@ -98,8 +102,8 @@ export function ChatCodeBlock({ code, language }: Props) {
         </div>
       </div>
       <pre className="chat-code-block-body">
-        <code>{renderHighlightedCode(code, cleanLang, showLineNumbers)}</code>
+        <code>{highlightedCode}</code>
       </pre>
     </div>
   )
-}
+})

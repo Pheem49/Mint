@@ -378,3 +378,14 @@
   .background-terminal-panel { background: Canvas; color: CanvasText; border-color: CanvasText; }
   .background-terminal-job, .background-terminal-filter { border-color: CanvasText; }
 }
+
+.background-terminal-actions .background-terminal-delete { color: var(--status-error, #f18585); padding-inline: 8px; }
+.background-terminal-actions .background-terminal-delete:hover { border-color: var(--status-error, #f18585); background: color-mix(in srgb, var(--status-error, #f18585) 10%, transparent); }
+.background-terminal-output > header > button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; margin-left: auto; padding: 0;
+  border: 1px solid var(--border, #343438); border-radius: 7px;
+  background: var(--bg-surface-soft, rgba(255,255,255,.04)); color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+}
+.background-terminal-output > header > button:hover { border-color: var(--accent, #10b981); color: var(--text-main, #eeeeef); }

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ChevronDown, Terminal } from 'lucide-react'
+import { ChevronDown, Terminal, Trash2, X } from 'lucide-react'
 import { backgroundPlatform, runtimePlatform } from '../platform'
 import type { BackgroundJob, BackgroundJobOutput } from '../types'
 import './background-terminals.css'
@@ -125,12 +125,37 @@ export function BackgroundTerminals({ workspacePath }: { workspacePath?: string 
   const count = current.filter(active).length
   const visible = all ? jobs : current
   const close = () => { setOpen(false); trigger.current?.focus() }
+  const openServer = async (url: string) => {
+    setActionError('')
+    try {
+      if (runtimePlatform.isTauriRuntime()) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('run_desktop_action', { action: { type: 'open_url', target: url } })
+      } else {
+        const opened = window.open(url, '_blank', 'noopener,noreferrer')
+        if (!opened) throw new Error('The browser blocked the new tab')
+      }
+    } catch (cause) {
+      setActionError(`Could not open browser: ${String(cause)}`)
+    }
+  }
   const stop = async (job: BackgroundJob) => {
     setPending(previous => new Set(previous).add(job.id))
     setActionError('')
     try {
       const next = await backgroundPlatform.stop(job.id)
       setJobs(previous => previous.map(item => item.id === job.id ? next : item))
+    } catch (cause) { setActionError(String(cause)) }
+    finally { setPending(previous => { const next = new Set(previous); next.delete(job.id); return next }) }
+  }
+  const remove = async (job: BackgroundJob) => {
+    setPending(previous => new Set(previous).add(job.id))
+    setActionError('')
+    try {
+      await backgroundPlatform.delete(job.id)
+      setJobs(previous => previous.filter(item => item.id !== job.id))
+      if (selected === job.id) setSelected(null)
+      statuses.current.delete(job.id)
     } catch (cause) { setActionError(String(cause)) }
     finally { setPending(previous => { const next = new Set(previous); next.delete(job.id); return next }) }
   }
@@ -172,13 +197,14 @@ export function BackgroundTerminals({ workspacePath }: { workspacePath?: string 
           {job.error && <small className="background-terminal-error">{job.error}</small>}
           <div className="background-terminal-actions">
             <button type="button" onClick={() => { setSelected(job.id); setFollow(true) }}>View output</button>
-            {job.serverUrl && (canOpen ? <a href={job.serverUrl} target="_blank" rel="noopener noreferrer">Open browser</a> : <small>Backend-local address: {job.serverUrl} · unavailable from this device</small>)}
+            {job.serverUrl && (canOpen ? <button type="button" onClick={() => void openServer(job.serverUrl!)}>Open browser</button> : <small>Backend-local address: {job.serverUrl} · unavailable from this device</small>)}
+            {!active(job) && <button type="button" className="background-terminal-delete" aria-label={`Remove terminal ${job.id}`} title="Remove terminal" disabled={pending.has(job.id)} onClick={() => void remove(job)}><Trash2 size={14} aria-hidden="true" /></button>}
             {active(job) && <button type="button" className="background-terminal-stop" disabled={Boolean(error) || pending.has(job.id) || job.status === 'stopping'} onClick={() => void stop(job)}>{job.status === 'stopping' || pending.has(job.id) ? 'Stopping…' : 'Stop'}</button>}
           </div>
         </article>)}
       </div>
       {selected && <section aria-label={`Output for ${selected}`} className="background-terminal-output">
-        <header><strong>{selected} · output</strong><label><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Follow</label></header>
+        <header><strong>{selected} · output</strong><label><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Follow</label><button type="button" aria-label="Close terminal output" title="Close output" onClick={() => setSelected(null)}><X size={14} aria-hidden="true" /></button></header>
         {output?.truncated && <small>Older output was truncated.</small>}
         <div ref={log} className="background-terminal-log" onWheel={event => { if (event.deltaY < 0) setFollow(false) }} onKeyDown={event => { if (['PageUp', 'ArrowUp', 'Home'].includes(event.key)) setFollow(false) }} onScroll={event => {
           const element = event.currentTarget

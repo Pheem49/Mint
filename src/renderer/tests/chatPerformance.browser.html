@@ -1,0 +1,71 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Virtual chat regression</title></head>
+<body><div id="root"></div><pre id="result">RUNNING</pre><script type="module">
+import React, { useRef, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { VirtualChatHistory } from '../shared/components/VirtualChatHistory';
+const h = React.createElement;
+const runtimeErrors = [];
+window.addEventListener('error', event => runtimeErrors.push(event.message));
+let update, setOlder, switchChat, setLive;
+function App() {
+  const scroll = useRef(null);
+  const [items, setItems] = useState(Array.from({length:1000}, (_, i) => ({id:i, height:80 + i % 3 * 40})));
+  const [older, changeOlder] = useState(true);
+  const [chat, changeChat] = useState('first');
+  const [live, changeLive] = useState(false);
+  update = setItems;
+  setOlder = changeOlder; switchChat = changeChat; setLive = changeLive;
+  return h('div', {ref:scroll, id:'scroll', style:{height:400,width:700,overflow:'auto',position:'relative',overflowAnchor:'none',display:'flex',flexDirection:'column',gap:10,padding:16,boxSizing:'border-box'}},
+    older && h('button', {style:{height:40,flexShrink:0,marginBottom:20}}, 'Load older'),
+    h(VirtualChatHistory, {key:chat,items, scrollRef:scroll,hasOlder:older,tail:live ? h('div', {style:{minHeight:200}}, h('input', {id:'approval-answer'})) : null, renderRow:index => h('div', {'data-message':items[index].id, style:{minHeight:items[index].height}}, 'Message ' + items[index].id)}));
+}
+const sleep = ms => new Promise(resolve => setTimeout(resolve,ms));
+const assert = (ok, message) => { if (!ok) throw Error(message); };
+createRoot(document.getElementById('root')).render(h(App));
+try {
+  await sleep(500);
+  const scroll = document.getElementById('scroll');
+  assert(document.querySelectorAll('[data-message]').length < 40, 'bounded mounted rows');
+  assert(document.querySelector('[data-message="999"]'), 'starts at latest: ' + JSON.stringify({offset:scroll.scrollTop,height:scroll.scrollHeight,rows:[...document.querySelectorAll('[data-message]')].map(node=>node.dataset.message)}));
+  scroll.scrollTop = 30000;
+  await sleep(300);
+  const anchor = () => [...document.querySelectorAll('[data-message]')].find(node => node.getBoundingClientRect().bottom > scroll.getBoundingClientRect().top);
+  const before = anchor(); const id = before.dataset.message; const top = before.getBoundingClientRect().top;
+  update(items => [{id:-2,height:190},{id:-1,height:270},...items]);
+  await sleep(400);
+  const retained = document.querySelector(`[data-message="${id}"]`);
+  assert(retained && Math.abs(retained.getBoundingClientRect().top - top) < 3, 'prepend preserves reading anchor');
+  const headerAnchor = anchor(); const headerId = headerAnchor.dataset.message; const headerTop = headerAnchor.getBoundingClientRect().top;
+  setOlder(false);
+  await sleep(400);
+  const newHeaderTop = document.querySelector(`[data-message="${headerId}"]`)?.getBoundingClientRect().top;
+  assert(Math.abs(newHeaderTop - headerTop) < 3, 'removing load-older header preserves anchor: ' + JSON.stringify({headerId,headerTop,newHeaderTop,offset:scroll.scrollTop}));
+  const offset = scroll.scrollTop;
+  update(items => [...items, {id:1000,height:200}]);
+  await sleep(300);
+  assert(Math.abs(scroll.scrollTop - offset) < 3, 'append does not pull reader to bottom');
+  scroll.scrollTop = scroll.scrollHeight;
+  await sleep(300);
+  update(items => [...items, {id:1001,height:300}]);
+  await sleep(400);
+  assert(scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 3, 'append follows when pinned');
+  update(items => items.map(item => item.id === 1001 ? {...item,height:700} : item));
+  await sleep(400);
+  assert(scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 3, 'dynamic height follows when pinned');
+  scroll.style.width = '350px';
+  await sleep(300);
+  assert(document.querySelectorAll('[data-message]').length < 40, 'resize retains bounded DOM');
+  setLive(true);
+  await sleep(300);
+  document.getElementById('approval-answer').value = 'draft approval answer';
+  scroll.scrollTop = 20000;
+  await sleep(300);
+  assert(document.getElementById('approval-answer')?.value === 'draft approval answer', 'active approval draft survives scrolling into history');
+  setLive(false);
+  update([{id:5000,height:120},{id:5001,height:600}]); switchChat('second');
+  await sleep(400);
+  assert(document.querySelector('[data-message="5001"]') && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 3, 'session switch opens latest');
+  assert(runtimeErrors.length === 0, 'no runtime/ResizeObserver errors: ' + runtimeErrors.join('; '));
+  document.getElementById('result').textContent = 'PASS: bounded DOM, latest, prepend/header anchor, append policy, dynamic height, resize, approval draft, session switch';
+} catch(error) { document.getElementById('result').textContent = 'FAIL: ' + error.message; }
+</script></body></html>

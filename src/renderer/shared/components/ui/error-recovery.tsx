@@ -14,7 +14,7 @@ export function ErrorRecovery({ onBackToChat, onRefresh }: ErrorRecoveryProps) {
     <main className="error-recovery" style={{ flex: 1, minHeight: 0, overflowY: 'auto', color: '#f4f4f5' }}>
       <div className="error-recovery-content">
         <div className="error-recovery-orb" style={{ width: 'min(280px, 60vw, 34vh)', aspectRatio: '1' }}>
-          <VoicePoweredOrb enableVoiceControl={false} hue={0} />
+          <VoicePoweredOrb animate={false} enableVoiceControl={false} hue={0} />
         </div>
         <div className="error-recovery-copy" role="alert">
           <p className="error-recovery-label">APPLICATION ERROR</p>

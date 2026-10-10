@@ -2464,7 +2464,7 @@ export const readWorkspaceFile = async (path: string, workspacePath?: string): P
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
   readMcpArtifact,
-  listBackgroundJobs, getBackgroundJob, stopBackgroundJob,
+  listBackgroundJobs, getBackgroundJob, stopBackgroundJob, deleteBackgroundJob,
   runSlashCommand,
   authRegister,
   authLogin,
@@ -2542,6 +2542,7 @@ export async function listBackgroundJobs(workspace?: string): Promise<import('..
 }
 export function getBackgroundJob(id: string) { return backgroundRequest<import('../shared/types').BackgroundJobOutput>(`/${encodeURIComponent(id)}`) }
 export function stopBackgroundJob(id: string) { return backgroundRequest<import('../shared/types').BackgroundJob>(`/${encodeURIComponent(id)}/stop`, 'POST') }
+export function deleteBackgroundJob(id: string) { return backgroundRequest<{deleted: boolean}>(`/${encodeURIComponent(id)}`, 'DELETE').then(() => undefined) }
 
 export async function startHtmlPreview(root: string, relativePath: string, mintBrowser = false): Promise<{url: string; jobId: string}> {
   const response = await authFetch(`${getLocalApiBase()}/html-preview`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, relativePath, mintBrowser}) })

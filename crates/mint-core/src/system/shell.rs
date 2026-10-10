@@ -182,6 +182,8 @@ pub enum ShellError {
     Execute(#[from] std::io::Error),
     #[error("no background job with id '{0}'")]
     JobNotFound(String),
+    #[error("background job '{0}' is still running")]
+    JobStillRunning(String),
 }
 
 pub fn run_shell_command(

@@ -1927,6 +1927,20 @@ fn stop_background_job(
 }
 
 #[tauri::command]
+fn remove_background_job(id: String, owner_token: Option<String>) -> Result<(), String> {
+    let job = get_background_job(id.clone(), owner_token)?;
+    let config = load_config().map_err(|e| e.to_string())?;
+    let path = job["workspacePath"].as_str().ok_or("Missing workspace")?;
+    mint_core::assert_path_capability(
+        std::path::Path::new(path),
+        mint_core::Capability::Read,
+        &config,
+    )
+    .map_err(|e| e.to_string())?;
+    mint_core::bg_shell::remove_job(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn run_slash_command(
     app: AppHandle,
     input: String,
@@ -2906,6 +2920,7 @@ pub fn run() {
             start_html_preview,
             get_background_job,
             stop_background_job,
+            remove_background_job,
             list_cron_jobs,
             add_cron_job,
             remove_cron_job,

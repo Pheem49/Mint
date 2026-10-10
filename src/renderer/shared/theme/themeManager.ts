@@ -1,3 +1,5 @@
+import '../css/effects.css'
+import { initializeEffectVisibility } from '../utils/effectVisibility'
 /**
  * shared/theme/themeManager.ts
  * Centralized theme controller and runtime state manager.
@@ -73,6 +75,9 @@ export const applyTheme = (cfg: any): void => {
     systemThemeListener = null
     systemThemeMediaQuery = null
   }
+
+  initializeEffectVisibility()
+  document.documentElement.setAttribute('data-reduced-effects', String(cfg.reducedEffects === true))
 
   // Set DOM data attributes
   document.documentElement.setAttribute('data-theme', effectiveTheme)

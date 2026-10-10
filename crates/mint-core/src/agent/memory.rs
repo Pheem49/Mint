@@ -595,8 +595,8 @@ impl MemoryStore {
             "DELETE FROM chat_sessions
              WHERE id != ?1
                AND id != ?2
+               AND kind = 'conversation'
                AND id NOT LIKE 'cron::%'
-               AND (workspace_path IS NULL OR TRIM(workspace_path) = '')
                AND (SELECT COUNT(*) FROM interaction_memories WHERE interaction_memories.chat_id = chat_sessions.id) = 0",
             params![DEFAULT_CONVERSATION_ID, CHAT_CLI_ID],
         );
@@ -1807,6 +1807,26 @@ mod conversation_sync_tests {
             "mint-conversation-sync-{}.sqlite",
             uuid::Uuid::new_v4()
         )))
+    }
+
+    #[test]
+    fn listing_sessions_removes_empty_project_chat_placeholders() {
+        let memory = store();
+        memory
+            .set_chat_session_workspace("conversation-empty", Some("/projects/demo"))
+            .unwrap();
+        memory
+            .start_turn("conversation-used", "first message")
+            .unwrap();
+
+        let sessions = memory.list_chat_sessions().unwrap();
+
+        assert!(!sessions
+            .iter()
+            .any(|session| session.id == "conversation-empty"));
+        assert!(sessions
+            .iter()
+            .any(|session| session.id == "conversation-used"));
     }
 
     #[test]

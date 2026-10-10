@@ -4,10 +4,14 @@ import { useEffect, useRef, useState, type FC, type RefObject } from 'react'
 import { Renderer, Program, Mesh, Triangle, Vec3 } from 'ogl'
 import { cn } from '../../lib/utils'
 import './voice-powered-orb.css'
+import '../../css/effects.css'
+import { initializeEffectVisibility } from '../../utils/effectVisibility'
 
 export interface VoicePoweredOrbProps {
   className?: string
   hue?: number
+  /** Pause decorative motion when the call is paused or unavailable. */
+  animate?: boolean
   enableVoiceControl?: boolean
   voiceSensitivity?: number
   maxRotationSpeed?: number
@@ -177,14 +181,16 @@ const frag = /* glsl */ `
 `;
 
 export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
-  className, hue = 0, enableVoiceControl = true, voiceSensitivity = 1.5,
+  className, hue = 0, animate = true, enableVoiceControl = true, voiceSensitivity = 1.5,
   maxRotationSpeed = 1.2, maxHoverIntensity = 0.8, onVoiceDetected, analyserRef,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const ownAnalyser = useRef<AnalyserNode | null>(null)
-  const config = useRef({ hue, enableVoiceControl, voiceSensitivity, maxRotationSpeed, maxHoverIntensity, onVoiceDetected, analyserRef })
-  config.current = { hue, enableVoiceControl, voiceSensitivity, maxRotationSpeed, maxHoverIntensity, onVoiceDetected, analyserRef }
+  const config = useRef({ hue, animate, enableVoiceControl, voiceSensitivity, maxRotationSpeed, maxHoverIntensity, onVoiceDetected, analyserRef })
+  config.current = { hue, animate, enableVoiceControl, voiceSensitivity, maxRotationSpeed, maxHoverIntensity, onVoiceDetected, analyserRef }
   const [fallback, setFallback] = useState(false)
+  const wakeRef = useRef<(() => void) | null>(null)
+  useEffect(() => { wakeRef.current?.() }, [hue, animate, enableVoiceControl, voiceSensitivity, maxRotationSpeed, maxHoverIntensity, onVoiceDetected, analyserRef])
 
   // Standalone mode retains the supplied microphone behavior. Live calls supply
   // their existing analyser, so this effect owns no call microphone resources.
@@ -237,10 +243,24 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
     let observer: ResizeObserver | undefined
     let raf = 0
     let disposed = false
+    let visible = true
+    let contextLost = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let intersection: IntersectionObserver | undefined
+    let preferenceObserver: MutationObserver | undefined
+    let wake = () => {}
+    const onVisibility = () => wake()
+    initializeEffectVisibility()
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
     const cleanup = () => {
       disposed = true
       cancelAnimationFrame(raf)
+      clearTimeout(timer)
+      wakeRef.current = null
+      document.removeEventListener('visibilitychange', onVisibility)
+      reduced.removeEventListener('change', onVisibility)
+      intersection?.disconnect()
+      preferenceObserver?.disconnect()
       observer?.disconnect()
       if (renderer) {
         geometry?.remove()
@@ -267,23 +287,31 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
       })
       if (!gl.getProgramParameter(program.program, gl.LINK_STATUS)) throw Error('Orb shader unavailable')
       const mesh = new Mesh(gl, { geometry, program })
+      let lastImage = ''
       const resize = () => {
-        if (disposed || !container.clientWidth || !container.clientHeight) return
-        renderer!.dpr = Math.min(2, window.devicePixelRatio || 1)
+        if (contextLost || disposed || !container.clientWidth || !container.clientHeight) return
+        const dpr = Math.min(2, window.devicePixelRatio || 1)
+        if (gl.canvas.width === Math.floor(container.clientWidth * dpr) && gl.canvas.height === Math.floor(container.clientHeight * dpr)) return
+        lastImage = ''
+        renderer!.dpr = dpr
         // OGL applies dpr internally; passing scaled sizes applies it twice.
         renderer!.setSize(container.clientWidth, container.clientHeight)
         program!.uniforms.iResolution.value.set(gl.canvas.width, gl.canvas.height, gl.canvas.width / gl.canvas.height)
-        // Resizing clears the drawing buffer. Paint immediately, including when
-        // the browser has deferred animation frames in a hidden window.
-        renderer!.render({ scene: mesh })
+        // Resizing clears the buffer; repaint visible graphics and invalidate
+        // hidden graphics so the next visibility wake paints them again.
+        if (!document.hidden && visible && !contextLost) renderer!.render({ scene: mesh })
+        wake()
       }
       observer = new ResizeObserver(resize)
       observer.observe(container)
       resize()
-      let lastTime = 0, currentRot = 0, detected = false
+      let lastTime = 0, currentRot = 0, detected = false, animationTime = 0
       let buffer: Uint8Array<ArrayBuffer> | null = null
       const update = (time: number) => {
-        if (disposed) return
+        raf = 0
+        timer = undefined
+        if (disposed || contextLost || document.hidden || !visible) { lastTime = 0; return }
+        const still = !config.current.animate || reduced.matches || document.documentElement.getAttribute('data-reduced-effects') === 'true'
         const c = config.current
         const dt = lastTime ? Math.min(0.05, Math.max(0, (time - lastTime) * 0.001)) : 0
         lastTime = time
@@ -298,18 +326,38 @@ export const VoicePoweredOrb: FC<VoicePoweredOrbProps> = ({
         }
         const nextDetected = voiceLevel > 0.1
         if (nextDetected !== detected) { detected = nextDetected; c.onVoiceDetected?.(detected) }
-        if (!reduced.matches && voiceLevel > 0.05) currentRot += dt * (0.3 + voiceLevel * c.maxRotationSpeed * 2.0)
-        program!.uniforms.iTime.value = reduced.matches ? 0 : time * 0.001
+        if (!still && voiceLevel > 0.05) currentRot += dt * (0.3 + voiceLevel * c.maxRotationSpeed * 2.0)
+        if (!still) animationTime += dt
+        program!.uniforms.iTime.value = still ? 0 : animationTime
         program!.uniforms.hue.value = c.hue
-        program!.uniforms.rot.value = currentRot
-        program!.uniforms.hover.value = reduced.matches ? 0 : Math.min(voiceLevel * 2.0, 1)
-        program!.uniforms.hoverIntensity.value = reduced.matches ? 0 : Math.min(voiceLevel * c.maxHoverIntensity * 0.8, c.maxHoverIntensity)
-        if (!document.hidden) renderer!.render({ scene: mesh })
-        raf = requestAnimationFrame(update)
+        program!.uniforms.rot.value = still ? 0 : currentRot
+        program!.uniforms.hover.value = still ? 0 : Math.min(voiceLevel * 2.0, 1)
+        program!.uniforms.hoverIntensity.value = still ? 0 : Math.min(voiceLevel * c.maxHoverIntensity * 0.8, c.maxHoverIntensity)
+        const image = [animationTime && !still ? animationTime : 0, c.hue, program!.uniforms.rot.value,
+          program!.uniforms.hover.value, program!.uniforms.hoverIntensity.value, gl.canvas.width, gl.canvas.height].join(':')
+        if (image !== lastImage) { renderer!.render({ scene: mesh }); lastImage = image }
+        if (!still) raf = requestAnimationFrame(update)
+        // Preserve voice callbacks without submitting identical GPU frames.
+        else if (c.enableVoiceControl && c.onVoiceDetected) timer = setTimeout(() => update(performance.now()), 100)
       }
-      raf = requestAnimationFrame(update)
+      wake = () => {
+        cancelAnimationFrame(raf)
+        clearTimeout(timer)
+        raf = 0
+        timer = undefined
+        lastTime = 0
+        if (!disposed && !contextLost && visible && !document.hidden) raf = requestAnimationFrame(update)
+      }
+      wakeRef.current = wake
+      document.addEventListener('visibilitychange', onVisibility)
+      reduced.addEventListener('change', onVisibility)
+      preferenceObserver = new MutationObserver(wake)
+      preferenceObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-reduced-effects'] })
+      intersection = new IntersectionObserver(entries => { visible = entries[0]?.isIntersecting ?? false; wake() })
+      intersection.observe(container)
+      wake()
       gl.canvas.addEventListener('webglcontextlost', () => {
-        if (!disposed) { cancelAnimationFrame(raf); setFallback(true) }
+        if (!disposed) { contextLost = true; cancelAnimationFrame(raf); clearTimeout(timer); setFallback(true) }
       }, { once: true })
       return cleanup
     } catch (error) {

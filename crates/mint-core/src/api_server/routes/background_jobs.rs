@@ -141,6 +141,26 @@ async fn execute_for(
                 .await
             }
         }
+    } else if ctx.method == "DELETE" {
+        match crate::bg_shell::remove_job(id) {
+            Ok(()) => send_json_response(socket, "200 OK", "{\"deleted\":true}").await,
+            Err(crate::shell::ShellError::JobStillRunning(_)) => {
+                send_json_response(
+                    socket,
+                    "409 Conflict",
+                    "{\"message\":\"Stop the background terminal before removing it\"}",
+                )
+                .await
+            }
+            Err(error) => {
+                send_json_response(
+                    socket,
+                    "404 Not Found",
+                    &serde_json::json!({"message": error.to_string()}).to_string(),
+                )
+                .await
+            }
+        }
     } else {
         send_json_response(
             socket,

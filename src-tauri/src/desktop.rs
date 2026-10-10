@@ -138,8 +138,8 @@ pub fn execute_action(
             {
                 return Err("only http, https, and file URLs may be opened".into());
             }
-            spawn_detached("xdg-open", &[&action.target])?;
-            Ok(success("opened URL"))
+            open_url_in_system_browser(&action.target)?;
+            Ok(success("opened URL in the system browser"))
         }
         "search" => {
             let query = action.target.trim();
@@ -740,6 +740,23 @@ fn success(message: &str) -> ActionResult {
         success: true,
         message: message.into(),
     }
+}
+
+fn open_url_in_system_browser(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        return spawn_detached("xdg-open", &[url]);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return spawn_detached("open", &[url]);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return spawn_detached("rundll32", &["url.dll,FileProtocolHandler", url]);
+    }
+    #[allow(unreachable_code)]
+    Err("opening URLs is unsupported on this platform".into())
 }
 
 fn spawn_detached(program: &str, args: &[&str]) -> Result<(), String> {

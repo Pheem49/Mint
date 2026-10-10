@@ -2,7 +2,7 @@ import McpToolResults from './McpToolResults'
 import { ContextCompactionStatus } from './ContextCompactionStatus'
 import { activeCompactionFrom } from '../utils/contextCompaction'
 import { useEffect, useMemo, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
-import { hasAgentToolActivity, thoughtsFrom, extendedThoughtsFrom, mergeFileChanges, parseFileChangesFromProgress } from '../agentProgress'
+import { EMPTY_AGENT_PROGRESS, hasAgentToolActivity, thoughtsFrom, extendedThoughtsFrom, mergeFileChanges, parseFileChangesFromProgress } from '../agentProgress'
 import { visibleInteractionsDuringRun } from '../conversation/syncView'
 import {
   GEMINI_MODELS,
@@ -16,17 +16,18 @@ import {
   GEMINI_LIVE_VOICES,
 } from '../constants/models'
 import { badge, providerLabel, fallbackNotice } from '../utils/providers'
-import { activitiesFrom, parseWebSearchSources, type AgentActivity, type AgentActivityView } from '../utils/agentActivity'
+import { parseWebSearchSources } from '../utils/agentActivity'
+import { useLatestCallback } from '../utils/useLatestCallback'
 import SlashSuggestions, { type SlashSuggestionsHandle } from './SlashSuggestions'
-import { AgentActivityTable } from './AgentActivityTable'
 import { ChatCodeBlock } from './ChatCodeBlock'
 import { renderApprovalDetails, renderDiff, type ApprovalDetails } from '../utils/approval'
 import { ApprovalCard } from './ApprovalCard'
-import { renderFormattedMessage, readableAssistantText, cleanSpeechText, renderSpeakerIcon, renderCopyIcon } from '../utils/markdown'
+import { readableAssistantText, cleanSpeechText, renderSpeakerIcon, renderCopyIcon } from '../utils/markdown'
 import { ThinkingBlock } from './ThinkingBlock'
-import SourcesBlock from './SourcesBlock'
 import ChatMessageItem from './ChatMessageItem'
-import { AgentActivityDrawer } from './AgentActivityDrawer'
+import { FormattedMessage } from './FormattedMessage'
+import { ProgressActivity } from './ProgressActivity'
+import { VirtualChatHistory, type VirtualChatHistoryHandle } from './VirtualChatHistory'
 import { ArtifactPreviewPanel, type ArtifactFile } from './ArtifactPreviewPanel'
 import { RewindModal } from './RewindModal'
 import type { AgentProgress, ChatResponse, DiffHunk, FileChange, GitCheckpoint, RuntimeStatus } from '../types'
@@ -184,7 +185,7 @@ export default function ChatPanel({
   agentProgress,
   agentActivitySnapshots,
   thinkingExpanded,
-  onThinkingExpandedChange,
+  onThinkingExpandedChange: handleThinkingExpandedChange,
   message,
   imageAttachments,
   videoAttachments,
@@ -231,6 +232,7 @@ export default function ChatPanel({
   onOpenArtifact,
   onOpenReview,
   } = { ...conversation, ...actions }
+  const onThinkingExpandedChange = useLatestCallback(handleThinkingExpandedChange)
   // The initiating surface already renders a live prompt/reply pair below.
   // Hide its matching persisted turn until the local stream settles, while
   // still showing turns submitted from other surfaces during that time.
@@ -238,7 +240,6 @@ export default function ChatPanel({
     () => visibleInteractionsDuringRun(interactions, sending, sendingInteractionId),
     [interactions, sending, sendingInteractionId],
   )
-  const agentActivities = activitiesFrom(agentProgress)
   // Keep the composer summary tied to the active/latest agent run. This is cheap
   // metadata, but memoizing it avoids parsing the activity stream while typing.
   const composerChanges = useMemo(() => parseFileChangesFromProgress(agentProgress), [agentProgress])
@@ -253,15 +254,17 @@ export default function ChatPanel({
   const composerChangeLabel = composerChanges.length === 1
     ? '1 file changed'
     : `${composerChanges.length} files changed`
-  const conversationChanges = useMemo(() => {
+  const historicalChanges = useMemo(() => {
     const historicalGroups = interactions.map((interaction) => {
       const interactionId = String(interaction.id)
-      const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
+      const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? EMPTY_AGENT_PROGRESS
       return parseFileChangesFromProgress(progress)
     })
-    const activeChanges = parseFileChangesFromProgress(agentProgress)
-    return mergeFileChanges([...historicalGroups, activeChanges])
-  }, [agentActivitySnapshots, agentProgress, interactions])
+    return mergeFileChanges(historicalGroups)
+  }, [agentActivitySnapshots, interactions])
+  // Review uses current data even from a memoized historical message's button.
+  // Merge the conversation only when requested, not on each progress update.
+  const getConversationChanges = useLatestCallback(() => mergeFileChanges([historicalChanges, composerChanges]))
 
   const projectName = useMemo(() => {
     if (!workspacePath) return null
@@ -276,8 +279,10 @@ export default function ChatPanel({
   const throttledStreamedReply = useThrottledValue(streamedReply, STREAM_MARKDOWN_UPDATE_MS)
   const liveWebSources = useMemo(() => parseWebSearchSources(agentProgress), [agentProgress])
   const activeFallbackNotice = fallbackNotice(streamedResponse)
-  const compaction = activeCompactionFrom(agentProgress)
-  const lastThinkingProgress = [...agentProgress].reverse().find(p => p.type === 'Thinking')
+  const compaction = useMemo(() => activeCompactionFrom(agentProgress), [agentProgress])
+  const liveThoughts = useMemo(() => thoughtsFrom(agentProgress), [agentProgress])
+  const liveExtendedThoughts = useMemo(() => extendedThoughtsFrom(agentProgress), [agentProgress])
+  const lastThinkingProgress = useMemo(() => [...agentProgress].reverse().find(p => p.type === 'Thinking'), [agentProgress])
   let activeAgentName: string | null = null
   let activeModelName: string | null = null
   if (lastThinkingProgress && lastThinkingProgress.type === 'Thinking') {
@@ -293,16 +298,19 @@ export default function ChatPanel({
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
+  const toggleActivity = useCallback((id: string) => {
+    setOpenActivityIds(current => ({ ...current, [id]: !(current[id] ?? (id === 'live')) }))
+  }, [])
 
-  const openArtifact = (artifact: ArtifactFile) => {
+  const openArtifact = useLatestCallback((artifact: ArtifactFile) => {
     if (onOpenArtifact) onOpenArtifact(artifact)
     else setActiveArtifact({ ...artifact, workspacePath: artifact.workspacePath ?? workspacePath })
-  }
+  })
 
-  const openReview = (title: string, changes: FileChange[]) => {
+  const openReview = useLatestCallback((title: string, changes: FileChange[]) => {
     if (onOpenReview) onOpenReview({ id: `review:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: title, changes })
     else setReviewPage({ title, changes })
-  }
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -369,6 +377,7 @@ export default function ChatPanel({
   const [copiedId, setCopiedId] = useState<string | number | null>(null)
 
   const chatContainerRef = useRef<HTMLDivElement | null>(null)
+  const virtualHistoryRef = useRef<VirtualChatHistoryHandle | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const isNearBottomRef = useRef(true)
@@ -390,7 +399,7 @@ export default function ChatPanel({
       const element = chatContainerRef.current
       if (element && isNearBottomRef.current) {
         // Smooth scrolling on every token restarts animations and causes jank.
-        element.scrollTop = element.scrollHeight
+        virtualHistoryRef.current?.scrollToEnd()
       }
     })
   }, [])
@@ -398,6 +407,12 @@ export default function ChatPanel({
   useEffect(() => {
     scheduleScrollToLatest()
   }, [interactions, sending, streamedReply, pendingApproval, agentProgress, scheduleScrollToLatest])
+
+  useEffect(() => {
+    isNearBottomRef.current = true
+    setShowScrollToBottom(false)
+    scheduleScrollToLatest()
+  }, [chatId, scheduleScrollToLatest])
 
   useEffect(() => () => {
     if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current)
@@ -412,8 +427,9 @@ export default function ChatPanel({
   }, [activeArtifact])
 
   const scrollToBottom = useCallback(() => {
-    chatEnd.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [chatEnd])
+    isNearBottomRef.current = true
+    virtualHistoryRef.current?.scrollToEnd()
+  }, [])
 
   const [splitRatio, setSplitRatio] = useState<number>(() => {
     try {
@@ -832,10 +848,10 @@ export default function ChatPanel({
   }
   // "Edit" on a past user message: drop its text back into the composer so it
   // can be tweaked and sent again as a new message (nothing is deleted).
-  const handleEditMessage = (text: string) => {
+  const handleEditMessage = useLatestCallback((text: string) => {
     setHistoryIndex(null)
     applyHistoryValue(text)
-  }
+  })
   const navigateHistoryNext = () => {
     if (historyIndex === null) return false
     if (historyIndex === 0) {
@@ -970,7 +986,7 @@ export default function ChatPanel({
       scheduleVoiceListen(900)
     }
   }
-  const speak = (text: string) => {
+  const speak = useLatestCallback((text: string) => {
     const speechText = cleanSpeechText(text)
     if (!speechText) return
     if (speakingText === text) {
@@ -990,7 +1006,7 @@ export default function ChatPanel({
       return
     }
     speakNative(speechText, text)
-  }
+  })
 
   const resizeInput = (element: HTMLTextAreaElement) => {
     element.style.height = 'auto'
@@ -1107,31 +1123,6 @@ export default function ChatPanel({
     appendWorkspaceReference(reference)
   }
   const isEmptyChat = interactions.length === 0 && !sending && !pendingApproval
-  const renderCompletedActivity = useCallback((interaction: any) => {
-    const interactionId = String(interaction.id)
-    const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
-    const activityView = activitiesFrom(progress)
-    const isOpen = Boolean(openActivityIds[interactionId])
-    return (
-      <AgentActivityDrawer
-        activityView={activityView}
-        isOpen={isOpen}
-        onToggle={() => setOpenActivityIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
-        isHistorical={true}
-        rawProgress={progress}
-      />
-    )
-  }, [agentActivitySnapshots, openActivityIds])
-
-  const renderWebSearchSources = useCallback((interaction: any) => {
-    const interactionId = String(interaction.id)
-    const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
-    const sources = parseWebSearchSources(progress)
-    if (sources.length === 0) return null
-
-    return <SourcesBlock sources={sources} />
-  }, [agentActivitySnapshots])
-
   const renderChangesList = (changes: ReturnType<typeof parseFileChangesFromProgress>, idPrefix: string) => {
     const showAll = Boolean(showAllFileChanges[idPrefix])
     const visibleChanges = showAll ? changes : changes.slice(0, 3)
@@ -1242,7 +1233,7 @@ export default function ChatPanel({
 
   const renderFileChanges = useCallback((interaction: any) => {
     const interactionId = String(interaction.id)
-    const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
+    const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? EMPTY_AGENT_PROGRESS
     const changes = parseFileChangesFromProgress(progress)
     if (changes.length === 0) return null
 
@@ -1355,7 +1346,7 @@ export default function ChatPanel({
                 className="file-changes-review-btn"
                 title="Review changed code"
                 onClick={() => {
-                  openReview('All conversation changes', conversationChanges)
+                  openReview('All conversation changes', getConversationChanges())
                 }}
               >
                 Review
@@ -1366,10 +1357,10 @@ export default function ChatPanel({
         </div>
       </div>
     )
-  }, [agentActivitySnapshots, conversationChanges, openReviewIds, openFileDiffs, showAllFileChanges, workspacePath])
+  }, [agentActivitySnapshots, getConversationChanges, openReviewIds, openFileDiffs, showAllFileChanges, workspacePath, onOpenArtifact, onOpenReview])
 
   const renderActiveFileChanges = () => {
-    const changes = parseFileChangesFromProgress(agentProgress)
+    const changes = composerChanges
     if (changes.length === 0) return null
 
     const totalAdditions = changes.reduce((sum, c) => sum + c.additions, 0)
@@ -1406,7 +1397,7 @@ export default function ChatPanel({
               className="file-changes-review-btn"
               title="Review changed code"
               onClick={() => {
-                openReview('All conversation changes', conversationChanges)
+                openReview('All conversation changes', getConversationChanges())
               }}
             >
               Review
@@ -1422,6 +1413,110 @@ export default function ChatPanel({
       </div>
     )
   }
+
+  const liveTurn = sending || pendingApproval ? (
+    <>
+      {sending && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+          <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble"><FormattedMessage text={[sendingMessage, sendingImageMarkers, sendingVideoMarkers].filter(Boolean).join(' ')} /></div></div></div>
+          {agentMode && (
+            <ProgressActivity
+              progress={agentProgress}
+              id="live"
+              isOpen={openActivityIds['live'] ?? true}
+              onToggle={toggleActivity}
+              pendingApproval={!!pendingApproval}
+            />
+          )}
+          {renderActiveFileChanges()}
+          <div className="message ai-message thinking-message">
+            <div className="bubble-wrapper">
+              {!agentMode && liveExtendedThoughts.length > 0 && (
+                <ThinkingBlock
+                  blockKey="live-extended"
+                  thoughts={liveExtendedThoughts}
+                  isLive={true}
+                  variant="extended"
+                  expanded={thinkingExpanded['live-extended'] ?? true}
+                  onExpandedChange={onThinkingExpandedChange}
+                />
+              )}
+              {!agentMode && liveThoughts.length > 0 && liveExtendedThoughts.length === 0 && (
+                <ThinkingBlock
+                  blockKey="live"
+                  thoughts={liveThoughts}
+                  isLive={true}
+                  expanded={thinkingExpanded.live ?? true}
+                  onExpandedChange={onThinkingExpandedChange}
+                />
+              )}
+              <div className="message-bubble">
+                <McpToolResults progress={agentProgress} running />
+                <span>
+                  {compaction ? (
+                    <ContextCompactionStatus key={compaction.index} />
+                  ) : throttledStreamedReply ? (
+                    <FormattedMessage text={throttledStreamedReply} sources={liveWebSources} />
+                  ) : (
+                    <div className="thinking-status">
+                      <span className="thinking-status-label">
+                        <span aria-hidden="true">✦ </span>
+                        {activeAgentName && activeModelName
+                          ? `${activeAgentName} (${activeModelName}) is thinking...`
+                          : 'Thinking'}
+                      </span>
+                      <span className="thinking-status-meta">
+                        {` · ${elapsedSeconds}s · Esc to cancel`}
+                      </span>
+                    </div>
+                  )}
+                </span>
+              </div>
+              {streamedResponse && (
+                <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span className="provider-model-chip" data-provider={(streamedResponse.provider || '').toLowerCase()} title={`${streamedResponse.provider} • ${streamedResponse.model}`}>
+                    <span className="provider-chip-dot" aria-hidden="true" />
+                    <span className="provider-chip-name">{streamedResponse.provider}</span>
+                    <span className="provider-chip-divider">/</span>
+                    <span className="provider-chip-model">{streamedResponse.model}</span>
+                  </span>
+                  {activeFallbackNotice && <span className="provider-fallback-notice">{activeFallbackNotice}</span>}
+                  {throttledStreamedReply && (
+                    <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
+                      <button
+                        type="button"
+                        className={`msg-action-btn copy-btn ${copiedId === 'live' ? 'is-copied' : ''}`}
+                        onClick={() => handleCopyMessage('live', throttledStreamedReply)}
+                        title={copiedId === 'live' ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
+                      >
+                        {renderCopyIcon(copiedId === 'live')}
+                      </button>
+                      <button
+                        type="button"
+                        className={`msg-action-btn tts-btn ${speakingText === throttledStreamedReply ? 'is-speaking' : ''}`}
+                        onClick={() => speak(throttledStreamedReply)}
+                        title={speakingText === throttledStreamedReply ? 'Stop reading' : 'Read aloud'}
+                      >
+                        {renderSpeakerIcon(speakingText === throttledStreamedReply)}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingApproval && (
+        <ApprovalCard
+          key={pendingApproval.id || JSON.stringify(pendingApproval)}
+          pendingApproval={pendingApproval}
+          onApproval={onApproval}
+        />
+      )}
+    </>
+  ) : null
 
   const sectionContent = (
     <section
@@ -1567,160 +1662,62 @@ export default function ChatPanel({
             </button>
           </div>
         </div>
-      <div className="chat-container" ref={chatContainerRef} onScroll={handleChatScroll}>
+      <div className="chat-container" ref={chatContainerRef} onScroll={handleChatScroll} style={{ overflowAnchor: 'none' }}>
         {hasOlder && onLoadOlder && (
           <button type="button" className="load-older-messages" disabled={loadingOlder}
             style={{ display: 'block', margin: '0 auto 20px', padding: '7px 14px', borderRadius: 8,
               border: '1px solid var(--border-color, #3a3a3a)', background: 'var(--surface, #252525)',
               color: 'var(--text-secondary, #c0c0c0)', cursor: loadingOlder ? 'default' : 'pointer' }}
             onClick={async () => {
-            const container = chatContainerRef.current
-            const previousHeight = container?.scrollHeight ?? 0
             setLoadingOlder(true)
             try {
               await onLoadOlder()
-              window.requestAnimationFrame(() => {
-                if (container) container.scrollTop += container.scrollHeight - previousHeight
-              })
             } finally { setLoadingOlder(false) }
           }}>
             {loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}
           </button>
         )}
-        {visibleInteractions.map((interaction, index) => (
-          <Fragment key={interaction.id}>
-            {index > 0 && shouldShowSessionDivider(visibleInteractions[index - 1].createdAt, interaction.createdAt) && (
-              <div className="system-event-divider">
-                <div className="system-event-line" />
-                <div className="system-event-pill">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="9" />
-                    <polyline points="12 7 12 12 15.5 14" />
-                  </svg>
-                  <span>{formatSessionDividerLabel(interaction.createdAt)}</span>
-                </div>
-                <div className="system-event-line" />
-              </div>
-            )}
-            <ChatMessageItem
-              interaction={interaction}
-              copiedId={copiedId}
-              onEditMessage={handleEditMessage}
-              speakingText={speakingText}
-              agentActivitySnapshots={agentActivitySnapshots}
-              thinkingExpanded={thinkingExpanded}
-              openActivityIds={openActivityIds}
-              openReviewIds={openReviewIds}
-              openFileDiffs={openFileDiffs}
-              onThinkingExpandedChange={onThinkingExpandedChange}
-              handleCopyMessage={handleCopyMessage}
-              speak={speak}
-              renderCompletedActivity={renderCompletedActivity}
-              renderFileChanges={renderFileChanges}
-              renderWebSearchSources={renderWebSearchSources}
-            />
-          </Fragment>
-        ))}
-
-        {sending && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-            <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble">{renderFormattedMessage([sendingMessage, sendingImageMarkers, sendingVideoMarkers].filter(Boolean).join(' '))}</div></div></div>
-            {agentMode && (
-              <AgentActivityDrawer
-                activityView={agentActivities}
-                isOpen={openActivityIds['live'] ?? true}
-                onToggle={() => setOpenActivityIds((current) => ({ ...current, live: !(current['live'] ?? true) }))}
-                pendingApproval={!!pendingApproval}
-                rawProgress={agentProgress}
-              />
-            )}
-            {renderActiveFileChanges()}
-            <div className="message ai-message thinking-message">
-              <div className="bubble-wrapper">
-                {!agentMode && extendedThoughtsFrom(agentProgress).length > 0 && (
-                  <ThinkingBlock
-                    blockKey="live-extended"
-                    thoughts={extendedThoughtsFrom(agentProgress)}
-                    isLive={true}
-                    variant="extended"
-                    expanded={thinkingExpanded['live-extended'] ?? true}
-                    onExpandedChange={onThinkingExpandedChange}
-                  />
-                )}
-                {!agentMode && thoughtsFrom(agentProgress).length > 0 && extendedThoughtsFrom(agentProgress).length === 0 && (
-                  <ThinkingBlock
-                    blockKey="live"
-                    thoughts={thoughtsFrom(agentProgress)}
-                    isLive={true}
-                    expanded={thinkingExpanded.live ?? true}
-                    onExpandedChange={onThinkingExpandedChange}
-                  />
-                )}
-                <div className="message-bubble">
-                  <McpToolResults progress={agentProgress} running />
-                  <span>
-                    {compaction ? (
-                      <ContextCompactionStatus key={compaction.index} />
-                    ) : throttledStreamedReply ? (
-                      renderFormattedMessage(throttledStreamedReply, liveWebSources)
-                    ) : (
-                      <div className="thinking-status">
-                        <span className="thinking-status-label">
-                          <span aria-hidden="true">✦ </span>
-                          {activeAgentName && activeModelName
-                            ? `${activeAgentName} (${activeModelName}) is thinking...`
-                            : 'Thinking'}
-                        </span>
-                        <span className="thinking-status-meta">
-                          {` · ${elapsedSeconds}s · Esc to cancel`}
-                        </span>
-                      </div>
-                    )}
-                  </span>
-                </div>
-                {streamedResponse && (
-                  <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span className="provider-model-chip" data-provider={(streamedResponse.provider || '').toLowerCase()} title={`${streamedResponse.provider} • ${streamedResponse.model}`}>
-                      <span className="provider-chip-dot" aria-hidden="true" />
-                      <span className="provider-chip-name">{streamedResponse.provider}</span>
-                      <span className="provider-chip-divider">/</span>
-                      <span className="provider-chip-model">{streamedResponse.model}</span>
-                    </span>
-                    {activeFallbackNotice && <span className="provider-fallback-notice">{activeFallbackNotice}</span>}
-                    {throttledStreamedReply && (
-                      <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
-                        <button
-                          type="button"
-                          className={`msg-action-btn copy-btn ${copiedId === 'live' ? 'is-copied' : ''}`}
-                          onClick={() => handleCopyMessage('live', throttledStreamedReply)}
-                          title={copiedId === 'live' ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
-                        >
-                          {renderCopyIcon(copiedId === 'live')}
-                        </button>
-                        <button
-                          type="button"
-                          className={`msg-action-btn tts-btn ${speakingText === throttledStreamedReply ? 'is-speaking' : ''}`}
-                          onClick={() => speak(throttledStreamedReply)}
-                          title={speakingText === throttledStreamedReply ? 'Stop reading' : 'Read aloud'}
-                        >
-                          {renderSpeakerIcon(speakingText === throttledStreamedReply)}
-                        </button>
-                      </div>
-                    )}
+        <VirtualChatHistory key={chatId} ref={virtualHistoryRef} items={visibleInteractions}
+          scrollRef={chatContainerRef} hasOlder={hasOlder}
+          renderRow={(index) => {
+            const interaction = visibleInteractions[index]
+            return (
+              <Fragment key={interaction.id}>
+                {index > 0 && shouldShowSessionDivider(visibleInteractions[index - 1].createdAt, interaction.createdAt) && (
+                  <div className="system-event-divider">
+                    <div className="system-event-line" />
+                    <div className="system-event-pill">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="9" />
+                        <polyline points="12 7 12 12 15.5 14" />
+                      </svg>
+                      <span>{formatSessionDividerLabel(interaction.createdAt)}</span>
+                    </div>
+                    <div className="system-event-line" />
                   </div>
                 )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {pendingApproval && (
-          <ApprovalCard
-            key={pendingApproval.id || JSON.stringify(pendingApproval)}
-            pendingApproval={pendingApproval}
-            onApproval={onApproval}
-          />
-        )}
+                <ChatMessageItem
+                  interaction={interaction}
+                  copiedId={copiedId}
+                  onEditMessage={handleEditMessage}
+                  speakingText={speakingText}
+                  agentActivitySnapshots={agentActivitySnapshots}
+                  thinkingExpanded={thinkingExpanded}
+                  openActivityIds={openActivityIds}
+                  openReviewIds={openReviewIds}
+                  openFileDiffs={openFileDiffs}
+                  onThinkingExpandedChange={onThinkingExpandedChange}
+                  handleCopyMessage={handleCopyMessage}
+                  speak={speak}
+                  toggleActivity={toggleActivity}
+                  showAllFileChanges={showAllFileChanges}
+                  workspacePath={workspacePath}
+                  renderFileChanges={renderFileChanges}
+                />
+              </Fragment>
+            )
+          }}
+          tail={liveTurn} />
         {showScrollToBottom && (
           <button
             type="button"

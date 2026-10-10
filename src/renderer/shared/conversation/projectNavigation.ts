@@ -10,6 +10,11 @@ interface ProjectNavigation {
   isCurrent?(): boolean
 }
 
+/** A local New chat is not a saved session until its first message is sent. */
+export function isPersistedConversation(sessionId: string, sessions: ChatSession[]): boolean {
+  return sessions.some(session => session.id === sessionId)
+}
+
 function sessionTime(session: ChatSession): number {
   return Date.parse(session.updatedAt) || Date.parse(session.createdAt) || 0
 }

@@ -6,6 +6,9 @@
 import type { AgentProgress, InteractionMemory, DiffHunk, FileChange } from './types'
 export type { AgentProgress, InteractionMemory }
 
+export const EMPTY_AGENT_PROGRESS: AgentProgress[] = []
+const fileChangesCache = new WeakMap<AgentProgress[], { length: number; changes: FileChange[] }>()
+
 export function isInternalCot(text: string): boolean {
   const trimmed = text.trim()
   if (trimmed.startsWith('<think>') || trimmed.includes('</think>')) {
@@ -200,6 +203,14 @@ export function parseAgentActivity(value: unknown): AgentProgress[] | undefined 
 }
 
 export function parseFileChangesFromProgress(progress: AgentProgress[]): FileChange[] {
+  const cached = fileChangesCache.get(progress)
+  if (cached?.length === progress.length) return cached.changes
+  const changes = deriveFileChangesFromProgress(progress)
+  fileChangesCache.set(progress, { length: progress.length, changes })
+  return changes
+}
+
+function deriveFileChangesFromProgress(progress: AgentProgress[]): FileChange[] {
   const changes = new Map<string, FileChange>()
   let activeEdit: { action: string; path: string; created: boolean; additions: number; deletions: number; hunks: DiffHunk[] } | null = null
 

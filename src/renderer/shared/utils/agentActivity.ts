@@ -252,6 +252,16 @@ function finalizeGroup(group: AgentActivityGroup): AgentActivityGroup {
 }
 
 export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
+  const cached = activityCache.get(progress)
+  if (cached?.length === progress.length) return cached.view
+  const view = deriveActivitiesFrom(progress)
+  activityCache.set(progress, { length: progress.length, view })
+  return view
+}
+
+const activityCache = new WeakMap<AgentProgress[], { length: number; view: AgentActivityView }>()
+
+function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
   const activities: AgentActivity[] = []
   const timeline: TimelineItem[] = []
   let currentGroup: AgentActivityGroup | null = null

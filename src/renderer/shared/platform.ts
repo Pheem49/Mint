@@ -71,6 +71,7 @@ export interface MintPlatformApi {
   listBackgroundJobs(workspace?: string): Promise<import("./types").BackgroundJob[]>
   getBackgroundJob(id: string): Promise<import("./types").BackgroundJobOutput>
   stopBackgroundJob(id: string): Promise<import("./types").BackgroundJob>
+  deleteBackgroundJob(id: string): Promise<void>
   authRegister(name: string | undefined, email: string, password: string): Promise<AuthUser>
   runSlashCommand(input: string, cwd?: string | null): Promise<SlashResponse>
   authLogin(email: string, password: string): Promise<AuthUser>
@@ -296,6 +297,7 @@ export const backgroundPlatform = {
   list: operation("listBackgroundJobs"),
   output: operation("getBackgroundJob"),
   stop: operation("stopBackgroundJob"),
+  delete: operation("deleteBackgroundJob"),
 }
 
 export const runtimePlatform = {

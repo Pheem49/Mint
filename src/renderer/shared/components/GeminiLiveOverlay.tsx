@@ -73,7 +73,7 @@ export default function GeminiLiveOverlay({
           <h2>Live conversation</h2>
         </header>
         <div className="live-orb-stage">
-          <VoicePoweredOrb hue={0} enableVoiceControl={status === 'listening' || status === 'speaking' || status === 'thinking'} analyserRef={analyserRef ?? emptyAnalyser} />
+          <VoicePoweredOrb hue={0} animate={status !== 'paused' && status !== 'error'} enableVoiceControl={status === 'listening' || status === 'speaking' || status === 'thinking'} analyserRef={analyserRef ?? emptyAnalyser} />
         </div>
         <div className="live-orb-state">
           <div className="gemini-live-status" role="status">{STATUS_LABEL[status]}</div>

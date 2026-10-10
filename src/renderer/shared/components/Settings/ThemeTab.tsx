@@ -306,6 +306,13 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
             )}
           </div>
 
+          <div className="setting-row stacked">
+            <label htmlFor="reduced-effects">Reduce effects</label>
+            <p className="section-subtitle">Keep the background and orb still. Also follows your system’s reduced motion preference.</p>
+            <input id="reduced-effects" type="checkbox" checked={config.reducedEffects === true}
+              onChange={event => updateField('reducedEffects', event.target.checked)} />
+          </div>
+
           {/* Surface style: Opaque vs Glassmorphism */}
           <div className="setting-row stacked">
             <label>Surface style</label>

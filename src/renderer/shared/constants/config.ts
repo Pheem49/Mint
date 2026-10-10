@@ -16,6 +16,7 @@ export const DEFAULT_CONFIG = {
   customPanelBg: '#1e293b',
   surfaceStyle: 'opaque' as 'opaque' | 'glass',
   glassBlur: 'none',
+  reducedEffects: false,
   fontFamily: "'Prompt', sans-serif",
   fontSize: '16px',
   typographyScaleVersion: 2,

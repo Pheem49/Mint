@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatSession } from '../types'
-import { navigateToProject } from './projectNavigation'
+import { isPersistedConversation, navigateToProject } from './projectNavigation'
 
 function session(id: string, workspacePath: string | null, updatedAt: string, kind = 'conversation'): ChatSession {
   return { id, workspacePath, updatedAt, kind, title: id, createdAt: '2026-10-01T00:00:00Z', messageCount: 2, totalBytes: 20 }
@@ -19,6 +19,12 @@ function fixture(sessions: ChatSession[]) {
 }
 
 describe('project selection', () => {
+  it('does not persist workspace context for an unsent New chat', () => {
+    const sessions = [session('conversation-saved', '/projects/new', '2026-10-09T00:00:00Z')]
+    expect(isPersistedConversation('conversation-unsent', sessions)).toBe(false)
+    expect(isPersistedConversation('conversation-saved', sessions)).toBe(true)
+  })
+
   it('opens the Workspace file tree when the folder action selects an existing project', async () => {
     const { state, ports } = fixture([session('conversation-target', '/projects/new', '2026-10-09T00:00:00Z')])
     await navigateToProject('/projects/new', ports, 'workspace')
