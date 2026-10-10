@@ -1,5 +1,6 @@
 export * from '../shared/types'
 import type { MintPlatformApi } from '../shared/platform'
+import { createConversationTransport } from '../shared/conversation/transport'
 import type {
 
   RuntimeStatus,
@@ -30,11 +31,6 @@ import type {
   GitBranchChangeOutcome,
 } from '../shared/types'
 
-
-type DesktopStreamEvent =
-  | { type: 'started'; interactionId: number }
-  | { type: 'chunk'; chunk: string }
-  | { type: 'progress'; progress: AgentProgress }
 
 export type { GeminiLiveEvent } from '../shared/utils/useGeminiLiveVoice'
 import type { GeminiLiveEvent } from '../shared/utils/useGeminiLiveVoice'
@@ -408,9 +404,9 @@ export async function fetchProviderModels(
   return invoke<string[]>('fetch_provider_models', { provider, apiKey, baseUrl })
 }
 
-/** Fetch the live model list for image `provider` from its API.
- *  Returns a dynamic list on success, falling back to static presets on any
- *  network or auth error. Results are cached for 1 hour on the Rust side. */
+/** Fetch image model choices from the shared Rust catalog.
+ *  Discovered models precede missing presets; blank overrides use the saved key.
+ *  Provider discovery is cached for 1 hour on the Rust side. */
 export async function fetchImageProviderModels(
   provider: string,
   apiKey: string = '',
@@ -427,9 +423,9 @@ export async function fetchImageProviderModels(
   return invoke<string[]>('fetch_image_provider_models', { provider, apiKey: apiKey || '' })
 }
 
-/** Fetch the live model list for video `provider` from its API.
- *  Returns a dynamic list on success, falling back to static presets on any
- *  network or auth error. Results are cached for 1 hour on the Rust side. */
+/** Fetch video model choices from the shared Rust catalog.
+ *  Discovered models precede missing presets; blank overrides use the saved key.
+ *  Provider discovery is cached for 1 hour on the Rust side. */
 export async function fetchVideoProviderModels(
   provider: string,
   apiKey: string = '',
@@ -446,10 +442,9 @@ export async function fetchVideoProviderModels(
   return invoke<string[]>('fetch_video_provider_models', { provider, apiKey: apiKey || '' })
 }
 
-/** Fetch the list of Gemini Live–capable models (BidiGenerateContent / native-audio)
- *  from the Gemini API. Returns a dynamic list on success; falls back to an empty
- *  array so the hook can use its static GEMINI_LIVE_MODELS preset instead.
- *  Results are cached for 1 hour on the Rust side. */
+/** Fetch Gemini Live model choices from the shared Rust catalog.
+ *  Discovered models precede missing presets; blank overrides use the saved key.
+ *  Provider discovery is cached for 1 hour on the Rust side. */
 export async function fetchGeminiLiveModels(apiKey: string): Promise<string[]> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const params = new URLSearchParams({ apiKey: apiKey || '' })
@@ -463,182 +458,12 @@ export async function fetchGeminiLiveModels(apiKey: string): Promise<string[]> {
   return invoke<string[]>('fetch_gemini_live_models', { apiKey: apiKey || '' })
 }
 
-export async function sendChatMessage(
-  message: string,
-  imageDataUri?: string | null,
-  audioDataUri?: string | null,
-  videoDataUri?: string | null,
-  documentAttachment?: DocumentAttachment | null,
-  workspacePath?: string | null,
-  chatId?: string | null,
-  agentId?: string | null,
-): Promise<ChatResponse> {
-  const outgoingMessage = withImagePlaceholder(message, imageDataUri, videoDataUri)
-  if (typeof window === 'undefined' || !isTauriRuntime()) {
-    const API_BASE = getApiBase();
-    try {
-      const res = await authFetch(`${API_BASE}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId })
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        return {
-          provider: 'error',
-          model: 'error',
-          text: data?.text || data?.message || data?.status || `Local API returned HTTP ${res.status}`,
-        };
-      }
-      if (!data || typeof data.text !== 'string') {
-        return {
-          provider: 'error',
-          model: 'error',
-          text: 'Local API returned an invalid chat response.',
-        };
-      }
-      return data;
-    } catch (e) {
-      console.error("Failed to send chat message to local server:", e);
-      return { provider: 'error', model: 'error', text: `Failed to connect to Local API Server: ${e}` };
-    }
-  }
-  const { invoke } = await import('@tauri-apps/api/core')
-  const response = await invoke<ChatResponse>('send_chat_message', {
-    request: { message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId },
-  })
-  if (imageDataUri) {
-    await invoke('save_pictures', {
-      images: imageDataUri.split(' '),
-      source: 'chat',
-      message: outgoingMessage,
-    })
-  }
-  if (videoDataUri) {
-    await invoke('save_pictures', {
-      images: videoDataUri.split(' '),
-      source: 'chat',
-      message: outgoingMessage,
-    })
-  }
-  return response
-}
-
-export async function streamChatMessage(
-  message: string,
-  onChunk: (chunk: string) => void,
-  imageDataUri?: string | null,
-  audioDataUri?: string | null,
-  videoDataUri?: string | null,
-  systemInstruction = '',
-  onProgress?: (progress: AgentProgress) => void,
-  documentAttachment?: DocumentAttachment | null,
-  workspacePath?: string | null,
-  chatId?: string | null,
-  agentId?: string | null,
-  // Unused on web (no plan-mode-approval UI here) — kept only so this positional
-  // arg list stays aligned with the desktop `tauri.ts`, since the shared
-  // `MintDashboard.tsx` call site passes the same argument list to both builds.
-  _planMode?: boolean,
-  pinnedMcpServer?: string | null,
-  // Web has no separate Tauri event bus for approvals (unlike desktop's
-  // global `listen('tool-approval-requested', ...)`), so the server sends
-  // an `approval-requested` event down this same ndjson stream instead —
-  // this callback is how the caller learns about it.
-  onApprovalRequested?: (payload: { token: string; approval: any }) => void,
-  onTurnStarted?: (interactionId: number) => void,
-): Promise<ChatResponse> {
-  if (typeof window === 'undefined' || !isTauriRuntime()) {
-    const API_BASE = getApiBase();
-    const outgoingMessage = withImagePlaceholder(message, imageDataUri, videoDataUri);
-    const res = await authFetch(`${API_BASE}/chat-stream`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId, pinnedMcpServer })
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => null);
-      throw new Error(data?.text || data?.message || `HTTP ${res.status}`);
-    }
-    const reader = res.body?.getReader();
-    if (!reader) {
-      throw new Error("No response body reader");
-    }
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let finalResponse: ChatResponse | null = null;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const event = JSON.parse(line);
-          if (event.type === 'chunk') {
-            onChunk(event.chunk);
-          } else if (event.type === 'started') {
-            onTurnStarted?.(event.interactionId);
-          } else if (event.type === 'progress') {
-            onProgress?.(event.progress);
-          } else if (event.type === 'done') {
-            finalResponse = event.response;
-          } else if (event.type === 'approval-requested') {
-            onApprovalRequested?.({ token: event.token, approval: event.approval });
-          }
-        } catch (e) {
-          console.error("Failed to parse stream line:", line, e);
-        }
-      }
-    }
-    if (finalResponse) return finalResponse;
-    throw new Error("Stream closed without a final response");
-  }
-  const { invoke, Channel } = await import('@tauri-apps/api/core')
-  const outgoingMessage = withImagePlaceholder(message, imageDataUri, videoDataUri)
-  const onEvent = new Channel<DesktopStreamEvent>()
-  onEvent.onmessage = (event) => {
-    if (event.type === 'chunk') onChunk(event.chunk)
-    else if (event.type === 'started') onTurnStarted?.(event.interactionId)
-    else onProgress?.(event.progress)
-  }
-  const response = await invoke<ChatResponse>('stream_chat_message', {
-    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId, pinnedMcpServer },
-    onEvent,
-  })
-  if (imageDataUri) {
-    await invoke('save_pictures', {
-      images: imageDataUri.split(' '),
-      source: 'chat',
-      message: outgoingMessage,
-    })
-  }
-  if (videoDataUri) {
-    await invoke('save_pictures', {
-      images: videoDataUri.split(' '),
-      source: 'chat',
-      message: outgoingMessage,
-    })
-  }
-  return response
-}
-
-function withImagePlaceholder(message: string, imageDataUri?: string | null, videoDataUri?: string | null) {
-  let finalMessage = message
-  if (imageDataUri && !finalMessage.includes('[Image #1]')) {
-    const imageCount = imageDataUri.split(/\s+/).filter(Boolean).length
-    const markers = Array.from({ length: imageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
-    if (markers) finalMessage = `${finalMessage} ${markers}`
-  }
-  if (videoDataUri && !finalMessage.includes('[Video #1]')) {
-    const videoCount = videoDataUri.split(/\s+/).filter(Boolean).length
-    const markers = Array.from({ length: videoCount }, (_, index) => `[Video #${index + 1}]`).join(' ')
-    if (markers) finalMessage = `${finalMessage} ${markers}`
-  }
-  return finalMessage
-}
+export const { sendChatMessage, streamChatMessage } = createConversationTransport({
+  isNative: isTauriRuntime,
+  apiBase: getLocalApiBase,
+  fetch: authFetch,
+  ownerToken: getStoredAuthToken,
+})
 
 export async function getTtsUrls(text: string): Promise<TtsUrl[]> {
   if (typeof window === 'undefined') return []
@@ -1596,7 +1421,10 @@ export async function listLearnedSkills(workspacePath?: string): Promise<Learned
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     try {
       const API_BASE = getLocalApiBase()
-      const res = await authFetch(`${API_BASE}/learned-skills`)
+      const params = new URLSearchParams()
+      if (workspacePath?.trim()) params.set('workspacePath', workspacePath)
+      const suffix = params.size ? `?${params.toString()}` : ''
+      const res = await authFetch(`${API_BASE}/learned-skills${suffix}`)
       if (res.ok) {
         return await res.json()
       }

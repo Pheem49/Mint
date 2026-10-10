@@ -90,6 +90,7 @@ export interface MintPlatformApi {
     workspacePath?: string | null,
     chatId?: string | null,
     agentId?: string | null,
+    planMode?: boolean,
   ): Promise<ChatResponse>
   streamChatMessage(
     message: string,

@@ -33,7 +33,7 @@ export default function App() {
     window.addEventListener('popstate', handleUrlChange)
     window.addEventListener('hashchange', handleUrlChange)
 
-    // Fired by the tray "Settings" item (src-tauri/src/lib.rs) so it opens
+    // Fired by the tray "Settings" item (src-tauri/src/app/tray.rs) so it opens
     // the settings view in this window instead of spawning a separate one.
     const unlistenPromise = listen('open-settings', () => {
       window.location.hash = '#/settings'

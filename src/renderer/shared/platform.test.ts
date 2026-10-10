@@ -1,7 +1,29 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { authPlatform, installRendererPlatform, installWorkspacePlatform, workspacePlatform, type WorkspacePlatform } from './platform'
 import * as desktopAdapter from '../src/tauri'
 import * as webAdapter from '../src-web/tauri'
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe.each([['Desktop fallback', desktopAdapter], ['Web', webAdapter]] as const)('%s skill inventory', (_name, adapter) => {
+  it('forwards the selected workspace and returns skill location metadata', async () => {
+    vi.stubGlobal('window', {
+      location: { hostname: 'localhost', port: '9000', protocol: 'http:' },
+      localStorage: { getItem: () => null },
+    })
+    let requestUrl: URL | undefined
+    const skills = [{ id: 0, name: 'example', sourcePath: '/selected project/skills/example.md',
+      content: 'selected workspace', updatedAt: '', createdAt: '', location: 'workspace',
+      description: null, is_workspace: true }]
+    vi.stubGlobal('fetch', async (input: string) => {
+      requestUrl = new URL(input, 'http://localhost:9000')
+      return new Response(JSON.stringify(skills), { headers: { 'Content-Type': 'application/json' } })
+    })
+    await expect(adapter.listLearnedSkills('/selected project')).resolves.toEqual(skills)
+    expect(requestUrl?.pathname).toBe('/api/learned-skills')
+    expect(requestUrl?.searchParams.get('workspacePath')).toBe('/selected project')
+  })
+})
 
 describe('renderer platform interfaces', () => {
   it('accepts both complete runtime adapters', () => {

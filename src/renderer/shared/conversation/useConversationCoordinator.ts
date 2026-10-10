@@ -1,86 +1,47 @@
-import { useEffect, useMemo, useReducer, useRef } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ConversationState } from './coordinator'
-import { initialConversationState, transitionConversation } from './coordinator'
-import type { AgentProgress, ChatResponse } from '../types'
+import { createConversationLifecycle, type ConversationEffects, type ConversationTransport } from './lifecycle'
+import { conversationPlatform } from '../platform'
 
-interface CoordinatorOptions {
+interface CoordinatorOptions extends ConversationEffects {
   conversationId: string
   draftKeyPrefix: string
   workspaceStorageKey: string
+  historyVisible: boolean
 }
 
+/** React adapter: persistence and browser signals enter the same lifecycle tests use. */
 export function useConversationCoordinator(
   initial: Partial<ConversationState>,
   options: CoordinatorOptions,
+  transport: ConversationTransport = conversationPlatform,
 ) {
-  const [conversation, dispatch] = useReducer(transitionConversation, initial, initialConversationState)
-  const actions = useMemo(() => ({
-    compose: (message: string) => dispatch({ type: 'compose', message }),
-    selectWorkspace: (path: string) => dispatch({ type: 'workspace_selected', path }),
-    attachImage: (image: ConversationState['imageAttachments'][number]) => dispatch({ type: 'image_attached', image }),
-    removeImage: (index: number) => dispatch({ type: 'image_removed', index }),
-    attachVideo: (video: ConversationState['videoAttachments'][number]) => dispatch({ type: 'video_attached', video }),
-    removeVideo: (index: number) => dispatch({ type: 'video_removed', index }),
-    attachDocument: (document: ConversationState['documentAttachment']) => dispatch({ type: 'document_attached', document }),
-    startRun: (message: string, imageCount = 0, videoCount = 0) => dispatch({
-      type: 'run_started', message, imageCount, videoCount,
-    }),
-    receiveChunk: (chunk: string) => dispatch({ type: 'chunk_received', chunk }),
-    receiveProgress: (progress: AgentProgress[]) => dispatch({ type: 'progress_received', progress }),
-    clearProgress: () => dispatch({ type: 'progress_cleared' }),
-    clearStream: () => dispatch({ type: 'stream_cleared' }),
-    requestApproval: (approval: unknown) => dispatch({ type: 'approval_requested', approval }),
-    finishRun: () => dispatch({ type: 'run_finished' }),
-    cancelRun: () => dispatch({ type: 'run_cancelled' }),
-    clearComposer: () => dispatch({ type: 'composer_cleared' }),
-    switchSession: (draft = '') => dispatch({ type: 'session_switched', draft }),
-    executeStream: async (
-      execute: (onChunk: (chunk: string) => void) => Promise<ChatResponse>,
-      shouldApplyResponse: () => boolean = () => true,
-    ) => {
-      // Keep provider streaming internal and reveal only the authoritative
-      // completed response. This avoids partial Markdown/card layouts and
-      // keeps Desktop and Web behavior aligned with the CLI.
-      const response = await execute(() => {})
-      if (shouldApplyResponse()) {
-        dispatch({ type: 'chunk_received', chunk: response.text })
-        dispatch({ type: 'response_received', response })
-      }
-      return response
+  const latest = useRef(options)
+  latest.current = options
+  const [actions] = useState(() => createConversationLifecycle(options.conversationId, initial, transport, {
+    onError: error => latest.current.onError?.(error),
+    onApproval: (approval, chatId) => latest.current.onApproval?.(approval, chatId),
+    onReply: (response, chatId) => latest.current.onReply?.(response, chatId),
+    onActivityPersisted: id => latest.current.onActivityPersisted?.(id),
+    onRunCompleted: () => latest.current.onRunCompleted?.(),
+    onVisibleRunCompleted: chatId => latest.current.onVisibleRunCompleted?.(chatId),
+  }, {
+    read: id => window.localStorage.getItem(`${latest.current.draftKeyPrefix}${id}`) || '',
+    write: (id, text) => {
+      const key = `${latest.current.draftKeyPrefix}${id}`
+      if (text) window.localStorage.setItem(key, text)
+      else window.localStorage.removeItem(key)
     },
-    executeApproval: async (execute: () => Promise<void>) => {
-      try {
-        await execute()
-      } finally {
-        dispatch({ type: 'approval_resolved' })
-      }
-    },
-    executeCancellation: async (execute: () => Promise<void>) => {
-      try {
-        await execute()
-      } finally {
-        dispatch({ type: 'run_cancelled' })
-      }
-    },
-  }), [])
+  }))
+  const conversation = useSyncExternalStore(actions.subscribe, actions.getSnapshot, actions.getSnapshot)
 
-  const loadedConversationRef = useRef(options.conversationId)
-  useEffect(() => {
-    if (loadedConversationRef.current === options.conversationId) return
-    loadedConversationRef.current = options.conversationId
-    let draft = ''
-    try {
-      draft = window.localStorage.getItem(`${options.draftKeyPrefix}${options.conversationId}`) || ''
-    } catch {
-      // Draft persistence is best-effort in private browsing modes.
-    }
-    actions.switchSession(draft)
-  }, [actions, options.conversationId, options.draftKeyPrefix])
+  useEffect(() => actions.watch({ window, document }, options.historyVisible),
+    [actions, options.historyVisible, conversation.conversationId])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       try {
-        const key = `${options.draftKeyPrefix}${options.conversationId}`
+        const key = `${options.draftKeyPrefix}${conversation.conversationId}`
         if (conversation.message) window.localStorage.setItem(key, conversation.message)
         else window.localStorage.removeItem(key)
       } catch {
@@ -88,15 +49,12 @@ export function useConversationCoordinator(
       }
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [conversation.message, options.conversationId, options.draftKeyPrefix])
+  }, [conversation.message, conversation.conversationId, options.draftKeyPrefix])
 
   useEffect(() => {
     try {
-      if (conversation.workspacePath) {
-        window.localStorage.setItem(options.workspaceStorageKey, conversation.workspacePath)
-      } else {
-        window.localStorage.removeItem(options.workspaceStorageKey)
-      }
+      if (conversation.workspacePath) window.localStorage.setItem(options.workspaceStorageKey, conversation.workspacePath)
+      else window.localStorage.removeItem(options.workspaceStorageKey)
     } catch {
       // Workspace persistence is best-effort in private browsing modes.
     }
