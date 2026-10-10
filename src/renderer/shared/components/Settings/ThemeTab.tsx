@@ -306,11 +306,17 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
             )}
           </div>
 
-          <div className="setting-row stacked">
-            <label htmlFor="reduced-effects">Reduce effects</label>
-            <p className="section-subtitle">Keep the background and orb still. Also follows your system’s reduced motion preference.</p>
-            <input id="reduced-effects" type="checkbox" checked={config.reducedEffects === true}
-              onChange={event => updateField('reducedEffects', event.target.checked)} />
+          <div className="toggle-row reduced-effects-row">
+            <div>
+              <label id="reduced-effects-label" htmlFor="reduced-effects">Reduce effects</label>
+              <p className="hint">Keep the background and orb still. Also follows your system’s reduced motion preference.</p>
+            </div>
+            <label className="settings-toggle-switch">
+              <input id="reduced-effects" type="checkbox" role="switch" aria-labelledby="reduced-effects-label"
+                checked={config.reducedEffects === true}
+                onChange={event => updateField('reducedEffects', event.target.checked)} />
+              <span className="settings-toggle-slider" aria-hidden="true" />
+            </label>
           </div>
 
           {/* Surface style: Opaque vs Glassmorphism */}
@@ -438,15 +444,9 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
           <div className="setting-row">
             <label>Font family</label>
             <SelectField aria-label="Font family" value={config.fontFamily} onValueChange={(nextValue) => updateField('fontFamily', nextValue)}>
-              <option value="'Prompt', sans-serif">Prompt (Thai & Latin - Default)</option>
-              <option value="'Outfit', sans-serif">Outfit (Geometric Modern)</option>
-              <option value="'Inter', sans-serif">Inter (Clean Sans-Serif)</option>
-              <option value="'Prompt', sans-serif">Prompt (Modern Thai)</option>
-              <option value="'Noto Sans Thai', sans-serif">Noto Sans Thai (clean Thai)</option>
-              <option value="'Sarabun', sans-serif">Sarabun (Formal Thai)</option>
-              <option value="'Kanit', sans-serif">Kanit (Trendy Thai)</option>
-              <option value="'Mitr', sans-serif">Mitr (Friendly Thai)</option>
-              <option value="'Mali', cursive">Mali (Cute Thai Font)</option>
+              <option value="'IBM Plex Sans Thai', 'Noto Sans Thai', 'Inter', ui-sans-serif, system-ui, sans-serif">IBM Plex Sans Thai (Default)</option>
+              <option value="'Inter', 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif">Inter + Noto Sans Thai</option>
+              <option value="'Noto Sans Thai', 'Inter', ui-sans-serif, system-ui, sans-serif">Noto Sans Thai</option>
               <option value="'Fira Code', monospace">Fira Code (developer code font)</option>
             </SelectField>
           </div>

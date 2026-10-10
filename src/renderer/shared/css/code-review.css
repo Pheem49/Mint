@@ -355,6 +355,12 @@
   backdrop-filter: blur(8px);
 }
 
+[data-surface="opaque"] .code-review-file-bar {
+  background: var(--bg-surface, #141518);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .code-review-file-bar-status {
   font-weight: 700;
   font-size: 0.72rem;
@@ -494,6 +500,10 @@
   flex: 0 0 auto;
   min-width: 0;
   overflow: hidden;
+}
+
+[data-surface="opaque"] .code-review-tree-pane {
+  background: var(--bg-surface-raised, var(--bg-surface, #141518));
 }
 
 .code-review-tree-collapse-btn {

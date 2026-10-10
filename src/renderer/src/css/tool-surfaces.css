@@ -116,6 +116,11 @@ body.is-tool-resizing .assistant-workspace {
   border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
 }
 
+[data-surface="opaque"] .tool-surface-tabs,
+[data-surface="opaque"] .tool-surface-launcher-header {
+  background: var(--chrome-bg, var(--bg-surface, #18191c));
+}
+
 .tool-surface-launcher-header {
   position: relative;
   z-index: 300;
@@ -215,13 +220,28 @@ body.is-tool-resizing .assistant-workspace {
   top: calc(100% + 6px);
   left: 0;
   right: auto;
-  width: 175px;
+  width: 232px;
   max-width: calc(100vw - 24px);
-  padding: 5px;
+  padding: 7px;
   border: 1px solid var(--border-default, rgba(255, 255, 255, 0.14));
   border-radius: var(--radius-md, 10px);
-  background: var(--bg-surface, #20232a);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  background: color-mix(in srgb, var(--bg-surface, #20232a) 96%, black);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.58), 0 2px 8px rgba(0, 0, 0, 0.28);
+  backdrop-filter: var(--glass-blur, none);
+  animation: toolMenuEnter 120ms ease-out both;
+}
+
+.tool-surface-menu-heading {
+  padding: 6px 10px 7px;
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+@keyframes toolMenuEnter {
+  from { opacity: 0; transform: translateY(-3px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .tool-surface-switch-menu.is-align-right {
@@ -235,9 +255,9 @@ body.is-tool-resizing .assistant-workspace {
 }
 
 .tool-surface-switch-menu .tool-surface-launcher-item {
-  min-height: 32px;
-  padding: 0 10px;
-  gap: 8px;
+  min-height: 46px;
+  padding: 4px 9px;
+  gap: 9px;
   border: 0;
   border-radius: var(--radius-xs, 6px);
   background: transparent;
@@ -258,11 +278,31 @@ body.is-tool-resizing .assistant-workspace {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   color: var(--text-muted, #94a3b8);
   flex-shrink: 0;
   transition: color 150ms ease, transform 150ms ease;
+}
+
+.tool-surface-switch-menu .tool-surface-menu-icon.is-review { color: #8ab4ff; }
+.tool-surface-switch-menu .tool-surface-menu-icon.is-terminal { color: #34d399; }
+.tool-surface-switch-menu .tool-surface-menu-icon.is-browser { color: #c4a7ff; }
+.tool-surface-switch-menu .tool-surface-menu-icon.is-files { color: #fbbf24; }
+
+.tool-surface-menu-copy { flex: 1; min-width: 0; }
+
+.tool-surface-menu-label {
+  color: var(--text-main, #e2e8f0);
+  font-size: 0.8rem;
+  font-weight: 550;
+  line-height: 1.15;
+}
+
+.tool-surface-switch-menu .tool-surface-launcher-item kbd {
+  padding: 3px 5px;
+  border-radius: 5px;
+  font-size: 0.64rem;
 }
 
 .tool-surface-menu-icon svg {
@@ -275,6 +315,11 @@ body.is-tool-resizing .assistant-workspace {
 .tool-surface-launcher-item:focus-visible .tool-surface-menu-icon {
   color: #f1f5f9;
   transform: scale(1.04);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-surface-switch-menu { animation: none; }
+  .tool-surface-menu-icon { transition: none; }
 }
 
 .tool-surface-tabs-container {

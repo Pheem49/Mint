@@ -4,7 +4,7 @@
   overflow: hidden;
   color: #e5e7eb;
   background: transparent;
-  font-family: 'Prompt', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-ui, 'Inter', 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif);
 }
 
 .mint-browser-tabs {

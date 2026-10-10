@@ -83,7 +83,7 @@
 }
 
 body {
-  font-family: 'Prompt', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-ui, 'Inter', 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif);
   background: transparent;
   color: var(--text-main);
   height: 100vh;
@@ -318,7 +318,7 @@ h1 {
   background: rgba(0,0,0,0.45);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  z-index: 80;
+  z-index: 1000;
   padding: 24px;
 }
 

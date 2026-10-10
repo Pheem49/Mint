@@ -194,7 +194,7 @@ export default function ToolSurfacePage({
 
   const launcherItems = [
     { label: 'Review', title: 'Review changes', shortcut: 'Ctrl+Shift+G', icon: <IconReview />, className: 'is-review', action: onOpenReview },
-    { label: 'Terminal', title: 'Integrated terminal', shortcut: 'Ctrl`', icon: <IconTerminal />, className: 'is-terminal', action: onOpenTerminal },
+    { label: 'Terminal', title: 'Integrated terminal', shortcut: 'Ctrl + `', icon: <IconTerminal />, className: 'is-terminal', action: onOpenTerminal },
     { label: 'Browser', title: 'Browser (Co-browsing with AI)', shortcut: 'Ctrl+T', icon: <IconBrowser />, className: 'is-browser', action: onOpenBrowser },
     { label: 'Workspace', title: 'Workspace files', shortcut: 'Ctrl+P', icon: <IconFiles />, className: 'is-files', action: onOpenFiles },
   ]
@@ -204,7 +204,8 @@ export default function ToolSurfacePage({
       {launcherItems.map((item) => (
         <button type="button" role="menuitem" className="tool-surface-launcher-item" key={item.label} title={item.title} onClick={() => { item.action(); setSwitcherOpen(false) }}>
           <span className={`tool-surface-menu-icon ${item.className}`} aria-hidden="true">{item.icon}</span>
-          <span>{item.label}</span><kbd>{item.shortcut}</kbd>
+          <span className="tool-surface-menu-copy"><span className="tool-surface-menu-label">{item.label}</span></span>
+          <kbd>{item.shortcut}</kbd>
         </button>
       ))}
     </div>
@@ -218,7 +219,7 @@ export default function ToolSurfacePage({
       const next = !open
       if (next && newTabWrapRef.current) {
         const rect = newTabWrapRef.current.getBoundingClientRect()
-        setMenuAlignRight(window.innerWidth - rect.left < 210)
+        setMenuAlignRight(window.innerWidth - rect.left < 260)
       }
       return next
     })
@@ -315,7 +316,7 @@ export default function ToolSurfacePage({
     <section
       className={`tool-surface-page ${isEntering ? 'is-entering' : ''} ${isMaximized ? 'is-maximized' : ''} ${isResizing ? 'is-resizing' : ''}`}
       onAnimationEnd={() => setIsEntering(false)}
-      aria-label="Open tools"
+      aria-label="Tools"
     >
       {!isMaximized && (
         <div
@@ -416,6 +417,7 @@ export default function ToolSurfacePage({
               onClick={(e) => { e.stopPropagation(); toggleSwitcher() }}
               title="Switch tool or open page"
               aria-label="Switch tool"
+              aria-haspopup="menu"
               aria-expanded={switcherOpen}
             >
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -425,8 +427,9 @@ export default function ToolSurfacePage({
             {switcherOpen && (
               <div
                 className={`tool-surface-switch-menu ${menuAlignRight ? 'is-align-right' : ''}`}
-                role="menu"
+                aria-label="Tool menu"
               >
+                <div className="tool-surface-menu-heading">OPEN TOOL</div>
                 {renderLauncher('is-switch-menu')}
               </div>
             )}

@@ -7,7 +7,7 @@ body {
     justify-content: center;
     align-items: center;
     height: 100vh;
-    font-family: 'Outfit', sans-serif;
+    font-family: var(--font-ui, 'Inter', 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif);
     user-select: none;
 }
 

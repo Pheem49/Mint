@@ -48,7 +48,7 @@ import type { PromptOptions } from '../conversation/lifecycle'
 
 
 
-import { DEFAULT_CONFIG, migrateTypographyScale } from '../constants/config'
+import { DEFAULT_CONFIG, migrateFontFamily, migrateTypographyScale } from '../constants/config'
 
 const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
 const RECENT_WORKSPACE_PATHS_KEY = 'mint:recent-workspace-paths'
@@ -776,7 +776,7 @@ export default function MintDashboard() {
       refreshChatSessions(),
       window.settingsApi?.getSettings()
         .then((loaded: any) => {
-          const migrated = migrateTypographyScale(loaded)
+          const migrated = migrateFontFamily(migrateTypographyScale(loaded))
           setSettingsConfig(migrated)
           applyThemeStyles({ ...DEFAULT_CONFIG, ...migrated })
         }),
@@ -793,7 +793,7 @@ export default function MintDashboard() {
       getRuntimeStatus().then(setStatus).catch(() => {})
       window.settingsApi?.getSettings?.().then((loaded: any) => {
         if (loaded) {
-          const migrated = migrateTypographyScale(loaded)
+          const migrated = migrateFontFamily(migrateTypographyScale(loaded))
           setSettingsConfig(migrated)
           applyThemeStyles(migrated)
         }
@@ -803,7 +803,7 @@ export default function MintDashboard() {
     window.addEventListener('focus', handleWindowFocus)
 
     window.api?.onSettingsChanged?.((loaded: any) => {
-      const migrated = migrateTypographyScale(loaded)
+      const migrated = migrateFontFamily(migrateTypographyScale(loaded))
       setSettingsConfig(migrated)
       applyThemeStyles(migrated)
       getRuntimeStatus().then(setStatus).catch(() => {})

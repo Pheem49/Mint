@@ -125,9 +125,15 @@ export const applyTheme = (cfg: any): void => {
     }
     if (cfg.customPanelBg) {
       const pRgb = hexToRgb(cfg.customPanelBg)
-      document.documentElement.style.setProperty('--bg-surface', `rgba(${pRgb.r}, ${pRgb.g}, ${pRgb.b}, 0.75)`)
-      document.documentElement.style.setProperty('--panel-bg', `rgba(${pRgb.r}, ${pRgb.g}, ${pRgb.b}, 0.75)`)
-      document.documentElement.style.setProperty('--surface-bg', `rgba(${pRgb.r}, ${pRgb.g}, ${pRgb.b}, 0.62)`)
+      const panelSurface = surfaceStyle === 'opaque'
+        ? cfg.customPanelBg
+        : `rgba(${pRgb.r}, ${pRgb.g}, ${pRgb.b}, 0.75)`
+      const raisedSurface = surfaceStyle === 'opaque'
+        ? cfg.customPanelBg
+        : `rgba(${pRgb.r}, ${pRgb.g}, ${pRgb.b}, 0.62)`
+      document.documentElement.style.setProperty('--bg-surface', panelSurface)
+      document.documentElement.style.setProperty('--panel-bg', panelSurface)
+      document.documentElement.style.setProperty('--surface-bg', raisedSurface)
     }
     return
   }

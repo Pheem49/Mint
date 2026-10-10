@@ -82,7 +82,7 @@ export default class ChunkErrorBoundary extends React.Component<Props, State> {
             width: '100vw',
             background: '#09090b',
             color: '#e4e4e7',
-            fontFamily: 'Outfit, Inter, ui-sans-serif, system-ui, sans-serif',
+            fontFamily: "'IBM Plex Sans Thai', 'Noto Sans Thai', 'Inter', ui-sans-serif, system-ui, sans-serif",
             boxSizing: 'border-box',
             overflow: 'hidden',
           }}

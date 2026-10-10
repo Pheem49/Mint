@@ -17,7 +17,7 @@ export const DEFAULT_CONFIG = {
   surfaceStyle: 'opaque' as 'opaque' | 'glass',
   glassBlur: 'none',
   reducedEffects: false,
-  fontFamily: "'Prompt', sans-serif",
+  fontFamily: "'IBM Plex Sans Thai', 'Noto Sans Thai', 'Inter', ui-sans-serif, system-ui, sans-serif",
   fontSize: '16px',
   typographyScaleVersion: 2,
   apiKey: '',
@@ -174,6 +174,32 @@ export const migrateTuiTheme = <T extends Record<string, any>>(config: T): T & {
   const legacyTheme = config.tuiTheme || config.theme
   const tuiTheme = legacyTheme === 'system' || legacyTheme === 'light' ? legacyTheme : 'dark'
   return { ...config, tuiTheme }
+}
+
+/** Move saved selections for fonts that are no longer bundled to a local family. */
+export function migrateFontFamily<T extends Record<string, any>>(config: T): T {
+  const family = config.fontFamily
+  if (!family) return config
+  if (family === "'Inter', 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif") {
+    return { ...config, fontFamily: DEFAULT_CONFIG.fontFamily }
+  }
+  if (family === "'Noto Sans Thai', sans-serif" || family === "'Noto Sans Thai', 'Inter', ui-sans-serif, system-ui, sans-serif") {
+    return { ...config, fontFamily: "'Noto Sans Thai', 'Inter', ui-sans-serif, system-ui, sans-serif" }
+  }
+  const retiredFamilies = [
+    "'Prompt', sans-serif",
+    "'Outfit', sans-serif",
+    "'Inter', sans-serif",
+    "'Sarabun', sans-serif",
+    "'Kanit', sans-serif",
+    "'Mitr', sans-serif",
+    "'Mali', sans-serif",
+    "'Mali', cursive",
+  ]
+  if (retiredFamilies.includes(family)) {
+    return { ...config, fontFamily: DEFAULT_CONFIG.fontFamily }
+  }
+  return config
 }
 
 /**
