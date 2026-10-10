@@ -173,7 +173,7 @@ pub fn parse_data_uri(raw: &str) -> Option<(String, &'static str, Vec<u8>)> {
     Some((mime_type, extension, STANDARD.decode(encoded).ok()?))
 }
 
-fn save_chat_images_to_directory(
+pub(crate) fn save_chat_images_to_directory(
     directory: &Path,
     images: Vec<String>,
     source: &str,

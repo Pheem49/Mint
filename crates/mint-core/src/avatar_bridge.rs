@@ -506,7 +506,7 @@ impl AvatarBridge {
     }
 
     /// Hook this into whatever emits `AgentProgress` for a turn (currently
-    /// wired at the `progress_cb` closure in `src-tauri/src/lib.rs` around
+    /// wired at the `progress_cb` closure in `src-tauri/src/commands/conversation.rs` around
     /// the `orchestrate_agent_loop` call).
     pub fn on_agent_progress(&self, progress: &AgentProgress) {
         if !self.is_active() {

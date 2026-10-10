@@ -3,6 +3,55 @@ use tokio::net::TcpStream;
 
 use super::super::*;
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiChatRequest {
+    message: String,
+    system_instruction: Option<String>,
+    chat_id: Option<String>,
+    image_data_uri: Option<String>,
+    audio_data_uri: Option<String>,
+    video_data_uri: Option<String>,
+    document_attachment: Option<crate::chat::DocumentAttachment>,
+    #[serde(default)]
+    workspace_path: Option<String>,
+    agent_id: Option<String>,
+    #[serde(default)]
+    plan_mode: bool,
+    #[serde(default)]
+    pinned_mcp_server: Option<String>,
+    #[serde(default)]
+    temperature: Option<f64>,
+    #[serde(default)]
+    thinking_enabled: Option<bool>,
+    #[serde(default)]
+    thinking_effort: Option<String>,
+}
+
+impl ApiChatRequest {
+    fn into_chat_request(self, config: &MintConfig) -> ChatRequest {
+        ChatRequest {
+            message: self.message,
+            system_instruction: self.system_instruction.unwrap_or_default(),
+            chat_id: self.chat_id,
+            image_data_uri: self.image_data_uri,
+            audio_data_uri: self.audio_data_uri,
+            video_data_uri: self.video_data_uri,
+            document_attachment: self.document_attachment,
+            workspace_path: self.workspace_path,
+            agent_id: self.agent_id,
+            plan_mode: self.plan_mode,
+            pinned_mcp_server: self.pinned_mcp_server,
+            messages: None,
+            tools: None,
+            temperature: self.temperature.or(config.temperature),
+            thinking_enabled: self.thinking_enabled,
+            thinking_effort: self.thinking_effort,
+            ..Default::default()
+        }
+    }
+}
+
 pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpStream) {
     let owner = match background_request_owner(ctx.request_str) {
         Ok(owner) => owner,
@@ -47,50 +96,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
     } = ctx;
     match (method, route) {
         ("POST", "/api/chat") => {
-            #[derive(Deserialize)]
-            #[serde(rename_all = "camelCase")]
-            struct ApiChatRequest {
-                message: String,
-                system_instruction: Option<String>,
-                chat_id: Option<String>,
-                image_data_uri: Option<String>,
-                audio_data_uri: Option<String>,
-                video_data_uri: Option<String>,
-                document_attachment: Option<crate::chat::DocumentAttachment>,
-                #[serde(default)]
-                workspace_path: Option<String>,
-                agent_id: Option<String>,
-                #[serde(default)]
-                pinned_mcp_server: Option<String>,
-                #[serde(default)]
-                temperature: Option<f64>,
-                #[serde(default)]
-                thinking_enabled: Option<bool>,
-                #[serde(default)]
-                thinking_effort: Option<String>,
-            }
-
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
                 let config = load_config().unwrap_or_default();
-                let chat_req = ChatRequest {
-                    message: req.message,
-                    system_instruction: req.system_instruction.unwrap_or_default(),
-                    chat_id: req.chat_id,
-                    image_data_uri: req.image_data_uri,
-                    audio_data_uri: req.audio_data_uri,
-                    video_data_uri: req.video_data_uri,
-                    document_attachment: req.document_attachment,
-                    workspace_path: req.workspace_path,
-                    agent_id: req.agent_id,
-                    plan_mode: false,
-                    pinned_mcp_server: req.pinned_mcp_server,
-                    messages: None,
-                    tools: None,
-                    temperature: req.temperature.or(config.temperature),
-                    thinking_enabled: req.thinking_enabled,
-                    thinking_effort: req.thinking_effort,
-                    ..Default::default()
-                };
+                let chat_req = req.into_chat_request(&config);
                 let mut chat_req = match chat_req.with_document_context(&config) {
                     Ok(req) => req,
                     Err(error) => {
@@ -221,50 +229,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
         }
 
         ("POST", "/api/chat-stream") => {
-            #[derive(Deserialize)]
-            #[serde(rename_all = "camelCase")]
-            struct ApiChatRequest {
-                message: String,
-                system_instruction: Option<String>,
-                chat_id: Option<String>,
-                image_data_uri: Option<String>,
-                audio_data_uri: Option<String>,
-                video_data_uri: Option<String>,
-                document_attachment: Option<crate::chat::DocumentAttachment>,
-                #[serde(default)]
-                workspace_path: Option<String>,
-                agent_id: Option<String>,
-                #[serde(default)]
-                pinned_mcp_server: Option<String>,
-                #[serde(default)]
-                temperature: Option<f64>,
-                #[serde(default)]
-                thinking_enabled: Option<bool>,
-                #[serde(default)]
-                thinking_effort: Option<String>,
-            }
-
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
                 let config = load_config().unwrap_or_default();
-                let chat_req = ChatRequest {
-                    message: req.message,
-                    system_instruction: req.system_instruction.unwrap_or_default(),
-                    chat_id: req.chat_id,
-                    image_data_uri: req.image_data_uri,
-                    audio_data_uri: req.audio_data_uri,
-                    video_data_uri: req.video_data_uri,
-                    document_attachment: req.document_attachment,
-                    workspace_path: req.workspace_path,
-                    agent_id: req.agent_id,
-                    plan_mode: false,
-                    pinned_mcp_server: req.pinned_mcp_server,
-                    messages: None,
-                    tools: None,
-                    temperature: req.temperature.or(config.temperature),
-                    thinking_enabled: req.thinking_enabled,
-                    thinking_effort: req.thinking_effort,
-                    ..Default::default()
-                };
+                let chat_req = req.into_chat_request(&config);
                 let mut chat_req = match chat_req.with_document_context(&config) {
                     Ok(req) => req,
                     Err(error) => {
@@ -445,36 +412,19 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             let audio_data_uri = chat_req.audio_data_uri.clone();
                             let video_data_uri = chat_req.video_data_uri.clone();
                             let agent_id = chat_req.agent_id.clone();
+                            let plan_mode = chat_req.plan_mode;
                             let pinned_mcp_server = chat_req.pinned_mcp_server.clone();
                             let tx_approval = tx.clone();
                             let tx_started = tx.clone();
 
                             let join_handle = tokio::spawn(async move {
-                                // Real (not auto-deny) approval flow: the request-payload
-                                // shape and blocking mechanism mirror desktop's approve_cb
-                                // (src-tauri/src/lib.rs) exactly, but the "requested" event
-                                // rides this same ndjson stream instead of a Tauri event,
-                                // and the token is a UUID (not a sequential counter) since
-                                // this endpoint, unlike Tauri IPC, is LAN-reachable by
-                                // default — see mint_core::PENDING_APPROVALS' docs.
                                 let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
-                                    let (approval_tx, approval_rx) = tokio::sync::oneshot::channel();
-                                    let token = uuid::Uuid::new_v4().to_string();
-                                    crate::PENDING_APPROVALS
-                                        .lock()
-                                        .unwrap()
-                                        .insert(token.clone(), approval_tx);
-                                    if let Ok(json_val) = serde_json::to_string(&serde_json::json!({
-                                        "type": "approval-requested",
-                                        "token": token,
-                                        "approval": approval
-                                    })) {
-                                        let _ = tx_approval.send(format!("{}\n", json_val));
-                                    }
-                                    Ok(tokio::task::block_in_place(move || {
-                                        tokio::runtime::Handle::current().block_on(approval_rx)
+                                    crate::PENDING_APPROVALS.request_blocking(|token| {
+                                        let event = serde_json::to_string(&serde_json::json!({
+                                            "type": "approval-requested", "token": token, "approval": approval
+                                        })).map_err(|error| error.to_string())?;
+                                        tx_approval.send(format!("{event}\n")).map_err(|error| error.to_string())
                                     })
-                                    .unwrap_or(ApprovalOutcome::Denied))
                                 };
                                 let result = crate::with_turn_start_listener(agent_scoped_chat_id.clone(), move |id| {
                                     let event = serde_json::json!({ "type": "started", "interactionId": id });
@@ -491,7 +441,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                     None,
                                     pinned_mcp_server.as_deref(),
                                     fast_mode,
-                                    false,
+                                    plan_mode,
                                     approve_cb,
                                     progress_cb,
                                     on_chunk,
@@ -601,5 +551,58 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
         _ => unreachable!(
             "api_server routed an unhandled route into routes::chat::execute: {method} {route}"
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_chat_request_preserves_plan_mode_and_conversation_context() {
+        let request: ApiChatRequest = serde_json::from_value(json!({
+            "message": "inspect", "systemInstruction": "read only", "chatId": "chat-1",
+            "workspacePath": "/project", "agentId": "agent-1", "pinnedMcpServer": "mcp-1",
+            "imageDataUri": "image", "audioDataUri": "audio", "videoDataUri": "video",
+            "planMode": true, "temperature": 0.4, "thinkingEnabled": true, "thinkingEffort": "high"
+        }))
+        .unwrap();
+        let config = MintConfig {
+            temperature: Some(0.8),
+            ..Default::default()
+        };
+        let request = request.into_chat_request(&config);
+        assert!(request.plan_mode);
+        assert_eq!(request.message, "inspect");
+        assert_eq!(request.system_instruction, "read only");
+        assert_eq!(request.chat_id.as_deref(), Some("chat-1"));
+        assert_eq!(request.workspace_path.as_deref(), Some("/project"));
+        assert_eq!(request.agent_id.as_deref(), Some("agent-1"));
+        assert_eq!(request.pinned_mcp_server.as_deref(), Some("mcp-1"));
+        assert_eq!(request.image_data_uri.as_deref(), Some("image"));
+        assert_eq!(request.audio_data_uri.as_deref(), Some("audio"));
+        assert_eq!(request.video_data_uri.as_deref(), Some("video"));
+        assert_eq!(request.temperature, Some(0.4));
+        assert_eq!(request.thinking_enabled, Some(true));
+        assert_eq!(request.thinking_effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn api_chat_request_defaults_to_agent_mode_and_config_temperature() {
+        for body in [
+            r#"{"message":"hello"}"#,
+            r#"{"message":"hello","planMode":false,"systemInstruction":null}"#,
+        ] {
+            let request: ApiChatRequest = serde_json::from_str(body).unwrap();
+            let request = request.into_chat_request(&MintConfig {
+                temperature: Some(0.8),
+                ..Default::default()
+            });
+            assert!(!request.plan_mode);
+            assert_eq!(request.system_instruction, "");
+            assert_eq!(request.temperature, Some(0.8));
+            assert!(request.messages.is_none());
+            assert!(request.tools.is_none());
+        }
     }
 }

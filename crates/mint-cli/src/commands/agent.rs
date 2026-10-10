@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Subcommand;
 use mint_core::{
-    CHAT_CLI_ID, ChatRequest, ImageGenRequest, MintConfig, TaskStore, generate_images, load_config,
+    CHAT_CLI_ID, ChatRequest, ImageGenRequest, MintConfig, TaskStore, load_config,
     orchestrate_chat_with_fallback, save_config,
 };
 
@@ -643,39 +643,23 @@ pub async fn handle_imagine(
         mask_data_uri: None,
         mode: None,
     };
-    match generate_images(&config, &request).await {
+    match mint_core::image_workflow::generate_and_save_images(&config, &request).await {
         Ok(result) => {
             spinner.finish_and_clear();
             eprintln!("{MINT}✦ Generated {} image(s){RESET}", result.images.len());
-            let data_uris: Vec<String> = result
-                .images
-                .iter()
-                .map(|img| img.data_uri.clone())
-                .collect();
-            match mint_core::save_chat_images(
-                data_uris,
-                Some(result.provider.clone()),
-                Some(prompt.clone()),
-            ) {
-                Ok(saved) => {
-                    for entry in &saved {
-                        println!("{MINT}✓{RESET} Saved: {}", entry.path.display());
-                    }
-                    if let (Some(out_path), Some(first)) = (&output, saved.first()) {
-                        match std::fs::copy(&first.path, out_path) {
-                            Ok(_) => println!("{MINT}✓{RESET} Copied to: {}", out_path.display()),
-                            Err(e) => eprintln!(
-                                "{WARN}Warning: could not copy to output path: {e}{RESET}"
-                            ),
-                        }
-                    }
-                    if let Some(desc) = &result.description
-                        && !desc.is_empty()
-                    {
-                        println!("\n{DIM}{desc}{RESET}");
-                    }
+            for entry in &result.images {
+                println!("{MINT}✓{RESET} Saved: {}", entry.path.display());
+            }
+            if let (Some(out_path), Some(first)) = (&output, result.images.first()) {
+                match std::fs::copy(&first.path, out_path) {
+                    Ok(_) => println!("{MINT}✓{RESET} Copied to: {}", out_path.display()),
+                    Err(e) => eprintln!("{WARN}Warning: could not copy to output path: {e}{RESET}"),
                 }
-                Err(e) => eprintln!("{ERROR}Failed to save images: {e}{RESET}"),
+            }
+            if let Some(desc) = &result.description
+                && !desc.is_empty()
+            {
+                println!("\n{DIM}{desc}{RESET}");
             }
         }
         Err(e) => {

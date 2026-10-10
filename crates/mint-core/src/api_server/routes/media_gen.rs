@@ -16,74 +16,27 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
     } = ctx;
     match (method, route) {
         ("POST", "/api/image-generate") => {
-            #[derive(serde::Deserialize)]
-            #[serde(rename_all = "camelCase")]
-            struct ImageGenApiRequest {
-                prompt: String,
-                #[serde(default)]
-                negative_prompt: Option<String>,
-                #[serde(default)]
-                aspect_ratio: Option<String>,
-                #[serde(default)]
-                num_images: Option<u8>,
-                #[serde(default)]
-                model: Option<String>,
-                /// Which image provider to use (overrides config.image_gen_provider).
-                #[serde(default)]
-                provider: Option<String>,
-                #[serde(default)]
-                image_data_uri: Option<String>,
-                #[serde(default)]
-                mask_data_uri: Option<String>,
-                #[serde(default)]
-                mode: Option<String>,
-            }
-
-            if let Ok(req) = serde_json::from_str::<ImageGenApiRequest>(body) {
+            if let Ok(request) = serde_json::from_str::<ImageGenRequest>(body) {
                 let config = load_config().unwrap_or_default();
-                let gen_request = ImageGenRequest {
-                    prompt: req.prompt.clone(),
-                    negative_prompt: req.negative_prompt,
-                    aspect_ratio: req.aspect_ratio,
-                    num_images: req.num_images,
-                    model: req.model,
-                    provider: req.provider,
-                    image_data_uri: req.image_data_uri,
-                    mask_data_uri: req.mask_data_uri,
-                    mode: req.mode,
-                };
-                match generate_images(&config, &gen_request).await {
-                    Ok(result) => {
+                match crate::image_workflow::generate_and_save_images(&config, &request).await {
+                    Ok(mut result) => {
                         log_api_req(
                             "POST",
                             "/api/image-generate",
                             "200 OK",
                             Some(&format!("Provider: {} | {}", result.provider, auth_label)),
                         );
-                        let data_uris: Vec<String> = result
-                            .images
-                            .iter()
-                            .map(|img| img.data_uri.clone())
-                            .collect();
-                        let mut saved = save_chat_images(
-                            data_uris,
-                            Some(result.provider.clone()),
-                            Some(req.prompt.clone()),
-                        )
-                        .unwrap_or_default();
-                        for picture in &mut saved {
+                        for picture in &mut result.images {
                             picture.url = Some(format!("/api/pictures/{}", picture.filename));
                             picture.thumbnail_url =
                                 Some(format!("/api/pictures/{}", picture.filename));
                         }
-                        let response = json!({
-                            "images": saved,
-                            "model": result.model,
-                            "provider": result.provider,
-                            "prompt": result.prompt,
-                            "description": result.description
-                        });
-                        send_json_response(socket, "200 OK", &response.to_string()).await;
+                        send_json_response(
+                            socket,
+                            "200 OK",
+                            &serde_json::to_string(&result).unwrap_or_default(),
+                        )
+                        .await;
                     }
                     Err(e) => {
                         log_api_err("API /api/image-generate error", &e);

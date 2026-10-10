@@ -1,3 +1,4 @@
+use serde_json::json;
 use std::{
     fs,
     net::{SocketAddr, TcpStream},
@@ -6,7 +7,6 @@ use std::{
     time::Duration,
 };
 
-use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
 pub fn start_system_events(app: AppHandle) {

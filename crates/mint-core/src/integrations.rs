@@ -8,3 +8,4 @@ pub mod mcp;
 pub mod mcp_result;
 pub mod oauth;
 pub mod plugins;
+pub mod webhooks;

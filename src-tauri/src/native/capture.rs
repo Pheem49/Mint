@@ -1,44 +1,23 @@
-use std::{
-    fs,
-    path::PathBuf,
-    process::{Command, Stdio},
-    sync::{
-        LazyLock, Mutex,
-        atomic::{AtomicU64, Ordering},
-    },
-};
-
+use crate::native::windows::open_desktop_window;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use image::ImageFormat;
+use mint_core::{ChatRequest, load_config, send_chat};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder,
-};
+use std::fs;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
+use tauri::{AppHandle, Emitter, Manager};
 
-use crate::system::run_system_automation;
-use mint_core::{ChatRequest, KnowledgeStore, create_folder, find_paths, send_chat};
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DesktopAction {
-    #[serde(rename = "type")]
-    pub kind: String,
-    #[serde(default)]
-    pub target: String,
-    #[serde(default)]
-    pub server: String,
-    #[serde(default)]
-    pub args: Value,
-    #[serde(default)]
-    pub approved: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ActionResult {
-    pub success: bool,
-    pub message: String,
+pub(crate) fn toggle_live_translate_interaction(app: &AppHandle) {
+    if LIVE_TRANSLATE_AREA_ACTIVE.load(Ordering::SeqCst)
+        && let Some(window) = app.get_webview_window("screen-picker")
+        && window.is_visible().unwrap_or(false)
+    {
+        let enabled = !LIVE_TRANSLATE_PASSTHROUGH.load(Ordering::SeqCst);
+        let _ = apply_live_translate_passthrough(&window, enabled);
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,170 +27,11 @@ pub struct CaptureRect {
     pub width: u32,
     pub height: u32,
 }
-
-pub fn open_desktop_window(app: &AppHandle, kind: &str) -> Result<(), String> {
-    let (label, route, width, height, always_on_top, skip_taskbar) = match kind {
-        "spotlight" => ("spotlight", "spotlight", 600.0, 80.0, true, true),
-        "widget" => ("widget", "widget", 150.0, 150.0, true, true),
-        "screen-picker" => ("screen-picker", "screen-picker", 1280.0, 800.0, true, true),
-        "live-translate-controls" => (
-            "live-translate-controls",
-            "live-translate-controls",
-            880.0,
-            76.0,
-            true,
-            true,
-        ),
-        other => return Err(format!("unsupported desktop window '{other}'")),
-    };
-
-    if let Some(window) = app.get_webview_window(label) {
-        window.show().map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())?;
-        return Ok(());
-    }
-
-    let url = WebviewUrl::App(format!("index.html#/{route}").into());
-    let mut builder = WebviewWindowBuilder::new(app, label, url)
-        .title(format!("Mint {kind}"))
-        .inner_size(width, height)
-        .decorations(false)
-        .transparent(true)
-        .always_on_top(always_on_top)
-        .skip_taskbar(skip_taskbar);
-    if kind == "screen-picker" {
-        builder = builder.fullscreen(true);
-    }
-    builder.build().map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-pub fn hide_window(app: &AppHandle, label: &str) -> Result<(), String> {
-    app.get_webview_window(label)
-        .ok_or_else(|| format!("window '{label}' is not open"))?
-        .hide()
-        .map_err(|error| error.to_string())
-}
-
-pub fn close_window(app: &AppHandle, label: &str) -> Result<(), String> {
-    app.get_webview_window(label)
-        .ok_or_else(|| format!("window '{label}' is not open"))?
-        .close()
-        .map_err(|error| error.to_string())
-}
-
-pub fn resize_window(app: &AppHandle, label: &str, width: u32, height: u32) -> Result<(), String> {
-    app.get_webview_window(label)
-        .ok_or_else(|| format!("window '{label}' is not open"))?
-        .set_size(PhysicalSize::new(width, height))
-        .map_err(|error| error.to_string())
-}
-
-pub fn position_widget(app: &AppHandle) {
-    let Some(widget) = app.get_webview_window("widget") else {
-        return;
-    };
-    let Ok(Some(monitor)) = widget.primary_monitor() else {
-        return;
-    };
-    let size = monitor.size();
-    let x = size.width.saturating_sub(190) as i32;
-    let _ = widget.set_position(PhysicalPosition::new(x, 40));
-}
-
-pub fn execute_action(
-    config: &mint_core::MintConfig,
-    action: DesktopAction,
-) -> Result<ActionResult, String> {
-    match action.kind.as_str() {
-        "none" => Ok(success("no action requested")),
-        "system_info" => Ok(success(&format!(
-            "os={} arch={} family={}",
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-            std::env::consts::FAMILY
-        ))),
-        "open_url" => {
-            if !(action.target.starts_with("https://")
-                || action.target.starts_with("http://")
-                || action.target.starts_with("file://"))
-            {
-                return Err("only http, https, and file URLs may be opened".into());
-            }
-            open_url_in_system_browser(&action.target)?;
-            Ok(success("opened URL in the system browser"))
-        }
-        "search" => {
-            let query = action.target.trim();
-            if query.is_empty() {
-                return Err("search query is required".into());
-            }
-            let url = format!("https://www.google.com/search?q={}", encode_query(query));
-            spawn_detached("xdg-open", &[&url])?;
-            Ok(success("opened web search"))
-        }
-        "open_app" => {
-            let app = action.target.trim();
-            if app.is_empty()
-                || !app
-                    .chars()
-                    .all(|char| char.is_ascii_alphanumeric() || matches!(char, '-' | '_' | '.'))
-            {
-                return Err("application name contains unsupported characters".into());
-            }
-            spawn_detached(app, &[])?;
-            Ok(success("opened application"))
-        }
-        "clipboard_write" => Err("clipboard actions are handled by the renderer".into()),
-        "mcp_tool" => mint_core::call_mcp_tool(config, &action.server, &action.target, action.args)
-            .map(|result| success(&result.to_string()))
-            .map_err(|error| error.to_string()),
-        "system_automation" => {
-            run_system_automation(&action.target, action.approved).map(|message| success(&message))
-        }
-        "create_folder" => create_folder(std::path::Path::new(&action.target), config)
-            .map(|path| success(&format!("created {}", path.display())))
-            .map_err(|error| error.to_string()),
-        "find_path" => {
-            let roots = action.args["roots"]
-                .as_array()
-                .map(|roots| {
-                    roots
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(PathBuf::from)
-                        .collect::<Vec<_>>()
-                })
-                .filter(|roots| !roots.is_empty())
-                .unwrap_or_else(|| {
-                    let mut roots =
-                        vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))];
-                    if let Some(home) = dirs::home_dir() {
-                        roots.push(home);
-                    }
-                    roots
-                });
-            let limit = action.args["limit"].as_u64().unwrap_or(20).min(100) as usize;
-            serde_json::to_string(&find_paths(&action.target, &roots, limit, config))
-                .map(|message| success(&message))
-                .map_err(|error| error.to_string())
-        }
-        "learn_file" => KnowledgeStore::open_default()
-            .map_err(|error| error.to_string())?
-            .index_file(std::path::Path::new(&action.target), config)
-            .map(|chunks| success(&format!("indexed {chunks} knowledge chunks")))
-            .map_err(|error| error.to_string()),
-        other => Err(format!(
-            "desktop action '{other}' has not migrated to the allowlisted Rust executor"
-        )),
-    }
-}
-
 pub fn capture_screen() -> Result<String, String> {
     capture_screen_bytes().map(|bytes| format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
 }
 
-pub fn read_clipboard_image() -> Result<String, String> {
+pub fn clipboard_image() -> Result<String, String> {
     let output = Command::new("wl-paste").args(["-t", "image/png"]).output();
 
     if let Ok(out) = output
@@ -705,95 +525,171 @@ pub(crate) fn capture_screen_bytes() -> Result<Vec<u8>, String> {
     ))
 }
 
-pub fn integration_status(config: &mint_core::MintConfig) -> Value {
-    let mcp_servers = config
-        .extra
-        .get("mcpServers")
-        .and_then(Value::as_object)
-        .map(|servers| servers.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
-    json!({
-        "automation": {
-            "supportedActions": ["open_url", "open_app", "search", "system_info", "system_automation", "find_path", "create_folder", "learn_file"],
-            "approvalRequired": true
-        },
-        "mcp": {
-            "configuredServers": mcp_servers,
-            "execution": "native-stdio"
-        },
-        "plugins": {
-            "migrated": ["desktop-actions", "dev_tools", "docker", "obsidian", "spotify", "system_metrics"]
-        }
-    })
-}
-
-pub fn emit_to_main(app: &AppHandle, event: &str, payload: impl Serialize + Clone) {
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.emit(event, payload);
-        let _ = main.show();
-        let _ = main.set_focus();
-    }
-}
-
-fn success(message: &str) -> ActionResult {
-    ActionResult {
-        success: true,
-        message: message.into(),
-    }
-}
-
-fn open_url_in_system_browser(url: &str) -> Result<(), String> {
-    #[cfg(target_os = "linux")]
-    {
-        return spawn_detached("xdg-open", &[url]);
-    }
-    #[cfg(target_os = "macos")]
-    {
-        return spawn_detached("open", &[url]);
-    }
-    #[cfg(target_os = "windows")]
-    {
-        return spawn_detached("rundll32", &["url.dll,FileProtocolHandler", url]);
-    }
-    #[allow(unreachable_code)]
-    Err("opening URLs is unsupported on this platform".into())
-}
-
-fn spawn_detached(program: &str, args: &[&str]) -> Result<(), String> {
-    Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("unable to start '{program}': {error}"))
-}
-
 fn path_string(path: &PathBuf) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn encode_query(query: &str) -> String {
-    query
-        .bytes()
-        .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (byte as char).to_string()
-            }
-            b' ' => "+".into(),
-            _ => format!("%{byte:02X}"),
-        })
-        .collect()
+static LIVE_TRANSLATE_PASSTHROUGH: AtomicBool = AtomicBool::new(false);
+static LIVE_TRANSLATE_AREA_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn reset_live_translate_interaction() {
+    LIVE_TRANSLATE_PASSTHROUGH.store(false, Ordering::SeqCst);
+    LIVE_TRANSLATE_AREA_ACTIVE.store(false, Ordering::SeqCst);
+    reset_live_translation_source();
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LiveTranslateGeometry {
+    x: i32,
+    y: i32,
+    scale_factor: f64,
+    window_capture: bool,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[tauri::command]
+pub(crate) async fn capture_chat_screen(app: AppHandle) -> Result<String, String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is unavailable".to_string())?;
+    window.hide().map_err(|error| error.to_string())?;
+    tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+    let captured = tokio::task::spawn_blocking(capture_screen).await;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    captured.map_err(|error| error.to_string())?
+}
 
-    #[test]
-    fn encodes_search_queries_for_urls() {
-        assert_eq!(encode_query("mint cli"), "mint+cli");
-        assert_eq!(encode_query("a/b"), "a%2Fb");
+#[tauri::command]
+pub(crate) fn read_clipboard_image() -> Result<String, String> {
+    clipboard_image()
+}
+
+#[tauri::command]
+pub(crate) async fn capture_translation_frame(rect: CaptureRect) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || capture_translation_region(rect))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn translate_captured_frame(
+    image: String,
+    target_language: String,
+) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    translate_captured_region(&config, &image, &target_language).await
+}
+
+#[tauri::command]
+pub(crate) fn start_live_translate(app: AppHandle) -> Result<(), String> {
+    LIVE_TRANSLATE_PASSTHROUGH.store(false, Ordering::SeqCst);
+    LIVE_TRANSLATE_AREA_ACTIVE.store(false, Ordering::SeqCst);
+    reset_live_translation_source();
+    let main = app.get_webview_window("main");
+    if let Some(window) = &main {
+        window.hide().map_err(|error| error.to_string())?;
     }
+    if let Err(error) = open_desktop_window(&app, "screen-picker") {
+        if let Some(window) = main {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn open_live_translate_controls(app: AppHandle) -> Result<(), String> {
+    open_desktop_window(&app, "live-translate-controls")?;
+    let picker = app
+        .get_webview_window("screen-picker")
+        .ok_or_else(|| "live translation window is unavailable".to_string())?;
+    let controls = app
+        .get_webview_window("live-translate-controls")
+        .ok_or_else(|| "live translation controls are unavailable".to_string())?;
+    let picker_position = picker.inner_position().map_err(|error| error.to_string())?;
+    let picker_size = picker.inner_size().map_err(|error| error.to_string())?;
+    let controls_size = controls.outer_size().map_err(|error| error.to_string())?;
+    let x = picker_position.x + (picker_size.width as i32 - controls_size.width as i32) / 2;
+    let y = picker_position.y + 12;
+    controls
+        .set_position(tauri::PhysicalPosition::new(x, y))
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn live_translate_geometry(app: AppHandle) -> Result<LiveTranslateGeometry, String> {
+    let window = app
+        .get_webview_window("screen-picker")
+        .ok_or_else(|| "live translation window is unavailable".to_string())?;
+    let position = window.inner_position().map_err(|error| error.to_string())?;
+    let scale_factor = window.scale_factor().map_err(|error| error.to_string())?;
+    let monitors = window
+        .available_monitors()
+        .map_err(|error| error.to_string())?;
+    let root_x = monitors
+        .iter()
+        .map(|monitor| monitor.position().x)
+        .min()
+        .unwrap_or(0);
+    let root_y = monitors
+        .iter()
+        .map(|monitor| monitor.position().y)
+        .min()
+        .unwrap_or(0);
+    Ok(LiveTranslateGeometry {
+        x: if matches!(std::env::var("XDG_SESSION_TYPE").as_deref(), Ok("x11")) {
+            position.x
+        } else {
+            position.x - root_x
+        },
+        y: if matches!(std::env::var("XDG_SESSION_TYPE").as_deref(), Ok("x11")) {
+            position.y
+        } else {
+            position.y - root_y
+        },
+        scale_factor,
+        window_capture: matches!(std::env::var("XDG_SESSION_TYPE").as_deref(), Ok("x11")),
+    })
+}
+
+fn apply_live_translate_passthrough(
+    window: &tauri::WebviewWindow,
+    enabled: bool,
+) -> Result<(), String> {
+    if enabled {
+        window
+            .set_ignore_cursor_events(true)
+            .map_err(|error| error.to_string())?;
+        if let Err(error) = window.set_focusable(false) {
+            let _ = window.set_ignore_cursor_events(false);
+            return Err(error.to_string());
+        }
+    } else {
+        window
+            .set_ignore_cursor_events(false)
+            .map_err(|error| error.to_string())?;
+        window
+            .set_focusable(true)
+            .map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+    }
+    LIVE_TRANSLATE_PASSTHROUGH.store(enabled, Ordering::SeqCst);
+    let _ = window.emit("live-translate-interaction-mode", !enabled);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn set_live_translate_passthrough(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let window = app
+        .get_webview_window("screen-picker")
+        .ok_or_else(|| "live translation window is unavailable".to_string())?;
+    apply_live_translate_passthrough(&window, enabled)?;
+    LIVE_TRANSLATE_AREA_ACTIVE.store(enabled, Ordering::SeqCst);
+    if !enabled {
+        reset_live_translation_source();
+    }
+    Ok(())
 }

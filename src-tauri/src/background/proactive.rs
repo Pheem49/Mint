@@ -1,3 +1,4 @@
+use crate::native::capture::capture_screen_bytes;
 use std::{
     collections::BTreeMap,
     fs,
@@ -14,8 +15,6 @@ use mint_core::{MintConfig, config_path, load_config};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager};
-
-use crate::desktop::capture_screen_bytes;
 
 const DEFAULT_INTERVAL_SECONDS: u64 = 60;
 const DEFAULT_COOLDOWN_SECONDS: u64 = 120;
@@ -251,4 +250,13 @@ fn timestamp() -> String {
         .unwrap_or_default()
         .as_secs()
         .to_string()
+}
+
+#[tauri::command]
+pub(crate) fn toggle_proactive(enabled: bool) {
+    set_enabled(enabled);
+}
+#[tauri::command]
+pub(crate) fn save_behavior_context(context: String) -> Result<(), String> {
+    record_behavior(&context)
 }

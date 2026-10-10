@@ -52,7 +52,6 @@ use crate::{
     destroy_session,
     detect_silence,
     find_paths,
-    generate_images,
     generate_srt,
     generate_video,
     get_user,
@@ -152,6 +151,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 /// loopback so only its local web proxy can reach the API directly.
 pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error> {
     let listener = TcpListener::bind(addr).await?;
+    let listener_addr = listener.local_addr()?;
+    let _webhook_lease = crate::webhooks::claim_api_listener(listener_addr);
     crate::companion::start();
     // API server banner removed to prevent duplicate output
 
@@ -178,6 +179,11 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
         // only safe for, a browser on this same machine — capture that now
         // while we still have the peer address.
         let from_loopback = peer_addr.ip().is_loopback();
+        // A wildcard API listener can cover more interfaces than a webhook is
+        // configured to accept. Classify callbacks by this connection's destination.
+        let Ok(connection_addr) = socket.local_addr() else {
+            continue;
+        };
 
         tokio::spawn(async move {
             // Isolates a panic anywhere in this connection's handling (a malformed
@@ -271,6 +277,20 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
             }
 
             let (route, query) = path.split_once('?').unwrap_or((path, ""));
+
+            // Provider-authenticated callbacks share this listener when their configured
+            // interface and port match it. Ordinary API routes still use the API token.
+            if let Ok(config) = crate::load_config()
+                && let Some(service) = crate::webhooks::api_service(&config, connection_addr, method, path)
+            {
+                let request = crate::webhooks::Request {
+                    method: method.into(), path: path.into(),
+                    headers: request_str[..header_end].into(),
+                    body: request_bytes[header_end + 4..].to_vec(),
+                };
+                crate::webhooks::handle(socket, service, config, request).await;
+                return;
+            }
 
             if !api_auth_ok(&request_str) {
                 send_json_response(
@@ -1183,6 +1203,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                     .await;
                 }
                 ("GET", "/api/models")
+                | ("GET", "/api/live-models")
                 | ("GET", "/api/image-models")
                 | ("GET", "/api/video-models")
                 | ("GET", "/api/checkpoints")
@@ -1368,7 +1389,7 @@ async fn run_web_agent_loop(
         None,
         request.pinned_mcp_server.as_deref(),
         fast_mode,
-        false,
+        request.plan_mode,
         |_| Ok(ApprovalOutcome::Denied),
         |_| {},
         |_| {},

@@ -811,33 +811,15 @@ pub fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Re
     Ok(())
 }
 pub fn load_all_available_skills(current_dir: &Path) -> Vec<mint_core::LearnedSkill> {
-    let mut skills = match MemoryStore::open_default() {
-        Ok(m) => m.learned_skills(100).unwrap_or_default(),
-        Err(_) => Vec::new(),
-    };
-
-    if let Some(home) = dirs::home_dir() {
-        let global_agents_path = home.join(".gemini").join("config").join("AGENTS.md");
-        mint_core::skills::load_agent_rules_file(&global_agents_path, &mut skills);
-
-        let global_skills_path = home.join(".config").join("mint").join("mint-skills");
-        mint_core::skills::load_skills_from_dir(&global_skills_path, &mut skills);
-    }
-    let workspace_agents_path1 = current_dir.join(".agents").join("AGENTS.md");
-    mint_core::skills::load_agent_rules_file(&workspace_agents_path1, &mut skills);
-    let workspace_agents_path2 = current_dir.join("AGENTS.md");
-    mint_core::skills::load_agent_rules_file(&workspace_agents_path2, &mut skills);
-
-    let workspace_skills_path1 = current_dir.join(".agents").join("skills");
-    mint_core::skills::load_skills_from_dir(&workspace_skills_path1, &mut skills);
-    let workspace_skills_path2 = current_dir.join("skills");
-    mint_core::skills::load_skills_from_dir(&workspace_skills_path2, &mut skills);
-
-    let mut unique_skills = std::collections::BTreeMap::new();
-    for skill in skills {
-        unique_skills.insert(skill.name.clone(), skill);
-    }
-    unique_skills.into_values().collect()
+    MemoryStore::open_default()
+        .ok()
+        .and_then(|memory| {
+            mint_core::skill_inventory::list_available_skills(&memory, Some(current_dir)).ok()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| entry.skill)
+        .collect()
 }
 
 #[cfg(test)]

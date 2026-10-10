@@ -1183,24 +1183,22 @@ impl MemoryStore {
             std::sync::Mutex<std::collections::HashSet<PathBuf>>,
         > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
 
-        let needs_init = {
-            let mut set = INITIALIZED_DATABASES.lock().unwrap();
-            set.insert(self.path.clone())
-        };
-
-        if needs_init {
+        // Publish readiness only after initialization succeeds. Companion and API
+        // reads may open the same database concurrently during startup.
+        let mut initialized = INITIALIZED_DATABASES
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !initialized.contains(&self.path) {
             initialize(
                 &connection,
                 memory_path().is_ok_and(|default_path| default_path == self.path),
             )?;
-            // This database holds OAuth tokens (see `oauth::save_oauth_tokens`,
-            // stored in `user_profile`) alongside chat history — restrict it
-            // to owner-only rather than leaving it at default (typically
-            // world-readable) permissions. `needs_init` already gates this to
-            // once per path per process, and any pre-existing database from
-            // before this fix gets tightened the same way on its first open.
+            // OAuth tokens live beside chat history; restrict the file once per
+            // path per process, including databases created by older versions.
             restrict_to_owner(&self.path);
+            initialized.insert(self.path.clone());
         }
+        drop(initialized);
         Ok(connection)
     }
 }
@@ -1800,6 +1798,37 @@ fn ensure_chat_session_row(connection: &Connection, chat_id: &str) -> Result<(),
 
 #[cfg(test)]
 mod conversation_sync_tests {
+    #[test]
+    fn concurrent_first_reads_wait_for_database_schema_initialization() {
+        use std::sync::{Arc, Barrier};
+        for _ in 0..3 {
+            let root =
+                std::env::temp_dir().join(format!("mint-schema-ordering-{}", uuid::Uuid::new_v4()));
+            let store = super::MemoryStore::open(root.join("memory.sqlite"));
+            let barrier = Arc::new(Barrier::new(16));
+            let results = std::thread::scope(|scope| {
+                let handles: Vec<_> = (0..16)
+                    .map(|_| {
+                        let barrier = Arc::clone(&barrier);
+                        let store = store.clone();
+                        scope.spawn(move || {
+                            barrier.wait();
+                            store.learned_skills(100)
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|handle| handle.join().unwrap())
+                    .collect::<Vec<_>>()
+            });
+            let _ = std::fs::remove_dir_all(root);
+            for result in results {
+                assert!(result.is_ok(), "concurrent inventory read: {result:?}");
+            }
+        }
+    }
+
     use super::*;
 
     fn store() -> MemoryStore {
@@ -1821,12 +1850,16 @@ mod conversation_sync_tests {
 
         let sessions = memory.list_chat_sessions().unwrap();
 
-        assert!(!sessions
-            .iter()
-            .any(|session| session.id == "conversation-empty"));
-        assert!(sessions
-            .iter()
-            .any(|session| session.id == "conversation-used"));
+        assert!(
+            !sessions
+                .iter()
+                .any(|session| session.id == "conversation-empty")
+        );
+        assert!(
+            sessions
+                .iter()
+                .any(|session| session.id == "conversation-used")
+        );
     }
 
     #[test]

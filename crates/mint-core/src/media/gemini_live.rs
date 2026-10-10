@@ -15,8 +15,10 @@ use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_util::sync::CancellationToken;
 
 use crate::MintConfig;
 use crate::orchestration::{AgentApproval, ApprovalOutcome, execute_tool_from_json};
@@ -60,6 +62,13 @@ pub enum GeminiLiveEvent {
 /// Handle for pushing mic audio into a running session.
 pub struct GeminiLiveHandle {
     audio_tx: mpsc::UnboundedSender<Vec<u8>>,
+    cancellation: CancellationToken,
+}
+
+impl Drop for GeminiLiveHandle {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+    }
 }
 
 impl GeminiLiveHandle {
@@ -87,24 +96,60 @@ where
 {
     let (audio_tx, audio_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
-    spawn_live_session(async move {
-        let mut audio_rx = audio_rx;
-        if let Err(message) = run_session(
-            &config,
-            &workspace_root,
-            &chat_id,
-            &mut approve_cb,
-            &on_event,
-            &mut audio_rx,
-        )
-        .await
-        {
-            on_event(GeminiLiveEvent::Error { message });
-        }
-        on_event(GeminiLiveEvent::Closed);
-    });
+    let on_event = Arc::new(on_event);
+    let session_events = Arc::clone(&on_event);
+    spawn_cancellable_live_session(
+        chat_id.clone(),
+        audio_tx,
+        async move {
+            let mut audio_rx = audio_rx;
+            if let Err(message) = run_session(
+                &config,
+                &workspace_root,
+                &chat_id,
+                &mut approve_cb,
+                &*session_events,
+                &mut audio_rx,
+            )
+            .await
+            {
+                session_events(GeminiLiveEvent::Error { message });
+            }
+        },
+        move || on_event(GeminiLiveEvent::Closed),
+    )
+}
 
-    GeminiLiveHandle { audio_tx }
+fn spawn_cancellable_live_session<F>(
+    chat_id: String,
+    audio_tx: mpsc::UnboundedSender<Vec<u8>>,
+    session: F,
+    on_closed: impl FnOnce() + Send + 'static,
+) -> GeminiLiveHandle
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    let cancellation = CancellationToken::new();
+    let session_cancellation = cancellation.clone();
+    spawn_live_session(async move {
+        crate::orchestration::run_control::scope_with_token(
+            &chat_id,
+            session_cancellation.clone(),
+            async move {
+                tokio::select! {
+                    biased;
+                    _ = session_cancellation.cancelled() => {},
+                    _ = session => {},
+                }
+            },
+        )
+        .await;
+        on_closed();
+    });
+    GeminiLiveHandle {
+        audio_tx,
+        cancellation,
+    }
 }
 
 /// Keep browser targeting, evidence, and recovery state for the entire voice
@@ -458,4 +503,79 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod approval_lifecycle_tests {
+    use super::*;
+    use crate::ApprovalRegistry;
+    use std::time::Duration;
+    use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn stopping_voice_releases_pending_approval_and_emits_closed() {
+        let registry = Arc::new(ApprovalRegistry::default());
+        let pending = registry.clone();
+        let (token_tx, token_rx) = oneshot::channel();
+        let (closed_tx, mut closed_rx) = oneshot::channel();
+        let (audio_tx, _audio_rx) = mpsc::unbounded_channel();
+        let handle = spawn_cancellable_live_session(
+            uuid::Uuid::new_v4().to_string(),
+            audio_tx,
+            async move {
+                pending
+                    .request(|token| {
+                        token_tx.send(token.to_owned()).unwrap();
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+            },
+            move || {
+                let _ = closed_tx.send(());
+            },
+        );
+        let token = token_rx.await.unwrap();
+        drop(handle);
+        let result = tokio::time::timeout(Duration::from_secs(5), &mut closed_rx).await;
+        if result.is_err() {
+            registry.resolve(&token, false, None);
+            let _ = closed_rx.await;
+        }
+        assert!(
+            matches!(result, Ok(Ok(()))),
+            "voice stop did not release approval wait: {result:?}"
+        );
+        assert!(!registry.resolve(&token, true, None));
+    }
+
+    #[tokio::test]
+    async fn stopping_voice_closes_a_session_waiting_on_transport() {
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let (io_tx, io_rx) = oneshot::channel();
+        let (closed_tx, mut closed_rx) = oneshot::channel();
+        let (audio_tx, _audio_rx) = mpsc::unbounded_channel();
+        let handle = spawn_cancellable_live_session(
+            uuid::Uuid::new_v4().to_string(),
+            audio_tx,
+            async move {
+                ready_tx.send(()).unwrap();
+                let _ = io_rx.await;
+            },
+            move || {
+                let _ = closed_tx.send(());
+            },
+        );
+        ready_rx.await.unwrap();
+        drop(handle);
+        let result = tokio::time::timeout(Duration::from_secs(5), &mut closed_rx).await;
+        if result.is_err() {
+            let _ = io_tx.send(());
+            let _ = closed_rx.await;
+        }
+        assert!(
+            matches!(result, Ok(Ok(()))),
+            "voice stop waited for transport: {result:?}"
+        );
+    }
 }

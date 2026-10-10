@@ -1,7 +1,5 @@
+use super::discord_rpc;
 use mint_core::MintConfig;
-
-use crate::discord_rpc;
-
 pub async fn execute_plugin(
     config: &MintConfig,
     name: &str,

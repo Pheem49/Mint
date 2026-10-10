@@ -1,10 +1,10 @@
+use serde::Deserialize;
 use std::{path::Path, time::Duration};
 
 use mint_core::{
     CodeEdit, KnowledgeStore, MintConfig, Task, TaskStore, load_config, parse_agent_json,
     propose_code_edits, run_agent_loop,
 };
-use serde::Deserialize;
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -220,4 +220,11 @@ mod tests {
         assert_eq!(action.action, "done");
         assert_eq!(action.target, "ok");
     }
+}
+
+#[tauri::command]
+pub(crate) async fn run_next_queued_task(
+    app: AppHandle,
+) -> Result<Option<mint_core::Task>, String> {
+    run_next_task(&app).await
 }

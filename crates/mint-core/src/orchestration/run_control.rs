@@ -35,23 +35,36 @@ pub(crate) async fn scope<F: Future>(chat: &str, future: F) -> F::Output {
             }
         })
         .unwrap_or_default();
-    let id = uuid::Uuid::new_v4().to_string();
-    RUNS.lock()
-        .unwrap()
-        .insert(id.clone(), (chat.into(), token.clone()));
-    let _registration = Registration {
-        id,
-        token: token.clone(),
-    };
-    CURRENT
-        .scope(
-            Context {
-                chat: chat.into(),
-                token,
-            },
-            future,
-        )
-        .await
+    scope_with_token(chat, token, future).await
+}
+
+pub(crate) fn scope_with_token<F: Future>(
+    chat: &str,
+    token: CancellationToken,
+    future: F,
+) -> impl Future<Output = F::Output> {
+    // Agent futures are large. Box before building another async scope so their
+    // state is not copied into multiple nested cancellation frames on the stack.
+    let future = Box::pin(future);
+    async move {
+        let id = uuid::Uuid::new_v4().to_string();
+        RUNS.lock()
+            .unwrap()
+            .insert(id.clone(), (chat.into(), token.clone()));
+        let _registration = Registration {
+            id,
+            token: token.clone(),
+        };
+        CURRENT
+            .scope(
+                Context {
+                    chat: chat.into(),
+                    token,
+                },
+                future,
+            )
+            .await
+    }
 }
 
 pub(crate) fn token() -> Option<CancellationToken> {

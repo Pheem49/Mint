@@ -1,7 +1,7 @@
-use std::process::{Command, Stdio};
-
 use mint_core::load_config;
 use serde::Serialize;
+use std::process::{Command, Stdio};
+
 use serde_json::{Value, json};
 
 #[derive(Debug, Serialize)]

@@ -15,7 +15,6 @@ tauri-build = { version = "2", features = [] }
 base64.workspace = true
 dirs.workspace = true
 futures-util.workspace = true
-hmac.workspace = true
 image.workspace = true
 mint-core = { path = "../crates/mint-core" }
 portable-pty = "0.9"
@@ -23,7 +22,6 @@ notify-rust = "4.18"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 # `macos-private-api` is required for transparent windows on macOS (the
 # spotlight/widget overlays and the main window all set `transparent`); it is a
 # no-op on other platforms. It also rules out Mac App Store distribution, which

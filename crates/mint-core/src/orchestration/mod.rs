@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
 
+pub mod approvals;
 mod mcp_review;
 mod repeated_failures;
 #[cfg(all(test, unix))]

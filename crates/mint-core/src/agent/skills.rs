@@ -88,61 +88,9 @@ pub fn learned_skills_context_with_history(
     chat_id: Option<&str>,
     history: &str,
 ) -> Result<String, SkillError> {
-    let mut skills = MemoryStore::open_default()?.learned_skills(100)?;
-
-    if let Some(home) = dirs::home_dir() {
-        let global_agents_path = home.join(".gemini").join("config").join("AGENTS.md");
-        load_agent_rules_file(&global_agents_path, &mut skills);
-
-        let global_skills_path = home.join(".config").join("mint").join("mint-skills");
-        if !global_skills_path.exists() {
-            let _ = std::fs::create_dir_all(&global_skills_path);
-        }
-        load_skills_from_dir(&global_skills_path, &mut skills);
-    }
-
-    if let Some(root) = workspace_root {
-        let rule_files = [
-            root.join(".agents").join("AGENTS.md"),
-            root.join("AGENTS.md"),
-            root.join(".claude").join("CLAUDE.md"),
-            root.join("CLAUDE.md"),
-            root.join(".cursorrules"),
-            root.join(".github").join("copilot-instructions.md"),
-        ];
-        for rule_path in &rule_files {
-            if rule_path.is_file() {
-                load_agent_rules_file(rule_path, &mut skills);
-            }
-        }
-
-        let cursor_rules_dir = root.join(".cursor").join("rules");
-        if let Ok(entries) = std::fs::read_dir(cursor_rules_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file()
-                    && (path.extension().and_then(|e| e.to_str()) == Some("mdc")
-                        || path.extension().and_then(|e| e.to_str()) == Some("md"))
-                {
-                    load_agent_rules_file(&path, &mut skills);
-                }
-            }
-        }
-
-        let workspace_skills_path1 = root.join(".agents").join("skills");
-        load_skills_from_dir(&workspace_skills_path1, &mut skills);
-
-        let workspace_skills_path2 = root.join("skills");
-        load_skills_from_dir(&workspace_skills_path2, &mut skills);
-    }
-
-    skills_context_from_with_history(
-        &MemoryStore::open_default()?,
-        skills,
-        workspace_root,
-        chat_id,
-        history,
-    )
+    let memory = MemoryStore::open_default()?;
+    let skills = crate::skill_inventory::skills_for_context(&memory, workspace_root)?;
+    skills_context_from_with_history(&memory, skills, workspace_root, chat_id, history)
 }
 
 #[cfg(test)]
@@ -230,7 +178,7 @@ fn skills_context_from_with_history(
     Ok(format!("{catalog}\n{retained}"))
 }
 
-fn is_rules_file(path: &Path) -> bool {
+pub(super) fn is_rules_file(path: &Path) -> bool {
     matches!(
         path.file_name().and_then(|name| name.to_str()),
         Some("AGENTS.md" | "CLAUDE.md" | ".cursorrules" | "copilot-instructions.md")
@@ -294,14 +242,11 @@ pub fn skill_for_read_path(root: &Path, path: &str) -> Option<LearnedSkill> {
     if is_rules_file(&canonical) {
         return None;
     }
-    let mut skills = MemoryStore::open_default().ok()?.learned_skills(100).ok()?;
-    if let Some(home) = dirs::home_dir() {
-        load_skills_from_dir(&home.join(".config/mint/mint-skills"), &mut skills);
-    }
-    load_skills_from_dir(&root.join(".agents/skills"), &mut skills);
-    load_skills_from_dir(&root.join("skills"), &mut skills);
-    skills
+    let memory = MemoryStore::open_default().ok()?;
+    crate::skill_inventory::list_available_skills(&memory, Some(root))
+        .ok()?
         .into_iter()
+        .map(|entry| entry.skill)
         .find(|skill| {
             Path::new(&skill.source_path).canonicalize().ok().as_ref() == Some(&canonical)
         })

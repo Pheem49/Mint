@@ -7,7 +7,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
     let RequestCtx {
         method,
         route,
-        query: _query,
+        query,
         body,
         request_str: _request_str,
         request_bytes: _request_bytes,
@@ -16,47 +16,17 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
     } = ctx;
     match (method, route) {
         ("GET", "/api/learned-skills") => {
-            let mut skills = match MemoryStore::open_default() {
-                Ok(m) => m.learned_skills(100).unwrap_or_default(),
-                Err(_) => Vec::new(),
-            };
-
-            if let Some(home) = dirs::home_dir() {
-                let global_agents_path = home.join(".gemini").join("config").join("AGENTS.md");
-                crate::skills::load_agent_rules_file(&global_agents_path, &mut skills);
-
-                let global_skills_path = home.join(".config").join("mint").join("mint-skills");
-                crate::skills::load_skills_from_dir(&global_skills_path, &mut skills);
-            }
-
-            if let Ok(current_dir) = std::env::current_dir() {
-                let workspace_agents_path1 = current_dir.join(".agents").join("AGENTS.md");
-                crate::skills::load_agent_rules_file(&workspace_agents_path1, &mut skills);
-                let workspace_agents_path2 = current_dir.join("AGENTS.md");
-                crate::skills::load_agent_rules_file(&workspace_agents_path2, &mut skills);
-
-                let workspace_skills_path1 = current_dir.join(".agents").join("skills");
-                crate::skills::load_skills_from_dir(&workspace_skills_path1, &mut skills);
-                let workspace_skills_path2 = current_dir.join("skills");
-                crate::skills::load_skills_from_dir(&workspace_skills_path2, &mut skills);
-
-                if let Ok(canonical_cwd) = current_dir.canonicalize() {
-                    for s in &mut skills {
-                        if let Ok(p) = std::path::Path::new(&s.source_path).canonicalize() {
-                            if p.starts_with(&canonical_cwd) {
-                                s.is_workspace = true;
-                            }
-                        }
-                    }
-                }
-            }
-
-            let mut unique_skills = std::collections::BTreeMap::new();
-            for s in skills {
-                unique_skills.insert(s.name.clone(), s);
-            }
-
-            let list: Vec<_> = unique_skills.into_values().collect();
+            let workspace = query_param(query, "workspacePath")
+                .filter(|path| !path.trim().is_empty())
+                .map(std::path::PathBuf::from)
+                .or_else(|| std::env::current_dir().ok());
+            let list = MemoryStore::open_default()
+                .ok()
+                .and_then(|memory| {
+                    crate::skill_inventory::list_available_skills(&memory, workspace.as_deref())
+                        .ok()
+                })
+                .unwrap_or_default();
             send_json_response(
                 socket,
                 "200 OK",

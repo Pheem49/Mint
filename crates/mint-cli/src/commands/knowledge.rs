@@ -281,42 +281,22 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
 pub fn handle_learn(path: Option<PathBuf>, list: bool, delete: Option<String>) -> Result<()> {
     let memory = MemoryStore::open_default()?;
     if list {
-        let mut skills = memory.learned_skills(100)?;
-
-        if let Some(home) = dirs::home_dir() {
-            let global_skills_path = home.join(".config").join("mint").join("mint-skills");
-            mint_core::skills::load_skills_from_dir(&global_skills_path, &mut skills);
-        }
-        if let Ok(root) = std::env::current_dir()
-            && let Ok(root) = root.canonicalize()
-        {
-            let workspace_skills_path1 = root.join(".agents").join("skills");
-            mint_core::skills::load_skills_from_dir(&workspace_skills_path1, &mut skills);
-
-            let workspace_skills_path2 = root.join("skills");
-            mint_core::skills::load_skills_from_dir(&workspace_skills_path2, &mut skills);
-        }
-
-        let mut unique_skills = std::collections::BTreeMap::new();
-        for skill in skills {
-            let loc = if skill.source_path.contains("/.config/mint/mint-skills") {
-                "Global"
-            } else if skill.source_path.contains("/skills")
-                || skill.source_path.contains("/.agents/skills")
-            {
-                "Workspace"
-            } else {
-                "Taught"
-            };
-            unique_skills.insert(skill.name.clone(), (skill, loc));
-        }
-
+        let root = std::env::current_dir().ok();
+        let unique_skills =
+            mint_core::skill_inventory::list_available_skills(&memory, root.as_deref())?;
         if unique_skills.is_empty() {
             println!("No learned skills found.");
         } else {
             println!("Learned AI Skills:");
-            for (name, (skill, loc)) in &unique_skills {
-                if *loc == "Taught" {
+            for entry in &unique_skills {
+                let skill = &entry.skill;
+                let name = &skill.name;
+                let loc = match entry.location {
+                    mint_core::skill_inventory::SkillLocation::Database => "Taught",
+                    mint_core::skill_inventory::SkillLocation::Global => "Global",
+                    mint_core::skill_inventory::SkillLocation::Workspace => "Workspace",
+                };
+                if loc == "Taught" {
                     println!("  ● [{loc}] {name}");
                 } else {
                     println!("  ● [{loc}] {name} (Source: {})", skill.source_path);

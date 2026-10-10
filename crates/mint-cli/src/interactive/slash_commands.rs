@@ -1877,17 +1877,16 @@ pub async fn handle_slash_command(
                         mask_data_uri: None,
                         mode: Some("edit".to_owned()),
                     };
-                    match mint_core::generate_images(&session.config, &req).await {
+                    match mint_core::image_workflow::generate_and_save_images(&session.config, &req)
+                        .await
+                    {
                         Ok(resp) => {
                             if let Some(first) = resp.images.first() {
                                 println!(
                                     "{DIM}Image edited successfully using {} ({}){RESET}\n",
                                     resp.provider, resp.model
                                 );
-                                println!(
-                                    "{DIM}Image data URI prefix: {}{RESET}\n",
-                                    &first.data_uri[..first.data_uri.len().min(60)]
-                                );
+                                println!("{DIM}Saved image: {}{RESET}\n", first.path.display());
                             }
                         }
                         Err(e) => {
@@ -1944,49 +1943,34 @@ pub async fn handle_slash_command(
 
         "/learn" => {
             if rest.is_empty() {
-                let mut skills = match MemoryStore::open_default() {
-                    Ok(m) => match m.learned_skills(100) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            println!("{ERROR}Error loading custom skills: {e}{RESET}\n");
-                            return Some(SlashResult::Handled);
-                        }
-                    },
-                    Err(e) => {
-                        println!("{ERROR}Memory error: {e}{RESET}\n");
+                let unique_skills = match MemoryStore::open_default()
+                    .map_err(|e| e.to_string())
+                    .and_then(|memory| {
+                        mint_core::skill_inventory::list_available_skills(
+                            &memory,
+                            Some(&session.current_dir),
+                        )
+                        .map_err(|e| e.to_string())
+                    }) {
+                    Ok(skills) => skills,
+                    Err(error) => {
+                        println!("{ERROR}Error loading skills: {error}{RESET}\n");
                         return Some(SlashResult::Handled);
                     }
                 };
-
-                if let Some(home) = dirs::home_dir() {
-                    let global_skills_path = home.join(".config").join("mint").join("mint-skills");
-                    mint_core::skills::load_skills_from_dir(&global_skills_path, &mut skills);
-                }
-                let workspace_skills_path1 = session.current_dir.join(".agents").join("skills");
-                mint_core::skills::load_skills_from_dir(&workspace_skills_path1, &mut skills);
-                let workspace_skills_path2 = session.current_dir.join("skills");
-                mint_core::skills::load_skills_from_dir(&workspace_skills_path2, &mut skills);
-
-                let mut unique_skills = std::collections::BTreeMap::new();
-                for skill in skills {
-                    let loc = if skill.source_path.contains("/.config/mint/mint-skills") {
-                        "Global"
-                    } else if skill.source_path.contains("/skills")
-                        || skill.source_path.contains("/.agents/skills")
-                    {
-                        "Workspace"
-                    } else {
-                        "Taught"
-                    };
-                    unique_skills.insert(skill.name.clone(), (skill, loc));
-                }
-
                 if unique_skills.is_empty() {
                     println!("No learned skills found. Use '/learn <path>' to add one.\n");
                 } else {
                     println!("Learned AI Skills:");
-                    for (name, (skill, loc)) in &unique_skills {
-                        if *loc == "Taught" {
+                    for entry in &unique_skills {
+                        let skill = &entry.skill;
+                        let name = &skill.name;
+                        let loc = match entry.location {
+                            mint_core::skill_inventory::SkillLocation::Database => "Taught",
+                            mint_core::skill_inventory::SkillLocation::Global => "Global",
+                            mint_core::skill_inventory::SkillLocation::Workspace => "Workspace",
+                        };
+                        if loc == "Taught" {
                             println!("  ● [{}] {}", loc, name);
                         } else {
                             println!("  ● [{}] {} (Source: {})", loc, name, skill.source_path);

@@ -28,6 +28,7 @@ pub use agent::chat;
 pub use agent::code_tools;
 pub use agent::memory;
 pub use agent::safety;
+pub use agent::skill_inventory;
 pub use agent::skills;
 pub use agent::subagents;
 pub use agent::tasks;
@@ -36,7 +37,9 @@ pub use media::auto_shorts;
 pub use media::gemini_live;
 pub use media::image_gen;
 pub use media::image_search;
+pub use media::image_workflow;
 pub use media::mic_transcribe;
+pub use media::model_catalog;
 pub use media::pictures;
 pub use media::speech;
 pub use media::subtitle;
@@ -51,6 +54,7 @@ pub use integrations::mcp;
 pub use integrations::mcp_result;
 pub use integrations::oauth;
 pub use integrations::plugins;
+pub use integrations::webhooks;
 
 pub use search::files;
 pub use search::knowledge;
@@ -290,32 +294,38 @@ mod agent_registration_tests {
     }
 }
 
-/// Pending web-side approval requests, keyed by a random token — the HTTP
-/// equivalent of desktop's `ApprovalsState` (`src-tauri/src/lib.rs`). A
-/// `oneshot::Sender` can only be consumed once, so entries are removed (not
-/// just read) on resolution, same as desktop's `submit_tool_approval`.
-pub static PENDING_APPROVALS: std::sync::LazyLock<
-    std::sync::Mutex<
-        std::collections::HashMap<String, tokio::sync::oneshot::Sender<ApprovalOutcome>>,
-    >,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+pub use orchestration::approvals::ApprovalRegistry;
 
-/// Resolves a pending approval by token — mirrors desktop's
-/// `submit_tool_approval` command exactly (a non-empty `answer` always wins
-/// over `approved`, used for the "ask a clarifying question" flow). Returns
-/// `false` if the token was never pending (already resolved, expired, or
-/// bogus) rather than erroring, matching `cancel_agent`'s lenient style.
+/// The HTTP approval registry. Native Desktop owns a separate instance of the same module.
+pub static PENDING_APPROVALS: std::sync::LazyLock<ApprovalRegistry> =
+    std::sync::LazyLock::new(ApprovalRegistry::default);
+
+/// Resolve once by token. Explicitly blank answers decline; non-empty feedback wins
+/// over `approved`. Unknown, consumed and cancelled tokens return `false`.
 pub fn resolve_pending_approval(token: &str, approved: bool, answer: Option<String>) -> bool {
-    let Some(tx) = PENDING_APPROVALS.lock().unwrap().remove(token) else {
-        return false;
-    };
-    let outcome = match answer.filter(|a| !a.trim().is_empty()) {
-        Some(ans) => ApprovalOutcome::Intercepted(ans),
-        None if approved => ApprovalOutcome::Approved,
-        None => ApprovalOutcome::Denied,
-    };
-    let _ = tx.send(outcome);
-    true
+    PENDING_APPROVALS.resolve(token, approved, answer)
+}
+
+#[cfg(test)]
+mod approval_resolution_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn explicitly_empty_approval_answers_decline_instead_of_approving() {
+        for answer in ["", " \t\n"] {
+            let mut token = String::new();
+            let result = PENDING_APPROVALS
+                .request(|emitted| {
+                    token = emitted.to_owned();
+                    assert!(resolve_pending_approval(emitted, true, Some(answer.into())));
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            assert_eq!(result, ApprovalOutcome::Denied);
+            assert!(!resolve_pending_approval(&token, true, None));
+        }
+    }
 }
 
 /// Plain-text notices from detached background tasks (currently just

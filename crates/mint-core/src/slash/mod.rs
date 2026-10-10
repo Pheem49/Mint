@@ -1,7 +1,7 @@
 //! UI-agnostic slash-command engine, shared by the CLI
 //! (`crates/mint-cli/src/interactive/slash_commands.rs`), the web API server
 //! (`crate::api_server::routes::slash`), and the desktop Tauri host
-//! (`src-tauri/src/lib.rs::run_slash_command`).
+//! (`src-tauri/src/commands/conversation.rs::run_slash_command`).
 //!
 //! `execute` is a pure function of its `input` string plus the `MintConfig` it
 //! is handed: it mutates the config in place for config commands and reports
