@@ -13,14 +13,15 @@ export function CollapsiblePasteInput({ value, inputRef, onValueChange, onResize
   // The owner always keeps the complete prompt. Folding changes presentation,
   // so every submit path (including queued messages) receives the real text.
   const [folded, setFolded] = useState<{ value: string; text: string } | null>(null)
+  const [expanded, setExpanded] = useState(false)
   const badgeRef = useRef<HTMLButtonElement>(null)
-  const collapsed = folded !== null && folded.value === value
+  const collapsed = folded !== null && folded.value === value && !expanded
   useEffect(() => {
-    if (folded && folded.value !== value) setFolded(null)
+    if (folded && folded.value !== value) { setFolded(null); setExpanded(false) }
     if (collapsed) badgeRef.current?.focus()
   }, [value, folded, collapsed])
   const open = () => {
-    setFolded(null)
+    setExpanded(true)
     setTimeout(() => {
       const input = inputRef.current
       if (!input) return
@@ -53,7 +54,20 @@ export function CollapsiblePasteInput({ value, inputRef, onValueChange, onResize
       value={value}
       hidden={collapsed}
       style={{ ...props.style, display: collapsed ? 'none' : props.style?.display }}
-      onChange={event => { setFolded(null); props.onChange?.(event) }}
+      aria-keyshortcuts={folded ? 'F2' : props['aria-keyshortcuts']}
+      title={folded ? 'F2: open/collapse pasted content' : props.title}
+      onKeyDown={event => {
+        if (event.key === 'F2' && folded && folded.value === value && !event.nativeEvent.isComposing) {
+          event.preventDefault()
+          event.stopPropagation()
+          setFolded({ value, text: value })
+          setExpanded(false)
+        } else props.onKeyDown?.(event)
+      }}
+      onChange={event => {
+        if (folded) setFolded({ value: event.target.value, text: event.target.value })
+        props.onChange?.(event)
+      }}
       onPaste={event => {
         props.onPaste?.(event)
         if (event.defaultPrevented) return
@@ -63,7 +77,8 @@ export function CollapsiblePasteInput({ value, inputRef, onValueChange, onResize
         event.stopPropagation()
         const input = event.currentTarget
         const draft = insertPastedText(value, input.selectionStart, input.selectionEnd, text)
-        setFolded(draft.collapsed ? { value: draft.value, text: draft.text } : null)
+        setFolded(draft.collapsed ? { value: draft.value, text: draft.text } : folded ? { value: draft.value, text: draft.value } : null)
+        setExpanded(!draft.collapsed && folded !== null)
         onValueChange(draft.value)
         if (!draft.collapsed) setTimeout(() => {
           input.setSelectionRange(draft.caret, draft.caret)

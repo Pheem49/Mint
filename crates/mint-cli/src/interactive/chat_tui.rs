@@ -402,6 +402,7 @@ pub(crate) struct ChatViewState {
     last_interaction_id: i64,
     composer: Vec<char>,
     collapsed_pastes: Vec<CollapsedPaste>,
+    expanded_paste: Option<std::ops::Range<usize>>,
     cursor: usize,
     history: Vec<String>,
     history_index: Option<usize>,
@@ -1152,23 +1153,32 @@ impl ChatViewState {
     pub fn set_draft(&mut self, draft: String) {
         self.composer = normalize_prompt_newlines(&draft).chars().collect();
         self.collapsed_pastes.clear();
+        self.expanded_paste = None;
         self.cursor = self.composer.len();
     }
     fn composer_text(&self) -> String {
+        self.composer_text_range(0..self.composer.len())
+    }
+    fn composer_text_range(&self, range: std::ops::Range<usize>) -> String {
         let mut text = String::new();
-        let mut start = 0;
-        for paste in &self.collapsed_pastes {
+        let mut start = range.start;
+        for paste in self
+            .collapsed_pastes
+            .iter()
+            .filter(|paste| paste.range.start >= range.start && paste.range.end <= range.end)
+        {
             text.extend(self.composer[start..paste.range.start].iter());
             text.push_str(&paste.text);
             start = paste.range.end;
         }
-        text.extend(self.composer[start..].iter());
+        text.extend(self.composer[start..range.end].iter());
         text
     }
     fn take_prompt(&mut self) -> String {
         let text = self.composer_text();
         self.composer.clear();
         self.collapsed_pastes.clear();
+        self.expanded_paste = None;
         self.cursor = 0;
         text
     }
@@ -1195,7 +1205,23 @@ impl ChatViewState {
         let paste = self.collapsed_pastes.remove(index);
         let start = paste.range.start;
         self.replace_composer(paste.range, &paste.text);
+        self.expanded_paste = Some(start..self.cursor);
         self.cursor = start;
+    }
+    fn toggle_paste(&mut self) {
+        if let Some(range) = self.expanded_paste.take() {
+            let text = self.composer_text_range(range.clone());
+            let start = range.start;
+            let badge = format!("[Pasted Content {} chars]", text.chars().count());
+            self.replace_composer(range, &badge);
+            self.collapsed_pastes.push(CollapsedPaste {
+                range: start..self.cursor,
+                text,
+            });
+            self.collapsed_pastes.sort_by_key(|paste| paste.range.start);
+        } else {
+            self.open_paste();
+        }
     }
     fn replace_composer(&mut self, mut range: std::ops::Range<usize>, text: &str) {
         // Badges are atomic. Deleting any part removes the attached paste;
@@ -1230,6 +1256,24 @@ impl ChatViewState {
             }
             true
         });
+        // Keep the open block's bounds attached to edits, including insertions
+        // at either edge. Fully deleting it must also remove the F2 target.
+        if let Some(open) = self.expanded_paste.as_mut() {
+            if !range.is_empty() && start <= open.start && range.end >= open.end {
+                self.expanded_paste = None;
+            } else {
+                if open.start > range.end || (!range.is_empty() && open.start == range.end) {
+                    open.start = open.start - removed + added;
+                } else if open.start >= start {
+                    open.start = start;
+                }
+                if open.end >= range.end {
+                    open.end = open.end - removed + added;
+                } else if open.end >= start {
+                    open.end = start + added;
+                }
+            }
+        }
         self.composer.splice(range, text.chars());
         self.cursor = start + added;
         self.slash_selected = 0;
@@ -1238,7 +1282,7 @@ impl ChatViewState {
         use event::{KeyCode, KeyModifiers};
         match key.code {
             KeyCode::F(2) => {
-                self.open_paste();
+                self.toggle_paste();
             }
             KeyCode::Left => {
                 self.cursor = self
@@ -2789,8 +2833,8 @@ impl ChatViewState {
                     composer_rows.len(),
                 ));
             }
-            if !self.collapsed_pastes.is_empty() {
-                input_block = input_block.title_bottom(" F2: view/edit paste ");
+            if !self.collapsed_pastes.is_empty() || self.expanded_paste.is_some() {
+                input_block = input_block.title_bottom(" F2: open/collapse paste ");
             }
             // Rows already wrap at the content width. A second word-wrap
             // pass would change blank-row and cursor/scroll positions.
@@ -5543,6 +5587,67 @@ mod context_compaction_shimmer_tests {
 #[cfg(test)]
 mod collapsed_paste_tests {
     use super::*;
+
+    #[test]
+    fn f2_toggles_an_edited_paste_without_folding_surrounding_instructions() {
+        let mut state = ChatViewState::default();
+        state.set_draft("before ".into());
+        state.insert_paste("a\nb\nc\nd\ne\nf\ng");
+        state.replace_composer(state.cursor..state.cursor, " after");
+        let f2 = event::KeyEvent::new(event::KeyCode::F(2), event::KeyModifiers::NONE);
+        state.edit_composer_key(f2);
+        state.edit_composer_key(event::KeyEvent::new(
+            event::KeyCode::Char('ก'),
+            event::KeyModifiers::NONE,
+        ));
+        state.edit_composer_key(f2);
+        assert_eq!(
+            state.composer.iter().collect::<String>(),
+            "before [Pasted Content 14 chars] after"
+        );
+        state.edit_composer_key(f2);
+        assert_eq!(
+            state.composer.iter().collect::<String>(),
+            "before กa\nb\nc\nd\ne\nf\ng after"
+        );
+        state.edit_composer_key(f2);
+        assert_eq!(state.take_prompt(), "before กa\nb\nc\nd\ne\nf\ng after");
+        state.set_draft("fresh".into());
+        state.edit_composer_key(f2);
+        assert_eq!(state.take_prompt(), "fresh");
+    }
+
+    #[test]
+    fn f2_preserves_nested_pastes_and_edits_before_the_open_block() {
+        let mut state = ChatViewState::default();
+        state.set_draft("before ".into());
+        state.insert_paste("a\nb\nc\nd\ne\nf\ng");
+        let f2 = event::KeyEvent::new(event::KeyCode::F(2), event::KeyModifiers::NONE);
+        state.edit_composer_key(f2);
+        state.replace_composer(0..0, "prefix ");
+        state.cursor = 15;
+        state.insert_paste("1\n2\n3\n4\n5\n6\n7");
+        state.edit_composer_key(f2);
+        assert_eq!(
+            state.composer.iter().collect::<String>(),
+            "prefix before [Pasted Content 26 chars]"
+        );
+        assert_eq!(
+            state.take_prompt(),
+            "prefix before a1\n2\n3\n4\n5\n6\n7\nb\nc\nd\ne\nf\ng"
+        );
+    }
+
+    #[test]
+    fn deleting_an_open_paste_drops_its_toggle_state() {
+        let mut state = ChatViewState::default();
+        state.insert_paste("a\nb\nc\nd\ne\nf\ng");
+        let f2 = event::KeyEvent::new(event::KeyCode::F(2), event::KeyModifiers::NONE);
+        state.edit_composer_key(f2);
+        state.replace_composer(0..13, "");
+        state.edit_composer_key(f2);
+        assert!(state.composer.is_empty());
+    }
 
     #[test]
     fn seven_pasted_lines_render_as_a_badge_instead_of_filling_the_composer() {
