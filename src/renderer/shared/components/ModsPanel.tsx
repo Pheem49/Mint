@@ -120,7 +120,7 @@ export function ModsPanel({ workspacePath, chatId, launcherTarget }: { workspace
         <ModUi node={mod.snapshot.ui.above_composer} onAction={(name, value) => action(mod, name, value)} />
       </section>)}
       {!launcherTarget && launchButton}
-      {open && <aside className="mods-panel" aria-label="Workspace mods" style={panelPosition}>
+      {open && createPortal(<aside className="mods-panel mint-mods" aria-label="Workspace mods" style={panelPosition}>
       <header><div><strong>Mods</strong><p>{mods.length} mods · {active.length} active</p></div><button type="button" onClick={() => setOpen(false)} aria-label="Close mods">×</button></header>
       {sidePanelMods.length > 0 && <nav aria-label="Mod panels"><button type="button" aria-pressed={tab === 'manage'} onClick={() => setTab('manage')}>Manage</button>{sidePanelMods.map(m => <button key={m.id} type="button" aria-pressed={tab === m.id} onClick={() => setTab(m.id)}>{m.name}</button>)}</nav>}
       {error && <p role="alert" className="mod-error">{error}</p>}
@@ -163,7 +163,7 @@ export function ModsPanel({ workspacePath, chatId, launcherTarget }: { workspace
         </article>)}
         {data.toolRequests?.map(request => <article className="mod-entry" key={request.id}><strong>{request.modId}: {request.action}</strong><pre>{JSON.stringify(request.input, null, 2)}</pre><button type="button" disabled={busy} onClick={() => { if (window.confirm(`Run ${request.action} requested by ${request.modId}?\n${JSON.stringify(request.input, null, 2)}`)) void operate({ action: 'run_request', command: request.id, grantPermissions: true }) }}>Review & run tool</button></article>)}
       </div>}
-      </aside>}
+      </aside>, document.body)}
     </div>
     {launcherTarget && createPortal(launchButton, launcherTarget)}
   </>

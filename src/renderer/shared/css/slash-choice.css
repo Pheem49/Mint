@@ -21,6 +21,7 @@
 #chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) .chat-tool-menu-wrap,
 #chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) #screen-capture-btn,
 #chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) .chat-provider-select,
+#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) .model-selector-container,
 #chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) #send-btn,
 #chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) #gemini-live-btn,
 #chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) .voice-pill.composer-voice-pill { grid-row: 3; }
@@ -31,6 +32,7 @@
 #chat-form:has(.slash-choice-panel):has(.mint-attachment) .chat-tool-menu-wrap,
 #chat-form:has(.slash-choice-panel):has(.mint-attachment) #screen-capture-btn,
 #chat-form:has(.slash-choice-panel):has(.mint-attachment) .chat-provider-select,
+#chat-form:has(.slash-choice-panel):has(.mint-attachment) .model-selector-container,
 #chat-form:has(.slash-choice-panel):has(.mint-attachment) #send-btn,
 #chat-form:has(.slash-choice-panel):has(.mint-attachment) #gemini-live-btn,
 #chat-form:has(.slash-choice-panel):has(.mint-attachment) .voice-pill.composer-voice-pill { grid-row: 4; }

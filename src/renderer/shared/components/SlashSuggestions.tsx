@@ -207,6 +207,16 @@ const SlashSuggestions = forwardRef<SlashSuggestionsHandle, Props>(function Slas
         return true
       }
       if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && !event.nativeEvent.isComposing) {
+        // A complete slash command is an invocation, not an autocomplete
+        // candidate. Let Enter reach the composer submit handler so commands
+        // such as `/models` can open their interactive picker on the first keypress.
+        if (
+          event.key === 'Enter' &&
+          mode === 'slash' &&
+          flat.some((item) => (item as SlashCommand).command.toLowerCase() === raw.trim().toLowerCase())
+        ) {
+          return false
+        }
         const item = flat[selIndex] ?? flat[0]
         if (!item) return false
         pick(item)

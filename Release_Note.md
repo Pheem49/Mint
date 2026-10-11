@@ -1,5 +1,9 @@
 # Release Notes - Mint Agent v1.16.0
 
+- Fixed Enter on a fully typed slash command in Desktop/Web being consumed by autocomplete; exact commands now run immediately and can open their interactive choice UI on the first Enter.
+- Fixed the model selector overlapping the composer placeholder while a slash choice panel is open by placing it with the other composer controls on both attachment and non-attachment layouts.
+- Fixed the Mods popover appearing offset from its launcher by rendering it at the document root while positioning it against the Mods button.
+- Restyled slash command suggestions across Desktop and Web with theme-matched neutral surfaces, calmer selection and focus states, and UI typography for descriptions while retaining monospaced command names. Removed the popup's outer frame so it sits directly in the composer without nested panel borders.
 - Slash command choices now appear directly above the composer as a compact, keyboard-dismissable option list, matching the Full-Screen TUI instead of covering the top of chat with the green proactive banner.
 - Moved slash command, skill and context mention suggestions into the composer below the typed prompt, with a compact terminal-style list and its own scroll area. The composer grows to hold the suggestions instead of covering conversation history; mobile composer rows adjust to keep its controls visible.
 
