@@ -32,6 +32,15 @@ manifest hash.
 
 ## Manage
 
+Type `/mods` in interactive chat to open the mod manager on Full-Screen TUI,
+Desktop and Web. It shows total and active mod counts. Select a mod with the
+arrow keys and Enter in the TUI, or select the displayed choices on Desktop/Web,
+then choose **Enable for this chat** or **Disable for this chat**. Mods with
+permissions require a separate approval before enabling. After a successful
+change, the menu closes, focus returns to the composer, and chat displays
+`[Mods] Enabled/Disabled <id> for this chat.` Reopen `/mods` to see updated counts,
+or use `/mods list` for a text listing.
+
 Use **Mods** above the composer on Desktop/Web to inspect source, diagnostics,
 permissions and revisions; enable for the current chat, workspace or globally;
 export/import `.mintmod` packages; or restore a source revision.
@@ -59,7 +68,7 @@ In interactive chat use `/mods hot-reload on|off` to watch active basic mods for
 
 Use `mint mods test <id>` or `/mods test <id>` for runtime tests; Desktop/Web have Run tests with per-case results. Tests never activate mods or perform real filesystem/tool operations. See [TESTING.md](TESTING.md).
 
-In interactive chat use `/mods`, `/mods export <id> [file]`,
+In interactive chat use `/mods export <id> [file]`,
 `/mods import <file> [--replace]`, and `/mods:<id>:<command> [value]`.
 Quote paths containing spaces. F7 opens the
 terminal panels; Tab/Shift+Tab select a control, Enter activates it, and Escape

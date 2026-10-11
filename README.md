@@ -420,6 +420,12 @@ mint
 This opens the Mint interactive shell, where you can type prompts naturally or use `/commands` (like `/help`, `/cd`, `/clear`, `/exit`).
 Press F6 at the prompt to confirm a switch between the full-screen TUI and Classic CLI without leaving the current conversation. You can also start directly in Classic mode with `mint --classic`.
 
+### Long Pasted Prompts
+
+In the full-screen TUI, pasted text over six lines collapses into a badge such as `[Pasted Content 31029 chars]`. Press **F2** to open the full text for editing, then press **F2** again to collapse it. The badge updates its character count after edits. Submitting sends the complete edited content, including any surrounding instructions, to the agent.
+
+Desktop/Web also support compact pasted content: click the paste badge or use **F2** to open and collapse it.
+
 ---
 
 ### CLI Subcommands
@@ -447,6 +453,9 @@ mint chat "<message>"
 | `mint onboard` | Configure Mint for first use |
 | `mint setup` | Interactively manage enabled agent tools |
 | `mint plugins` | Centralized interactive management for built-in ecosystem plugins & skills |
+| `mint mods list` | List mods available in the current workspace |
+| `mint mods enable <id> [chat\|workspace\|global]` | Enable a mod at the selected scope |
+| `mint mods test <id>` | Run isolated tests for a mod |
 | `mint web` | Launch the web UI and local API server |
 | `mint-web` | Shortcut for `mint web` when installed via npm; forwards options such as `--dev` and `--tailscale` |
 | `mint web --tailscale` | Serve the built web UI privately over Tailscale HTTPS for mobile/PWA use |
@@ -476,6 +485,20 @@ mint chat "<message>"
 | `mint skills list` | List all skills Mint can see (global, workspace, taught) |
 | `mint eval --suite <path>` | Run benchmark evaluation suite on agent models / harness |
 | `mint update --check` | Check for an available update |
+
+### Mint Mods
+
+Mint Mods add custom panels, status bands, commands and tool guards to the full-screen TUI, Desktop and Web. Ask Mint to create one in your selected workspace, for example:
+
+> Make me a Mint mod called token-weather: show context usage, a sparkline of the last 12 turns, and the last turn's token delta above the prompt. Update after every turn.
+
+Mint validates and publishes the mod source in `<workspace>/mint-mods/<id>/`, containing `manifest.json`, `main.ts` (or `main.js`) and `README.md`. Basic mods can open in the current chat after successful validation. Mods that read workspace files or request tools require permission review; cloned or imported mods stay disabled until you enable them.
+
+Type **`/mods`** to see the total and active mod counts and select a mod. In the TUI, use the arrow keys and Enter; on Desktop/Web, select the displayed choices. Choose **Enable for this chat** or **Disable for this chat** to apply the change. After any required permission approval, the menu closes, the composer regains focus, and chat shows a result such as `[Mods] Enabled token-weather for this chat.` Use `/mods list` for a text listing.
+
+Press **F7** in the full-screen TUI to interact with mod panels. Desktop/Web provide a **Mods** button above the composer for source inspection, diagnostics, activation scopes, revisions, tests, hot reload and `.mintmod` import/export.
+
+See the [Mint Mods guide](docs/mods/README.md), [authoring guide](docs/mods/AUTHORING.md), and [testing guide](docs/mods/TESTING.md). The repository includes three examples in [examples/mods](examples/mods): `token-meter`, `task-checklist` and `tool-guard`.
 
 ### Code Agent
 
@@ -660,6 +683,8 @@ For custom devices, [the runnable Device MCP example](examples/device-mcp/README
 | `/skill [list]` | List all skills Mint can see (global, workspace, taught) |
 | `/skill add <path\|github-repo\|url>` | Install a skill — local path, or a GitHub repo/URL via `npx skills` |
 | `/plugins` | Browse plugins — enable/disable, OAuth connect/disconnect, credentials |
+| `/mods` | Browse mod counts and enable/disable a selected mod for this chat |
+| `/mods list` | Show a text listing of available mods |
 | `/plugin enable\|disable <name>` | Toggle a native plugin for the agent |
 | `/memory list` | List stored memories |
 | `/memory clear` | Clear stored memories |

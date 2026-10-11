@@ -1,5 +1,9 @@
 # Release Notes - Mint Agent v1.16.0
 
+- Updated the main README with Mint Mods prompt creation, workspace source layout, interactive management, F7 panels and guide links, plus long-paste folding and the F2 edit/collapse toggle. Synced the Mods guide with the current menu counts, permission approval and return-to-composer behavior.
+
+- After enabling/disabling a mod from `/mods`, the menu now closes and displays `[Mods] Enabled/Disabled <id> for this chat.` instead of reopening the mod details. TUI returns to the composer; Desktop/Web restore composer focus. Permission approval still completes before enabling.
+
 - `/mods` now opens a shared interactive manager in Full-Screen TUI, Desktop and Web: shows total and active counts, lets users select a mod, enable/disable it for the current chat, and return to the updated list. Permission-bearing mods require a separate revision-bound approval; invalid sources remain visible with diagnostics. Explicit `/mods list`, enable/disable and other subcommands retain their existing behavior. Choice details display as a body in TUI and multiple lines in Desktop/Web.
 
 - Added reversible F2 paste folding: Full-Screen TUI, Desktop and Web can reopen, edit and collapse long pasted content repeatedly. Re-folded badges show the updated character count; submissions retain the complete edited text. TUI tracks the opened paste through nearby edits and nested pastes while preserving surrounding instructions, and clears the toggle target after deletion or submission. Added keyboard-toggle and browser regressions.

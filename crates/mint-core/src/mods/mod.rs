@@ -113,13 +113,19 @@ mod lifecycle_tests {
             assert_eq!(menu["options"].as_array().unwrap().len(), 2);
             let detail = picker(&w, &chat, surface, &choose(&menu, "Counter"));
             let enabled = picker(&w, &chat, surface, &choose(&detail, "Enable"));
-            assert_eq!(enabled["kind"], "needs_choice", "{enabled}");
+            assert_eq!(enabled["kind"], "message", "{enabled}");
+            assert!(
+                enabled["markdown"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Enabled counter for this chat")
+            );
             let scoped = crate::scoped_chat_id(&chat, Some(&w.0.to_string_lossy()));
             let records = list(&w.0, &scoped).unwrap();
             assert_eq!(records[0]["enabled"], true);
             assert_eq!(records[1]["enabled"], false);
             assert_eq!(record(&w.0, "other-chat")["enabled"], false);
-            let menu = picker(&w, &chat, surface, &choose(&enabled, "Back"));
+            let menu = picker(&w, &chat, surface, "/mods");
             assert!(
                 menu["title"]
                     .as_str()
@@ -128,7 +134,13 @@ mod lifecycle_tests {
             );
             let detail = picker(&w, &chat, surface, &choose(&menu, "Counter"));
             let disabled = picker(&w, &chat, surface, &choose(&detail, "Disable"));
-            assert_eq!(disabled["kind"], "needs_choice");
+            assert_eq!(disabled["kind"], "message");
+            assert!(
+                disabled["markdown"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Disabled counter for this chat")
+            );
             assert_eq!(record(&w.0, &scoped)["enabled"], false);
             close_chat(&w.0, &scoped);
         }
@@ -162,7 +174,7 @@ mod lifecycle_tests {
         let detail = picker(&w, "a", "cli", "/mods manage counter");
         let review = picker(&w, "a", "cli", &choose(&detail, "Enable"));
         let approved = picker(&w, "a", "cli", &choose(&review, "Approve"));
-        assert_eq!(approved["kind"], "needs_choice");
+        assert_eq!(approved["kind"], "message");
         assert_eq!(record(&w.0, &scoped)["enabled"], true);
         close_chat(&w.0, &scoped);
     }

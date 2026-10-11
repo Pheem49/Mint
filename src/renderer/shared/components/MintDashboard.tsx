@@ -1420,7 +1420,10 @@ export default function MintDashboard() {
   async function handleEngineSlashResponse(userText: string, resp: SlashResponse) {
     switch (resp.kind) {
       case 'message':
-        pushSystemMessage(userText, resp.markdown)
+        pushSystemMessage(userText.startsWith('/mods set ') ? '/mods' : userText, resp.markdown)
+        if (userText.startsWith('/mods set ')) {
+          requestAnimationFrame(() => document.getElementById('chat-input')?.focus())
+        }
         break
       case 'applied': {
         const wsChange = resp.effects.find((e) => e.kind === 'workspace_changed') as

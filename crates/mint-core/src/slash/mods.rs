@@ -56,6 +56,12 @@ fn manage(root: &Path, chat: &str, action: &str, args: &[String]) -> Result<Slas
             "off" => crate::mods::disable(root, &scoped, id)?,
             _ => return Err("Choose Enable or Disable from /mods".into()),
         }
+        return Ok(SlashResponse::Message {
+            markdown: format!(
+                "[Mods] {} {id} for this chat.",
+                if state == "on" { "Enabled" } else { "Disabled" }
+            ),
+        });
     }
     let mods = crate::mods::list(root, &scoped)?;
     if id.is_empty() {
