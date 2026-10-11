@@ -1,4 +1,5 @@
 import McpToolResults from './McpToolResults'
+import { CollapsiblePasteInput } from './CollapsiblePasteInput'
 import { ContextCompactionStatus } from './ContextCompactionStatus'
 import { activeCompactionFrom } from '../utils/contextCompaction'
 import { useEffect, useMemo, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
@@ -1898,10 +1899,15 @@ export default function ChatPanel({
               History {historyIndex + 1}/{promptHistory.length}
             </div>
           )}
-          <textarea
+          <CollapsiblePasteInput
             id="chat-input"
-            ref={textareaRef}
+            inputRef={textareaRef}
             value={message}
+            onValueChange={(value) => {
+              onSetMessage(value)
+              if (historyIndex !== null) setHistoryIndex(null)
+            }}
+            onResizeInput={resizeInput}
             onChange={(event) => {
               resizeInput(event.currentTarget)
               onSetMessage(event.target.value)

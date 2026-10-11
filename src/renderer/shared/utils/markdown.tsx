@@ -700,7 +700,7 @@ function splitVideoSegments(text: string): Segment[] {
 }
 
 export function renderFormattedMessage(text: string, webSources: WebSearchSource[] = []): ReactNode {
-  const displayText = readableAssistantText(text)
+  const displayText = readableAssistantText(text.replace(/\r\n?/g, '\n'))
   if (!displayText) return null
 
   const segments = splitVideoSegments(displayText)

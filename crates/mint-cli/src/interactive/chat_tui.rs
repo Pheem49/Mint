@@ -28,6 +28,10 @@ use std::sync::{
 };
 use unicode_width::UnicodeWidthStr;
 
+fn normalize_prompt_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 /// Sweep a white glow across the thinking text, fading to dim gray at the edges.
 fn shimmer_thinking_line(line: &str, tick: usize) -> Line<'static> {
     // Split at the first " (" to isolate the verb from the timer suffix.
@@ -350,10 +354,12 @@ impl TranscriptEntry {
                 let clean = crate::agent::sanitize_latex(text);
                 crate::agent::format_markdown_bold(&clean)
             }
-            TranscriptRole::User
-            | TranscriptRole::Notice
-            | TranscriptRole::Command
-            | TranscriptRole::System => crate::agent::format_markdown_bold(text),
+            TranscriptRole::User => {
+                crate::agent::format_markdown_bold(&normalize_prompt_newlines(text))
+            }
+            TranscriptRole::Notice | TranscriptRole::Command | TranscriptRole::System => {
+                crate::agent::format_markdown_bold(text)
+            }
         };
 
         if let Ok(parsed) = processed.into_text() {
@@ -395,6 +401,7 @@ pub(crate) struct ChatViewState {
     sync_cursor: i64,
     last_interaction_id: i64,
     composer: Vec<char>,
+    collapsed_pastes: Vec<CollapsedPaste>,
     cursor: usize,
     history: Vec<String>,
     history_index: Option<usize>,
@@ -417,6 +424,12 @@ pub(crate) struct ChatViewState {
     watermark_frame: u8,
     watermark_animating: bool,
     pub(crate) theme: crate::terminal_theme::TuiTheme,
+}
+
+#[derive(Debug)]
+struct CollapsedPaste {
+    range: std::ops::Range<usize>,
+    text: String,
 }
 
 #[derive(Debug)]
@@ -1063,7 +1076,7 @@ impl TuiHandle {
         self.state
             .lock()
             .ok()
-            .and_then(|state| (!state.composer.is_empty()).then(|| state.composer.iter().collect()))
+            .and_then(|state| (!state.composer.is_empty()).then(|| state.composer_text()))
     }
     pub fn choose(
         &self,
@@ -1137,8 +1150,207 @@ impl ChatViewState {
         state
     }
     pub fn set_draft(&mut self, draft: String) {
-        self.composer = draft.chars().collect();
+        self.composer = normalize_prompt_newlines(&draft).chars().collect();
+        self.collapsed_pastes.clear();
         self.cursor = self.composer.len();
+    }
+    fn composer_text(&self) -> String {
+        let mut text = String::new();
+        let mut start = 0;
+        for paste in &self.collapsed_pastes {
+            text.extend(self.composer[start..paste.range.start].iter());
+            text.push_str(&paste.text);
+            start = paste.range.end;
+        }
+        text.extend(self.composer[start..].iter());
+        text
+    }
+    fn take_prompt(&mut self) -> String {
+        let text = self.composer_text();
+        self.composer.clear();
+        self.collapsed_pastes.clear();
+        self.cursor = 0;
+        text
+    }
+    fn open_paste(&mut self) -> bool {
+        let Some(index) = self
+            .collapsed_pastes
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, paste)| {
+                if self.cursor < paste.range.start {
+                    paste.range.start - self.cursor
+                } else {
+                    self.cursor.saturating_sub(paste.range.end)
+                }
+            })
+            .map(|(index, _)| index)
+        else {
+            return false;
+        };
+        self.expand_paste(index);
+        true
+    }
+    fn expand_paste(&mut self, index: usize) {
+        let paste = self.collapsed_pastes.remove(index);
+        let start = paste.range.start;
+        self.replace_composer(paste.range, &paste.text);
+        self.cursor = start;
+    }
+    fn replace_composer(&mut self, mut range: std::ops::Range<usize>, text: &str) {
+        // Badges are atomic. Deleting any part removes the attached paste;
+        // inserting inside one opens it before editing the actual text.
+        if range.is_empty() {
+            if let Some(index) = self
+                .collapsed_pastes
+                .iter()
+                .position(|paste| range.start > paste.range.start && range.start < paste.range.end)
+            {
+                self.expand_paste(index);
+                range = self.cursor..self.cursor;
+            }
+        } else {
+            for paste in &self.collapsed_pastes {
+                if range.start < paste.range.end && range.end > paste.range.start {
+                    range.start = range.start.min(paste.range.start);
+                    range.end = range.end.max(paste.range.end);
+                }
+            }
+        }
+        let start = range.start;
+        let removed = range.end - start;
+        let added = text.chars().count();
+        self.collapsed_pastes.retain_mut(|paste| {
+            if start < paste.range.end && range.end > paste.range.start {
+                return false;
+            }
+            if paste.range.start >= range.end {
+                paste.range.start = paste.range.start - removed + added;
+                paste.range.end = paste.range.end - removed + added;
+            }
+            true
+        });
+        self.composer.splice(range, text.chars());
+        self.cursor = start + added;
+        self.slash_selected = 0;
+    }
+    fn edit_composer_key(&mut self, key: event::KeyEvent) -> bool {
+        use event::{KeyCode, KeyModifiers};
+        match key.code {
+            KeyCode::F(2) => {
+                self.open_paste();
+            }
+            KeyCode::Left => {
+                self.cursor = self
+                    .collapsed_pastes
+                    .iter()
+                    .find(|paste| self.cursor > paste.range.start && self.cursor <= paste.range.end)
+                    .map_or(self.cursor.saturating_sub(1), |paste| paste.range.start);
+            }
+            KeyCode::Right => {
+                self.cursor = self
+                    .collapsed_pastes
+                    .iter()
+                    .find(|paste| self.cursor >= paste.range.start && self.cursor < paste.range.end)
+                    .map_or((self.cursor + 1).min(self.composer.len()), |paste| {
+                        paste.range.end
+                    });
+            }
+            KeyCode::Backspace if self.cursor > 0 => {
+                self.replace_composer(self.cursor - 1..self.cursor, "");
+            }
+            KeyCode::Delete if self.cursor < self.composer.len() => {
+                self.replace_composer(self.cursor..self.cursor + 1, "");
+            }
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
+                self.replace_composer(self.cursor..self.cursor, "\n");
+            }
+            KeyCode::Char(character)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                if self
+                    .active_notice()
+                    .is_some_and(|notice| !notice.starts_with("Terminal too small"))
+                {
+                    self.clear_notice();
+                }
+                self.replace_composer(self.cursor..self.cursor, &character.to_string());
+            }
+            _ => return false,
+        }
+        true
+    }
+    fn insert_paste(&mut self, text: &str) {
+        let text = normalize_prompt_newlines(text);
+        if let Some(index) = self
+            .collapsed_pastes
+            .iter()
+            .position(|paste| self.cursor > paste.range.start && self.cursor < paste.range.end)
+        {
+            self.expand_paste(index);
+        }
+        let cursor = self.cursor.min(self.composer.len());
+        if text.lines().count() > 6 {
+            let badge = format!("[Pasted Content {} chars]", text.chars().count());
+            self.replace_composer(cursor..cursor, &badge);
+            self.collapsed_pastes.push(CollapsedPaste {
+                range: cursor..self.cursor,
+                text: text.clone(),
+            });
+            self.collapsed_pastes.sort_by_key(|paste| paste.range.start);
+        } else {
+            self.replace_composer(cursor..cursor, &text);
+        }
+        self.slash_selected = 0;
+    }
+    fn composer_width(&self, area: Rect) -> usize {
+        let (main, _) = mod_layout(
+            area,
+            self.mods_open && self.dialog.is_none() && self.thought_modal.is_none(),
+        );
+        main.width.saturating_sub(4).max(1) as usize
+    }
+    fn navigate_composer(&mut self, key: event::KeyEvent, row_width: usize) -> bool {
+        use event::{KeyCode, KeyModifiers};
+        if key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            || self.composer.is_empty()
+        {
+            return false;
+        }
+        let (rows, row, col) = wrap_input_visual_into_rows(&self.composer, row_width, self.cursor);
+        let target_row = match key.code {
+            KeyCode::Up if rows.len() > 1 => row.saturating_sub(1),
+            KeyCode::Down if rows.len() > 1 => (row + 1).min(rows.len() - 1),
+            KeyCode::Home | KeyCode::End => row,
+            _ => return false,
+        };
+        let start = input_row_start(&self.composer, &rows, target_row);
+        let target: Vec<char> = rows[target_row].chars().collect();
+        self.cursor = match key.code {
+            KeyCode::Home => start,
+            KeyCode::End => start + target.len(),
+            _ => {
+                let column = UnicodeWidthStr::width(
+                    rows[row].chars().take(col).collect::<String>().as_str(),
+                );
+                let mut width = 0;
+                let mut count = 0;
+                for character in target {
+                    let next = UnicodeWidthStr::width(character.to_string().as_str());
+                    if width + next > column {
+                        break;
+                    }
+                    width += next;
+                    count += 1;
+                }
+                start + count
+            }
+        };
+        true
     }
     pub fn reload_transcript(&mut self, chat_id: &str, workspace: &Path) {
         if self.chat_id != chat_id || self.current_dir != workspace {
@@ -1423,15 +1635,14 @@ impl ChatViewState {
             return;
         }
         if self.history_index.is_none() {
-            self.draft_before_history = self.composer.clone();
+            self.draft_before_history = self.composer_text().chars().collect();
         }
         let index = self
             .history_index
             .map(|index| index.saturating_sub(1))
             .unwrap_or(self.history.len() - 1);
         self.history_index = Some(index);
-        self.composer = self.history[index].chars().collect();
-        self.cursor = self.composer.len();
+        self.set_draft(self.history[index].clone());
     }
     fn history_next(&mut self) {
         let Some(index) = self.history_index else {
@@ -1440,7 +1651,7 @@ impl ChatViewState {
         if index + 1 < self.history.len() {
             let next = index + 1;
             self.history_index = Some(next);
-            self.composer = self.history[next].chars().collect();
+            self.set_draft(self.history[next].clone());
         } else {
             self.history_index = None;
             self.composer = std::mem::take(&mut self.draft_before_history);
@@ -1498,18 +1709,26 @@ impl ChatViewState {
         } else {
             0
         };
-        let end = self.composer[cursor..]
+        let word_end = self.composer[cursor..]
             .iter()
             .position(|c| c.is_whitespace())
             .map_or(self.composer.len(), |offset| cursor + offset);
-        let needs_space = end == self.composer.len();
+        let paste_start = self
+            .collapsed_pastes
+            .iter()
+            .find(|paste| paste.range.start >= cursor)
+            .map(|paste| paste.range.start);
+        let end = paste_start.map_or(word_end, |start| word_end.min(start));
+        let needs_space = end == self.composer.len() || paste_start == Some(end);
         let replacement = if needs_space {
             format!("{token} ")
         } else {
             token.clone()
         };
-        self.composer.splice(start..end, replacement.chars());
-        self.cursor = start + token.chars().count() + 1;
+        self.replace_composer(start..end, &replacement);
+        if !needs_space {
+            self.cursor += 1;
+        }
         self.slash_selected = 0;
         true
     }
@@ -1784,7 +2003,10 @@ impl ChatViewState {
             while i < chars.len() {
                 if chars[i] == '[' {
                     let remaining: String = chars[i..].iter().collect();
-                    if remaining.starts_with("[Image") || remaining.starts_with("[Pasted text") {
+                    if remaining.starts_with("[Image")
+                        || remaining.starts_with("[Pasted text")
+                        || remaining.starts_with("[Pasted Content")
+                    {
                         if let Some(end) = remaining.find(']') {
                             let badge = &remaining[..=end];
                             if i > last_end {
@@ -2556,15 +2778,26 @@ impl ChatViewState {
                         .collect::<Vec<_>>(),
                 )
             };
+            let mut input_block = Block::default()
+                .borders(Borders::TOP | Borders::BOTTOM)
+                .border_style(Style::default().fg(crate::terminal_theme::MUTED));
+            if composer_rows.len() > visible_composer_rows {
+                input_block = input_block.title_bottom(format!(
+                    " {}–{} / {} lines · ↑/↓ edit ",
+                    composer_scroll + 1,
+                    (composer_scroll + visible_composer_rows).min(composer_rows.len()),
+                    composer_rows.len(),
+                ));
+            }
+            if !self.collapsed_pastes.is_empty() {
+                input_block = input_block.title_bottom(" F2: view/edit paste ");
+            }
+            // Rows already wrap at the content width. A second word-wrap
+            // pass would change blank-row and cursor/scroll positions.
             frame.render_widget(
                 Paragraph::new(input)
-                    .wrap(Wrap { trim: false })
                     .scroll((composer_scroll as u16, 0))
-                    .block(
-                        Block::default()
-                            .borders(Borders::TOP | Borders::BOTTOM)
-                            .border_style(Style::default().fg(crate::terminal_theme::MUTED)),
-                    ),
+                    .block(input_block),
                 rows[4],
             );
 
@@ -2895,13 +3128,7 @@ fn input_index_at(
     let scroll = cursor_row.saturating_add(1).saturating_sub(visible_rows);
     let row_index = visible_row + scroll;
     let row = rows.get(row_index)?;
-    let mut start = 0usize;
-    for prior_row in rows.iter().take(row_index) {
-        start += prior_row.chars().count();
-        if chars.get(start) == Some(&'\n') {
-            start += 1;
-        }
-    }
+    let start = input_row_start(chars, &rows, row_index);
 
     let text_x = area.x.saturating_add(3);
     let target_column = point.column.saturating_sub(text_x) as usize;
@@ -2915,6 +3142,17 @@ fn input_index_at(
         visual_column += width;
     }
     Some(start + row_chars.len())
+}
+
+fn input_row_start(chars: &[char], rows: &[String], row_index: usize) -> usize {
+    let mut start = 0;
+    for row in rows.iter().take(row_index) {
+        start += row.chars().count();
+        if chars.get(start) == Some(&'\n') {
+            start += 1;
+        }
+    }
+    start
 }
 
 fn wrap_input_visual_into_rows(
@@ -3552,11 +3790,7 @@ impl ChatTui {
                 }
                 event::Event::Paste(text) => {
                     self.clear_mouse_selection();
-                    for c in text.trim_end_matches(['\r', '\n']).chars() {
-                        let cursor = state.cursor;
-                        state.composer.insert(cursor, c);
-                        state.cursor += 1;
-                    }
+                    state.insert_paste(&text);
                 }
                 event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
                     use event::{KeyCode, KeyModifiers};
@@ -3570,9 +3804,7 @@ impl ChatTui {
                     if self.mouse_selection.range().is_some() {
                         if matches!(key.code, KeyCode::Delete | KeyCode::Backspace) {
                             if let Some((start, end)) = self.composer_selection_range(&state) {
-                                state.composer.drain(start..end);
-                                state.cursor = start;
-                                state.slash_selected = 0;
+                                state.replace_composer(start..end, "");
                                 state.clear_notice();
                             }
                             self.clear_mouse_selection();
@@ -3650,7 +3882,7 @@ impl ChatTui {
                         continue;
                     }
                     if key.code == KeyCode::F(6) {
-                        let text: String = state.composer.iter().collect();
+                        let text = state.composer_text();
                         return Ok(Some(InteractiveInput {
                             text,
                             pasted_image,
@@ -3761,6 +3993,11 @@ impl ChatTui {
                         }
                         continue;
                     }
+                    let composer_width =
+                        state.composer_width(Rect::new(0, 0, size.width, size.height));
+                    if state.edit_composer_key(key) {
+                        continue;
+                    }
                     match key.code {
                         KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             if let Some(record) = super::get_last_thought() {
@@ -3788,9 +4025,14 @@ impl ChatTui {
                                 } else {
                                     pasted_image = Some(uri);
                                 }
-                                let mut cursor = state.cursor;
-                                super::insert_image_placeholder(&mut state.composer, &mut cursor);
-                                state.cursor = cursor;
+                                let mut image_draft = state.composer.clone();
+                                let cursor = state.cursor;
+                                let mut end = cursor;
+                                super::insert_image_placeholder(&mut image_draft, &mut end);
+                                state.replace_composer(
+                                    cursor..cursor,
+                                    &image_draft[cursor..end].iter().collect::<String>(),
+                                );
                                 state.set_notice("Image attached");
                             } else {
                                 state.set_notice("No image found in clipboard");
@@ -3805,7 +4047,6 @@ impl ChatTui {
                         KeyCode::Home if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             state.scroll_from_bottom = u16::MAX
                         }
-                        KeyCode::End => state.scroll_from_bottom = 0,
                         KeyCode::Up if !state.suggestions().is_empty() => {
                             state.slash_selected = state.slash_selected.saturating_sub(1)
                         }
@@ -3816,27 +4057,11 @@ impl ChatTui {
                         KeyCode::Tab if !state.suggestions().is_empty() => {
                             state.apply_selected_suggestion();
                         }
+                        KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End
+                            if state.navigate_composer(key, composer_width) => {}
+                        KeyCode::End => state.scroll_from_bottom = 0,
                         KeyCode::Up if !state.composer.contains(&'\n') => state.history_previous(),
                         KeyCode::Down if !state.composer.contains(&'\n') => state.history_next(),
-                        KeyCode::Left => state.cursor = state.cursor.saturating_sub(1),
-                        KeyCode::Right => {
-                            state.cursor = (state.cursor + 1).min(state.composer.len())
-                        }
-                        KeyCode::Backspace if state.cursor > 0 => {
-                            state.cursor -= 1;
-                            let cursor = state.cursor;
-                            state.composer.remove(cursor);
-                            state.slash_selected = 0;
-                        }
-                        KeyCode::Delete if state.cursor < state.composer.len() => {
-                            let cursor = state.cursor;
-                            state.composer.remove(cursor);
-                        }
-                        KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
-                            let cursor = state.cursor;
-                            state.composer.insert(cursor, '\n');
-                            state.cursor += 1;
-                        }
                         KeyCode::Enter => {
                             let suggestions = state.suggestions();
                             let input: String = state.composer.iter().collect();
@@ -3846,8 +4071,7 @@ impl ChatTui {
                             {
                                 state.apply_selected_suggestion();
                             }
-                            let text: String = state.composer.drain(..).collect();
-                            state.cursor = 0;
+                            let text = state.take_prompt();
                             state.history_index = None;
                             state.draft_before_history.clear();
                             state.clear_notice();
@@ -3871,30 +4095,12 @@ impl ChatTui {
                         }
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             if !state.composer.is_empty() {
-                                state.composer.clear();
-                                state.cursor = 0;
+                                state.take_prompt();
                                 state.slash_selected = 0;
                                 state.clear_notice();
                             } else {
                                 state.set_notice("Press Ctrl+D twice to exit");
                             }
-                        }
-                        KeyCode::Char(c)
-                            if !key
-                                .modifiers
-                                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-                        {
-                            if state
-                                .active_notice()
-                                .map(|n| !n.starts_with("Terminal too small"))
-                                .unwrap_or(false)
-                            {
-                                state.clear_notice();
-                            }
-                            let cursor = state.cursor;
-                            state.composer.insert(cursor, c);
-                            state.cursor += 1;
-                            state.slash_selected = 0;
                         }
                         _ => {}
                     }
@@ -4120,11 +4326,7 @@ impl ChatTui {
                     event::Event::Paste(text) => {
                         self.clear_mouse_selection();
                         if let Ok(mut state) = handle.state.lock() {
-                            let cursor = state.cursor;
-                            for (offset, character) in text.chars().enumerate() {
-                                state.composer.insert(cursor + offset, character);
-                            }
-                            state.cursor += text.chars().count();
+                            state.insert_paste(&text);
                         }
                     }
                     event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
@@ -4146,9 +4348,7 @@ impl ChatTui {
                                 && matches!(key.code, KeyCode::Delete | KeyCode::Backspace)
                             {
                                 if let Some((start, end)) = self.composer_selection_range(&state) {
-                                    state.composer.drain(start..end);
-                                    state.cursor = start;
-                                    state.slash_selected = 0;
+                                    state.replace_composer(start..end, "");
                                 }
                                 self.clear_mouse_selection();
                                 selection_handled = true;
@@ -4166,38 +4366,23 @@ impl ChatTui {
                             continue;
                         }
                         if let Ok(mut state) = handle.state.lock() {
+                            let size = self.terminal.size()?;
+                            let composer_width =
+                                state.composer_width(Rect::new(0, 0, size.width, size.height));
+                            if state.edit_composer_key(key) {
+                                continue;
+                            }
                             match key.code {
+                                KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End
+                                    if state.navigate_composer(key, composer_width) => {}
                                 KeyCode::End => state.scroll_from_bottom = 0,
                                 KeyCode::Enter => {
                                     if !state.composer.is_empty() {
-                                        let text: String = state.composer.drain(..).collect();
-                                        state.cursor = 0;
+                                        let text = state.take_prompt();
                                         if let Ok(mut queued) = handle.queued.lock() {
                                             queued.push(text);
                                         }
                                     }
-                                }
-                                KeyCode::Backspace if state.cursor > 0 => {
-                                    state.cursor -= 1;
-                                    let cursor = state.cursor;
-                                    state.composer.remove(cursor);
-                                }
-                                KeyCode::Delete if state.cursor < state.composer.len() => {
-                                    let cursor = state.cursor;
-                                    state.composer.remove(cursor);
-                                }
-                                KeyCode::Left => state.cursor = state.cursor.saturating_sub(1),
-                                KeyCode::Right => {
-                                    state.cursor = (state.cursor + 1).min(state.composer.len())
-                                }
-                                KeyCode::Char(character)
-                                    if !key
-                                        .modifiers
-                                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-                                {
-                                    let cursor = state.cursor;
-                                    state.composer.insert(cursor, character);
-                                    state.cursor += 1;
                                 }
                                 _ => {}
                             }
@@ -5352,6 +5537,267 @@ mod context_compaction_shimmer_tests {
             " · 12s • Esc to interrupt"
         );
         assert_eq!(first.spans.last(), next.spans.last());
+    }
+}
+
+#[cfg(test)]
+mod collapsed_paste_tests {
+    use super::*;
+
+    #[test]
+    fn seven_pasted_lines_render_as_a_badge_instead_of_filling_the_composer() {
+        let mut state = ChatViewState::default();
+        state.insert_paste("a\nb\nc\nd\ne\nf\ng");
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 32)).unwrap();
+        let mut composer = None;
+        terminal
+            .draw(|frame| composer = state.render(frame).composer)
+            .unwrap();
+        let area = composer.unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = (area.y..area.bottom())
+            .flat_map(|y| (area.x..area.right()).map(move |x| buffer[(x, y)].symbol()))
+            .collect();
+        assert!(rendered.contains("[Pasted Content 13 chars]"), "{rendered}");
+        assert!(rendered.contains("F2"));
+        assert_eq!(area.height, 3, "A collapsed paste should use one input row");
+    }
+
+    #[test]
+    fn six_pasted_lines_stay_editable_inline() {
+        let mut state = ChatViewState::default();
+        state.insert_paste("a\r\nb\rc\nd\ne\nf");
+        assert_eq!(
+            state.composer.iter().collect::<String>(),
+            "a\nb\nc\nd\ne\nf"
+        );
+    }
+
+    #[test]
+    fn autocomplete_keeps_the_adjacent_collapsed_paste_as_separate_content() {
+        let mut state = ChatViewState::default();
+        state.set_draft("/hel".into());
+        state.insert_paste("a\nb\nc\nd\ne\nf\ng");
+        state.cursor = 4;
+        state.slash_selected = state
+            .suggestions()
+            .iter()
+            .position(|(token, _)| token == "/help")
+            .unwrap();
+        assert!(state.apply_selected_suggestion());
+        assert_eq!(state.take_prompt(), "/help a\nb\nc\nd\ne\nf\ng");
+    }
+
+    #[test]
+    fn clipboard_trailing_newlines_survive_both_inline_and_collapsed_submit() {
+        let mut state = ChatViewState::default();
+        state.insert_paste("a\nb\nc\nd\ne\nf\n");
+        assert_eq!(
+            state.composer.iter().collect::<String>(),
+            "a\nb\nc\nd\ne\nf\n"
+        );
+        assert_eq!(state.take_prompt(), "a\nb\nc\nd\ne\nf\n");
+        state.insert_paste("a\nb\nc\nd\ne\nf\ng\n\n");
+        assert_eq!(
+            state.composer.iter().collect::<String>(),
+            "[Pasted Content 15 chars]"
+        );
+        assert_eq!(state.take_prompt(), "a\nb\nc\nd\ne\nf\ng\n\n");
+    }
+
+    #[test]
+    fn submit_expands_each_paste_without_replacing_literal_badge_text() {
+        let mut state = ChatViewState::default();
+        state.set_draft("literal [Pasted Content 13 chars]: ".into());
+        state.insert_paste("a\nb\nc\nd\ne\nf\ng");
+        state.replace_composer(state.cursor..state.cursor, " then ");
+        state.insert_paste("1\n2\n3\n4\n5\n6\n7");
+        assert_eq!(
+            state.take_prompt(),
+            "literal [Pasted Content 13 chars]: a\nb\nc\nd\ne\nf\ng then 1\n2\n3\n4\n5\n6\n7"
+        );
+        assert!(state.composer.is_empty());
+        state.set_draft("fresh".into());
+        assert_eq!(state.take_prompt(), "fresh");
+    }
+
+    #[test]
+    fn opening_a_paste_reveals_its_first_line_and_edits_reach_submit() {
+        let mut state = ChatViewState::default();
+        state.insert_paste("a\nb\nc\nd\ne\nf\ng");
+        assert!(state.open_paste());
+        assert_eq!(state.cursor, 0);
+        assert_eq!(
+            state.composer.iter().collect::<String>(),
+            "a\nb\nc\nd\ne\nf\ng"
+        );
+        state.replace_composer(1..1, " edited");
+        assert_eq!(state.take_prompt(), "a edited\nb\nc\nd\ne\nf\ng");
+    }
+
+    #[test]
+    fn deleting_part_of_a_badge_removes_only_that_paste() {
+        let mut state = ChatViewState::default();
+        state.set_draft("before ".into());
+        state.insert_paste("a\nb\nc\nd\ne\nf\ng");
+        state.replace_composer(state.cursor..state.cursor, " after");
+        state.replace_composer(8..9, "");
+        assert_eq!(state.take_prompt(), "before  after");
+    }
+
+    #[test]
+    fn unicode_character_count_and_history_restore_keep_the_real_content() {
+        let mut state = ChatViewState {
+            history: vec!["older".into()],
+            ..Default::default()
+        };
+        state.insert_paste("ก\rข\rค\rง\rจ\rฉ\rช");
+        assert_eq!(
+            state.composer.iter().collect::<String>(),
+            "[Pasted Content 13 chars]"
+        );
+        state.history_previous();
+        state.history_next();
+        assert_eq!(state.composer_text(), "ก\nข\nค\nง\nจ\nฉ\nช");
+    }
+}
+
+#[cfg(test)]
+mod pasted_prompt_render_tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+
+    const PROMPT: &str = "Make me a Mint mod called token-weather.\r\rWhat it should show:\r- ☀ Clear (yellow), ☁ Cloudy (cyan), ☂ Showers (blue)\r- 134.4k / 200k\r- ▁▂▃▄▅▆▇█\r- ▲ +98.3k last turn\r\rIt should update after every turn.";
+
+    #[test]
+    fn pasted_prompt_draft_renders_line_breaks_without_carriage_return_cells() {
+        let mut state = ChatViewState::default();
+        state.set_draft(PROMPT.into());
+        state.cursor = 0;
+        let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
+        let mut composer = None;
+        terminal
+            .draw(|frame| composer = state.render(frame).composer)
+            .unwrap();
+        let area = composer.unwrap();
+        let buffer = terminal.backend().buffer();
+        let rows: Vec<String> = (area.y + 1..area.bottom() - 1)
+            .map(|y| {
+                (area.x..area.right())
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect()
+            })
+            .collect();
+        assert!(
+            rows.iter().all(|row| !row.contains('\r')),
+            "CR must become a line break, not a terminal cursor movement: {rows:?}"
+        );
+        assert!(rows[0].contains("Make me a Mint mod called token-weather."));
+        assert!(rows[2].contains("What it should show:"), "{rows:?}");
+        assert!(rows[3].contains("☀ Clear"));
+    }
+
+    #[test]
+    fn sent_pasted_prompt_preserves_all_lines_and_weather_symbols() {
+        let mut state = ChatViewState::default();
+        state.push_user(PROMPT.into());
+        state.push_assistant("Reading the authoring guide.");
+        let mut terminal = Terminal::new(TestBackend::new(80, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(
+            !rendered.contains('\r'),
+            "Sent user text contains terminal cursor movements"
+        );
+        for label in [
+            "token-weather.",
+            "What it should show:",
+            "☀ Clear",
+            "134.4k / 200k",
+            "▁▂▃▄▅▆▇█",
+            "▲ +98.3k last turn",
+            "It should update after every turn.",
+        ] {
+            assert!(rendered.contains(label), "Missing sent text: {label}");
+        }
+        assert_eq!(state.plain_transcript_lines()[2], "What it should show:");
+    }
+
+    #[test]
+    fn reused_prompt_history_normalizes_crlf_and_lone_cr() {
+        let mut state = ChatViewState {
+            history: vec!["first\r\nsecond\rthird".into()],
+            ..Default::default()
+        };
+        state.history_previous();
+        assert_eq!(
+            state.composer.iter().collect::<String>(),
+            "first\nsecond\nthird"
+        );
+        assert_eq!(state.cursor, 18);
+    }
+
+    #[test]
+    fn composer_navigation_uses_visual_rows_for_wrapped_and_wide_text() {
+        use event::{KeyCode, KeyEvent, KeyModifiers};
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let mut state = ChatViewState::default();
+        state.set_draft("0123456789abcdefghijABCDEFGHIJKLMNOPQRSTUVWXYZ".into());
+        assert!(state.navigate_composer(key(KeyCode::Up), 20));
+        assert_eq!(state.cursor, 26);
+        assert!(state.navigate_composer(key(KeyCode::Home), 20));
+        assert_eq!(state.cursor, 20);
+        assert!(state.navigate_composer(key(KeyCode::Down), 20));
+        assert_eq!(state.cursor, 40);
+        assert!(state.navigate_composer(key(KeyCode::End), 20));
+        assert_eq!(state.cursor, 46);
+        state.set_draft("界界\naaaa".into());
+        assert!(state.navigate_composer(key(KeyCode::Up), 20));
+        assert_eq!(state.cursor, 2);
+        assert!(state.navigate_composer(key(KeyCode::Down), 20));
+        assert_eq!(state.cursor, 7);
+    }
+
+    #[test]
+    fn long_pasted_prompt_can_be_inspected_from_first_to_last_line() {
+        use event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut state = ChatViewState::default();
+        state.insert_paste(
+            &(1..=12)
+                .map(|i| format!("Prompt line {i:02}"))
+                .collect::<Vec<_>>()
+                .join("\r"),
+        );
+        assert!(state.edit_composer_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)));
+        assert_eq!(state.cursor, 0);
+        state.cursor = state.composer.len();
+        let mut terminal = Terminal::new(TestBackend::new(80, 32)).unwrap();
+        let mut composer = None;
+        terminal
+            .draw(|frame| composer = state.render(frame).composer)
+            .unwrap();
+        let area = composer.unwrap();
+        let visible = |buffer: &Buffer| -> String {
+            (area.y + 1..area.bottom() - 1)
+                .flat_map(|y| (area.x..area.right()).map(move |x| buffer[(x, y)].symbol()))
+                .collect()
+        };
+        assert!(visible(terminal.backend().buffer()).contains("Prompt line 12"));
+        for _ in 0..11 {
+            assert!(state.navigate_composer(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), 72));
+        }
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        assert!(visible(terminal.backend().buffer()).contains("Prompt line 01"));
+        assert!(visible(terminal.backend().buffer()).contains("Prompt line 06"));
     }
 }
 

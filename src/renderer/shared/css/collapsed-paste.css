@@ -1,0 +1,35 @@
+.chat-pasted-content {
+  display: flex;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  align-self: start;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent, #22d3ee);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+#chat-form:not(:has(.mint-attachment)) .chat-pasted-content {
+  grid-row: 1;
+}
+.chat-pasted-content > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-pasted-content-action {
+  flex-shrink: 0;
+  color: var(--text-soft, #94a3b8);
+  font-size: 0.8em;
+}
+.chat-pasted-content:focus-visible {
+  outline: 2px solid var(--accent, #22d3ee);
+  outline-offset: 2px;
+}
