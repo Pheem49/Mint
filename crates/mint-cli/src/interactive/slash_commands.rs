@@ -261,7 +261,8 @@ async fn execute_core_slash(
                 .iter()
                 .map(|opt| ChoiceItem::new(opt.label.clone(), opt.value.clone()))
                 .collect();
-            match ui.prompt_choice(&title, "", &choice_items) {
+            let (heading, body) = title.split_once('\n').unwrap_or((&title, ""));
+            match ui.prompt_choice(heading, body, &choice_items) {
                 Ok(Some(idx)) => {
                     let opt = &options[idx];
                     if opt.value == "__action:search" {

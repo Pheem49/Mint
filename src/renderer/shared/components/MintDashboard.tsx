@@ -1935,7 +1935,7 @@ export default function MintDashboard() {
             <div className="proactive-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 }}>
               <div className="proactive-header">
                 <span className="proactive-icon">⚡</span>
-                <div className="proactive-message">{pendingSlashChoice.title}</div>
+                <div className="proactive-message" style={{ whiteSpace: 'pre-line' }}>{pendingSlashChoice.title}</div>
                 <button className="proactive-dismiss-btn" onClick={() => setPendingSlashChoice(null)}>
                   Dismiss
                 </button>

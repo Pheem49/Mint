@@ -17,6 +17,7 @@
 
 use crate::MintConfig;
 use std::path::{Path, PathBuf};
+mod mods;
 
 /// The instruction `/init` hands to the code agent (via
 /// [`SlashResponse::ForwardToAgent`]). Mirrors Claude Code's `/init`, but
@@ -203,6 +204,11 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         let root = req.workspace();
         if let Err(e) = crate::assert_path_capability(&root, crate::Capability::Read, config) {
             return error(e.to_string());
+        }
+        if token == "/mods" {
+            if let Some(response) = mods::picker(&root, chat, rest) {
+                return response.unwrap_or_else(error);
+            }
         }
         return match crate::mods::slash(&root, chat, &req.input) {
             Ok(text) => message(text),

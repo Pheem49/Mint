@@ -62,6 +62,110 @@ mod lifecycle_tests {
     fn record(root: &std::path::Path, chat: &str) -> Value {
         list(root, chat).unwrap().remove(0)
     }
+    fn picker(w: &Workspace, chat: &str, surface: &str, input: &str) -> Value {
+        let mut config = crate::MintConfig {
+            allowed_read_paths: vec![w.0.clone()],
+            allowed_write_paths: vec![w.0.clone()],
+            ..Default::default()
+        };
+        serde_json::to_value(crate::slash::execute(
+            &crate::slash::SlashRequest {
+                input: input.into(),
+                cwd: Some(w.0.to_string_lossy().into_owned()),
+                surface: Some(surface.into()),
+                chat_id: Some(chat.into()),
+            },
+            &mut config,
+        ))
+        .unwrap()
+    }
+    fn choose(response: &Value, label: &str) -> String {
+        let option = response["options"]
+            .as_array()
+            .unwrap_or_else(|| panic!("Expected choices: {response}"))
+            .iter()
+            .find(|option| option["label"].as_str().unwrap().starts_with(label))
+            .unwrap_or_else(|| panic!("Missing choice {label}: {response}"));
+        format!(
+            "{} {}",
+            response["command"].as_str().unwrap(),
+            option["value"].as_str().unwrap()
+        )
+    }
+    #[test]
+    fn mods_picker_counts_and_toggles_the_selected_mod_on_every_surface() {
+        let w = Workspace::new();
+        publish(&w.0, &source(COUNTER, vec![]), None).unwrap();
+        let mut second = source(COUNTER, vec![]);
+        second.manifest.id = "second".into();
+        second.manifest.name = "Second".into();
+        publish(&w.0, &second, None).unwrap();
+        for surface in ["cli", "desktop", "web"] {
+            let chat = format!("picker-{surface}");
+            let menu = picker(&w, &chat, surface, "/mods");
+            assert_eq!(menu["kind"], "needs_choice", "{menu}");
+            assert!(
+                menu["title"]
+                    .as_str()
+                    .unwrap()
+                    .contains("2 mods · 0 active")
+            );
+            assert_eq!(menu["options"].as_array().unwrap().len(), 2);
+            let detail = picker(&w, &chat, surface, &choose(&menu, "Counter"));
+            let enabled = picker(&w, &chat, surface, &choose(&detail, "Enable"));
+            assert_eq!(enabled["kind"], "needs_choice", "{enabled}");
+            let scoped = crate::scoped_chat_id(&chat, Some(&w.0.to_string_lossy()));
+            let records = list(&w.0, &scoped).unwrap();
+            assert_eq!(records[0]["enabled"], true);
+            assert_eq!(records[1]["enabled"], false);
+            assert_eq!(record(&w.0, "other-chat")["enabled"], false);
+            let menu = picker(&w, &chat, surface, &choose(&enabled, "Back"));
+            assert!(
+                menu["title"]
+                    .as_str()
+                    .unwrap()
+                    .contains("2 mods · 1 active")
+            );
+            let detail = picker(&w, &chat, surface, &choose(&menu, "Counter"));
+            let disabled = picker(&w, &chat, surface, &choose(&detail, "Disable"));
+            assert_eq!(disabled["kind"], "needs_choice");
+            assert_eq!(record(&w.0, &scoped)["enabled"], false);
+            close_chat(&w.0, &scoped);
+        }
+    }
+    #[test]
+    fn mods_picker_requires_review_and_rejects_changed_permission_source() {
+        let w = Workspace::new();
+        let original = source(COUNTER, vec!["workspace.read"]);
+        publish(&w.0, &original, None).unwrap();
+        let detail = picker(&w, "a", "cli", "/mods manage counter");
+        let review = picker(&w, "a", "cli", &choose(&detail, "Enable"));
+        assert_eq!(review["kind"], "needs_choice");
+        assert!(review["title"].as_str().unwrap().contains("workspace.read"));
+        let scoped = crate::scoped_chat_id("a", Some(&w.0.to_string_lossy()));
+        assert_eq!(record(&w.0, &scoped)["enabled"], false);
+        let approve = choose(&review, "Approve");
+        std::fs::write(
+            w.0.join("mint-mods/counter/main.ts"),
+            format!("{COUNTER}\n// changed"),
+        )
+        .unwrap();
+        let rejected = picker(&w, "a", "cli", &approve);
+        assert_eq!(rejected["kind"], "message");
+        assert!(
+            rejected["markdown"]
+                .as_str()
+                .unwrap()
+                .contains("changed after review")
+        );
+        assert_eq!(record(&w.0, &scoped)["enabled"], false);
+        let detail = picker(&w, "a", "cli", "/mods manage counter");
+        let review = picker(&w, "a", "cli", &choose(&detail, "Enable"));
+        let approved = picker(&w, "a", "cli", &choose(&review, "Approve"));
+        assert_eq!(approved["kind"], "needs_choice");
+        assert_eq!(record(&w.0, &scoped)["enabled"], true);
+        close_chat(&w.0, &scoped);
+    }
     #[test]
     fn workspace_reenable_clears_only_the_current_chats_disable_override() {
         let w = Workspace::new();
