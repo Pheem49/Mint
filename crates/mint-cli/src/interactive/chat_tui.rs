@@ -441,6 +441,9 @@ pub(crate) struct DialogState {
     pub filter: Vec<char>,
     pub selected: usize,
     pub scroll_offset: usize,
+    pub body_scroll: usize,
+    body_max_scroll: std::cell::Cell<usize>,
+    body_page_size: std::cell::Cell<usize>,
     pub checked: Option<Vec<bool>>,
     pub input: Option<Vec<char>>,
     pub resume_picker: Option<ResumePickerDialog>,
@@ -482,6 +485,9 @@ impl DialogState {
             filter: Vec::new(),
             selected: 0,
             scroll_offset: 0,
+            body_scroll: 0,
+            body_max_scroll: std::cell::Cell::new(0),
+            body_page_size: std::cell::Cell::new(0),
             checked,
             input: None,
             resume_picker: None,
@@ -502,6 +508,9 @@ impl DialogState {
             filter: Vec::new(),
             selected: 0,
             scroll_offset: 0,
+            body_scroll: 0,
+            body_max_scroll: std::cell::Cell::new(0),
+            body_page_size: std::cell::Cell::new(0),
             checked: None,
             input: Some(Vec::new()),
             resume_picker: None,
@@ -531,6 +540,9 @@ impl DialogState {
             filter: Vec::new(),
             selected: 0,
             scroll_offset: 0,
+            body_scroll: 0,
+            body_max_scroll: std::cell::Cell::new(0),
+            body_page_size: std::cell::Cell::new(0),
             checked: None,
             input: None,
             resume_picker: Some(ResumePickerDialog {
@@ -558,6 +570,9 @@ impl DialogState {
             filter: Vec::new(),
             selected: active.min(2),
             scroll_offset: 0,
+            body_scroll: 0,
+            body_max_scroll: std::cell::Cell::new(0),
+            body_page_size: std::cell::Cell::new(0),
             checked: None,
             input: None,
             resume_picker: None,
@@ -664,6 +679,33 @@ impl DialogState {
 
     pub fn handle_key(&mut self, key: event::KeyEvent) -> Option<DialogAnswer> {
         use event::{KeyCode, KeyModifiers};
+
+        if self.body_max_scroll.get() > 0 {
+            self.body_scroll = self.body_scroll.min(self.body_max_scroll.get());
+            let page = self.body_page_size.get().max(1);
+            match key.code {
+                KeyCode::PageUp => {
+                    self.body_scroll = self.body_scroll.saturating_sub(page);
+                    return None;
+                }
+                KeyCode::PageDown => {
+                    self.body_scroll = self
+                        .body_scroll
+                        .saturating_add(page)
+                        .min(self.body_max_scroll.get());
+                    return None;
+                }
+                KeyCode::Home => {
+                    self.body_scroll = 0;
+                    return None;
+                }
+                KeyCode::End => {
+                    self.body_scroll = self.body_max_scroll.get();
+                    return None;
+                }
+                _ => {}
+            }
+        }
 
         // Text input mode
         if let Some(input) = self.input.as_mut() {
@@ -2113,7 +2155,7 @@ impl ChatViewState {
                 // The top border consumes a row in addition to the title, body,
                 // spacer, options, and footer counted above.
                 let total = 1 + 1 + body_lines + filter_lines + 1 + content_lines;
-                (total as u16).min(max_allowed)
+                total.min(max_allowed as usize) as u16
             }
         } else {
             0
@@ -2461,16 +2503,95 @@ impl ChatViewState {
                     ),
                 ]));
 
-                if !dialog.body.is_empty() {
-                    for line in dialog.body.lines() {
-                        lines.push(Line::from(vec![
-                            Span::raw(" "),
-                            Span::styled(
-                                line.to_owned(),
-                                Style::default().fg(crate::terminal_theme::MUTED),
-                            ),
-                        ]));
+                let width = rows[3].width.max(1);
+                let title_height = Paragraph::new(lines.clone())
+                    .wrap(Wrap { trim: false })
+                    .line_count(width);
+                let body = Paragraph::new(
+                    dialog
+                        .body
+                        .lines()
+                        .map(|line| {
+                            Line::styled(
+                                format!(" {line}"),
+                                Style::default().fg(crate::terminal_theme::TEXT),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .wrap(Wrap { trim: false });
+                let body_lines = if dialog.body.is_empty() {
+                    0
+                } else {
+                    body.line_count(width)
+                };
+                let hint = if dialog.input.is_some() {
+                    " Enter submit · Esc cancel"
+                } else if dialog.checked.is_some() {
+                    " Space toggle · Enter confirm · 1-9 pick · Type to filter · Esc cancel"
+                } else {
+                    " ↑/↓ navigate · 1-9 pick · Type to filter · Enter select · Esc cancel"
+                };
+                let normal_footer_height = (if dialog.input.is_some() { 1 } else { 2 })
+                    + Paragraph::new(hint)
+                        .wrap(Wrap { trim: false })
+                        .line_count(width);
+                let filter_height = if dialog.filter.is_empty() {
+                    0
+                } else {
+                    Paragraph::new(format!(
+                        " Filter: {} ({total_options}/{})",
+                        dialog.filter.iter().collect::<String>(),
+                        dialog.options.len()
+                    ))
+                    .wrap(Wrap { trim: false })
+                    .line_count(width)
+                };
+                let option_height = if dialog.input.is_some() {
+                    1
+                } else {
+                    total_options.clamp(1, 8)
+                };
+                let inner_height = rows[3].height.saturating_sub(1) as usize;
+                let fixed_height = title_height + filter_height + 1 + option_height;
+                let body_overflows =
+                    body_lines > inner_height.saturating_sub(fixed_height + normal_footer_height);
+                let hint = if body_overflows && dialog.input.is_none() {
+                    if dialog.checked.is_some() {
+                        " Space toggle · Enter confirm · Esc cancel"
+                    } else {
+                        " ↑/↓ choose · Enter select · Esc cancel"
                     }
+                } else {
+                    hint
+                };
+                let footer_height = if body_overflows && dialog.input.is_none() {
+                    Paragraph::new(hint)
+                        .wrap(Wrap { trim: false })
+                        .line_count(width)
+                } else {
+                    normal_footer_height
+                };
+                let body_height = body_lines
+                    .min(inner_height.saturating_sub(
+                        fixed_height + footer_height + usize::from(body_overflows),
+                    ));
+                let max_body_scroll = body_lines.saturating_sub(body_height);
+                dialog.body_max_scroll.set(max_body_scroll);
+                dialog.body_page_size.set(body_height);
+                let body_scroll = dialog.body_scroll.min(max_body_scroll);
+                // Reserve visual rows in the controls paragraph; render the body
+                // independently so its scroll cannot move the approval choices.
+                lines.extend((0..body_height).map(|_| Line::raw("")));
+                if body_overflows {
+                    lines.push(Line::styled(
+                        format!(
+                            " {}/{} · PgUp/PgDn · Home/End · Wheel",
+                            body_scroll + 1,
+                            body_lines
+                        ),
+                        Style::default().fg(crate::terminal_theme::MUTED),
+                    ));
                 }
 
                 let mut filter_row_idx = None;
@@ -2530,7 +2651,6 @@ impl ChatViewState {
                     let header_height = Paragraph::new(lines.clone())
                         .wrap(Wrap { trim: false })
                         .line_count(rows[3].width.max(1));
-                    let footer_height = 3; // blank + hint + bottom padding
                     let inner_height = (rows[3].height as usize).saturating_sub(1);
                     let available_rows = inner_height.saturating_sub(header_height + footer_height);
                     // Show every choice when it fits. Reserve space for both
@@ -2667,17 +2787,16 @@ impl ChatViewState {
                         }
                     }
 
-                    lines.push(Line::raw(""));
-                    let hint = if dialog.checked.is_some() {
-                        " Space toggle · Enter confirm · 1-9 pick · Type to filter · Esc cancel"
-                    } else {
-                        " ↑/↓ navigate · 1-9 pick · Type to filter · Enter select · Esc cancel"
-                    };
+                    if !body_overflows {
+                        lines.push(Line::raw(""));
+                    }
                     lines.push(Line::styled(
                         hint,
                         Style::default().fg(crate::terminal_theme::MUTED),
                     ));
-                    lines.push(Line::raw(""));
+                    if !body_overflows {
+                        lines.push(Line::raw(""));
+                    }
                 }
 
                 frame.render_widget(
@@ -2687,6 +2806,16 @@ impl ChatViewState {
                             .border_style(Style::default().fg(crate::terminal_theme::MUTED)),
                     ),
                     rows[3],
+                );
+
+                frame.render_widget(
+                    body.scroll((body_scroll.min(u16::MAX as usize) as u16, 0)),
+                    Rect::new(
+                        rows[3].x,
+                        rows[3].y + 1 + title_height as u16,
+                        rows[3].width,
+                        body_height as u16,
+                    ),
                 );
 
                 if let Some((visual_col, row_idx)) = input_cursor {
@@ -3387,6 +3516,24 @@ fn selected_cells_match(previous: &Buffer, current: &Buffer, selection: MouseSel
 }
 
 fn route_mouse_wheel(state: &mut ChatViewState, kind: event::MouseEventKind) {
+    if let Some(dialog) = state.dialog.as_mut() {
+        match kind {
+            event::MouseEventKind::ScrollUp => {
+                dialog.body_scroll = dialog
+                    .body_scroll
+                    .min(dialog.body_max_scroll.get())
+                    .saturating_sub(3);
+            }
+            event::MouseEventKind::ScrollDown => {
+                dialog.body_scroll = dialog
+                    .body_scroll
+                    .saturating_add(3)
+                    .min(dialog.body_max_scroll.get());
+            }
+            _ => {}
+        }
+        return;
+    }
     match kind {
         event::MouseEventKind::ScrollUp => {
             if let Some(modal) = state.thought_modal.as_mut() {
@@ -4869,6 +5016,119 @@ mod dialog_tests {
             .collect();
         assert!(rendered.contains("Option 9"));
         assert!(!rendered.contains("more below"));
+    }
+
+    #[test]
+    fn long_skill_diff_keeps_decisions_visible_and_can_be_reviewed_to_the_end() {
+        let (reply, _) = mpsc::channel();
+        let mut state = ChatViewState::default();
+        state.dialog = Some(DialogState::new_choice(
+            "Save skill?",
+            format!(
+                "Changes instructions used in future tasks.\nPath: /workspace/.agents/skills/example/SKILL.md\n\n{}",
+                (1..=100)
+                    .map(|i| format!("+ Skill instruction {i:03}: {}", "รายละเอียด ".repeat(8)))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+            vec!["Approve".into(), "Deny".into()],
+            None,
+            reply,
+        ));
+        for (width, height) in [(80, 24), (160, 42), (60, 16)] {
+            state.dialog.as_mut().unwrap().selected = 0;
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| {
+                    state.render(frame);
+                })
+                .unwrap();
+            let visible = |buffer: &Buffer| {
+                buffer
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+            };
+            let rendered = visible(terminal.backend().buffer());
+            assert!(
+                rendered.contains("1. Approve"),
+                "{width}x{height}: approve hidden"
+            );
+            assert!(
+                rendered.contains("2. Deny"),
+                "{width}x{height}: deny hidden"
+            );
+            assert!(
+                rendered.contains("Enter select"),
+                "{width}x{height}: hint hidden"
+            );
+            assert!(rendered.contains("PgUp/PgDn"));
+            assert!(rendered.contains("Changes instructions"));
+            let dialog = state.dialog.as_mut().unwrap();
+            assert_eq!(
+                dialog.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)),
+                None
+            );
+            assert_eq!(dialog.selected, 0);
+            terminal
+                .draw(|frame| {
+                    state.render(frame);
+                })
+                .unwrap();
+            let rendered = visible(terminal.backend().buffer());
+            assert!(
+                rendered.contains("Skill instruction 100"),
+                "{width}x{height}: last diff line hidden"
+            );
+            assert!(rendered.contains("2. Deny"));
+            route_mouse_wheel(&mut state, event::MouseEventKind::ScrollDown);
+            terminal
+                .draw(|frame| {
+                    state.render(frame);
+                })
+                .unwrap();
+            assert!(visible(terminal.backend().buffer()).contains("Skill instruction 100"));
+            route_mouse_wheel(&mut state, event::MouseEventKind::ScrollUp);
+            assert_eq!(
+                state.scroll_from_bottom, 0,
+                "wheel must review the dialog, not chat"
+            );
+            let dialog = state.dialog.as_mut().unwrap();
+            dialog.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+            terminal
+                .draw(|frame| {
+                    state.render(frame);
+                })
+                .unwrap();
+            assert!(visible(terminal.backend().buffer()).contains("Changes instructions"));
+            let dialog = state.dialog.as_mut().unwrap();
+            dialog.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+            terminal
+                .draw(|frame| {
+                    state.render(frame);
+                })
+                .unwrap();
+            assert!(!visible(terminal.backend().buffer()).contains("Changes instructions"));
+            state
+                .dialog
+                .as_mut()
+                .unwrap()
+                .handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+            terminal
+                .draw(|frame| {
+                    state.render(frame);
+                })
+                .unwrap();
+            assert!(visible(terminal.backend().buffer()).contains("Changes instructions"));
+            let dialog = state.dialog.as_mut().unwrap();
+            dialog.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            assert_eq!(
+                dialog.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+                Some(DialogAnswer::Choice(1))
+            );
+            dialog.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        }
     }
 
     #[test]

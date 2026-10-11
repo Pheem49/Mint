@@ -568,24 +568,19 @@
 /* Slash Command Suggestions Popup */
 
 .slash-suggestions-popup {
-  position: absolute;
-  bottom: calc(100% + 12px);
-  left: 20px;
-  right: 20px;
-  max-height: 250px;
-  background: var(--bg-overlay);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-2xl);
-  box-shadow: var(--shadow-lg);
+  position: static;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+  max-height: min(38vh, 320px);
+  background: #0b0c0a;
+  border: 1px solid #303730;
+  border-radius: 0;
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  z-index: 100;
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  transform-origin: bottom center;
-  animation: slashPopupFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: transform, opacity;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
 }
 
 .slash-suggestions-header {
@@ -596,23 +591,23 @@
   padding: 9px 16px;
   font-size: 0.72rem;
   font-weight: 700;
-  color: var(--interactive-fg);
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-surface-soft);
+  color: #00e676;
+  border-bottom: 1px solid #303730;
+  background: #0b0c0a;
   letter-spacing: 0.04em;
   text-transform: none;
 }
 
 .slash-suggestions-count {
   font-weight: 600;
-  color: var(--text-muted);
+  color: #9ba69c;
   letter-spacing: 0.02em;
   text-transform: none;
 }
 
 .slash-suggestions-list {
   overflow-y: auto;
-  padding: 6px;
+  padding: 4px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -642,30 +637,30 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 14px;
-  border-radius: var(--radius-lg);
+  padding: 8px 10px;
+  border-radius: 0;
   background: transparent;
   border: none;
   text-align: left;
   cursor: pointer;
   width: 100%;
-  transition: background 0.14s ease, box-shadow 0.14s ease;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
 .slash-suggestion-item:hover {
-  background: var(--bg-surface-hover);
+  background: #171b17;
 }
 
 .slash-suggestion-item.active {
-  background: var(--bg-surface-soft);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: #171b17;
+  box-shadow: inset 2px 0 0 #00e676;
 }
 
 .slash-cmd-name {
   font-size: 0.84rem;
   font-weight: 600;
   font-family: var(--font-mono, monospace);
-  color: var(--interactive-fg);
+  color: #00e676;
   min-width: 128px;
   flex-shrink: 0;
   white-space: nowrap;
@@ -3930,6 +3925,32 @@ input:checked + .slider:before {
   color: #475569;
   opacity: 1;
 }
+
+/* Keep the command picker inside the composer instead of overlaying chat. */
+#chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) {
+  grid-template-rows: minmax(48px, auto) minmax(0, min(38vh, 320px)) 32px;
+}
+
+#chat-form:has(.slash-suggestions-popup):has(.mint-attachment) {
+  grid-template-rows: auto minmax(48px, auto) minmax(0, min(38vh, 320px)) 32px;
+}
+
+#chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) .slash-suggestions-popup { grid-row: 2; }
+#chat-form:has(.slash-suggestions-popup):has(.mint-attachment) .slash-suggestions-popup { grid-row: 3; }
+
+#chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) .chat-tool-menu-wrap,
+#chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) #screen-capture-btn,
+#chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) .chat-provider-select,
+#chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) #send-btn,
+#chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) #gemini-live-btn,
+#chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) .voice-pill.composer-voice-pill { grid-row: 3; }
+
+#chat-form:has(.slash-suggestions-popup):has(.mint-attachment) .chat-tool-menu-wrap,
+#chat-form:has(.slash-suggestions-popup):has(.mint-attachment) #screen-capture-btn,
+#chat-form:has(.slash-suggestions-popup):has(.mint-attachment) .chat-provider-select,
+#chat-form:has(.slash-suggestions-popup):has(.mint-attachment) #send-btn,
+#chat-form:has(.slash-suggestions-popup):has(.mint-attachment) #gemini-live-btn,
+#chat-form:has(.slash-suggestions-popup):has(.mint-attachment) .voice-pill.composer-voice-pill { grid-row: 4; }
 
 [data-theme="light"] #chat-tool-btn,
 [data-theme="light"] #screen-capture-btn {

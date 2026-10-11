@@ -1,0 +1,90 @@
+.slash-choice-panel {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+  gap: 8px;
+  margin: 0 10px 10px;
+  padding: 10px 12px 8px;
+  color: var(--text-main, #e8e8e8);
+  background: var(--surface-bg, #151515);
+  border: 1px solid var(--border, #343434);
+  border-radius: 8px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  box-shadow: none;
+}
+
+/* The composer is a CSS grid. Reserve complete rows for the choice list so it
+   cannot be auto-placed into the first 32px control column. */
+#chat-form:has(.slash-choice-panel) { grid-template-rows: auto minmax(48px, auto) 32px; }
+#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) #chat-input { grid-row: 2; }
+#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) .chat-tool-menu-wrap,
+#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) #screen-capture-btn,
+#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) .chat-provider-select,
+#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) #send-btn,
+#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) #gemini-live-btn,
+#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) .voice-pill.composer-voice-pill { grid-row: 3; }
+
+#chat-form:has(.slash-choice-panel):has(.mint-attachment) { grid-template-rows: auto auto minmax(48px, auto) 32px; }
+#chat-form:has(.slash-choice-panel):has(.mint-attachment) .slash-choice-panel { grid-row: 2; }
+#chat-form:has(.slash-choice-panel):has(.mint-attachment) #chat-input { grid-row: 3; }
+#chat-form:has(.slash-choice-panel):has(.mint-attachment) .chat-tool-menu-wrap,
+#chat-form:has(.slash-choice-panel):has(.mint-attachment) #screen-capture-btn,
+#chat-form:has(.slash-choice-panel):has(.mint-attachment) .chat-provider-select,
+#chat-form:has(.slash-choice-panel):has(.mint-attachment) #send-btn,
+#chat-form:has(.slash-choice-panel):has(.mint-attachment) #gemini-live-btn,
+#chat-form:has(.slash-choice-panel):has(.mint-attachment) .voice-pill.composer-voice-pill { grid-row: 4; }
+
+.slash-choice-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border, #343434);
+}
+
+.slash-choice-heading > div { min-width: 0; }
+.slash-choice-command { color: var(--accent, #42d392); font-size: 12px; font-weight: 700; }
+.slash-choice-heading p { margin: 3px 0 0; color: var(--text-main, #e8e8e8); font-size: 13px; line-height: 1.4; white-space: pre-line; }
+
+.slash-choice-heading > button {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  color: var(--text-muted, #858585);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.slash-choice-options { display: grid; gap: 3px; }
+.slash-choice-options > button {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 8px;
+  color: var(--text-main, #e8e8e8);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.slash-choice-options > button > span { color: var(--text-muted, #858585); min-width: 16px; }
+.slash-choice-options > button:hover, .slash-choice-options > button:focus-visible {
+  color: var(--accent, #42d392);
+  background: var(--surface-strong, #222);
+  outline: none;
+}
+.slash-choice-hint { padding-top: 5px; color: var(--text-muted, #858585); border-top: 1px solid var(--border, #343434); font-size: 11px; }
+
+@media (max-width: 600px) {
+  .slash-choice-panel { margin: 0 6px 8px; padding: 8px 10px 7px; }
+}

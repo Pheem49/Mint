@@ -61,6 +61,36 @@
   }
 }
 
+/* Slash suggestions expand within the composer, retaining their own scroll area. */
+@media (max-width: 760px) {
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) {
+    grid-template-rows: minmax(48px, auto) minmax(0, min(34dvh, 280px)) 40px 40px;
+  }
+  #chat-form:has(.slash-suggestions-popup):has(.mint-attachment) {
+    grid-template-rows: auto minmax(48px, auto) minmax(0, min(34dvh, 280px)) 40px 40px;
+  }
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) .model-selector-container { grid-row: 3; }
+  #chat-form:has(.slash-suggestions-popup):has(.mint-attachment) .model-selector-container { grid-row: 4; }
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) .slash-suggestions-popup { grid-row: 2; }
+  #chat-form:has(.slash-suggestions-popup):has(.mint-attachment) .slash-suggestions-popup { grid-row: 3; }
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) .chat-tool-menu-wrap,
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) #screen-capture-btn,
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) #send-btn,
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) #gemini-live-btn,
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) .voice-pill.composer-voice-pill,
+  #chat-form:has(.slash-suggestions-popup):has(.mint-attachment) .chat-tool-menu-wrap,
+  #chat-form:has(.slash-suggestions-popup):has(.mint-attachment) #screen-capture-btn,
+  #chat-form:has(.slash-suggestions-popup):has(.mint-attachment) #send-btn,
+  #chat-form:has(.slash-suggestions-popup):has(.mint-attachment) #gemini-live-btn,
+  #chat-form:has(.slash-suggestions-popup):has(.mint-attachment) .voice-pill.composer-voice-pill { grid-row: 5; }
+
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) .chat-tool-menu-wrap,
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) #screen-capture-btn,
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) #send-btn,
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) #gemini-live-btn,
+  #chat-form:has(.slash-suggestions-popup):not(:has(.mint-attachment)) .voice-pill.composer-voice-pill { grid-row: 4; }
+}
+
 @media (max-width: 760px) {
   html, body, #root,
   .app-container {

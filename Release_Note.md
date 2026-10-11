@@ -1,5 +1,14 @@
 # Release Notes - Mint Agent v1.16.0
 
+- Slash command choices now appear directly above the composer as a compact, keyboard-dismissable option list, matching the Full-Screen TUI instead of covering the top of chat with the green proactive banner.
+- Moved slash command, skill and context mention suggestions into the composer below the typed prompt, with a compact terminal-style list and its own scroll area. The composer grows to hold the suggestions instead of covering conversation history; mobile composer rows adjust to keep its controls visible.
+
+- Moved the Desktop/Web Mods launcher into the composer controls beside Agent mode, so it no longer floats over the conversation content.
+
+- Changed the Desktop/Web Mods panel to size itself to its contents and scroll within a viewport-based maximum height. Its launcher now toggles a popover above the Mods button beside Terminals. Session settings, tests, exports and source diagnostics stay in expandable sections; the redundant Manage tab is hidden unless a mod provides its own panel.
+
+- Fixed long skill/file approval diffs hiding the choices and keyboard hints in the Full-Screen TUI. Approval bodies now use an independent viewport with PgUp/PgDn, Home/End and mouse-wheel scrolling, a visible position indicator and readable text; Approve/Deny stay visible, including in small terminals. Added rendering and navigation regressions with wrapped Thai text. Desktop/Web retain their existing bounded diff preview and full review modal.
+
 - Updated the main README with Mint Mods prompt creation, workspace source layout, interactive management, F7 panels and guide links, plus long-paste folding and the F2 edit/collapse toggle. Synced the Mods guide with the current menu counts, permission approval and return-to-composer behavior.
 
 - After enabling/disabling a mod from `/mods`, the menu now closes and displays `[Mods] Enabled/Disabled <id> for this chat.` instead of reopening the mod details. TUI returns to the composer; Desktop/Web restore composer focus. Permission approval still completes before enabling.

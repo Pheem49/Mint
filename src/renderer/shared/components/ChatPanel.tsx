@@ -46,6 +46,7 @@ import { ModsPanel } from './ModsPanel'
 import CodeReviewPage from './CodeReviewPage'
 import type { ToolSurface } from './ToolSurfacePage'
 import '../css/thinking-status.css'
+import '../css/slash-choice.css'
 
 import { catalogPlatform, conversationPlatform, runtimePlatform } from '../platform'
 
@@ -148,8 +149,11 @@ interface ChatPanelContract {
   cliSessionId?: string
   onBackToCode?: () => void
   conversationTitle?: string
+  slashChoice?: { command: string; title: string; options: { label: string; value: string }[] } | null
   onOpenArtifact?: (artifact: ArtifactFile) => void
   onOpenReview?: (review: Extract<ToolSurface, { kind: 'review' }>) => void
+  onSelectSlashChoice?: (value: string) => void
+  onDismissSlashChoice?: () => void
 }
 
 export type ConversationViewModel = Pick<ChatPanelContract,
@@ -158,7 +162,7 @@ export type ConversationViewModel = Pick<ChatPanelContract,
   | 'thinkingExpanded' | 'message' | 'imageAttachments' | 'videoAttachments' | 'documentName'
   | 'pendingApproval' | 'agentMode' | 'planMode' | 'status' | 'workspacePath' | 'chatId' | 'recentWorkspacePaths'
   | 'chatEnd' | 'welcomeInteraction' | 'settingsConfig' | 'isCliSession' | 'cliSessionId'
-  | 'conversationTitle'
+  | 'conversationTitle' | 'slashChoice'
   | 'hasOlder'
   | 'sendingInteractionId'
 >
@@ -231,10 +235,24 @@ export default function ChatPanel({
   cliSessionId,
   onBackToCode,
   conversationTitle,
+  slashChoice,
   onOpenArtifact,
   onOpenReview,
+  onSelectSlashChoice,
+  onDismissSlashChoice,
   } = { ...conversation, ...actions }
   const onThinkingExpandedChange = useLatestCallback(handleThinkingExpandedChange)
+  useEffect(() => {
+    if (!slashChoice) return
+    const dismissOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onDismissSlashChoice?.()
+      document.getElementById('chat-input')?.focus()
+    }
+    window.addEventListener('keydown', dismissOnEscape)
+    return () => window.removeEventListener('keydown', dismissOnEscape)
+  }, [slashChoice, onDismissSlashChoice])
   // The initiating surface already renders a live prompt/reply pair below.
   // Hide its matching persisted turn until the local stream settles, while
   // still showing turns submitted from other surfaces during that time.
@@ -298,6 +316,7 @@ export default function ChatPanel({
   const [reviewPage, setReviewPage] = useState<{ title: string; changes: FileChange[] } | null>(null)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactFile | null>(null)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
+  const [modsLauncherTarget, setModsLauncherTarget] = useState<HTMLDivElement | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
   const toggleActivity = useCallback((id: string) => {
@@ -1738,7 +1757,7 @@ export default function ChatPanel({
       </div>
 
       <div className="input-area">
-        <ModsPanel workspacePath={workspacePath} chatId={chatId} />
+        <ModsPanel workspacePath={workspacePath} chatId={chatId} launcherTarget={modsLauncherTarget} />
         {composerChanges.length > 0 && (
           <button
             type="button"
@@ -1797,17 +1816,8 @@ export default function ChatPanel({
             </label>
           )}
           <BackgroundTerminals workspacePath={workspacePath} />
+          <div className="mods-launch-slot" ref={setModsLauncherTarget} />
         </div>
-        <SlashSuggestions
-          ref={slashRef}
-          message={message}
-          onComplete={completeSuggestion}
-          workspacePath={workspacePath}
-          mcpServers={settingsConfig?.mcpServers}
-          anchorRef={textareaRef}
-          suppressed={historyIndex !== null}
-        />
-
         <form
           id="chat-form"
           className={geminiLiveEnabled ? 'has-live-btn' : ''}
@@ -1828,6 +1838,25 @@ export default function ChatPanel({
             if (onPasteImage(event.clipboardData)) event.preventDefault()
           }}
         >
+          {slashChoice && (
+            <section className="slash-choice-panel" aria-label={`${slashChoice.command} choices`}>
+              <header className="slash-choice-heading">
+                <div>
+                  <span className="slash-choice-command">{slashChoice.command}</span>
+                  <p>{slashChoice.title}</p>
+                </div>
+                <button type="button" onClick={onDismissSlashChoice} aria-label="Dismiss choices">×</button>
+              </header>
+              <div className="slash-choice-options" role="group" aria-label="Options">
+                {slashChoice.options.map((option, index) => (
+                  <button key={option.value} type="button" onClick={() => onSelectSlashChoice?.(option.value)}>
+                    <span>{index + 1}.</span>{option.label}
+                  </button>
+                ))}
+              </div>
+              <div className="slash-choice-hint">Select an option · Esc to dismiss</div>
+            </section>
+          )}
           {(imageAttachments.length > 0 || videoAttachments.length > 0 || documentName) && (
             <div className="mint-attachment">
               {imageAttachments.map((attachment, idx) => (
@@ -1918,6 +1947,15 @@ export default function ChatPanel({
             onDrop={handleWorkspaceDrop}
             placeholder="Ask anything, @ to mention, / for actions"
             rows={1}
+          />
+          <SlashSuggestions
+            ref={slashRef}
+            message={message}
+            onComplete={completeSuggestion}
+            workspacePath={workspacePath}
+            mcpServers={settingsConfig?.mcpServers}
+            anchorRef={textareaRef}
+            suppressed={historyIndex !== null}
           />
           <div className="chat-tool-menu-wrap" ref={toolMenuRef}>
               <button id="chat-tool-btn" type="button" aria-haspopup="menu" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((open) => !open)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>

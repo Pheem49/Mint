@@ -1761,11 +1761,22 @@ export default function MintDashboard() {
     chatEnd,
     welcomeInteraction: MOCK_WELCOME_INTERACTION,
     settingsConfig,
+    slashChoice: pendingSlashChoice,
     isCliSession: conversationId.startsWith('cli') || conversationId === 'cli',
     cliSessionId: conversationId.startsWith('cli') ? conversationId : undefined,
     conversationTitle: chatSessions.find((session) => session.id === conversationId)?.title,
   }
   const chatActions: ConversationActions = {
+    onSelectSlashChoice: (value) => {
+      if (!pendingSlashChoice) return
+      const next = `${pendingSlashChoice.command} ${value}`
+      setPendingSlashChoice(null)
+      requestAnimationFrame(() => document.getElementById('chat-input')?.focus())
+      runSlashCommand(next, workspacePath || null, conversationId)
+        .then((response) => handleEngineSlashResponse(next, response))
+        .catch(() => {})
+    },
+    onDismissSlashChoice: () => setPendingSlashChoice(null),
     onLoadOlder: loadOlderInteractions,
     onThinkingExpandedChange: handleThinkingExpandedChange,
     onSubmit: handleSubmit,
@@ -1929,34 +1940,6 @@ export default function MintDashboard() {
                     onClick={() => handleProactiveAction(sug.action)}
                   >
                     {sug.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {pendingSlashChoice && (
-            <div className="proactive-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 }}>
-              <div className="proactive-header">
-                <span className="proactive-icon">⚡</span>
-                <div className="proactive-message" style={{ whiteSpace: 'pre-line' }}>{pendingSlashChoice.title}</div>
-                <button className="proactive-dismiss-btn" onClick={() => setPendingSlashChoice(null)}>
-                  Dismiss
-                </button>
-              </div>
-              <div className="proactive-chips">
-                {pendingSlashChoice.options.map((opt) => (
-                  <button
-                    key={opt.value}
-                    className="suggestion-chip"
-                    onClick={() => {
-                      const next = `${pendingSlashChoice.command} ${opt.value}`
-                      setPendingSlashChoice(null)
-                      runSlashCommand(next, workspacePath || null, conversationId)
-                        .then((r) => handleEngineSlashResponse(next, r))
-                        .catch(() => {})
-                    }}
-                  >
-                    {opt.label}
                   </button>
                 ))}
               </div>
