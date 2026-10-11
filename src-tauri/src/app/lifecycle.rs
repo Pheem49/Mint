@@ -54,6 +54,12 @@ fn allow_media_permission_requests(_window: &tauri::WebviewWindow) {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if std::env::args().nth(1).as_deref() == Some("--mint-mod-host") {
+        if let Err(error) = mint_core::mods::worker_main() {
+            eprintln!("{error}");
+        }
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -101,6 +107,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::mods::mods_operation,
             native::notifications::send_mint_notification,
             native::terminal::start_interactive_terminal,
             native::terminal::write_interactive_terminal,

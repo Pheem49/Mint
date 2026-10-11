@@ -149,6 +149,13 @@ pub enum Command {
         #[command(subcommand)]
         command: LinkCommand,
     },
+    /// Manage workspace mods. Use list, enable, disable, validate, test, usage, source, logs, export or import.
+    Mods {
+        #[arg(long, default_value = "cli")]
+        chat: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Manage PreToolUse/PostToolUse hooks.
     Hooks {
         #[command(subcommand)]
@@ -372,6 +379,7 @@ pub async fn dispatch(cmd: Command, config: &mut MintConfig, cli: &crate::Cli) -
 
         Command::Mcp { command } => integrations::handle_mcp(command).await,
         Command::Link { command } => integrations::handle_link(command),
+        Command::Mods { chat, args } => crate::mods_cli::run(&chat, &args).await,
         Command::Hooks { command } => integrations::handle_hooks(command),
         Command::Gmail { command } => integrations::handle_gmail(command).await,
         Command::Plugins { command } => integrations::handle_plugins(command).await,

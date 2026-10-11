@@ -75,3 +75,16 @@ it('routes background terminal controls through both platform adapters', async (
   expect(getBackgroundJob).toHaveBeenCalledWith(job.id)
   expect(stopBackgroundJob).toHaveBeenCalledWith(job.id)
 })
+
+describe.each([['Desktop fallback', desktopAdapter], ['Web', webAdapter]] as const)('%s workspace mods', (_name, adapter) => {
+  it('forwards explicit workspace, chat, instance and action identity', async () => {
+    vi.stubGlobal('window', { location: { hostname: 'localhost', port: '9000', protocol: 'http:' }, localStorage: { getItem: () => null } })
+    let body: unknown
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      body = JSON.parse(String(init.body))
+      return new Response(JSON.stringify({ mods: [] }), { headers: { 'Content-Type': 'application/json' } })
+    })
+    await adapter.modsOperation({ workspacePath: '/project', chatId: 'chat-a', action: 'action', id: 'checklist', instanceId: 'revision-instance', command: 'add', value: 'Test' })
+    expect(body).toEqual({ workspacePath: '/project', chatId: 'chat-a', action: 'action', id: 'checklist', instanceId: 'revision-instance', command: 'add', value: 'Test' })
+  })
+})

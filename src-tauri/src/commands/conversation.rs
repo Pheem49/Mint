@@ -469,6 +469,7 @@ pub(crate) fn list_chat_sessions() -> Result<Vec<ChatSession>, String> {
 
 #[tauri::command]
 pub(crate) fn delete_chat_session(chat_id: String) -> Result<usize, String> {
+    mint_core::cancel_agent(&chat_id);
     MemoryStore::open_default()
         .and_then(|memory| memory.delete_chat_session(&chat_id))
         .map_err(|error| error.to_string())
@@ -513,6 +514,7 @@ pub(crate) async fn run_slash_command(
     app: AppHandle,
     input: String,
     cwd: Option<String>,
+    chat_id: Option<String>,
     owner_token: Option<String>,
 ) -> Result<mint_core::slash::SlashResponse, String> {
     use mint_core::slash::{SlashEffect, SlashResponse};
@@ -521,6 +523,7 @@ pub(crate) async fn run_slash_command(
         input,
         cwd,
         surface: Some("desktop".to_string()),
+        chat_id,
     };
     let trimmed = request.input.trim();
     let (token, rest) = trimmed

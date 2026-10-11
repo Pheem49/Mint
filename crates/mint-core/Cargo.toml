@@ -22,6 +22,7 @@ hound = "3"
 ignore.workspace = true
 image.workspace = true
 mint-companion-protocol = { path = "../mint-companion-protocol" }
+mint-mod-runtime = { path = "../mint-mod-runtime" }
 jsonschema = { version = "0.58.6", default-features = false }
 libc = "0.2"
 quick-xml.workspace = true

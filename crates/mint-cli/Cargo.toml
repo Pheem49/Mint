@@ -1,5 +1,6 @@
 [package]
 name = "mint-cli"
+default-run = "mint"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,6 +8,10 @@ license.workspace = true
 [[bin]]
 name = "mint"
 path = "src/main.rs"
+
+[[bin]]
+name = "mint-mod-host"
+path = "src/mod_host.rs"
 
 [dependencies]
 anyhow.workspace = true
@@ -17,6 +22,7 @@ chrono-tz.workspace = true
 dirs.workspace = true
 iana-time-zone.workspace = true
 mint-core = { path = "../mint-core" }
+mint-mod-runtime = { path = "../mint-mod-runtime" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

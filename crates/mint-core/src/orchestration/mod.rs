@@ -13,6 +13,8 @@ use thiserror::Error;
 
 pub mod approvals;
 mod mcp_review;
+#[cfg(test)]
+mod mod_authoring_regressions;
 mod repeated_failures;
 #[cfg(all(test, unix))]
 mod review_regressions;
@@ -1475,6 +1477,7 @@ async fn stream_chat_with_network_retry(
             Ok((response, fallback)) => {
                 if !stream_json_prompt
                     && allow_final_stream
+                    && !provider_truncated_response(response.stop_reason.as_deref())
                     && response
                         .tool_calls
                         .as_ref()
@@ -1748,6 +1751,14 @@ where
                 }
                 progress(event);
             };
+            let _ = crate::mods::event(
+                &root,
+                chat_id,
+                "turn_start",
+                serde_json::json!({"turnId":companion_turn_id}),
+                None,
+            );
+            let mut mod_usage = crate::mods::UsageTracker::new(&root, chat_id, companion_turn_id);
             let resolved_task = resolve_github_links(task, config).await;
             let agent_result = crate::browser::run_session(async {
         // Subagent runs use a synthetic `{parent_chat_id}::subagent::{name}` chat id
@@ -1868,6 +1879,7 @@ where
         let mut last_input_tokens: u64 = 0;
         let mut turn_generated_tokens: u64 = 0;
         let mut executed_tools: Vec<ToolExecutionRecord> = Vec::new();
+        let mut mod_truncation_retries = 0;
         let mut mcp_review = mcp_review::McpReview::default();
         let mut files_modified: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
@@ -1875,6 +1887,8 @@ where
             std::collections::BTreeSet::new();
 
         'steps: for step in 1..=MAX_STEPS {
+            crate::mods::set_turn_policy(&root, chat_id, plan_mode, pinned_mcp_server);
+            let _ = execute_mod_requests(&root, chat_id, config, plan_mode, &mut approve, &mut progress, None).await;
             if run_control::cancelled() { turn.interrupt(); return Err(OrchestrationError::Agent("Agent turn canceled by user".into())); }
             let thought_id = if let Some(name) = chat_id.split("::subagent::").nth(1) {
                 format!("subagent-{name}-step-{step}")
@@ -2074,6 +2088,8 @@ where
             final_provider = response.provider.clone();
             final_model = response.model.clone();
             turn_total_tokens += response.total_tokens.unwrap_or(0) as u64;
+            let usage_payload = mod_usage.record(&active_config, &response);
+            let _ = crate::mods::event(&root, chat_id, "usage_update", usage_payload, None);
             turn_generated_tokens += response.output_tokens.unwrap_or(0) as u64;
             if let Some(input) = response.input_tokens {
                 last_input_tokens = input as u64;
@@ -2098,6 +2114,32 @@ where
                         step_thought_signatures.insert(call.id.clone(), signature.clone());
                     }
                 }
+            }
+
+            // A provider-limited design draft is not a completed mod. Recover
+            // only after successful mod preparation, before publication, and
+            // within a per-turn budget. All subsequent tools keep their normal
+            // plan-mode, capability and approval checks.
+            if tool_mode == ToolCallingMode::Native
+                && !plan_mode
+                && !active_config.disabled_tools.iter().any(|tool| tool == "mod_publish")
+                && response.tool_calls.as_ref().is_none_or(|calls| calls.is_empty())
+                && provider_truncated_response(response.stop_reason.as_deref())
+                && mod_truncation_retries < 2
+                && executed_tools.iter().any(|tool| tool.success && matches!(tool.action.as_str(), "mod_help" | "mod_validate"))
+                && !executed_tools.iter().any(|tool| tool.success && tool.action == "mod_publish")
+            {
+                mod_truncation_retries += 1;
+                let instruction = "Your previous response reached the provider output-length limit before completing the request. Use the already loaded Mint Mods guide and choose reasonable defaults. If the user requested a mod, send the source through mod_validate and then mod_publish using their tool arguments, with at most one short progress sentence. Follow the existing permissions and approvals. If the request cannot be completed, call finish with a concise explanation. Otherwise answer the original question concisely. Avoid repeating the design discussion.";
+                native_messages.push(ChatMessage {
+                    role: ChatRole::User,
+                    content: vec![ContentBlock::Text { text: instruction.into() }],
+                });
+                trajectory.push(format_trajectory_step(step, "", "mod_authoring_recovery", instruction));
+                progress(AgentProgress::Thought {
+                    thought: "Mod preparation reached the provider output limit; continuing with the authoring tools.".into(),
+                });
+                continue 'steps;
             }
 
             // `decisions` is normally a single `(call_id, AgentDecision)`, matching the
@@ -2447,6 +2489,7 @@ where
                             tool_timeline: executed_tools.clone(),
                             retries_count: executed_tools.iter().filter(|t| t.retried).count(),
                         };
+                        let _ = execute_mod_requests(&root, chat_id, config, plan_mode, &mut approve, &mut progress, None).await;
                         progress(AgentProgress::RunCompleted {
                             summary: run_summary,
                         });
@@ -2883,6 +2926,8 @@ where
                             &mut progress,
                         )).await {
                             native_messages = compacted;
+                            let payload = mod_usage.compacted();
+                            let _ = crate::mods::event(&root, chat_id, "context_compacted", payload, None);
                             // Wait for actual usage from the next request, rather than
                             // displaying the pre-compaction percentage as current.
                             last_context_pct = None;
@@ -2926,6 +2971,13 @@ where
                 } else {
                     turn.fail();
                 }
+            }
+            let mut mod_turn_end = mod_usage.finish();
+            mod_turn_end["success"] = serde_json::json!(agent_result.is_ok());
+            mod_turn_end["cancelled"] = serde_json::json!(run_control::cancelled());
+            let _ = crate::mods::event(&root, chat_id, "turn_end", mod_turn_end, None);
+            if run_control::cancelled() {
+                crate::mods::close_chat(&root, chat_id);
             }
             agent_result
         },
@@ -3528,6 +3580,120 @@ async fn execute_tool_outcome_reviewed(
     expected: Option<&mcp_review::McpReview>,
 ) -> Result<crate::integrations::mcp_result::ToolOutcome, OrchestrationError> {
     run_control::check()?;
+    let origin = MOD_ORIGIN.try_with(Clone::clone).ok().flatten();
+    let input = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+    crate::mods::event(
+        root,
+        chat_id,
+        "pre_tool_use",
+        serde_json::json!({"callId":call_id,"action":decision.action,"input":input}),
+        origin.as_deref(),
+    )
+    .map_err(OrchestrationError::Agent)?;
+    let result = execute_tool_outcome_reviewed_inner(
+        root, config, decision, chat_id, approve, progress, call_id, expected,
+    )
+    .await;
+    let _ = crate::mods::event(
+        root,
+        chat_id,
+        "post_tool_use",
+        serde_json::json!({"callId":call_id,"action":decision.action,"input":input,"result":result.as_ref().map(|r|r.text.clone()).unwrap_or_else(|e|e.to_string()),"success":result.is_ok()}),
+        origin.as_deref(),
+    );
+    result
+}
+
+tokio::task_local! { static MOD_ORIGIN: Option<String>; }
+
+/// Run queued requests through the same policy and approval path as agent tools.
+pub async fn execute_mod_requests(
+    root: &Path,
+    chat: &str,
+    config: &MintConfig,
+    plan_mode: bool,
+    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
+    selected: Option<&[String]>,
+) -> Result<(), String> {
+    let requests = match selected {
+        Some(ids) => crate::mods::take_selected_requests(root, chat, ids)?,
+        None => crate::mods::take_requests(root, chat)?,
+    };
+    let (remembered_plan, pin) = crate::mods::turn_policy(root, chat);
+    let plan_mode = plan_mode || remembered_plan;
+    for request in requests {
+        let action = request["action"].as_str().unwrap_or("");
+        let id = request["modId"].as_str().unwrap_or("");
+        let input = match decode_agent_input(request["input"].clone()) {
+            Ok(input) => input,
+            Err(error) => {
+                crate::mods::complete_request(
+                    root,
+                    chat,
+                    id,
+                    request["hash"].as_str().unwrap_or(""),
+                    serde_json::json!({"requestId":request["id"],"action":action,"error":error}),
+                )?;
+                continue;
+            }
+        };
+        let allowed = crate::prompts::agent::base_allowed_actions().contains(&action)
+            && !action.starts_with("mod_")
+            && !config.disabled_tools.iter().any(|t| t == action)
+            && (!plan_mode || plan_mode_allows(action, &input))
+            && pin.as_deref().is_none_or(|p| {
+                !matches!(action, "mcp_tool" | "mcp_list_tools") || input.server == p
+            });
+        let result = if allowed {
+            let decision = AgentDecision {
+                thought: String::new(),
+                action: action.into(),
+                input,
+            };
+            MOD_ORIGIN
+                .scope(
+                    Some(id.into()),
+                    execute_tool_outcome_reviewed(
+                        root,
+                        config,
+                        &decision,
+                        chat,
+                        approve,
+                        progress,
+                        request["id"].as_str().unwrap_or(""),
+                        None,
+                    ),
+                )
+                .await
+                .map(|r| r.text)
+                .map_err(|e| e.to_string())
+        } else {
+            Err("This tool is unavailable to mods in the current mode".into())
+        };
+        crate::mods::complete_request(
+            root,
+            chat,
+            id,
+            request["hash"].as_str().unwrap_or(""),
+            serde_json::json!({"requestId":request["id"],"action":action,"result":result.as_ref().ok(),"error":result.as_ref().err()}),
+        )?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_tool_outcome_reviewed_inner(
+    root: &Path,
+    config: &MintConfig,
+    decision: &AgentDecision,
+    chat_id: &str,
+    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
+    call_id: &str,
+    expected: Option<&mcp_review::McpReview>,
+) -> Result<crate::integrations::mcp_result::ToolOutcome, OrchestrationError> {
+    run_control::check()?;
     if matches!(decision.action.as_str(), "mcp_tool" | "mcp_list_tools") {
         let mut out = tools::plugins_mcp::execute_reviewed(
             &decision.action,
@@ -3573,6 +3739,9 @@ async fn execute_tool_text(
 ) -> Result<String, OrchestrationError> {
     let input = &decision.input;
     match decision.action.as_str() {
+        "mod_help" | "mod_list" | "mod_validate" | "mod_publish" => {
+            tools::mods::execute(&decision.action, input, root, config, chat_id, approve_cb).await
+        }
         "list_files" | "read_file" | "note_write" | "apply_patch" | "write_file" => {
             tools::files::execute(
                 decision.action.as_str(),

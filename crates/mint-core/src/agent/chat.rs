@@ -1512,6 +1512,19 @@ fn anthropic_content_block(block: &ContentBlock) -> Result<Value, ChatError> {
 /// `tool_use` content blocks (Anthropic may return a `tool_use` block before,
 /// after, or interleaved with text — unlike the old code, this does not assume
 /// the first block is text).
+// Anthropic reports uncached, cache-read and cache-created input separately.
+fn anthropic_input_tokens(usage: &Value) -> Option<u32> {
+    [
+        "input_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    ]
+    .into_iter()
+    .filter_map(|key| usage[key].as_u64())
+    .reduce(u64::saturating_add)
+    .map(|n| n.min(u32::MAX as u64) as u32)
+}
+
 fn parse_anthropic_reply(model: String, response: &Value) -> Result<ProviderReply, ChatError> {
     let blocks = response["content"].as_array().cloned().unwrap_or_default();
     let mut text = String::new();
@@ -1558,7 +1571,7 @@ fn parse_anthropic_reply(model: String, response: &Value) -> Result<ProviderRepl
                 thought: Some(th.clone()),
                 tool_calls: None,
                 stop_reason: response["stop_reason"].as_str().map(str::to_owned),
-                input_tokens: response["usage"]["input_tokens"].as_u64().map(|n| n as u32),
+                input_tokens: anthropic_input_tokens(&response["usage"]),
                 output_tokens: response["usage"]["output_tokens"]
                     .as_u64()
                     .map(|n| n as u32),
@@ -1572,7 +1585,7 @@ fn parse_anthropic_reply(model: String, response: &Value) -> Result<ProviderRepl
         thought,
         tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
         stop_reason: response["stop_reason"].as_str().map(str::to_owned),
-        input_tokens: response["usage"]["input_tokens"].as_u64().map(|n| n as u32),
+        input_tokens: anthropic_input_tokens(&response["usage"]),
         output_tokens: response["usage"]["output_tokens"]
             .as_u64()
             .map(|n| n as u32),
@@ -2151,9 +2164,7 @@ impl StreamReplyAccumulator {
     {
         match value["type"].as_str() {
             Some("message_start") => {
-                self.input_tokens = value["message"]["usage"]["input_tokens"]
-                    .as_u64()
-                    .map(|n| n as u32);
+                self.input_tokens = anthropic_input_tokens(&value["message"]["usage"]);
             }
             Some("content_block_start") => {
                 let block_index = value["index"].as_u64().unwrap_or(0) as usize;
@@ -3829,6 +3840,32 @@ mod tests {
             (ollama.input_tokens, ollama.output_tokens),
             (Some(80), Some(40))
         );
+    }
+    #[test]
+    fn anthropic_cached_prompt_tokens_count_toward_context_in_json_and_streams() {
+        let usage = json!({"input_tokens":100,"cache_read_input_tokens":98_000,"cache_creation_input_tokens":1_000,"output_tokens":400,"cache_creation":{"ephemeral_5m_input_tokens":1_000}});
+        let reply = parse_anthropic_reply(
+            "claude-test".into(),
+            &json!({"content":[{"type":"text","text":"Ready"}],"usage":usage}),
+        )
+        .unwrap();
+        assert_eq!(reply.input_tokens, Some(99_100));
+        let mut stream = StreamReplyAccumulator::default();
+        stream.consume_anthropic(
+            &json!({"type":"message_start","message":{"usage":usage}}),
+            &mut |_| {},
+        );
+        stream.consume_anthropic(
+            &json!({"type":"content_block_delta","delta":{"type":"text_delta","text":"Ready"}}),
+            &mut |_| {},
+        );
+        stream.consume_anthropic(
+            &json!({"type":"message_delta","usage":{"output_tokens":400}}),
+            &mut |_| {},
+        );
+        let reply = stream.finish("claude-test".into()).unwrap();
+        assert_eq!(reply.input_tokens, Some(99_100));
+        assert_eq!(reply.output_tokens, Some(400));
     }
 
     #[test]

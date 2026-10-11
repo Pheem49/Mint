@@ -41,6 +41,7 @@ import ModelSelectorPopover from './ModelSelectorPopover'
 import GitBranchSelector from './GitBranchSelector'
 import WorkspaceSelector from './WorkspaceSelector'
 import { BackgroundTerminals } from './BackgroundTerminals'
+import { ModsPanel } from './ModsPanel'
 import CodeReviewPage from './CodeReviewPage'
 import type { ToolSurface } from './ToolSurfacePage'
 import '../css/thinking-status.css'
@@ -1736,6 +1737,7 @@ export default function ChatPanel({
       </div>
 
       <div className="input-area">
+        <ModsPanel workspacePath={workspacePath} chatId={chatId} />
         {composerChanges.length > 0 && (
           <button
             type="button"

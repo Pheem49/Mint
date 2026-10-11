@@ -1544,19 +1544,20 @@ export async function deleteSubagent(sourcePath: string): Promise<void> {
 
 export async function runSlashCommand(
   input: string,
-  cwd?: string | null
+  cwd?: string | null,
+  chatId?: string | null
 ): Promise<import('../shared/platform').SlashResponse> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const res = await authFetch(`${getLocalApiBase()}/slash`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input, cwd: cwd ?? null })
+      body: JSON.stringify({ input, cwd: cwd ?? null, chat_id: chatId ?? null })
     })
     if (!res.ok) return { kind: 'not_handled' }
     return res.json()
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('run_slash_command', { input, cwd: cwd ?? null })
+  return invoke('run_slash_command', { input, cwd: cwd ?? null, chatId: chatId ?? null })
 }
 
 export async function listCronJobs(): Promise<CronJob[]> {
@@ -2289,8 +2290,20 @@ export const readWorkspaceFile = async (path: string, workspacePath?: string): P
   return invoke('read_workspace_file', { path, workspacePath })
 }
 
+export async function modsOperation(operation: import('../shared/mods').ModOperation): Promise<import('../shared/mods').ModResponse> {
+  if (isTauriRuntime()) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke('mods_operation', { operation })
+  }
+  const res = await authFetch(`${getApiBase()}/mods`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(operation) })
+  const value = await res.json()
+  if (!res.ok) throw new Error(value.error || 'Mod operation failed')
+  return value
+}
+
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
+  modsOperation,
   readMcpArtifact,
   listBackgroundJobs, getBackgroundJob, stopBackgroundJob, deleteBackgroundJob,
   runSlashCommand,

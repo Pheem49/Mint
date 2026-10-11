@@ -184,6 +184,7 @@ async fn execute_core_slash(
         input: trimmed.to_string(),
         cwd: Some(session.current_dir.to_string_lossy().to_string()),
         surface: Some("cli".to_string()),
+        chat_id: Some(session.chat_id.clone()),
     };
 
     if matches!(
@@ -338,6 +339,33 @@ pub async fn handle_slash_command(
         .split_once(char::is_whitespace)
         .map(|(c, r)| (c, r.trim()))
         .unwrap_or((trimmed, ""));
+
+    if cmd == "/mods" && rest == "run-tools" {
+        let chat = mint_core::scoped_chat_id(
+            &session.chat_id,
+            Some(&session.current_dir.to_string_lossy()),
+        );
+        match mint_core::mods::pending_requests(&session.current_dir, &chat) {
+            Ok(requests) => {
+                for request in requests {
+                    let body = format!(
+                        "{} requests {}\n{}",
+                        request["modId"],
+                        request["action"],
+                        serde_json::to_string_pretty(&request["input"]).unwrap_or_default()
+                    );
+                    if ui.prompt_confirm(&body, false).unwrap_or(false) {
+                        let operation=serde_json::from_value(serde_json::json!({"workspacePath":session.current_dir,"chatId":chat,"action":"run_request","command":request["id"],"grantPermissions":true})).unwrap();
+                        if let Err(error) = mint_core::mods::operate_async(operation).await {
+                            ui.push_command_output(error);
+                        }
+                    }
+                }
+            }
+            Err(error) => ui.push_command_output(error),
+        }
+        return Some(SlashResult::Handled);
+    }
 
     // Check CLI-specific commands and interactive bare wizards first:
     let is_cli_only_or_wizard = matches!(

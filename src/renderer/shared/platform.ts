@@ -67,13 +67,14 @@ export type SlashResponse =
   | { kind: 'not_handled' }
 
 export interface MintPlatformApi {
+  modsOperation(operation: import("./mods").ModOperation): Promise<import("./mods").ModResponse>
   readMcpArtifact(id: string): Promise<string>
   listBackgroundJobs(workspace?: string): Promise<import("./types").BackgroundJob[]>
   getBackgroundJob(id: string): Promise<import("./types").BackgroundJobOutput>
   stopBackgroundJob(id: string): Promise<import("./types").BackgroundJob>
   deleteBackgroundJob(id: string): Promise<void>
   authRegister(name: string | undefined, email: string, password: string): Promise<AuthUser>
-  runSlashCommand(input: string, cwd?: string | null): Promise<SlashResponse>
+  runSlashCommand(input: string, cwd?: string | null, chatId?: string | null): Promise<SlashResponse>
   authLogin(email: string, password: string): Promise<AuthUser>
   authLogout(): Promise<void>
   authGetCurrentUser(): Promise<AuthUser | null>
@@ -337,3 +338,5 @@ export const workspacePlatform: WorkspacePlatform = {
   listWorkspaceHistory: (...args) => requireWorkspacePlatform().listWorkspaceHistory(...args),
   undoWorkspaceAction: (...args) => requireWorkspacePlatform().undoWorkspaceAction(...args),
 }
+
+export const modsPlatform = { operation: operation("modsOperation") }

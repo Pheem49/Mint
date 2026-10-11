@@ -48,6 +48,8 @@ use render::{local_time, md_heading, md_list, md_table};
 #[derive(serde::Deserialize)]
 pub struct SlashRequest {
     pub input: String,
+    #[serde(default)]
+    pub chat_id: Option<String>,
     /// Active workspace directory; defaults to the process cwd.
     #[serde(default)]
     pub cwd: Option<String>,
@@ -194,6 +196,19 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         return SlashResponse::NotHandled;
     };
 
+    if token == "/mods" || token.starts_with("/mods:") {
+        let Some(chat) = req.chat_id.as_deref().filter(|s| !s.is_empty()) else {
+            return error("Mods require an explicit chat ID");
+        };
+        let root = req.workspace();
+        if let Err(e) = crate::assert_path_capability(&root, crate::Capability::Read, config) {
+            return error(e.to_string());
+        }
+        return match crate::mods::slash(&root, chat, &req.input) {
+            Ok(text) => message(text),
+            Err(e) => error(e),
+        };
+    }
     match token.as_str() {
         "/shells" if !req.is_cli() => match crate::bg_shell::shells_command(rest, &req.workspace(), &None, config) {
             Ok(text) => message(text), Err(err) => error(err.to_string()),
@@ -2490,6 +2505,7 @@ mod tests {
             input: input.to_string(),
             cwd: None,
             surface: None,
+            chat_id: None,
         }
     }
 
@@ -2498,6 +2514,7 @@ mod tests {
             input: input.to_string(),
             cwd: None,
             surface: Some(surface.to_string()),
+            chat_id: None,
         }
     }
 
@@ -2839,6 +2856,16 @@ mod tests {
                 assert!(markdown.contains("`/bg`")); // cli-only, present in the cli list
             }
             _ => panic!("expected Message"),
+        }
+    }
+
+    #[test]
+    fn mods_are_discoverable_in_help_on_every_surface() {
+        for surface in ["cli", "desktop", "web"] {
+            match execute(&req_surface("/help", surface), &mut MintConfig::default()) {
+                SlashResponse::Message { markdown } => assert!(markdown.contains("`/mods`")),
+                _ => panic!("expected help Message"),
+            }
         }
     }
 

@@ -7,3 +7,5 @@ pub(crate) mod media;
 pub(crate) mod settings;
 pub(crate) mod voice;
 pub(crate) mod workspace;
+
+pub(crate) mod mods;

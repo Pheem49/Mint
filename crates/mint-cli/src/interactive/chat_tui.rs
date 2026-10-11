@@ -388,6 +388,10 @@ pub(crate) struct ThoughtModalState {
 pub(crate) struct ChatViewState {
     pub(crate) transcript: Vec<TranscriptEntry>,
     chat_id: String,
+    mods: Vec<serde_json::Value>,
+    mods_open: bool,
+    mod_focus: usize,
+    mod_input: Option<(String, String)>,
     sync_cursor: i64,
     last_interaction_id: i64,
     composer: Vec<char>,
@@ -1137,6 +1141,9 @@ impl ChatViewState {
         self.cursor = self.composer.len();
     }
     pub fn reload_transcript(&mut self, chat_id: &str, workspace: &Path) {
+        if self.chat_id != chat_id || self.current_dir != workspace {
+            self.stop_mods();
+        }
         if let Ok(memory) = mint_core::MemoryStore::open_default() {
             self.reload_transcript_with(&memory, chat_id, workspace);
         } else {
@@ -1167,6 +1174,9 @@ impl ChatViewState {
         chat_id: &str,
         workspace: &Path,
     ) {
+        if self.chat_id != chat_id || self.current_dir != workspace {
+            self.stop_mods();
+        }
         self.chat_id = chat_id.to_owned();
         self.transcript.clear();
         let scoped = mint_core::scoped_chat_id(chat_id, Some(&workspace.to_string_lossy()));
@@ -1372,6 +1382,9 @@ impl ChatViewState {
         self.selection_mode = false;
     }
     pub fn sync_session(&mut self, session: &InteractiveSession) {
+        if self.current_dir != session.current_dir {
+            self.stop_mods();
+        }
         self.model = active_model(&session.config.ai_provider, &session.config).to_owned();
         self.thinking_status = format_thinking_status(&session.config);
         self.provider = format_provider_display_name(&session.config.ai_provider, &session.config);
@@ -1379,6 +1392,31 @@ impl ChatViewState {
         self.current_dir = session.current_dir.clone();
         self.plan_mode = session.plan_mode;
         self.history = session.history.clone();
+    }
+    fn stop_mods(&mut self) {
+        if !self.chat_id.is_empty() {
+            let chat =
+                mint_core::scoped_chat_id(&self.chat_id, Some(&self.current_dir.to_string_lossy()));
+            mint_core::mods::close_chat(&self.current_dir, &chat);
+        }
+        self.mods.clear();
+        self.mods_open = false;
+    }
+    fn mod_input_value<'a>(&'a self, control: &'a crate::mods_ui::Control) -> &'a str {
+        self.mod_input
+            .as_ref()
+            .filter(|(initial, _)| initial == &control.value)
+            .map_or(&control.value, |(_, draft)| draft)
+    }
+    fn mod_input_draft(&mut self, control: &crate::mods_ui::Control) -> &mut String {
+        if self
+            .mod_input
+            .as_ref()
+            .is_none_or(|(initial, _)| initial != &control.value)
+        {
+            self.mod_input = Some((control.value.clone(), control.value.clone()));
+        }
+        &mut self.mod_input.as_mut().unwrap().1
     }
     fn history_previous(&mut self) {
         if self.history.is_empty() {
@@ -1629,6 +1667,19 @@ impl ChatViewState {
             .min(lines.len() - 1);
         lines[start..=end].join("\n")
     }
+    fn mod_viewport(&self, area: Rect) -> mint_core::mods::Viewport {
+        let (body, _) = mod_layout(
+            area,
+            self.mods_open && self.dialog.is_none() && self.thought_modal.is_none(),
+        );
+        mint_core::mods::Viewport {
+            surface: Some("terminal".into()),
+            columns: (body.width > 0).then_some(body.width),
+            rows: (body.height > 0).then_some(body.height),
+            side_panel_open: self.mods_open,
+            ..Default::default()
+        }
+    }
     fn render(&self, frame: &mut ratatui::Frame<'_>) -> RenderAreas {
         let suggestions = self.suggestions();
         let suggestion_height = if suggestions.is_empty() {
@@ -1761,26 +1812,10 @@ impl ChatViewState {
             spans
         }
 
-        let horizontal_pad = if frame.area().width >= 80 {
-            2
-        } else if frame.area().width >= 60 {
-            1
-        } else {
-            0
-        };
-        let main_area = if horizontal_pad > 0 {
-            Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Length(horizontal_pad),
-                    Constraint::Min(0),
-                    Constraint::Length(horizontal_pad),
-                ])
-                .split(frame.area())[1]
-        } else {
-            frame.area()
-        };
-
+        let (main_area, mod_side_area) = mod_layout(
+            frame.area(),
+            self.mods_open && self.dialog.is_none() && self.thought_modal.is_none(),
+        );
         let dialog_height = if let Some(dialog) = &self.dialog {
             let filtered_len = dialog.filtered_indices().len();
             let max_allowed = main_area.height.saturating_sub(7);
@@ -1869,6 +1904,13 @@ impl ChatViewState {
                 .split(main_area)
         };
 
+        let mut rows = rows.to_vec();
+        let band_lines = crate::mods_ui::slot_lines(&self.mods, "above_composer");
+        let band_height = (band_lines.len() as u16)
+            .min(6)
+            .min(rows[1].height.saturating_sub(2));
+        rows[1].height = rows[1].height.saturating_sub(band_height);
+        let mod_band_area = Rect::new(rows[1].x, rows[1].bottom(), rows[1].width, band_height);
         let line1_text = format!(
             "[Mint] v{} | Active AI: {}",
             env!("CARGO_PKG_VERSION"),
@@ -1950,7 +1992,7 @@ impl ChatViewState {
             ..rows[0]
         };
         frame.render_widget(
-            Paragraph::new("Type naturally or /help for commands. F6: Classic CLI. Ctrl+D exits."),
+            Paragraph::new("Type naturally or /help. F7: Mods. F6: Classic CLI. Ctrl+D exits."),
             help_area,
         );
 
@@ -2618,6 +2660,49 @@ impl ChatViewState {
                 ));
             }
         }
+        if mod_band_area.height > 0 {
+            frame.render_widget(
+                Paragraph::new(band_lines).style(Style::default().fg(crate::terminal_theme::TEXT)),
+                mod_band_area,
+            );
+        }
+        if self.mods_open && self.dialog.is_none() && self.thought_modal.is_none() {
+            let area = mod_side_area.unwrap_or(Rect::new(
+                main_area.x,
+                main_area.y + 6,
+                main_area.width,
+                main_area.height.saturating_sub(6 + composer_height + 1),
+            ));
+            frame.render_widget(ratatui::widgets::Clear, area);
+            let mut lines = crate::mods_ui::slot_lines(&self.mods, "side_panel");
+            if lines.is_empty() {
+                lines.push("No active panels. /mods lists mods.".into());
+            }
+            let controls = crate::mods_ui::controls(&self.mods);
+            if let Some(control) = controls.get(self.mod_focus % controls.len().max(1)) {
+                lines.push(Line::raw(""));
+                lines.push(Line::raw(format!(
+                    "› {}{}",
+                    control.label,
+                    if control.input {
+                        format!(": {}", self.mod_input_value(control))
+                    } else {
+                        String::new()
+                    }
+                )));
+            }
+            lines.push(Line::raw(""));
+            lines.push("Tab: control · Enter: activate".into());
+            lines.push("F7/Esc: chat · /mods run-tools".into());
+            lines.push("/mods hot-reload on|off".into());
+            lines.push("/mods test <id>".into());
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .wrap(Wrap { trim: false })
+                    .block(Block::default().borders(Borders::ALL).title(" Mods · F7 ")),
+                area,
+            );
+        }
         RenderAreas {
             back_to_bottom: back_to_bottom_area,
             composer: rows.get(4).copied(),
@@ -2675,6 +2760,31 @@ fn highlighted_user_content(line: Line<'static>, width: u16) -> Vec<Line<'static
             Line::from(spans)
         })
         .collect()
+}
+
+fn mod_layout(area: Rect, dock: bool) -> (Rect, Option<Rect>) {
+    let pad = if area.width >= 80 {
+        2
+    } else if area.width >= 60 {
+        1
+    } else {
+        0
+    };
+    let mut main = Rect::new(
+        area.x + pad,
+        area.y,
+        area.width.saturating_sub(pad * 2),
+        area.height,
+    );
+    let panel = if dock && main.width >= 100 {
+        let width = 38u16.min(main.width / 2);
+        let panel = Rect::new(main.right() - width, main.y, width, main.height);
+        main.width -= width;
+        Some(panel)
+    } else {
+        None
+    };
+    (main, panel)
 }
 
 #[derive(Default)]
@@ -3285,14 +3395,33 @@ impl ChatTui {
         let mut pasted_image: Option<String> = None;
         let mut last_ctrl_d: Option<std::time::Instant> = None;
         let mut last_sync = std::time::Instant::now();
+        state.mods = mint_core::mods::list(
+            &state.current_dir,
+            &mint_core::scoped_chat_id(&state.chat_id, Some(&state.current_dir.to_string_lossy())),
+        )
+        .unwrap_or_default();
         let mut previous_bg_count =
             mint_core::bg_shell::running_count_for(std::path::Path::new(&state.workspace));
         let mut redraw = true;
         let mut painted_notice_visible = false;
+        let mut reported_mod_viewport = None;
         let mut watermark_started: Option<std::time::Instant> = None;
         const DOUBLE_PRESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
         loop {
+            let size = self.terminal.size()?;
+            let viewport = state.mod_viewport(Rect::new(0, 0, size.width, size.height));
+            if reported_mod_viewport.as_ref() != Some(&viewport) {
+                let chat = mint_core::scoped_chat_id(
+                    &state.chat_id,
+                    Some(&state.current_dir.to_string_lossy()),
+                );
+                let _ =
+                    mint_core::mods::update_viewport(&state.current_dir, &chat, viewport.clone());
+                state.mods = mint_core::mods::list(&state.current_dir, &chat).unwrap_or_default();
+                reported_mod_viewport = Some(viewport);
+                redraw = true;
+            }
             let watermark_visible = state.transcript.is_empty()
                 && state.dialog.is_none()
                 && state.thought_modal.is_none();
@@ -3365,6 +3494,18 @@ impl ChatTui {
                         && !state.selection_mode
                     {
                         redraw |= state.refresh_shared_transcript();
+                        let mods = mint_core::mods::list(
+                            &state.current_dir,
+                            &mint_core::scoped_chat_id(
+                                &state.chat_id,
+                                Some(&state.current_dir.to_string_lossy()),
+                            ),
+                        )
+                        .unwrap_or_default();
+                        if mods != state.mods {
+                            state.mods = mods;
+                            redraw = true;
+                        }
                         last_sync = std::time::Instant::now();
                     }
                     continue;
@@ -3441,6 +3582,73 @@ impl ChatTui {
 
                     self.clear_mouse_selection();
 
+                    if key.code == KeyCode::F(7) && state.dialog.is_none() {
+                        state.mods_open = !state.mods_open;
+                        state.mod_input = None;
+                        continue;
+                    }
+                    if state.mods_open && state.dialog.is_none() && state.thought_modal.is_none() {
+                        let controls = crate::mods_ui::controls(&state.mods);
+                        match key.code {
+                            KeyCode::Esc => state.mods_open = false,
+                            KeyCode::Tab => {
+                                state.mod_focus = (state.mod_focus + 1) % controls.len().max(1);
+                                state.mod_input = None;
+                            }
+                            KeyCode::BackTab => {
+                                state.mod_focus = (state.mod_focus + controls.len().max(1) - 1)
+                                    % controls.len().max(1);
+                                state.mod_input = None;
+                            }
+                            KeyCode::Enter => {
+                                if let Some(control) =
+                                    controls.get(state.mod_focus % controls.len().max(1))
+                                {
+                                    let chat = mint_core::scoped_chat_id(
+                                        &state.chat_id,
+                                        Some(&state.current_dir.to_string_lossy()),
+                                    );
+                                    let value = if control.input {
+                                        serde_json::json!(state.mod_input_value(control))
+                                    } else {
+                                        serde_json::Value::Null
+                                    };
+                                    let result = mint_core::mods::action(
+                                        &state.current_dir,
+                                        &chat,
+                                        &control.id,
+                                        &control.instance,
+                                        &control.action,
+                                        value,
+                                    );
+                                    if let Err(error) = result {
+                                        state.set_notice(error);
+                                    }
+                                    state.mod_input = None;
+                                    state.mods = mint_core::mods::list(&state.current_dir, &chat)
+                                        .unwrap_or_default();
+                                }
+                            }
+                            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                if let Some(control) = controls
+                                    .get(state.mod_focus % controls.len().max(1))
+                                    .filter(|c| c.input)
+                                {
+                                    state.mod_input_draft(control).push(c);
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                if let Some(control) = controls
+                                    .get(state.mod_focus % controls.len().max(1))
+                                    .filter(|c| c.input)
+                                {
+                                    state.mod_input_draft(control).pop();
+                                }
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
                     if key.code == KeyCode::F(6) {
                         let text: String = state.composer.iter().collect();
                         return Ok(Some(InteractiveInput {
@@ -3654,6 +3862,7 @@ impl ChatTui {
                         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             if let Some(time) = last_ctrl_d {
                                 if time.elapsed() < DOUBLE_PRESS_TIMEOUT {
+                                    state.stop_mods();
                                     return Ok(None);
                                 }
                             }
@@ -5143,5 +5352,125 @@ mod context_compaction_shimmer_tests {
             " · 12s • Esc to interrupt"
         );
         assert_eq!(first.spans.last(), next.spans.last());
+    }
+}
+
+#[cfg(test)]
+mod mod_surface_tests {
+    use super::*;
+    #[test]
+    fn focused_mod_input_displays_the_current_value_before_editing() {
+        let mut state = ChatViewState::default();
+        state.mods_open = true;
+        state.mods = vec![
+            serde_json::json!({"id":"draft","enabled":true,"snapshot":{"ui":{"side_panel":{"type":"input","label":"Draft","action":"save","value":"existing"}}}}),
+        ];
+        let backend = ratatui::backend::TestBackend::new(120, 35);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("› Draft: existing"));
+    }
+    #[test]
+    fn terminal_shows_reload_diagnostics_while_the_old_mod_stays_active() {
+        let mut state = ChatViewState::default();
+        state.mods_open = true;
+        state.mods = vec![
+            serde_json::json!({"id":"counter","name":"Counter","enabled":true,"reloadError":"Invalid update","snapshot":{"ui":{"side_panel":{"type":"text","text":"Working revision"}}}}),
+        ];
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 35)).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(text.contains("Reload: Invalid update"));
+        assert!(text.contains("Working revision"));
+    }
+    #[test]
+    fn terminal_viewport_tracks_docked_panel_width_and_overlay_fallback() {
+        let mut state = ChatViewState::default();
+        state.mods_open = true;
+        let wide = state.mod_viewport(Rect::new(0, 0, 120, 35));
+        assert_eq!(wide.columns, Some(78));
+        assert_eq!(wide.surface.as_deref(), Some("terminal"));
+        let narrow = state.mod_viewport(Rect::new(0, 0, 80, 35));
+        assert_eq!(narrow.columns, Some(76));
+        state.mods_open = false;
+        assert_eq!(
+            state.mod_viewport(Rect::new(0, 0, 120, 35)).columns,
+            Some(116)
+        );
+    }
+    #[test]
+    fn terminal_weather_band_keeps_color_and_metrics_on_one_row() {
+        let mut state = ChatViewState::default();
+        state.mods = vec![
+            serde_json::json!({"id":"weather","name":"Weather","enabled":true,"snapshot":{"ui":{"above_composer":{"type":"stack","direction":"row","children":[{"type":"text","text":"Storm","color":"magenta"},{"type":"text","text":"80% 160k / 200k"}]}}}}),
+        ];
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 35)).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut rows = Vec::new();
+        for y in 0..35 {
+            rows.push(
+                (0..120)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>(),
+            );
+        }
+        let row = rows
+            .iter()
+            .position(|r| r.contains("Storm 80% 160k / 200k"))
+            .expect("Weather and counts share one row");
+        let x = rows[row].find("Storm").unwrap();
+        assert_eq!(
+            buffer[(x as u16, row as u16)].fg,
+            ratatui::style::Color::Magenta
+        );
+    }
+    #[test]
+    fn terminal_renders_mod_band_and_side_panel() {
+        let mut state = ChatViewState::default();
+        state.mods = vec![
+            serde_json::json!({"id":"meter","name":"Meter","enabled":true,"snapshot":{"ui":{"above_composer":{"type":"text","text":"123 tokens"},"side_panel":{"type":"table","columns":["Task"],"rows":[["Write tests"]]}}}}),
+        ];
+        state.mods_open = true;
+        let backend = ratatui::backend::TestBackend::new(120, 35);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let text = buffer
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(text.contains("123 tokens"));
+        assert!(text.contains("Write tests"));
     }
 }

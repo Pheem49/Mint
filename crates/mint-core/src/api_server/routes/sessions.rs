@@ -134,6 +134,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
 
         ("POST", "/api/chat-sessions/delete") => {
             let chat_id = query_param(query, "chatId").unwrap_or_default();
+            crate::cancel_agent(&chat_id);
             if let Ok(memory) = MemoryStore::open_default() {
                 let deleted = memory.delete_chat_session(&chat_id).unwrap_or(0);
                 let response = serde_json::json!({ "status": "ok", "deleted": deleted });

@@ -1080,7 +1080,7 @@ export default function MintDashboard() {
       // comes back as `not_handled` and falls through to the TS processor below.
       let engineResp: SlashResponse | null = null
       try {
-        engineResp = await runSlashCommand(trimmed, workspacePath || null)
+        engineResp = await runSlashCommand(trimmed, workspacePath || null, conversationId)
       } catch {
         engineResp = null
       }
@@ -1948,7 +1948,7 @@ export default function MintDashboard() {
                     onClick={() => {
                       const next = `${pendingSlashChoice.command} ${opt.value}`
                       setPendingSlashChoice(null)
-                      runSlashCommand(next, workspacePath || null)
+                      runSlashCommand(next, workspacePath || null, conversationId)
                         .then((r) => handleEngineSlashResponse(next, r))
                         .catch(() => {})
                     }}

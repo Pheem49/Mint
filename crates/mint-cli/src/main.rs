@@ -323,6 +323,9 @@ fn log_panic_to_file(message: &str) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--mint-mod-host") {
+        return mint_mod_runtime::worker_main().map_err(anyhow::Error::msg);
+    }
     let _background_shutdown = mint_core::bg_shell::ShutdownGuard;
     install_panic_hook();
     let mut cli = Cli::parse();
@@ -533,3 +536,7 @@ mod cli_tests {
         }
     }
 }
+
+mod mods_cli;
+
+mod mods_ui;

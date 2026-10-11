@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/mint-mod-runtime",
   "crates/mint-core",
   "crates/mint-cli",
   "src-tauri",

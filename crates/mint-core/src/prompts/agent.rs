@@ -46,6 +46,9 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "stock",
     "calculation",
     "memory_recall",
+    "mod_help",
+    "mod_list",
+    "mod_validate",
     "git_status",
     "git_diff",
     "git_log",
@@ -102,6 +105,10 @@ pub(crate) fn base_allowed_actions() -> Vec<&'static str> {
         "stock",
         "calculation",
         "memory_recall",
+        "mod_help",
+        "mod_list",
+        "mod_validate",
+        "mod_publish",
         "git_status",
         "git_diff",
         "git_log",
@@ -185,6 +192,7 @@ pub fn build_system_prompt(
     let actions_str = allowed_actions.join("|");
 
     let mut input_formats = Vec::new();
+    input_formats.push("- mod_help / mod_list: {}. mod_validate / mod_publish: {\"arguments\":{\"manifest\":{...},\"source\":\"export function register(mint) {...}\",\"readme\":\"...\",\"expectedHash\":\"existing hash when replacing\"}}.");
     if allowed_actions.contains(&"list_files") {
         input_formats.push(
             "- list_files: {\"path\":\".\",\"limit\":100} (workspace path, ~/path, or allowed user folder like Downloads)",
@@ -451,6 +459,9 @@ pub fn build_system_prompt(
     let input_formats_str = input_formats.join("\n");
 
     let mut rules = Vec::new();
+    if allowed_actions.contains(&"mod_help") {
+        rules.push("MINT MODS: When asked to create or change a mod, call mod_help and mod_list first. Use the guide to draft the single-file source directly in mod_validate tool arguments, with at most one short progress sentence. Choose reasonable implementation defaults and proceed to validation. After validation succeeds, call mod_publish in execution mode if available; use expectedHash when replacing source. Creation is complete only after the publication result confirms the path in workspace/mint-mods/<id>/ and activation state. In plan mode, present the draft/plan for approval. Follow the guide's bounded validation retries and report actual diagnostics if blocked.");
+    }
     if plan_mode {
         rules.push(
             "0p. PLAN MODE IS ACTIVE: you may only investigate (read files, search, inspect diagnostics, etc.). Mutating tools such as write_file, apply_patch, and most run_shell/mcp_tool/run_plugin calls are unavailable and will be blocked. Once you have a clear implementation plan, call exit_plan_mode with the full plan; the user will approve or reject it. Do not attempt to edit files or run mutating commands before that approval.",

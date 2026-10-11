@@ -137,6 +137,32 @@ fn finish_tool() -> ToolSpec {
 fn all_tools() -> Vec<ToolSpec> {
     vec![
         tool(
+            "mod_help",
+            "Read the Mint Mods authoring guide. Call before creating or editing a mod from a user prompt.",
+            schema(json!({}), &[]),
+        ),
+        tool(
+            "mod_list",
+            "Inspect workspace mods, sources, hashes, permissions and active revisions.",
+            schema(json!({}), &[]),
+        ),
+        tool(
+            "mod_validate",
+            "Compile and preview a single-file Mint mod without running real tools. Follow mod_help; fix errors before publishing.",
+            schema(
+                json!({"arguments":{"type":"object","properties":{"manifest":{"type":"object"},"source":{"type":"string"},"readme":{"type":"string"}},"required":["manifest","source"]}}),
+                &["arguments"],
+            ),
+        ),
+        tool(
+            "mod_publish",
+            "Publish a validated mod in workspace/mint-mods/<id> and open it in this chat. Use only when the user requests mod creation/editing. Requested special permissions require approval. Existing source requires expectedHash.",
+            schema(
+                json!({"arguments":{"type":"object","properties":{"manifest":{"type":"object"},"source":{"type":"string"},"readme":{"type":"string"},"expectedHash":{"type":"string"}},"required":["manifest","source"]}}),
+                &["arguments"],
+            ),
+        ),
+        tool(
             "conversation_summary",
             "Internal tool representing a compacted conversation history summary from previous steps.",
             schema(

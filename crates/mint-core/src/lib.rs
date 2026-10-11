@@ -17,6 +17,7 @@ pub mod git;
 pub mod integrations;
 pub mod live_sync;
 pub mod media;
+pub mod mods;
 pub mod orchestration;
 pub mod prompts;
 pub mod search;
@@ -254,6 +255,7 @@ pub fn unregister_agent(chat_id: &str, task_id: tokio::task::Id) {
 pub fn cancel_agent(chat_id: &str) -> bool {
     let turns = crate::orchestration::run_control::cancel(chat_id);
     let mcp_calls = crate::mcp::cancel_mcp_calls(chat_id);
+    crate::mods::shutdown_chat(chat_id);
     let mut agents = ACTIVE_AGENTS.lock().unwrap();
     if let Some(handle) = agents.remove(chat_id) {
         if mcp_calls == 0 {
