@@ -11,6 +11,7 @@ pub mod folder_picker;
 pub mod html_preview;
 pub mod knowledge_engine;
 pub mod project_detector;
+pub mod release_notes;
 pub mod shell;
 pub mod stock;
 pub mod weather;

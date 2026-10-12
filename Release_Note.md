@@ -1,5 +1,7 @@
 # Release Notes - Mint Agent v1.16.0
 
+- Development CLI/Desktop/Web now read release notes live from their build checkout, with a shared embedded fallback snapshot generated in Cargo's OUT_DIR. Editing Release_Note.md no longer invalidates development Rust builds or launcher receipts. Shipping builds track and embed current notes via MINT_BUNDLE_RELEASE_NOTES=1; release jobs and Desktop packaging enable it, and npm source packages bundle automatically. Unified Classic CLI with the shared reader and added real Cargo fixtures covering live edits, missing/empty/invalid notes, unrelated caller workspaces, fallback, release refresh and mode switching.
+
 - Fixed Enter on a fully typed slash command in Desktop/Web being consumed by autocomplete; exact commands now run immediately and can open their interactive choice UI on the first Enter.
 - Fixed the model selector overlapping the composer placeholder while a slash choice panel is open by placing it with the other composer controls on both attachment and non-attachment layouts.
 - Fixed the Mods popover appearing offset from its launcher by rendering it at the document root while positioning it against the Mods button.

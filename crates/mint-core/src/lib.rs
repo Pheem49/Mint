@@ -71,6 +71,7 @@ pub use system::bg_shell;
 pub use system::calculation;
 pub use system::config;
 pub use system::docker_sandbox;
+pub use system::release_notes;
 pub use system::shell;
 pub use system::stock;
 pub use system::weather;

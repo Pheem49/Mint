@@ -24,7 +24,7 @@ console.log(JSON.stringify({reason:'compiler-artifact',target:{name:'mint',kind:
 if(process.env.EDIT_DURING_BUILD) fs.appendFileSync(${JSON.stringify(path.join(root, 'crates/mint-cli/src/main.rs'))},'changed');
 `, { mode: 0o755 });
   const run = (extra = {}) => {
-    const env = { ...process.env, PATH: path.join(root, 'tools') + path.delimiter + process.env.PATH, ...extra };
+    const env = { ...process.env, MINT_BUNDLE_RELEASE_NOTES: '0', PATH: path.join(root, 'tools') + path.delimiter + process.env.PATH, ...extra };
     delete env.MINT_BIN;
     return spawnSync(process.execPath, [path.join(root, 'src/bin/index.js'), '--test', 'a b', '$(echo unexpected)'], { cwd: path.join(root, 'caller'), env, encoding: 'utf8' });
   };
@@ -72,4 +72,18 @@ test('protocol source edits rebuild the CLI before connecting Companion', t => {
   fs.writeFileSync(path.join(protocol, 'lib.rs'), 'v2');
   assert.equal(f.run().status, 0);
   assert.equal(f.builds().length, 2);
+});
+
+test('development release note edits do not rebuild the CLI but bundled builds track them', t => {
+  const f = fixture(t);
+  const notes = path.join(f.root, 'Release_Note.md');
+  fs.writeFileSync(notes, 'first notes');
+  assert.equal(f.run().status, 0);
+  fs.writeFileSync(notes, 'updated notes');
+  assert.equal(f.run().status, 0);
+  assert.equal(f.builds().length, 1);
+  assert.equal(f.run({ MINT_BUNDLE_RELEASE_NOTES: '1' }).status, 0);
+  fs.writeFileSync(notes, 'packaged notes');
+  assert.equal(f.run({ MINT_BUNDLE_RELEASE_NOTES: '1' }).status, 0);
+  assert.equal(f.builds().length, 3);
 });

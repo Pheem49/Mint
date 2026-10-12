@@ -226,13 +226,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             agent_mode: true,
             plan_mode: false,
         },
-        "/release-notes" => message(
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../Release_Note.md"
-            ))
-            .trim(),
-        ),
+        "/release-notes" => message(crate::release_notes::text()),
         "/clear" => SlashResponse::Applied {
             markdown: "🧹 Conversation history cleared.".into(),
             effects: vec![SlashEffect::HistoryCleared],
@@ -2521,6 +2515,24 @@ mod tests {
             cwd: None,
             surface: Some(surface.to_string()),
             chat_id: None,
+        }
+    }
+
+    #[test]
+    fn release_notes_are_available_on_every_surface() {
+        for surface in ["cli", "desktop", "web"] {
+            match execute(
+                &req_surface("/release-notes", surface),
+                &mut MintConfig::default(),
+            ) {
+                SlashResponse::Message { markdown } => {
+                    assert!(markdown.starts_with("# Release Notes - Mint Agent"));
+                }
+                other => panic!(
+                    "expected release notes on {surface}, got {}",
+                    serde_json::to_value(other).unwrap()
+                ),
+            }
         }
     }
 

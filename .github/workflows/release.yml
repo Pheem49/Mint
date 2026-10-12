@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      MINT_BUNDLE_RELEASE_NOTES: "1"
 
     steps:
       - name: Checkout
@@ -110,6 +111,7 @@ jobs:
     runs-on: windows-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      MINT_BUNDLE_RELEASE_NOTES: "1"
 
     steps:
       - name: Checkout
@@ -180,6 +182,7 @@ jobs:
     runs-on: macos-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      MINT_BUNDLE_RELEASE_NOTES: "1"
 
     steps:
       - name: Checkout

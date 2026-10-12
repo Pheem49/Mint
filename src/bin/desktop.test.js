@@ -18,7 +18,7 @@ function fixture(t) {
   fs.writeFileSync(binary, app, { mode: 0o755 });
   fs.writeFileSync(path.join(root, 'node_modules/@tauri-apps/cli/tauri.js'), `
 const fs=require('fs');
-fs.appendFileSync(${JSON.stringify(path.join(root, 'builds'))},JSON.stringify({cwd:process.cwd(),args:process.argv.slice(2),lto:process.env.CARGO_PROFILE_RELEASE_LTO})+'\\n');
+fs.appendFileSync(${JSON.stringify(path.join(root, 'builds'))},JSON.stringify({cwd:process.cwd(),args:process.argv.slice(2),lto:process.env.CARGO_PROFILE_RELEASE_LTO,bundleNotes:process.env.MINT_BUNDLE_RELEASE_NOTES})+'\\n');
 if(process.env.FAIL_BUILD){console.error('desktop compiler error');process.exit(19);}
 fs.writeFileSync(${JSON.stringify(binary)},${JSON.stringify(app)},{mode:0o755});
 fs.mkdirSync('out/renderer',{recursive:true});fs.writeFileSync('out/renderer/index.html','built UI');
@@ -29,7 +29,7 @@ if(process.env.EDIT_DURING_BUILD)fs.appendFileSync('src/renderer/app.tsx','edit'
   return {
     root, binary,
     run(command = 'start', args = [], extra = {}) {
-      return spawnSync(process.execPath, [path.join(root, 'src/bin/desktop.js'), command, ...args], { cwd: path.join(root, 'caller'), encoding: 'utf8', env: { ...process.env, ...extra } });
+      return spawnSync(process.execPath, [path.join(root, 'src/bin/desktop.js'), command, ...args], { cwd: path.join(root, 'caller'), encoding: 'utf8', env: { ...process.env, MINT_BUNDLE_RELEASE_NOTES: '0', ...extra } });
     },
     builds() { return fs.existsSync(path.join(root, 'builds')) ? fs.readFileSync(path.join(root, 'builds'), 'utf8').trim().split('\n').map(JSON.parse) : []; }
   };
@@ -81,7 +81,8 @@ test('package produces the installer and a portable archive without launching de
   const archive = path.join(f.root, 'target/release/bundle/tar/mint-agent.tar.gz');
   const listing = spawnSync('tar', ['-tzf', archive], { encoding: 'utf8' });
   assert.equal(listing.status, 0, listing.stderr); assert.match(listing.stdout, /mint-desktop-portable\/mint-desktop/);
-  assert.equal(f.run().status, 0); assert.equal(f.builds().length, 1);
+  assert.equal(f.builds()[0].bundleNotes, '1');
+  assert.equal(f.run().status, 0); assert.equal(f.builds().length, 2);
 });
 
 test('custom Desktop build cannot validate the default start cache', t => {
@@ -100,4 +101,13 @@ test('protocol source edits invalidate a cached Desktop build', t => {
   fs.writeFileSync(path.join(protocol, 'lib.rs'), 'v2');
   assert.equal(f.run().status, 0);
   assert.equal(f.builds().length, 2);
+});
+
+test('release note edits do not rebuild a development Desktop', t => {
+  const f = fixture(t);
+  fs.writeFileSync(path.join(f.root, 'Release_Note.md'), 'first notes');
+  assert.equal(f.run().status, 0);
+  fs.writeFileSync(path.join(f.root, 'Release_Note.md'), 'updated notes');
+  assert.equal(f.run().status, 0);
+  assert.equal(f.builds().length, 1);
 });

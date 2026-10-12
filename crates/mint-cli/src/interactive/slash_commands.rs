@@ -2558,10 +2558,9 @@ pub async fn handle_slash_command(
         }
 
         "/release-notes" => {
-            const RELEASE_NOTES: &str = include_str!("../../../../Release_Note.md");
             ui.push_command_output(format!(
                 "\n{BLUE}────────────────────────────────────────────{RESET}\n{}\n{BLUE}────────────────────────────────────────────{RESET}",
-                RELEASE_NOTES.trim()
+                mint_core::release_notes::text()
             ));
             Some(SlashResult::Handled)
         }

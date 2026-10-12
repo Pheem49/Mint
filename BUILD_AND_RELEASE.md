@@ -67,6 +67,21 @@ artifacts to the same tagged GitHub Release. Desktop bundles are renamed to
   is ad-hoc signed / not notarized, so clear its quarantine flag after
   download: `xattr -d com.apple.quarantine ./mint-cli_macos_arm64`.
 
+Development checkouts read `Release_Note.md` at runtime from the checkout used
+for the build. Editing it does not invalidate the CLI/Desktop development build.
+Rust keeps a fallback snapshot in `OUT_DIR`, rather than including the source
+Markdown directly. Missing, unreadable or empty live notes use that snapshot.
+
+Shipping builds set `MINT_BUNDLE_RELEASE_NOTES=1` to track and embed the latest
+notes and disable live checkout reads. The release workflow sets this for all
+platforms, and `npm run package` sets it automatically for Desktop packages.
+For a manual standalone CLI release from a checkout, run
+`MINT_BUNDLE_RELEASE_NOTES=1 cargo build --release -p mint-cli` on Linux/macOS
+(or set the environment variable before running Cargo on Windows). Source
+packages without `.git`, including npm installs, bundle notes automatically.
+Packaged Desktop builds do not validate the development launcher cache; the next
+development start builds its own live-notes variant.
+
 The same workflow can be started manually from the Actions tab with
 `workflow_dispatch`; manual runs upload workflow artifacts but only tag-triggered
 runs publish a GitHub Release.

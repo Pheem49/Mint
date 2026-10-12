@@ -18,7 +18,9 @@ function fingerprint(root) {
       hash.update(relative); hash.update('\0'); hash.update(fs.readFileSync(full)); hash.update('\0');
     }
   }
-  for (const name of ['src/bin/auto-build.js', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain', 'rust-toolchain.toml', '.cargo', 'crates/mint-cli', 'crates/mint-core', 'crates/mint-companion-protocol', 'src-tauri/Cargo.toml', 'Release_Note.md', 'slash-commands.json', 'mcp-registry.json']) visit(name);
+  for (const name of ['src/bin/auto-build.js', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain', 'rust-toolchain.toml', '.cargo', 'crates/mint-cli', 'crates/mint-core', 'crates/mint-companion-protocol', 'src-tauri/Cargo.toml', 'slash-commands.json', 'mcp-registry.json']) visit(name);
+  if (process.env.MINT_BUNDLE_RELEASE_NOTES === '1') visit('Release_Note.md');
+  hash.update(`MINT_BUNDLE_RELEASE_NOTES=${process.env.MINT_BUNDLE_RELEASE_NOTES === '1'}\0`);
   for (const key of Object.keys(process.env).filter(k => /^(CARGO_|RUST|CC$|CXX$|AR$)/.test(k)).sort()) hash.update(`${key}=${process.env[key]}\0`);
   return hash.digest('hex');
 }

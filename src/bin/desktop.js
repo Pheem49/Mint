@@ -26,9 +26,9 @@ function digest(inputs) {
   inputs.forEach(visit);
   return hash.digest('hex');
 }
-function fingerprint() {
-  const source = digest(['src/bin/desktop.js', 'src-tauri', 'crates/mint-core', 'crates/mint-companion-protocol', 'src/renderer', 'public', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain', 'rust-toolchain.toml', '.cargo', 'package.json', 'package-lock.json', 'vite.config.ts', 'tsconfig.json', 'tsconfig.node.json', '.env', '.env.local', '.env.production', '.env.production.local', 'Release_Note.md', 'slash-commands.json', 'mcp-registry.json']);
-  const env = Object.keys(process.env).filter(k => /^(CARGO_|RUST|VITE_|TAURI_|CC$|CXX$|AR$)/.test(k)).sort().map(k => [k, process.env[k]]);
+function fingerprint(bundle = false) {
+  const source = digest(['src/bin/desktop.js', 'src-tauri', 'crates/mint-core', 'crates/mint-companion-protocol', 'src/renderer', 'public', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain', 'rust-toolchain.toml', '.cargo', 'package.json', 'package-lock.json', 'vite.config.ts', 'tsconfig.json', 'tsconfig.node.json', '.env', '.env.local', '.env.production', '.env.production.local', 'slash-commands.json', 'mcp-registry.json', ...(bundle || process.env.MINT_BUNDLE_RELEASE_NOTES === '1' ? ['Release_Note.md'] : [])]);
+  const env = Object.keys(process.env).filter(k => /^(MINT_BUNDLE_RELEASE_NOTES$|CARGO_|RUST|VITE_|TAURI_|CC$|CXX$|AR$)/.test(k)).sort().map(k => [k, process.env[k]]);
   return crypto.createHash('sha256').update(source).update(JSON.stringify(env)).digest('hex');
 }
 function identity(binary) {
@@ -47,21 +47,21 @@ function run(command, args, options = {}) {
   });
 }
 async function build({ fast = false, bundle = false, args = [] } = {}) {
-  const before = fingerprint();
+  const before = fingerprint(bundle);
   const debug = args.includes('--debug');
   const custom = args.some(arg => arg !== '--no-bundle');
   if (custom && !debug) fs.rmSync(stamp, { force: true });
   // Custom output targets must never accidentally validate an older host binary.
   if (process.env.CARGO_BUILD_TARGET || args.some(a => a === '--target' || a.startsWith('--target='))) throw new Error('custom build targets are not supported by this Desktop launcher');
   const binary = path.join(target, debug ? 'debug' : 'release', executable);
-  const env = { ...process.env, CARGO_TARGET_DIR: target };
+  const env = { ...process.env, CARGO_TARGET_DIR: target, ...(bundle ? { MINT_BUNDLE_RELEASE_NOTES: '1' } : {}) };
   if (fast) Object.assign(env, { CARGO_PROFILE_RELEASE_LTO: 'false', CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '8' });
   console.error(`mint: building ${fast ? 'fast' : 'full'} Desktop${bundle ? ' package' : ''}…`);
   const tauri = path.join(root, 'node_modules/@tauri-apps/cli/tauri.js');
   await run(process.execPath, [tauri, 'build', ...(bundle ? [] : ['--no-bundle']), ...args, '--', '--locked'], { cwd: root, env });
-  if (fingerprint() !== before) throw new Error('source changed during build; run the command again');
+  if (fingerprint(bundle) !== before) throw new Error('source changed during build; run the command again');
   const state = { fingerprint: before, binary, identity: identity(binary), mode: fast ? 'fast' : 'full', assets: digest(['out/renderer']) };
-  if (!debug && !custom) {
+  if (!debug && !custom && !bundle) {
     fs.mkdirSync(target, { recursive: true });
     const temporary = `${stamp}.${process.pid}.tmp`;
     fs.writeFileSync(temporary, JSON.stringify(state)); fs.renameSync(temporary, stamp);
