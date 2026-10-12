@@ -1,41 +1,25 @@
 .slash-choice-panel {
+  position: absolute;
+  inset-inline: 0;
+  bottom: calc(100% + 8px);
+  z-index: 101;
   display: grid;
   grid-column: 1 / -1;
   grid-row: 1;
   min-width: 0;
   gap: 8px;
-  margin: 0 10px 10px;
+  margin: 0;
+  max-height: min(38dvh, 340px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 10px 12px 8px;
   color: var(--text-main, #e8e8e8);
-  background: var(--surface-bg, #151515);
+  background: var(--panel-bg, #252525);
   border: 1px solid var(--border, #343434);
-  border-radius: 8px;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  border-radius: 18px;
+  font-family: var(--font-sans, Inter, system-ui, sans-serif);
   box-shadow: none;
 }
-
-/* The composer is a CSS grid. Reserve complete rows for the choice list so it
-   cannot be auto-placed into the first 32px control column. */
-#chat-form:has(.slash-choice-panel) { grid-template-rows: auto minmax(48px, auto) 32px; }
-#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) #chat-input { grid-row: 2; }
-#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) .chat-tool-menu-wrap,
-#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) #screen-capture-btn,
-#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) .chat-provider-select,
-#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) .model-selector-container,
-#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) #send-btn,
-#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) #gemini-live-btn,
-#chat-form:has(.slash-choice-panel):not(:has(.mint-attachment)) .voice-pill.composer-voice-pill { grid-row: 3; }
-
-#chat-form:has(.slash-choice-panel):has(.mint-attachment) { grid-template-rows: auto auto minmax(48px, auto) 32px; }
-#chat-form:has(.slash-choice-panel):has(.mint-attachment) .slash-choice-panel { grid-row: 2; }
-#chat-form:has(.slash-choice-panel):has(.mint-attachment) #chat-input { grid-row: 3; }
-#chat-form:has(.slash-choice-panel):has(.mint-attachment) .chat-tool-menu-wrap,
-#chat-form:has(.slash-choice-panel):has(.mint-attachment) #screen-capture-btn,
-#chat-form:has(.slash-choice-panel):has(.mint-attachment) .chat-provider-select,
-#chat-form:has(.slash-choice-panel):has(.mint-attachment) .model-selector-container,
-#chat-form:has(.slash-choice-panel):has(.mint-attachment) #send-btn,
-#chat-form:has(.slash-choice-panel):has(.mint-attachment) #gemini-live-btn,
-#chat-form:has(.slash-choice-panel):has(.mint-attachment) .voice-pill.composer-voice-pill { grid-row: 4; }
 
 .slash-choice-heading {
   display: flex;
@@ -47,7 +31,7 @@
 }
 
 .slash-choice-heading > div { min-width: 0; }
-.slash-choice-command { color: var(--accent, #42d392); font-size: 12px; font-weight: 700; }
+.slash-choice-command { color: var(--text-muted, #858585); font-size: 12px; font-weight: 700; }
 .slash-choice-heading p { margin: 3px 0 0; color: var(--text-main, #e8e8e8); font-size: 13px; line-height: 1.4; white-space: pre-line; }
 
 .slash-choice-heading > button {
@@ -62,12 +46,13 @@
   line-height: 1;
 }
 
-.slash-choice-options { display: grid; gap: 3px; }
+.slash-choice-options { display: grid; gap: 2px; }
 .slash-choice-options > button {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 9px;
   width: 100%;
+  min-height: 32px;
   padding: 6px 8px;
   color: var(--text-main, #e8e8e8);
   text-align: left;
@@ -79,14 +64,32 @@
   font-size: 13px;
 }
 
-.slash-choice-options > button > span { color: var(--text-muted, #858585); min-width: 16px; }
+.slash-choice-options > button > span { color: var(--text-muted, #858585); min-width: 18px; text-align: center; border-radius: 50%; background: var(--surface-hover, #333); }
 .slash-choice-options > button:hover, .slash-choice-options > button:focus-visible {
-  color: var(--accent, #42d392);
+  color: var(--text-muted, #858585);
   background: var(--surface-strong, #222);
   outline: none;
 }
 .slash-choice-hint { padding-top: 5px; color: var(--text-muted, #858585); border-top: 1px solid var(--border, #343434); font-size: 11px; }
 
 @media (max-width: 600px) {
-  .slash-choice-panel { margin: 0 6px 8px; padding: 8px 10px 7px; }
+  .slash-choice-panel { margin: 0; padding: 8px 10px 7px; max-height: min(34dvh, 280px); }
+  .slash-choice-options > button { min-height: 40px; }
+}
+
+.slash-choice-options > button.active {
+  background: var(--surface-hover, #272727);
+  color: var(--text-main, #e8e8e8);
+}
+.slash-choice-options > button:focus-visible {
+  outline: 2px solid var(--text-muted);
+  outline-offset: -2px;
+}
+.slash-choice-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

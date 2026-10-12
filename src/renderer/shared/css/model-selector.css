@@ -771,3 +771,47 @@
   outline: 2px solid var(--interactive-fg);
   outline-offset: -2px;
 }
+
+/* Composer-width model picker with the model list and options side by side. */
+#chat-form .model-selector-container { position: static; }
+#chat-form .model-spotlight-popover {
+  inset-inline: 0;
+  bottom: calc(100% + 8px);
+  width: 100%;
+  max-width: 100%;
+  height: 410px;
+  max-height: min(65dvh, 410px);
+  flex-direction: row;
+  border-radius: 18px;
+  background: var(--panel-bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  animation: none;
+  font-family: var(--font-sans, Inter, system-ui, sans-serif);
+}
+#chat-form .model-spotlight-mobile-tabs { display: none; flex: 0 0 auto; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border-default); }
+#chat-form .model-spotlight-mobile-tabs button { flex: 1 1 0; min-width: 0; min-height: 28px; padding: 4px 8px; border: 0; border-radius: 6px; color: var(--text-muted); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+#chat-form .model-spotlight-mobile-tabs button[aria-selected="true"] { color: var(--text-main); background: var(--surface-hover); }
+#chat-form .model-spotlight-left-pane, #chat-form .model-spotlight-right-pane { box-sizing: border-box; flex: 0 0 50%; width: 50%; min-width: 0; min-height: 0; }
+#chat-form .model-spotlight-left-pane { border-right: 1px solid var(--border-default); }
+#chat-form .model-spotlight-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 5px; }
+#chat-form .model-spotlight-search-bar { flex: 0 0 auto; padding: 7px 12px; }
+#chat-form .model-spotlight-group-header { padding: 6px 8px 3px; }
+#chat-form .model-spotlight-item { min-height: 32px; margin: 0; padding: 6px 8px; border-radius: 8px; }
+#chat-form .model-spotlight-item.is-active,
+#chat-form .model-spotlight-item.is-inspected { background: var(--surface-hover); border-color: transparent; box-shadow: none; }
+#chat-form .model-item-repo { display: none; }
+#chat-form .model-item-effort-pill { border: 0; background: transparent; color: var(--text-muted); padding: 0; }
+#chat-form .model-item-name { font-size: 13px; font-weight: 500; }
+#chat-form .model-spotlight-right-pane { overflow-y: auto; overscroll-behavior: contain; }
+@media (max-width: 760px) {
+  #chat-form .model-spotlight-popover { height: min(60dvh, 420px); max-height: calc(var(--mint-viewport-height, 100dvh) - 160px); flex-direction: column; }
+  #chat-form .model-spotlight-mobile-tabs { display: flex; }
+  #chat-form .model-spotlight-left-pane, #chat-form .model-spotlight-right-pane { flex: 1 1 auto; width: 100%; border-right: 0; }
+  #chat-form .model-spotlight-popover.mobile-pane-models .model-spotlight-right-pane,
+  #chat-form .model-spotlight-popover.mobile-pane-options .model-spotlight-left-pane { display: none; }
+  #chat-form .model-spotlight-item, #chat-form .model-spotlight-mobile-tabs button { min-height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .model-selector-trigger, .model-selector-trigger-chevron { transition: none; }
+}

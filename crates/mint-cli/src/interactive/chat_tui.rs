@@ -1748,9 +1748,20 @@ impl ChatViewState {
         let cursor = self.cursor.min(self.composer.len());
         let before: String = self.composer[..cursor].iter().collect();
         if before.starts_with('/') && !before.contains(char::is_whitespace) {
-            return super::SLASH_COMMANDS
+            let prefix = before.to_lowercase();
+            let query = &prefix[1..];
+            let mut matches: Vec<_> = super::SLASH_COMMANDS
                 .iter()
-                .filter(|command| command.token.starts_with(&before))
+                .filter(|command| {
+                    command.on_cli()
+                        && command.token.starts_with('/')
+                        && (command.token.to_lowercase().starts_with(&prefix)
+                            || command.description.to_lowercase().contains(query))
+                })
+                .collect();
+            matches.sort_by_key(|command| !command.token.to_lowercase().starts_with(&prefix));
+            return matches
+                .into_iter()
                 .map(|command| (command.token.clone(), command.description.clone()))
                 .collect();
         }
@@ -4898,6 +4909,32 @@ mod dialog_tests {
             kind: KeyEventKind::Press,
             state: KeyEventState::empty(),
         }
+    }
+
+    #[test]
+    fn slash_suggestion_finds_description_and_completes_executable_token() {
+        let mut state = ChatViewState::default();
+        state.set_draft("/statistics".to_owned());
+        assert_eq!(
+            state.suggestions().first().map(|item| item.0.as_str()),
+            Some("/stats")
+        );
+        assert!(state.apply_selected_suggestion());
+        assert_eq!(state.composer_text(), "/stats ");
+        state.set_draft("/reasoning".to_owned());
+        assert!(
+            state
+                .suggestions()
+                .iter()
+                .all(|(token, _)| token.starts_with('/'))
+        );
+        state.set_draft("/remember a durable fact".to_owned());
+        assert!(state.suggestions().is_empty());
+        state.set_draft("/st".to_owned());
+        assert_eq!(
+            state.suggestions().first().map(|item| item.0.as_str()),
+            Some("/stats")
+        );
     }
 
     #[test]

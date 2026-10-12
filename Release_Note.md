@@ -1,6 +1,24 @@
 # Release Notes - Mint Agent v1.16.0
 
+- Balanced the Saved Pictures gallery across Desktop and Web with an adaptive five-column maximum, wider content alignment, and thumbnails that show the full image without cropping portrait photos.
+
+- Expanded historical and live agent activity to the full chat column so run summaries and thought rows no longer collapse to their content width. Kept the disclosure arrow beside the “Working through task” label.
+
+- Refined the chat run summary with a quieter run ID, clearer metric hierarchy, cleaner zero counts, and an SVG disclosure indicator for agent activity.
+
+- Replaced the remaining text glyph and emoji icons in the Desktop/Web sidebar project and conversation menus, move picker, and Show more control with consistent SVG icons.
+
+- Restored the Desktop/Web model selector's two-column layout: Models and Options appear together in equal halves on wide screens, while narrow screens use equal-width tabs.
+
+- Refined the Desktop/Web Mods popover to match the composer controls: a clear header and import row, readable mod cards with status badges, a prominent enable action, and quieter expandable options and session settings. Added responsive sizing and visible focus states for its controls.
+
 - Development CLI/Desktop/Web now read release notes live from their build checkout, with a shared embedded fallback snapshot generated in Cargo's OUT_DIR. Editing Release_Note.md no longer invalidates development Rust builds or launcher receipts. Shipping builds track and embed current notes via MINT_BUNDLE_RELEASE_NOTES=1; release jobs and Desktop packaging enable it, and npm source packages bundle automatically. Unified Classic CLI with the shared reader and added real Cargo fixtures covering live edits, missing/empty/invalid notes, unrelated caller workspaces, fallback, release refresh and mode switching.
+
+- Added ↑/↓ navigation and Enter selection to Desktop/Web slash choice panels, including `/models` provider/model steps. The highlighted option stays visible, resets for each new choice, follows pointer/focus selection, and consumes keys before composer history or submission; Esc dismisses and restores composer focus.
+
+- Redesigned Desktop/Web slash, skill and mention suggestions as a compact, scrollable panel above the composer, with icons, inline descriptions, keyboard hints and shared responsive styling. Command choice panels now use the same above-composer placement without expanding the input or shifting attachment/control rows.
+- Changed Desktop/Web model selection to a composer-width list with provider grouping and thinking effort. Mouse/touch selection closes the menu immediately; the Options pane retains model details and thinking controls. Added browser checks for both surface styles, attachment layouts, menu placement, completion, Enter/Escape and model selection.
+- Added case-insensitive command description search to Full-Screen TUI and Desktop/Web suggestions (for example, `/statistics` completes to `/stats`), while preserving argument entry, prioritizing token-prefix matches, and using the shared command catalog.
 
 - Fixed Enter on a fully typed slash command in Desktop/Web being consumed by autocomplete; exact commands now run immediately and can open their interactive choice UI on the first Enter.
 - Fixed the model selector overlapping the composer placeholder while a slash choice panel is open by placing it with the other composer controls on both attachment and non-attachment layouts.

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, type MouseEvent as ReactMouseEvent, type DragEvent as ReactDragEvent } from 'react'
+import { Check, ChevronDown, Folder, FolderInput, FolderMinus, Pencil, Plus, Trash2 } from 'lucide-react'
 import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon, renderScheduledTasksSvgIcon, renderLinkedFoldersSvgIcon } from '../constants/plugins'
 import { useAuthUser } from './AuthGate'
 import { runtimePlatform } from '../platform'
@@ -790,8 +791,8 @@ export default function DashboardSidebar({
                     </div>
                     {projectMenu?.projectId === group.id && (
                       <div className="sidebar-project-menu-popover" role="menu" style={{ top: projectMenu.top, left: projectMenu.left }} onClick={(e) => e.stopPropagation()}>
-                        {onNewChatInProject && <button type="button" role="menuitem" onClick={() => { setCollapsedProjects((prev) => ({ ...prev, [group.id]: false })); onNewChatInProject(group.id); setProjectMenu(null) }}>＋ <span>New chat in project</span></button>}
-                        <button type="button" role="menuitem" className="is-destructive" onClick={() => removeProjectFromSidebar(group.id)}>⌫ <span>Remove from sidebar</span></button>
+                        {onNewChatInProject && <button type="button" role="menuitem" onClick={() => { setCollapsedProjects((prev) => ({ ...prev, [group.id]: false })); onNewChatInProject(group.id); setProjectMenu(null) }}><Plus className="sidebar-menu-icon" size={14} aria-hidden="true" /><span>New chat in project</span></button>}
+                        <button type="button" role="menuitem" className="is-destructive" onClick={() => removeProjectFromSidebar(group.id)}><FolderMinus className="sidebar-menu-icon" size={14} aria-hidden="true" /><span>Remove from sidebar</span></button>
                       </div>
                     )}
                     {!isCollapsed && (
@@ -922,9 +923,8 @@ export default function DashboardSidebar({
                             className="sidebar-show-more-btn"
                             onClick={() => toggleShowMore(group.id)}
                           >
-                            {isExpanded
-                              ? 'Show less ⌃'
-                              : `Show more (${group.sessions.length - maxVisible}) ⌄`}
+                            <span>{isExpanded ? 'Show less' : `Show more (${group.sessions.length - maxVisible})`}</span>
+                            <ChevronDown className={isExpanded ? 'is-expanded' : ''} size={13} aria-hidden="true" />
                           </button>
                         )}
                       </div>
@@ -1164,9 +1164,9 @@ export default function DashboardSidebar({
                   }}
                   title={p.path}
                 >
-                  <span className="sidebar-move-item-icon">📁</span>
+                  <span className="sidebar-move-item-icon"><Folder size={14} aria-hidden="true" /></span>
                   <span className="sidebar-move-item-name">{p.name}</span>
-                  {isCurrent && <span className="sidebar-move-item-check">✓</span>}
+                  {isCurrent && <span className="sidebar-move-item-check"><Check size={14} aria-hidden="true" /></span>}
                 </button>
               )
             })}
@@ -1189,7 +1189,7 @@ export default function DashboardSidebar({
               </svg>
             </span>
             <span className="sidebar-move-item-name">Recents (No project)</span>
-            {!moveMenu.currentWorkspacePath && <span className="sidebar-move-item-check">✓</span>}
+            {!moveMenu.currentWorkspacePath && <span className="sidebar-move-item-check"><Check size={14} aria-hidden="true" /></span>}
           </button>
 
           {onBrowseFolder && (
@@ -1220,9 +1220,9 @@ export default function DashboardSidebar({
         const session = conversationSessions.find((item) => item.id === conversationMenu.sessionId)
         if (!session) return null
         return <div className="sidebar-conversation-menu-popover" role="menu" style={{ top: conversationMenu.top, left: conversationMenu.left }} onClick={(event) => event.stopPropagation()}>
-          <button type="button" role="menuitem" onClick={() => { setEditingSessionId(session.id); setEditTitleValue(session.title || ''); setConversationMenu(null) }}>✎ <span>Rename</span></button>
-          {onUpdateSessionWorkspace && <button type="button" role="menuitem" onClick={(event) => { setConversationMenu(null); openMoveMenu(event as any, session) }}>↗ <span>Move to project</span></button>}
-          <button type="button" role="menuitem" className="is-destructive" onClick={() => { onDeleteConversation(session.id); setConversationMenu(null) }}>⌫ <span>Delete conversation</span></button>
+          <button type="button" role="menuitem" onClick={() => { setEditingSessionId(session.id); setEditTitleValue(session.title || ''); setConversationMenu(null) }}><Pencil className="sidebar-menu-icon" size={14} aria-hidden="true" /><span>Rename</span></button>
+          {onUpdateSessionWorkspace && <button type="button" role="menuitem" onClick={(event) => { setConversationMenu(null); openMoveMenu(event as any, session) }}><FolderInput className="sidebar-menu-icon" size={14} aria-hidden="true" /><span>Move to project</span></button>}
+          <button type="button" role="menuitem" className="is-destructive" onClick={() => { onDeleteConversation(session.id); setConversationMenu(null) }}><Trash2 className="sidebar-menu-icon" size={14} aria-hidden="true" /><span>Delete conversation</span></button>
         </div>
       })()}
     </aside>

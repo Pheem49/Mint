@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { ChevronDown, Puzzle, Upload, X } from 'lucide-react'
 import { modsPlatform, runtimePlatform } from '../platform'
 import type { ModOperation, ModRecord, ModResponse, ModTestReport } from '../mods'
 import { ModUi } from './ModUi'
@@ -104,7 +105,7 @@ export function ModsPanel({ workspacePath, chatId, launcherTarget }: { workspace
   const sidePanelMods = active.filter(m => m.snapshot?.ui.side_panel)
   const selected = mods.find(m => m.id === tab)
 
-  const launchButton = <button type="button" className="mods-launch" disabled={!workspacePath} onClick={() => setOpen(!open)} aria-expanded={open} title={workspacePath ? 'Workspace mods' : 'Choose a workspace to use mods'}>Mods{active.length ? ` · ${active.length}` : ''}</button>
+  const launchButton = <button type="button" className="mods-launch" disabled={!workspacePath} onClick={() => setOpen(!open)} aria-expanded={open} title={workspacePath ? 'Workspace mods' : 'Choose a workspace to use mods'}><Puzzle size={14} aria-hidden="true" /><span>Mods</span>{active.length > 0 && <span className="mods-launch-count" aria-label={`${active.length} active mods`}>{active.length}</span>}</button>
   const panelPosition = launcherTarget ? (() => {
     const bounds = launcherTarget.getBoundingClientRect()
     return {
@@ -121,16 +122,11 @@ export function ModsPanel({ workspacePath, chatId, launcherTarget }: { workspace
       </section>)}
       {!launcherTarget && launchButton}
       {open && createPortal(<aside className="mods-panel mint-mods" aria-label="Workspace mods" style={panelPosition}>
-      <header><div><strong>Mods</strong><p>{mods.length} mods · {active.length} active</p></div><button type="button" onClick={() => setOpen(false)} aria-label="Close mods">×</button></header>
+      <header className="mods-panel-header"><span className="mods-panel-icon" aria-hidden="true"><Puzzle size={18} /></span><div className="mods-panel-title"><strong>Mods</strong><p>{mods.length} installed · {active.length} active</p></div><button type="button" className="mods-close" onClick={() => setOpen(false)} aria-label="Close mods"><X size={17} aria-hidden="true" /></button></header>
       {sidePanelMods.length > 0 && <nav aria-label="Mod panels"><button type="button" aria-pressed={tab === 'manage'} onClick={() => setTab('manage')}>Manage</button>{sidePanelMods.map(m => <button key={m.id} type="button" aria-pressed={tab === m.id} onClick={() => setTab(m.id)}>{m.name}</button>)}</nav>}
       {error && <p role="alert" className="mod-error">{error}</p>}
       {selected?.snapshot?.ui.side_panel && tab !== 'manage' ? <section className="mod-content"><ModUi node={selected.snapshot.ui.side_panel} onAction={(name, value) => action(selected, name, value)} /></section> : <div className="mod-content">
-        {!mods.length && <p className="mod-hint">No mods in this workspace yet. Ask Mint to create one or import a .mintmod package. Imported mods stay off until enabled.</p>}
-        <details className="mod-session-settings">
-          <summary>Session settings</summary>
-          <ModSessionControls enabled={data.session?.hotReload ?? false} busy={busy} onToggle={enabled => void operate({ action: 'hot_reload', value: enabled })} />
-        </details>
-        <div className="mod-actions"><label>Enable for <select value={scope} onChange={e => setScope(e.target.value as typeof scope)}><option value="chat">This chat</option><option value="workspace">This workspace</option><option value="global">All workspaces</option></select></label><button type="button" disabled={busy} onClick={() => importRef.current?.click()}>Import</button></div>
+        <div className="mods-toolbar"><label htmlFor="mods-scope">Enable for <select id="mods-scope" value={scope} onChange={e => setScope(e.target.value as typeof scope)}><option value="chat">This chat</option><option value="workspace">This workspace</option><option value="global">All workspaces</option></select></label><button type="button" className="mods-import" disabled={busy} onClick={() => importRef.current?.click()}><Upload size={14} aria-hidden="true" />Import</button></div>
         <input ref={importRef} type="file" accept=".mintmod" hidden onChange={async e => {
           const file = e.target.files?.[0]; e.target.value = ''; if (!file) return
           if (file.size > 1024 * 1024) { setError('Package exceeds 1 MiB'); return }
@@ -145,23 +141,24 @@ export function ModsPanel({ workspacePath, chatId, launcherTarget }: { workspace
             await operate({ action: 'import', package: packed, expectedHash: info.expectedHash || undefined })
           } catch (e) { if (currentScope.current === `${workspacePath}\0${chatId}`) setError(String(e)) }
         }} />
-        {loading && <p role="status">Loading mods…</p>}
-        {!loading && !mods.length && <p>No mods in this workspace yet.</p>}
+        {loading && <p role="status" className="mods-empty">Loading mods…</p>}
+        {!loading && !mods.length && <div className="mods-empty"><Puzzle size={22} aria-hidden="true" /><strong>No mods yet</strong><p>Ask Mint to create one, or import a .mintmod package. Imported mods stay off until enabled.</p></div>}
         {mods.map(mod => <article key={mod.id} className="mod-entry">
-          <div className="mod-entry-heading"><strong>{mod.name}</strong><span>{mod.error ? 'Error' : mod.enabled ? 'Active' : 'Off'}</span></div>
-          <p className="mod-hint">{mod.manifest?.version} {mod.changed ? '· Source changed; active revision preserved' : ''}</p>
+          <div className="mod-entry-heading"><div><strong>{mod.name}</strong><small>Version {mod.manifest?.version || 'unknown'}</small></div><span className={`mod-status ${mod.error ? 'is-error' : mod.enabled ? 'is-active' : ''}`}>{mod.error ? 'Error' : mod.enabled ? 'Active' : 'Off'}</span></div>
+          {mod.changed && <p className="mod-hint">Source changed · active revision preserved</p>}
           {mod.reloadError && <p role="alert" className="mod-error">Reload: {mod.reloadError}</p>}
           {(mod.error || mod.sourceError) && <p role="alert" className="mod-error">{mod.error || mod.sourceError}</p>}
-          <p className="mod-hint">Permissions: {mod.manifest?.permissions?.join(', ') || 'UI, events and mod state'}</p>
-          <button type="button" className="mod-primary-action" disabled={busy || !mod.manifest} onClick={() => mod.enabled && !mod.changed ? void operate({ action: 'disable', id: mod.id }) : activate(mod)}>{mod.enabled && !mod.changed ? 'Disable' : mod.changed ? 'Validate & reload' : 'Enable'}</button>
-          <details className="mod-entry-more"><summary>More options</summary>
+          <p className="mod-hint">{mod.manifest?.permissions?.join(', ') || 'UI, events and mod state'}</p>
+          <div className="mod-entry-footer"><button type="button" className={`mod-primary-action ${mod.enabled && !mod.changed ? 'is-disable' : ''}`} disabled={busy || !mod.manifest} onClick={() => mod.enabled && !mod.changed ? void operate({ action: 'disable', id: mod.id }) : activate(mod)}>{mod.enabled && !mod.changed ? 'Disable' : mod.changed ? 'Validate & reload' : 'Enable'}</button>
+          <details className="mod-entry-more"><summary>More options <ChevronDown size={13} aria-hidden="true" /></summary>
             <div className="mod-actions"><button type="button" disabled={busy || !mod.source} onClick={() => void operate({ action: 'export', id: mod.id })}>Export</button><button type="button" disabled={busy || !mod.source} onClick={() => void operate({ action: 'test', id: mod.id })}>Run tests</button></div>
             {reports[mod.id] && <ModTestResults report={reports[mod.id]} />}
             <details><summary>Source & diagnostics</summary><pre>{mod.source}</pre><pre>{mod.snapshot?.logs?.join('\n') || 'No log messages'}</pre><p className="mod-hint">Active revision: {mod.activeHash || 'None'}</p></details>
             {mod.revisions.length > 1 && <label className="mod-revisions">Restore source revision <select value="" disabled={busy} onChange={e => { const hash = e.target.value; if (hash && window.confirm('Restore this source revision? Review and enable it after restoring.')) void operate({ action: 'rollback', id: mod.id, hash, expectedHash: mod.hash }) }}><option value="">Choose revision</option>{mod.revisions.filter(h => h !== mod.hash).map(h => <option key={h} value={h}>{h.slice(0, 12)}</option>)}</select></label>}
-          </details>
+          </details></div>
         </article>)}
         {data.toolRequests?.map(request => <article className="mod-entry" key={request.id}><strong>{request.modId}: {request.action}</strong><pre>{JSON.stringify(request.input, null, 2)}</pre><button type="button" disabled={busy} onClick={() => { if (window.confirm(`Run ${request.action} requested by ${request.modId}?\n${JSON.stringify(request.input, null, 2)}`)) void operate({ action: 'run_request', command: request.id, grantPermissions: true }) }}>Review & run tool</button></article>)}
+        <details className="mod-session-settings"><summary>Session settings <ChevronDown size={13} aria-hidden="true" /></summary><ModSessionControls enabled={data.session?.hotReload ?? false} busy={busy} onToggle={enabled => void operate({ action: 'hot_reload', value: enabled })} /></details>
       </div>}
       </aside>, document.body)}
     </div>

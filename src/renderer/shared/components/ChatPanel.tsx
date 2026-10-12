@@ -19,6 +19,7 @@ import {
 import { badge, providerLabel, fallbackNotice } from '../utils/providers'
 import { parseWebSearchSources } from '../utils/agentActivity'
 import { useLatestCallback } from '../utils/useLatestCallback'
+import SlashChoicePanel from './SlashChoicePanel'
 import SlashSuggestions, { type SlashSuggestionsHandle } from './SlashSuggestions'
 import { ChatCodeBlock } from './ChatCodeBlock'
 import { renderApprovalDetails, renderDiff, type ApprovalDetails } from '../utils/approval'
@@ -242,17 +243,6 @@ export default function ChatPanel({
   onDismissSlashChoice,
   } = { ...conversation, ...actions }
   const onThinkingExpandedChange = useLatestCallback(handleThinkingExpandedChange)
-  useEffect(() => {
-    if (!slashChoice) return
-    const dismissOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      onDismissSlashChoice?.()
-      document.getElementById('chat-input')?.focus()
-    }
-    window.addEventListener('keydown', dismissOnEscape)
-    return () => window.removeEventListener('keydown', dismissOnEscape)
-  }, [slashChoice, onDismissSlashChoice])
   // The initiating surface already renders a live prompt/reply pair below.
   // Hide its matching persisted turn until the local stream settles, while
   // still showing turns submitted from other surfaces during that time.
@@ -1839,23 +1829,12 @@ export default function ChatPanel({
           }}
         >
           {slashChoice && (
-            <section className="slash-choice-panel" aria-label={`${slashChoice.command} choices`}>
-              <header className="slash-choice-heading">
-                <div>
-                  <span className="slash-choice-command">{slashChoice.command}</span>
-                  <p>{slashChoice.title}</p>
-                </div>
-                <button type="button" onClick={onDismissSlashChoice} aria-label="Dismiss choices">×</button>
-              </header>
-              <div className="slash-choice-options" role="group" aria-label="Options">
-                {slashChoice.options.map((option, index) => (
-                  <button key={option.value} type="button" onClick={() => onSelectSlashChoice?.(option.value)}>
-                    <span>{index + 1}.</span>{option.label}
-                  </button>
-                ))}
-              </div>
-              <div className="slash-choice-hint">Select an option · Esc to dismiss</div>
-            </section>
+            <SlashChoicePanel
+              choice={slashChoice}
+              inputRef={textareaRef}
+              onSelect={onSelectSlashChoice}
+              onDismiss={onDismissSlashChoice}
+            />
           )}
           {(imageAttachments.length > 0 || videoAttachments.length > 0 || documentName) && (
             <div className="mint-attachment">
@@ -1955,7 +1934,7 @@ export default function ChatPanel({
             workspacePath={workspacePath}
             mcpServers={settingsConfig?.mcpServers}
             anchorRef={textareaRef}
-            suppressed={historyIndex !== null}
+            suppressed={historyIndex !== null || Boolean(slashChoice)}
           />
           <div className="chat-tool-menu-wrap" ref={toolMenuRef}>
               <button id="chat-tool-btn" type="button" aria-haspopup="menu" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((open) => !open)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
