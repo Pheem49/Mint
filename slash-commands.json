@@ -1,4 +1,5 @@
 [
+  { "token": "/mint-web", "usage": "", "description": "Start Mint Web in a background terminal; stop it when Mint closes", "category": "system", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/help", "usage": "", "description": "Show this help", "category": "system", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mods", "usage": "[list|source|validate|test|enable|disable|export|import|hot-reload]", "description": "Manage workspace mods, tests and live UI panels", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/theme", "usage": "", "description": "Choose terminal theme with a live preview", "category": "system", "surfaces": ["cli"] },

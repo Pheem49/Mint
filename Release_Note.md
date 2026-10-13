@@ -1,5 +1,7 @@
 # Release Notes - Mint Agent v1.16.0
 
+- Added `/mint-web` on CLI, Desktop and Web to launch Mint Web as a tracked background terminal. Repeated calls reuse the live job, occupied ports are rejected, and `/shells` exposes logs and Stop. A lifetime pipe shuts down the child API and tracked frontend when its owning Mint backend exits, including abrupt termination. The standalone web launcher now tracks and supervises its frontend instead of leaving an untracked process behind. Added subprocess lifecycle, restart, ownership, port conflict and shared slash-routing regressions.
+
 - Fixed the Full-Screen TUI Back to bottom End shortcut being consumed by draft cursor navigation. While history is scrolled up, End returns to the latest message without changing the draft or cursor; at the bottom it retains normal composer navigation, both while idle and while the agent runs.
 
 - Fixed Full-Screen TUI transcript drag selection stopping at the visible viewport. Holding a left-button drag at the top/bottom edge now scrolls through history, retains off-screen selected text for Ctrl+C/right-click copy, and stops on release. Selected transcript content stays stable during streaming; composer selection remains available. Snapshots retain styled text and render only the viewport/copy chunks instead of allocating cells for the entire history, preserve the scrollbar and Back to bottom button, and support history beyond 65,535 visual rows.

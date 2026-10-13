@@ -69,6 +69,15 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                         markdown: error.to_string(),
                     },
                 }
+            } else if token == "/mint-web" {
+                let cwd = req
+                    .cwd
+                    .as_deref()
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                let markdown = crate::system::mint_web::command(&cwd, rest, owner, &config)
+                    .unwrap_or_else(|e| e);
+                crate::slash::SlashResponse::Message { markdown }
             } else if token == "/preview" {
                 let cwd = req
                     .cwd

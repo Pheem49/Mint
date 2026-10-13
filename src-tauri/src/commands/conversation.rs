@@ -542,6 +542,16 @@ pub(crate) async fn run_slash_command(
                 markdown: error.to_string(),
             },
         }
+    } else if token == "/mint-web" {
+        let owner = background_owner(owner_token)?;
+        let cwd = request
+            .cwd
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        let markdown =
+            mint_core::system::mint_web::command(&cwd, rest, owner, &config).unwrap_or_else(|e| e);
+        SlashResponse::Message { markdown }
     } else if token == "/preview" {
         let owner = background_owner(owner_token)?;
         let cwd = request

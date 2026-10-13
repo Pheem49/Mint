@@ -237,13 +237,9 @@ pub(crate) async fn launch_mint_target(target: String, dev: bool) -> Result<()> 
             } else {
                 "dev:web"
             };
-            std::process::Command::new("npm")
-                .current_dir(&project_root)
-                .args(["run", web_cmd])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
+            let frontend = mint_core::bg_shell::start_web_frontend(&project_root, &config, web_cmd)
                 .map_err(|e| anyhow::anyhow!("Failed to launch web app: {e}"))?;
+            mint_core::bg_shell::watch_web_owner();
 
             println!("\n{MINT}✔ Mint Web is running!{RESET}\n");
             println!("    {BLUE}Web UI:{RESET}     {MINT}http://localhost:9000{RESET}");
@@ -260,7 +256,20 @@ pub(crate) async fn launch_mint_target(target: String, dev: bool) -> Result<()> 
             println!("{DIM}(API Requests & Error logs will be displayed below){RESET}\n");
 
             println!("{DIM}Press Ctrl+C to stop{RESET}\n");
-            mint_core::start_api_server(3000).await?;
+            tokio::select! {
+                result = mint_core::start_api_server(3000) => result?,
+                result = async {
+                    loop {
+                        let job = mint_core::bg_shell::snapshot(&frontend.id)?;
+                        if !matches!(job.status, mint_core::bg_shell::JobStatus::Running | mint_core::bg_shell::JobStatus::Stopping) {
+                            anyhow::bail!("Mint Web frontend stopped ({:?}):\n{}\n{}", job.status, job.stdout, job.stderr);
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                    #[allow(unreachable_code)]
+                    Ok::<(), anyhow::Error>(())
+                } => result?,
+            }
         }
         _ => {}
     }

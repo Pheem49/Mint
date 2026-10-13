@@ -216,6 +216,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         };
     }
     match token.as_str() {
+        "/mint-web" => match crate::system::mint_web::command(&req.workspace(), rest, None, config) { Ok(text) => message(text), Err(err) => error(err) },
         "/shells" if !req.is_cli() => match crate::bg_shell::shells_command(rest, &req.workspace(), &None, config) {
             Ok(text) => message(text), Err(err) => error(err.to_string()),
         },
@@ -2515,6 +2516,24 @@ mod tests {
             cwd: None,
             surface: Some(surface.to_string()),
             chat_id: None,
+        }
+    }
+
+    #[test]
+    fn mint_web_command_is_registered_and_validates_usage_on_all_surfaces() {
+        for surface in ["cli", "desktop", "web"] {
+            assert!(catalog::SLASH_COMMANDS.iter().any(
+                |spec| spec.token == "/mint-web" && spec.surfaces.iter().any(|s| s == surface)
+            ));
+            match execute(
+                &req_surface("/mint-web unexpected", surface),
+                &mut MintConfig::default(),
+            ) {
+                SlashResponse::Message { markdown } => {
+                    assert!(markdown.contains("Usage: /mint-web"))
+                }
+                _ => panic!("Mint Web command was not routed on {surface}"),
+            }
         }
     }
 

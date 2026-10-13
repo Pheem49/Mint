@@ -10,6 +10,7 @@ pub mod docker_sandbox;
 pub mod folder_picker;
 pub mod html_preview;
 pub mod knowledge_engine;
+pub mod mint_web;
 pub mod project_detector;
 pub mod release_notes;
 pub mod shell;

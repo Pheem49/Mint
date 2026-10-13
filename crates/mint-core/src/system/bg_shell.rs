@@ -92,6 +92,8 @@ pub struct JobRecord {
     stop_complete: std::sync::atomic::AtomicBool,
     stop_error: Mutex<Option<String>>,
     managed_stop: Option<Arc<std::sync::atomic::AtomicBool>>,
+    // Held by the backend, so the owned child observes EOF when its owner dies.
+    owner_stdin: Mutex<Option<std::process::ChildStdin>>,
 }
 
 pub struct StartedJob {
@@ -426,6 +428,7 @@ pub(crate) fn start_local_service(
         stop_complete: std::sync::atomic::AtomicBool::new(false),
         stop_error: Mutex::new(None),
         managed_stop: Some(Arc::clone(&stop)),
+        owner_stdin: Mutex::new(None),
     });
     job.stdout
         .lock()
@@ -453,6 +456,62 @@ pub(crate) fn start_local_service(
         register(job);
     });
     Ok(id)
+}
+
+/// Start an application-owned program with a lifetime pipe on stdin.
+pub(crate) fn start_owned_background(
+    cwd: &Path,
+    config: &MintConfig,
+    command: &str,
+    mut program: Command,
+) -> Result<StartedJob, ShellError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        program.process_group(0);
+    }
+    program.env("MINT_WEB_LIFETIME_PIPE", "1");
+    spawn_tracked(cwd, config, command, program, true)
+}
+
+/// Launch Mint's known frontend scripts as tracked children of the web backend.
+pub fn start_web_frontend(
+    cwd: &Path,
+    config: &MintConfig,
+    script: &str,
+) -> Result<StartedJob, ShellError> {
+    if !matches!(script, "dev:web" | "preview:web") {
+        return Err(ShellError::Execute(std::io::Error::other(
+            "Unknown Mint Web frontend script",
+        )));
+    }
+    let mut program = Command::new(if cfg!(windows) { "npm.cmd" } else { "npm" });
+    program.args(["run", script]);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        program.process_group(0);
+    }
+    spawn_tracked(cwd, config, &format!("npm run {script}"), program, false)
+}
+
+/// Called by the owned Mint Web child. EOF also covers abrupt owner termination.
+pub fn watch_web_owner() {
+    if std::env::var_os("MINT_WEB_LIFETIME_PIPE").is_none() {
+        return;
+    }
+    std::thread::spawn(|| {
+        let mut byte = [0u8; 1];
+        let mut stdin = std::io::stdin().lock();
+        loop {
+            match stdin.read(&mut byte) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        shutdown();
+        std::process::exit(0);
+    });
 }
 
 /// Starts `command` detached from the blocking tool-call path and returns
@@ -484,19 +543,39 @@ pub fn start_background(
         });
     }
 
+    spawn_tracked(
+        cwd,
+        config,
+        command,
+        crate::shell::shell_command(command),
+        false,
+    )
+}
+
+fn spawn_tracked(
+    cwd: &Path,
+    config: &MintConfig,
+    command: &str,
+    mut cmd: Command,
+    owned: bool,
+) -> Result<StartedJob, ShellError> {
+    if is_shutting_down() {
+        return Err(ShellError::Execute(std::io::Error::other(
+            "Mint backend is shutting down",
+        )));
+    }
     let cwd = assert_path_capability(cwd, Capability::Write, config)?;
     if !cwd.is_dir() {
         return Err(ShellError::InvalidWorkingDirectory(cwd));
     }
-
-    let mut cmd = crate::shell::shell_command(command);
     cmd.current_dir(&cwd)
-        .stdin(Stdio::null())
+        .stdin(if owned { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
     let mut child = cmd.spawn()?;
     let pid = child.id();
+    let owner_stdin = child.stdin.take();
     let stdout = child.stdout.take().expect("stdout was piped");
     let stderr = child.stderr.take().expect("stderr was piped");
 
@@ -516,6 +595,7 @@ pub fn start_background(
         stop_complete: std::sync::atomic::AtomicBool::new(false),
         stop_error: Mutex::new(None),
         managed_stop: None,
+        owner_stdin: Mutex::new(owner_stdin),
     });
 
     spawn_pump(stdout, Arc::clone(&job), StreamKind::Stdout);
@@ -620,6 +700,7 @@ pub(crate) fn promote_timed_out(
         stop_complete: std::sync::atomic::AtomicBool::new(false),
         stop_error: Mutex::new(None),
         managed_stop: None,
+        owner_stdin: Mutex::new(None),
     });
 
     {
@@ -1023,6 +1104,29 @@ pub fn kill_job(job_id: &str) -> Result<String, ShellError> {
     let Some(pid) = job.pid else {
         return Err(ShellError::JobNotFound(job_id.into()));
     };
+    // Closing the lifetime pipe lets owned Mint Web shut down its own tracked
+    // frontend before it exits. Keep forceful group cleanup as a fallback.
+    if job.owner_stdin.lock().unwrap().take().is_some() {
+        *status = JobStatus::Stopping;
+        drop(status);
+        job.stop_complete
+            .store(true, std::sync::atomic::Ordering::Release);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(2));
+            if !matches!(*job.status.lock().unwrap(), JobStatus::Stopping) {
+                return;
+            }
+            #[cfg(not(target_os = "windows"))]
+            let _ = Command::new("kill")
+                .args(["-KILL", "--", &format!("-{pid}")])
+                .output();
+            #[cfg(target_os = "windows")]
+            let _ = Command::new("taskkill")
+                .args(["/T", "/F", "/PID", &pid.to_string()])
+                .output();
+        });
+        return Ok(format!("job_id: {job_id} stop requested (pid {pid})"));
+    }
     #[cfg(not(target_os = "windows"))]
     let result = Command::new("kill")
         .args(["-TERM", "--", &format!("-{pid}")])
@@ -1089,6 +1193,123 @@ mod tests {
                 return output;
             }
             std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owned_background_keeps_stdin_open_and_stop_kills_the_program() {
+        let mut program = Command::new("bash");
+        program.args(["-c", "echo ready; cat; echo eof"]);
+        let job = start_owned_background(Path::new("."), &local_config(), "owned fixture", program)
+            .unwrap();
+        let _cleanup = StopOnDrop(job.id.clone());
+        let ready = wait_json(&job.id, |v| {
+            v["stdout"].as_str().is_some_and(|s| s.contains("ready"))
+        });
+        assert_eq!(ready["status"], "running");
+        assert!(!ready["stdout"].as_str().unwrap().contains("eof"));
+        kill_job(&job.id).unwrap();
+        let stopped = wait_json(&job.id, |v| v["status"] == "stopped");
+        assert!(stopped["stdout"].as_str().unwrap().contains("eof"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn owned_web_stops_frontend_when_owner_is_killed() {
+        const TEST: &str = "system::bg_shell::tests::owned_web_stops_frontend_when_owner_is_killed";
+        let fixture = |role: &str| {
+            let mut p = Command::new(std::env::current_exe().unwrap());
+            p.args(["--exact", TEST, "--nocapture"])
+                .env("MINT_WEB_FIXTURE_ROLE", role);
+            p
+        };
+        match std::env::var("MINT_WEB_FIXTURE_ROLE").as_deref() {
+            Ok("web") => {
+                let frontend =
+                    start_background(Path::new("."), &local_config(), "sleep 30").unwrap();
+                println!("frontend:{}", frontend.pid.unwrap());
+                std::io::stdout().flush().unwrap();
+                watch_web_owner();
+                loop {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+            Ok("owner") => {
+                let web = start_owned_background(
+                    Path::new("."),
+                    &local_config(),
+                    "web fixture",
+                    fixture("web"),
+                )
+                .unwrap();
+                println!("web:{}", web.pid.unwrap());
+                let ready = wait_json(&web.id, |v| {
+                    v["stdout"]
+                        .as_str()
+                        .is_some_and(|s| s.contains("frontend:"))
+                });
+                println!("{}", ready["stdout"].as_str().unwrap());
+                std::io::stdout().flush().unwrap();
+                loop {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+            _ => {}
+        }
+        struct Cleanup {
+            owner: Child,
+            groups: Vec<u32>,
+        }
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = self.owner.kill();
+                let _ = self.owner.wait();
+                for pid in &self.groups {
+                    let _ = Command::new("kill")
+                        .args(["-KILL", "--", &format!("-{pid}")])
+                        .output();
+                }
+            }
+        }
+        use std::io::{BufRead, BufReader};
+        let mut owner = fixture("owner").stdout(Stdio::piped()).spawn().unwrap();
+        let stdout = owner.stdout.take().unwrap();
+        let mut cleanup = Cleanup {
+            owner,
+            groups: vec![],
+        };
+        for line in BufReader::new(stdout).lines() {
+            let line = line.unwrap();
+            if let Some(pid) = line
+                .strip_prefix("web:")
+                .or_else(|| line.strip_prefix("frontend:"))
+            {
+                cleanup.groups.push(pid.parse().unwrap());
+                if cleanup.groups.len() == 2 {
+                    break;
+                }
+            }
+        }
+        assert_eq!(cleanup.groups.len(), 2);
+        cleanup.owner.kill().unwrap();
+        cleanup.owner.wait().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        for pid in &cleanup.groups {
+            loop {
+                let live = std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+                    stat.rsplit_once(')')
+                        .is_some_and(|(_, rest)| !rest.trim_start().starts_with('Z'))
+                });
+                if !live {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "owned process {pid} survived its owner"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
         }
     }
 
