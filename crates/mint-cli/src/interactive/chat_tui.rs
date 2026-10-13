@@ -2965,6 +2965,19 @@ impl ChatViewState {
             let mut input_block = Block::default()
                 .borders(Borders::TOP | Borders::BOTTOM)
                 .border_style(Style::default().fg(crate::terminal_theme::MUTED));
+            let bg_running = mint_core::bg_shell::running_count_for(&self.current_dir);
+            if bg_running > 0 {
+                input_block = input_block.title_top(
+                    Line::styled(
+                        format!(
+                            " {bg_running} Background Terminal{} running ",
+                            if bg_running == 1 { "" } else { "s" }
+                        ),
+                        Style::default().fg(crate::terminal_theme::BLUE),
+                    )
+                    .alignment(ratatui::layout::Alignment::Right),
+                );
+            }
             if composer_rows.len() > visible_composer_rows {
                 input_block = input_block.title_bottom(format!(
                     " {}–{} / {} lines · ↑/↓ edit ",
@@ -2990,24 +3003,13 @@ impl ChatViewState {
             } else {
                 " [Agent] "
             };
-            let bg_running =
-                mint_core::bg_shell::running_count_for(std::path::Path::new(&self.workspace));
-            let jobs_prefix = if bg_running > 0 {
-                format!(
-                    "{} background terminal{} · /shells · ",
-                    bg_running,
-                    if bg_running == 1 { "" } else { "s" }
-                )
-            } else {
-                String::new()
-            };
             let path_text = format!("path: {}", self.workspace);
             let thinking_text = format!("• {}", self.thinking_status);
             let left_len = mode_label.chars().count()
                 + self.model.chars().count()
                 + thinking_text.chars().count()
                 + 1;
-            let right_len = jobs_prefix.chars().count() + path_text.chars().count();
+            let right_len = path_text.chars().count();
             let available = rows[5].width as usize;
             let gap = available.saturating_sub(left_len + right_len);
             let footer = if let Some(notice) = self.active_notice() {
@@ -3021,15 +3023,6 @@ impl ChatViewState {
                 Line::styled(
                     " Selection mode · ↑/↓ scroll · Enter/y copy · Esc cancel",
                     Style::default().fg(crate::terminal_theme::WARNING),
-                )
-            } else if bg_running > 0 && left_len + right_len > available {
-                Line::styled(
-                    format!(
-                        " {bg_running} terminal{} · /shells ·{}",
-                        if bg_running == 1 { "" } else { "s" },
-                        mode_label
-                    ),
-                    Style::default().fg(crate::terminal_theme::BLUE),
                 )
             } else {
                 Line::from(vec![
@@ -3049,10 +3042,6 @@ impl ChatViewState {
                         Style::default().fg(crate::terminal_theme::ACCENT),
                     ),
                     Span::raw(" ".repeat(gap)),
-                    Span::styled(
-                        jobs_prefix,
-                        Style::default().fg(crate::terminal_theme::BLUE),
-                    ),
                     Span::styled(path_text, Style::default().fg(crate::terminal_theme::MUTED)),
                 ])
             };
@@ -4115,8 +4104,7 @@ impl ChatTui {
             &mint_core::scoped_chat_id(&state.chat_id, Some(&state.current_dir.to_string_lossy())),
         )
         .unwrap_or_default();
-        let mut previous_bg_count =
-            mint_core::bg_shell::running_count_for(std::path::Path::new(&state.workspace));
+        let mut previous_bg_count = mint_core::bg_shell::running_count_for(&state.current_dir);
         let mut redraw = true;
         let mut painted_notice_visible = false;
         let mut reported_mod_viewport = None;
@@ -4168,8 +4156,7 @@ impl ChatTui {
                 }
             }
 
-            let bg_count =
-                mint_core::bg_shell::running_count_for(std::path::Path::new(&state.workspace));
+            let bg_count = mint_core::bg_shell::running_count_for(&state.current_dir);
             if bg_count != previous_bg_count {
                 previous_bg_count = bg_count;
                 redraw = true;
@@ -5498,7 +5485,7 @@ mod dialog_tests {
     }
 
     #[test]
-    fn background_count_is_workspace_scoped_and_visible_in_narrow_tui() {
+    fn background_count_updates_above_composer_and_uses_the_actual_workspace() {
         let root = std::env::temp_dir().join(format!(
             "mint-tui-bg-{}-{}",
             std::process::id(),
@@ -5524,16 +5511,37 @@ mod dialog_tests {
                 let _ = std::fs::remove_dir(&self.1);
             }
         }
-        let _cleanup = Cleanup(vec![first.id, second.id], root.clone());
+        let _cleanup = Cleanup(vec![first.id.clone(), second.id.clone()], root.clone());
         let mut state = ChatViewState::default();
-        state.workspace = root.to_string_lossy().into_owned();
-        for (width, expected) in [(160, "2 background terminals"), (40, "2 terminals")] {
+        state.current_dir = root.clone();
+        state.workspace = format!("{} · branch: Rust", root.display());
+        state.set_notice("A temporary notice");
+        for width in [160, 40] {
+            let expected = "2 Background Terminals running";
             let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+            let mut composer = None;
             terminal
-                .draw(|frame| {
-                    state.render(frame);
-                })
+                .draw(|frame| composer = state.render(frame).composer)
                 .unwrap();
+            let area = composer.unwrap();
+            let rendered: String = (area.x..area.right())
+                .map(|x| {
+                    terminal
+                        .backend()
+                        .buffer()
+                        .cell(Position::new(x, area.y))
+                        .unwrap()
+                        .symbol()
+                })
+                .collect();
+            assert!(
+                rendered.contains(expected),
+                "missing count above composer: {rendered}"
+            );
+            assert!(
+                rendered.trim_end_matches([' ', '─']).ends_with("running"),
+                "count must align right: {rendered}"
+            );
             let rendered: String = terminal
                 .backend()
                 .buffer()
@@ -5545,8 +5553,45 @@ mod dialog_tests {
                 rendered.contains(expected),
                 "missing job count at width {width}: {rendered}"
             );
-            assert!(rendered.contains("/shells"));
         }
+        let wait_for_count = |expected| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while mint_core::bg_shell::running_count_for(&root) != expected {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        };
+        mint_core::bg_shell::kill_job(&first.id).unwrap();
+        wait_for_count(1);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("1 Background Terminal running"));
+        mint_core::bg_shell::kill_job(&second.id).unwrap();
+        wait_for_count(0);
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(!rendered.contains("Background Terminal"));
     }
 
     #[test]

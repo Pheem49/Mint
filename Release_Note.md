@@ -1,5 +1,7 @@
 # Release Notes - Mint Agent v1.16.0
 
+- Moved the Full-Screen TUI background terminal count to the right side of the composer's top border: “1 Background Terminal running” / “N Background Terminals running”. It updates as jobs start/stop, hides at zero and stays visible during notices. Fixed counting and redraw detection to use the actual workspace directory instead of the formatted path/branch label; Desktop/Web retain their existing live terminal badge. Added rendered regressions for wide/narrow terminals, notices and 2 → 1 → 0 transitions.
+
 - Added `/mint-web` on CLI, Desktop and Web to launch Mint Web as a tracked background terminal. Repeated calls reuse the live job, occupied ports are rejected, and `/shells` exposes logs and Stop. A lifetime pipe shuts down the child API and tracked frontend when its owning Mint backend exits, including abrupt termination. The standalone web launcher now tracks and supervises its frontend instead of leaving an untracked process behind. Added subprocess lifecycle, restart, ownership, port conflict and shared slash-routing regressions.
 
 - Fixed the Full-Screen TUI Back to bottom End shortcut being consumed by draft cursor navigation. While history is scrolled up, End returns to the latest message without changing the draft or cursor; at the bottom it retains normal composer navigation, both while idle and while the agent runs.
