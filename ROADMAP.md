@@ -5,8 +5,10 @@ This roadmap describes the direction of Mint. It is a planning guide, not a prom
 ## Now
 
 - Make the first-run path reliable across Linux, macOS, and Windows.
-- Publish verified prebuilt CLI binaries and keep source installation available.
-- Improve the GitHub landing page, demo, onboarding, and troubleshooting docs.
+- Improve the reliability of prebuilt CLI releases, checksum verification, and source-install fallback.
+- Refine the primary Full-Screen TUI experience: input, navigation, approvals, and long-running task feedback.
+- Keep shared features and behavior consistent across CLI, Desktop, and Web, including tasks started through messaging bridges.
+- Add a focused TUI demo and troubleshooting guides to support the shorter README and existing setup documentation.
 - Make the Telegram and messaging workflow a clear, dependable coding-agent experience.
 - Add small, well-scoped issues that new contributors can complete without learning the whole codebase.
 
@@ -20,7 +22,6 @@ This roadmap describes the direction of Mint. It is a planning guide, not a prom
 
 ## Later
 
-- Make the desktop, web, CLI, and messaging surfaces feel more consistent.
 - Improve observability for long-running agent tasks and gateway deployments.
 - Grow the skills and plugin ecosystem with clearer packaging and discovery.
 - Evaluate additional sandboxing and deployment options for always-on agents.

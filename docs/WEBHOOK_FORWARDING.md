@@ -167,7 +167,7 @@ buffering tuning is needed.
 ## Running on a VPS
 
 `mint gateway start` runs the same `start_channels()` path headless, so LINE and WhatsApp
-work there identically. See [Running Mint 24/7 on a VPS](../README.md#running-mint-247-on-a-vps-headless-gateway).
+work there identically. See [Running Mint 24/7 on a VPS](GATEWAY.md#running-mint-247-on-a-vps-headless-gateway).
 Keep the tunnel/proxy in front of `3000`/`3001`; do **not** publish those ports directly,
 and keep `lineChannelSecret` / `whatsappAppSecret` set so unsigned requests are rejected.
 
