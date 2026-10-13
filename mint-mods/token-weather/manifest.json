@@ -1,8 +1,0 @@
-{
-  "id": "token-weather",
-  "name": "Token Weather",
-  "version": "1.0.0",
-  "sdkVersion": 1,
-  "entry": "main.ts",
-  "permissions": []
-}

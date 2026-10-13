@@ -460,7 +460,7 @@ pub fn build_system_prompt(
 
     let mut rules = Vec::new();
     if allowed_actions.contains(&"mod_help") {
-        rules.push("MINT MODS: When asked to create or change a mod, call mod_help and mod_list first. Use the guide to draft the single-file source directly in mod_validate tool arguments, with at most one short progress sentence. Choose reasonable implementation defaults and proceed to validation. After validation succeeds, call mod_publish in execution mode if available; use expectedHash when replacing source. Creation is complete only after the publication result confirms the path in workspace/mint-mods/<id>/ and activation state. In plan mode, present the draft/plan for approval. Follow the guide's bounded validation retries and report actual diagnostics if blocked.");
+        rules.push("MINT MODS: When asked to create or change a mod, call mod_help and mod_list first. Use the guide to draft the single-file source directly in mod_validate tool arguments, with at most one short progress sentence. Choose reasonable implementation defaults and proceed to validation. After validation succeeds, call mod_publish in execution mode if available; use expectedHash when replacing source. Creation is complete only after the publication result confirms the path in workspace/.mint-mods/<id>/ and activation state. In plan mode, present the draft/plan for approval. Follow the guide's bounded validation retries and report actual diagnostics if blocked.");
     }
     if plan_mode {
         rules.push(

@@ -111,8 +111,12 @@ pub fn operate(op: &Operation) -> Result<Value, String> {
             return Ok(json!({"mods":[],"session":session_snapshot(root,&chat)?}));
         }
         "rollback" => {
-            crate::assert_path_capability(root, crate::Capability::Write, &config)
-                .map_err(|e| e.to_string())?;
+            crate::assert_path_capability(
+                &source_path(root, &op.id)?,
+                crate::Capability::Write,
+                &config,
+            )
+            .map_err(|e| e.to_string())?;
             rollback(
                 root,
                 &op.id,
@@ -147,14 +151,18 @@ pub fn operate(op: &Operation) -> Result<Value, String> {
             );
         }
         "import" => {
-            crate::assert_path_capability(root, crate::Capability::Write, &config)
-                .map_err(|e| e.to_string())?;
             if op.package.len() > 2 * 1024 * 1024 {
                 return Err("Package is too large".into());
             }
             let bytes = STANDARD.decode(&op.package).map_err(|e| e.to_string())?;
             let source: Source = serde_json::from_value(mint_mod_runtime::unpack(&bytes)?)
                 .map_err(|e| e.to_string())?;
+            crate::assert_path_capability(
+                &source_path(root, &source.manifest.id)?,
+                crate::Capability::Write,
+                &config,
+            )
+            .map_err(|e| e.to_string())?;
             publish(root, &source, op.expected_hash.as_deref())?;
         }
         _ => return Err("Unknown mod operation".into()),

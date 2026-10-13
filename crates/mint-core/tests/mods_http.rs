@@ -20,12 +20,15 @@ impl Drop for Server {
 }
 impl Server {
     fn start() -> Self {
+        Self::start_in("mint-mods")
+    }
+    fn start_in(directory: &str) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         drop(listener);
         let root = std::env::temp_dir().join(format!("mint-mod-http-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
-        let dir = root.join("mint-mods/checklist");
+        let dir = root.join(directory).join("checklist");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("manifest.json"),r#"{"id":"checklist","name":"Checklist","version":"1","sdkVersion":1,"entry":"main.ts","permissions":[]}"#).unwrap();
         std::fs::write(dir.join("main.ts"),r#"export function register(mint){function draw(){mint.ui.set('side_panel',{type:'text',text:mint.state.get('task')||'Empty'});}mint.commands.register('add',v=>{mint.state.set('task',v);draw();});draw();}"#).unwrap();
@@ -124,6 +127,8 @@ fn http_mods_preserve_chat_identity_and_reject_stale_actions() {
     std::fs::create_dir(&import_root).unwrap();
     let (_, imported) = server.post("/api/slash", json!({"input":"/mods import '../checklist exported.mintmod'","cwd":import_root,"chat_id":"a"}));
     assert!(imported["markdown"].as_str().unwrap().contains("Imported"));
+    assert!(import_root.join(".mint-mods/checklist/main.ts").is_file());
+    assert!(!import_root.join("mint-mods").exists());
     let (_, discovered) = server.request(json!({"action":"list","workspacePath":import_root}));
     assert_eq!(discovered["mods"][0]["enabled"], false);
     let (status, _) =
@@ -179,4 +184,32 @@ fn http_session_controls_viewport_and_mod_tests_share_the_core() {
     assert_eq!(value["testReport"]["passed"], 1);
     let (_, value) = server.request(json!({"action":"close"}));
     assert_eq!(value["session"]["hotReload"], false);
+}
+
+#[test]
+fn hidden_mods_use_the_shared_desktop_web_operations_for_import_and_tests() {
+    let server = Server::start_in(".mint-mods");
+    let (status, listed) = server.request(json!({"action":"list"}));
+    assert!(status.contains("200"), "{listed}");
+    assert_eq!(listed["mods"][0]["id"], "checklist");
+    let (_, exported) = server.request(json!({"action":"export","id":"checklist"}));
+    let target = server.root.join("new-workspace");
+    std::fs::create_dir(&target).unwrap();
+    let (status, imported) = server.request(json!({
+        "action":"import","workspacePath":target,"package":exported["package"]
+    }));
+    assert!(status.contains("200"), "{imported}");
+    assert!(target.join(".mint-mods/checklist/main.ts").is_file());
+    assert!(!target.join("mint-mods").exists());
+    assert_eq!(imported["mods"][0]["enabled"], false);
+    let tests = target.join(".mint-mods/checklist/tests");
+    std::fs::create_dir(&tests).unwrap();
+    std::fs::write(tests.join("checklist.test.ts"),
+        "export function registerTests(test){test('adds task',async({command,ui,equal})=>{await command('add','hidden');equal(ui('side_panel').text,'hidden');});}"
+    ).unwrap();
+    let (status, report) =
+        server.request(json!({"action":"test","workspacePath":target,"id":"checklist"}));
+    assert!(status.contains("200"), "{report}");
+    assert_eq!(report["testReport"]["failed"], 0);
+    assert_eq!(report["testReport"]["passed"], 1);
 }

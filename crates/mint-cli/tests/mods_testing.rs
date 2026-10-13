@@ -69,6 +69,21 @@ fn mod_export_requires_replace_and_preserves_quoted_paths() {
             .success()
     );
     assert!(!outside.exists());
+    // A package exported from a legacy mod installs into the new directory.
+    std::fs::rename(root.join("mint-mods"), root.join("legacy-backup")).unwrap();
+    let imported = run(&["mods", "import", filename]);
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    assert!(root.join(".mint-mods/sample/main.ts").is_file());
+    assert!(!root.join("mint-mods").exists());
+    assert!(
+        run(&["mods", "export", "sample", "hidden.mintmod"])
+            .status
+            .success()
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 

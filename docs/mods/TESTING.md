@@ -1,6 +1,7 @@
 # Testing Mint mods
 
-Keep tests beside the mod in `mint-mods/<id>/tests/*.test.ts` or `*.test.js`.
+Keep tests beside the mod in `.mint-mods/<id>/tests/*.test.ts` or `*.test.js`.
+Existing mods in `mint-mods/<id>/` use the same `tests/` layout.
 Export `registerTests(test)`; each named case runs in a fresh QuickJS instance
 using the actual mod source and SDK. Tests never enable a mod or change its
 saved state. Type imports from `@mint/mods` work as in main.ts.

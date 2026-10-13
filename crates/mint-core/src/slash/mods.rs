@@ -66,7 +66,7 @@ fn manage(root: &Path, chat: &str, action: &str, args: &[String]) -> Result<Slas
     let mods = crate::mods::list(root, &scoped)?;
     if id.is_empty() {
         if mods.is_empty() {
-            return Ok(SlashResponse::Message { markdown: "**Mods · 0 mods · 0 active**\n\nNo mods yet. Ask Mint to create one in mint-mods/.".into() });
+            return Ok(SlashResponse::Message { markdown: "**Mods · 0 mods · 0 active**\n\nNo mods yet. Ask Mint to create one in .mint-mods/.".into() });
         }
         let active = mods.iter().filter(|m| m["enabled"] == true).count();
         return Ok(choices(

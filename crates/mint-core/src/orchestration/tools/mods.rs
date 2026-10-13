@@ -23,8 +23,12 @@ pub(in crate::orchestration) async fn execute(
         if action == "mod_validate" {
             return Ok(serde_json::json!({"valid":true,"preview":preview}).to_string());
         }
-        crate::assert_path_capability(&root.join("mint-mods"), crate::Capability::Write, config)
-            .map_err(|e| e.to_string())?;
+        crate::assert_path_capability(
+            &crate::mods::source_path(root, &source.manifest.id)?,
+            crate::Capability::Write,
+            config,
+        )
+        .map_err(|e| e.to_string())?;
         let expected = input.arguments["expectedHash"].as_str();
         let hash = crate::mods::publish(root, &source, expected)?;
         let granted = if source.manifest.permissions.is_empty() {
@@ -51,7 +55,7 @@ pub(in crate::orchestration) async fn execute(
                 Some(&hash),
             )?;
         }
-        Ok(serde_json::json!({"path":root.join("mint-mods").join(&source.manifest.id),"hash":hash,"validated":true,"enabled":source.manifest.permissions.is_empty()||granted}).to_string())
+        Ok(serde_json::json!({"path":crate::mods::source_path(root, &source.manifest.id)?,"hash":hash,"validated":true,"enabled":source.manifest.permissions.is_empty()||granted}).to_string())
     })();
     result.map_err(OrchestrationError::Agent)
 }
@@ -122,7 +126,7 @@ mod tests {
                 .is_err()
         );
         assert!(saved.is_file());
-        assert!(!root.join("mint-mods/prompt-test").exists());
+        assert!(!root.join(".mint-mods/prompt-test").exists());
         input.arguments["source"] = serde_json::json!(
             "export async function register(mint){await Promise.resolve();mint.ui.set('above_composer',{type:'text',text:'Created from prompt'});}"
         );
@@ -140,6 +144,12 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&result).unwrap()["enabled"],
             true
         );
+        let published: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            published["path"],
+            serde_json::json!(root.join(".mint-mods/prompt-test"))
+        );
+        assert!(root.join(".mint-mods/prompt-test/main.ts").is_file());
         let mods = crate::mods::list(&root, &chat).unwrap();
         assert_eq!(
             mods[0]["snapshot"]["ui"]["above_composer"]["text"],

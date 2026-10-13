@@ -7,7 +7,7 @@ Deliver a working mod through the tools. For a self-contained SDK mod, use the r
 1. Call `mod_list` to inspect existing source, hashes, permissions and active revisions.
 2. Create one module exporting `register(mint)`. Draft the manifest with sdkVersion 1, a lowercase kebab-case id, name, version, entry `main.ts` or `main.js`, and a permissions array.
 3. Call `mod_validate` with arguments `{manifest, source, readme}`. Mint retains the draft outside the workspace; validation errors include its path. Preview has no filesystem or tools. Defer those calls to commands or event handlers. Fix diagnostics, with at most three validation attempts; then report any remaining error.
-4. Call `mod_publish` with the same arguments. For an existing mod also include `expectedHash` from mod_list. Publishing checks for disk changes, writes `mint-mods/<id>/`, and opens the validated revision in this chat. Basic capabilities need no extra activation decision; requested permissions are reviewed by the user.
+4. Call `mod_publish` with the same arguments. For an existing mod also include `expectedHash` from mod_list. Publishing checks for disk changes, creates new IDs in `.mint-mods/<id>/` (existing legacy IDs are edited in `mint-mods/<id>/`), and opens the validated revision in this chat. Basic capabilities need no extra activation decision; requested permissions are reviewed by the user.
 5. If tests are requested, add `tests/*.test.ts` exporting `registerTests(test)` and run `mint mods test <id>` (or `/mods test <id>`). Follow [TESTING.md](TESTING.md). Report the folder, activation state and validation/test results with tool output as evidence.
 
 Use these interfaces:

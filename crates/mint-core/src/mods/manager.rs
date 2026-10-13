@@ -107,20 +107,51 @@ pub(super) fn atomic_json(p: &Path, value: &impl Serialize) -> Result<(), String
 fn catalog(root: &Path) -> Result<Catalog, String> {
     read_json(&data(root)?.join("catalog.json"))
 }
-fn source_path(root: &Path, id: &str) -> Result<PathBuf, String> {
+fn source_base(root: &Path, name: &str) -> Result<PathBuf, String> {
+    let base = root.join(name);
+    match fs::symlink_metadata(&base) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink()
+                || base.canonicalize().map_err(|e| e.to_string())? != base
+            {
+                return Err(format!("{name} cannot be a symlink"));
+            }
+            if !metadata.is_dir() {
+                return Err(format!("{name} must be a directory"));
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
+    Ok(base)
+}
+/// Resolve one workspace source: prefer the hidden directory, keep legacy edits
+/// in place, and create new IDs in `.mint-mods`. Invalid preferred copies never
+/// fall back to a different source with the same ID.
+pub fn source_path(root: &Path, id: &str) -> Result<PathBuf, String> {
     if !valid_id(id) {
         return Err("Invalid mod ID".into());
     }
     let root = canonical(root)?;
-    let base = root.join("mint-mods");
-    if base.exists() && base.canonicalize().map_err(|e| e.to_string())? != base {
-        return Err("mint-mods cannot be a symlink".into());
+    let preferred = source_base(&root, ".mint-mods")?.join(id);
+    for dir in [preferred.clone(), source_base(&root, "mint-mods")?.join(id)] {
+        match fs::symlink_metadata(&dir) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink()
+                    || dir.canonicalize().map_err(|e| e.to_string())? != dir
+                {
+                    return Err("Mod directories cannot be symlinks".into());
+                }
+                if !metadata.is_dir() {
+                    return Err("Mod source must be a directory".into());
+                }
+                return Ok(dir);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
     }
-    let dir = base.join(id);
-    if dir.exists() && dir.canonicalize().map_err(|e| e.to_string())? != dir {
-        return Err("Mod directories cannot be symlinks".into());
-    }
-    Ok(dir)
+    Ok(preferred)
 }
 fn limited(path: &Path, max: usize) -> Result<String, String> {
     let real = path.canonicalize().map_err(|e| e.to_string())?;
@@ -161,7 +192,7 @@ pub fn shareable_source(root: &Path, id: &str) -> Result<Source, String> {
     match load_source(root, id) {
         Ok(source) => Ok(source),
         Err(error) => {
-            if !valid_id(id) || root.join("mint-mods").join(id).exists() {
+            if source_path(root, id)?.exists() {
                 return Err(error);
             }
             let dir = global_dir()?;
@@ -182,21 +213,27 @@ pub fn shareable_source(root: &Path, id: &str) -> Result<Source, String> {
 }
 pub fn discover(root: &Path) -> Result<Vec<Value>, String> {
     let root = canonical(root)?;
-    let base = root.join("mint-mods");
-    if !base.exists() {
-        return Ok(vec![]);
-    }
-    source_path(&root, "probe")?;
-    let mut mods = Vec::new();
-    for entry in fs::read_dir(base).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let id = entry.file_name().to_string_lossy().to_string();
-        if !entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+    let mut ids = BTreeSet::new();
+    for name in [".mint-mods", "mint-mods"] {
+        let base = source_base(&root, name)?;
+        if !base.exists() {
             continue;
         }
-        match load_source(&root,&id){Ok(s)=>mods.push(json!({"id":id,"name":s.manifest.name,"manifest":s.manifest,"hash":s.hash(),"enabled":false})),Err(e)=>mods.push(json!({"id":id,"name":id,"enabled":false,"error":e}))}
+        for entry in fs::read_dir(base).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let kind = entry.file_type().map_err(|e| e.to_string())?;
+            if kind.is_dir() || kind.is_symlink() {
+                ids.insert(entry.file_name().to_string_lossy().to_string());
+            }
+        }
     }
-    mods.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+    let mut mods = Vec::new();
+    for id in ids {
+        match load_source(&root, &id) {
+            Ok(s) => mods.push(json!({"id":id,"name":s.manifest.name,"manifest":s.manifest,"hash":s.hash(),"enabled":false})),
+            Err(e) => mods.push(json!({"id":id,"name":id,"enabled":false,"error":e})),
+        }
+    }
     Ok(mods)
 }
 pub(super) fn key(root: &Path, chat: &str, id: &str) -> Result<String, String> {

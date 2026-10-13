@@ -20,14 +20,6 @@ pub fn slash(root: &Path, chat: &str, input: &str) -> Result<String, String> {
     let mut args = words.iter().map(String::as_str);
     let action = args.next().unwrap_or("list");
     let id = args.next().unwrap_or("");
-    if matches!(action, "import" | "rollback") {
-        crate::assert_path_capability(
-            &root.join("mint-mods"),
-            crate::Capability::Write,
-            &crate::load_config().map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-    }
     match action {
         "hot-reload"=>{let enabled=match id {"on"=>true,"off"=>false,""=>return Ok(session_snapshot(root,&chat)?.to_string()),_=>return Err("Use /mods hot-reload on|off".into())};set_hot_reload(root,&chat,enabled)?;Ok(format!("Hot reload {} for this session",if enabled {"on"}else{"off"}))},
         "usage"=>Ok(current_usage(root,&chat).to_string()),
@@ -48,19 +40,20 @@ pub fn slash(root: &Path, chat: &str, input: &str) -> Result<String, String> {
             let mut bytes = Vec::new();
             std::fs::File::open(path).map_err(|e| e.to_string())?.take(1024 * 1024 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
             let source: Source = serde_json::from_value(mint_mod_runtime::unpack(&bytes)?).map_err(|e| e.to_string())?;
+            crate::assert_path_capability(&source_path(root, &source.manifest.id)?, crate::Capability::Write, &crate::load_config().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
             let replace = args.any(|a| a == "--replace");
             let expected = if replace { load_source(root, &source.manifest.id).ok().map(|s| s.hash()) } else { None };
             publish(root, &source, expected.as_deref())?;
             Ok(format!("Imported {}; disabled until enabled", source.manifest.id))
         },
-        "list"=>{let mods=list(root,&chat)?;if mods.is_empty(){return Ok("No mods yet. Ask Mint to create one in mint-mods/.".into());}Ok(mods.iter().map(|m|format!("- {} · {}{}",m["id"].as_str().unwrap_or(""),if m["enabled"]==true{"active"}else{"off"},m["error"].as_str().or(m["reloadError"].as_str()).map(|e|format!(" · {e}")).unwrap_or_default())).collect::<Vec<_>>().join("\n"))},
+        "list"=>{let mods=list(root,&chat)?;if mods.is_empty(){return Ok("No mods yet. Ask Mint to create one in .mint-mods/.".into());}Ok(mods.iter().map(|m|format!("- {} · {}{}",m["id"].as_str().unwrap_or(""),if m["enabled"]==true{"active"}else{"off"},m["error"].as_str().or(m["reloadError"].as_str()).map(|e|format!(" · {e}")).unwrap_or_default())).collect::<Vec<_>>().join("\n"))},
         "source"=>{let source=shareable_source(root,id)?;Ok(format!("```json\n{}\n```\n```typescript\n{}\n```",serde_json::to_string_pretty(&source.manifest).unwrap(),source.source))},
         "logs"=>{let mods=list(root,&chat)?;let m=mods.iter().find(|m|m["id"].as_str()==Some(id)).ok_or("Unknown mod")?;Ok(m["snapshot"]["logs"].to_string())},
         "validate"=>{let source=shareable_source(root,id)?;validate(root,&source).map(|s|json!({"valid":true,"preview":s}).to_string())},
         "enable"=>{let options:Vec<_>=args.collect();let scope=options.iter().find(|a|["chat","workspace","global"].contains(a)).copied().unwrap_or("chat");enable(root,&chat,id,scope,options.contains(&"--grant-permissions"))?;Ok(format!("Enabled {id} for {scope}"))},
         "disable"=>{disable(root,&chat,id)?;Ok(format!("Disabled {id} in this chat"))},
         "revisions"=>Ok(serde_json::to_string_pretty(&revisions(root,id)?).unwrap()),
-        "rollback"=>{let hash=args.next().ok_or("Revision hash required")?;let current=load_source(root,id)?;rollback(root,id,hash,&current.hash())?;Ok(format!("Restored {id} source; review and enable the revision."))},
+        "rollback"=>{crate::assert_path_capability(&source_path(root,id)?,crate::Capability::Write,&crate::load_config().map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;let hash=args.next().ok_or("Revision hash required")?;let current=load_source(root,id)?;rollback(root,id,hash,&current.hash())?;Ok(format!("Restored {id} source; review and enable the revision."))},
         _=>Ok("/mods list | source <id> | validate <id> | test <id> | hot-reload on|off | usage | enable <id> [chat|workspace|global] [--grant-permissions] | disable <id> | logs <id> | revisions <id> | rollback <id> <hash> | export <id> [file] [--replace] | import <file> [--replace]\n/mods:<id>:<command> [value]".into())
     }
 }

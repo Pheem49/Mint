@@ -116,7 +116,7 @@ async fn truncated_mod_design_recovers_into_real_validation_and_publish() {
         call("mod_validate", source.clone()), call("mod_publish", source),
         call("finish", json!({"summary":"Created token-weather","verification":"mod_validate passed and mod_publish enabled the revision"})),
     ]).await;
-    let published = root.join("mint-mods/token-weather/main.ts").is_file();
+    let published = root.join(".mint-mods/token-weather/main.ts").is_file();
     std::fs::remove_dir_all(root).unwrap();
     assert!(
         published,
@@ -171,7 +171,7 @@ async fn mod_recovery_respects_plan_mode_and_disabled_publication() {
             disabled_tools,
         )
         .await;
-        let published = root.join("mint-mods").exists();
+        let published = root.join(".mint-mods").exists();
         std::fs::remove_dir_all(root).unwrap();
         assert!(!published);
         assert_eq!(requests.len(), 2);
@@ -201,7 +201,7 @@ async fn truncation_after_publication_does_not_republish() {
         prose("The mod was published. More details...", "length"),
     ])
     .await;
-    let published = root.join("mint-mods/token-weather/main.ts").is_file();
+    let published = root.join(".mint-mods/token-weather/main.ts").is_file();
     std::fs::remove_dir_all(root).unwrap();
     assert!(published);
     assert_eq!(requests.len(), 3);

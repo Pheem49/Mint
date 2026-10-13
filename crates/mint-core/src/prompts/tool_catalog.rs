@@ -156,7 +156,7 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "mod_publish",
-            "Publish a validated mod in workspace/mint-mods/<id> and open it in this chat. Use only when the user requests mod creation/editing. Requested special permissions require approval. Existing source requires expectedHash.",
+            "Publish a validated mod in workspace/.mint-mods/<id> and open it in this chat. Use only when the user requests mod creation/editing. Requested special permissions require approval. Existing source requires expectedHash.",
             schema(
                 json!({"arguments":{"type":"object","properties":{"manifest":{"type":"object"},"source":{"type":"string"},"readme":{"type":"string"},"expectedHash":{"type":"string"}},"required":["manifest","source"]}}),
                 &["arguments"],

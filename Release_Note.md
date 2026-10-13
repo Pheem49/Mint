@@ -1,5 +1,7 @@
 # Release Notes - Mint Agent v1.16.0
 
+- New workspace mods use `.mint-mods/<id>/`, with legacy `mint-mods/<id>/` discovery and in-place updates preserved. Hidden copies take precedence for duplicate IDs; source checks, imports, rollback and agent paths use the selected directory. Moved this workspace’s token-weather mod locally, ignored `.mint-mods/` in Git, and clarified source sharing through examples or exported packages.
+
 - Changed Mint’s project license from AGPL-3.0-only to MIT; updated Rust/npm metadata and README. Third-party dependencies and bundled assets retain their respective licenses.
 
 - Moved the Full-Screen TUI background terminal count to the right side of the composer's top border: “1 Background Terminal running” / “N Background Terminals running”. It updates as jobs start/stop, hides at zero and stays visible during notices. Fixed counting and redraw detection to use the actual workspace directory instead of the formatted path/branch label; Desktop/Web retain their existing live terminal badge. Added rendered regressions for wide/narrow terminals, notices and 2 → 1 → 0 transitions.

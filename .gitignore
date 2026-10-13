@@ -24,6 +24,9 @@ mint-config.json
 workflows.json
 mint-chat-history.json
 
+# Workspace-local Mint mods
+/.mint-mods/
+
 # ==========================
 # Generated Build Output
 # ==========================

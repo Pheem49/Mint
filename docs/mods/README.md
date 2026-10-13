@@ -18,9 +18,11 @@ permission decision. Drafts are retained beside Mint's configuration under
 `mods/workspaces/<workspace-hash>/drafts/`; validation errors include their path.
 A failed draft never replaces the active revision.
 
-Source is stored in `<workspace>/mint-mods/<id>/` with `manifest.json`, `main.ts`
-(or `main.js`) and `README.md`. Commit these files to share a mod. Merely cloning
-a repository or importing a package does not enable its mods.
+Source is stored in `<workspace>/.mint-mods/<id>/` with `manifest.json`, `main.ts`
+(or `main.js`) and `README.md`. This repository ignores workspace-local mods;
+put shareable examples in `examples/mods/` or export a `.mintmod` package.
+Other repositories may choose to track `.mint-mods/` to share source with their
+team. Merely cloning a repository or importing a package does not enable its mods.
 
 Compiled source, immutable revisions, activation decisions and per-chat state
 are kept beside Mint's configuration under `mods/`, outside the workspace.
@@ -29,6 +31,20 @@ installs a personal copy; changes in the original workspace do not silently
 update that copy. Source changes keep the old active revision until validated
 and enabled again, or successfully reloaded in an opted-in session. Special permission decisions belong to the exact source and
 manifest hash.
+
+## Source directory compatibility
+
+New mods and imports for new IDs are created in `<workspace>/.mint-mods/<id>/`.
+Mint also discovers existing `mint-mods/<id>/` folders during the transition.
+Edits, replacement imports, tests and rollback use the selected mod's existing
+folder; Mint does not move it automatically.
+
+If both folders contain the same ID, `.mint-mods` takes precedence and the ID
+appears once. An invalid preferred copy reports an error rather than falling
+back to a legacy copy. To move a legacy mod yourself, move its whole folder
+(including tests) into `.mint-mods`, keeping its ID and source unchanged.
+Activation, approvals and saved state remain tied to the workspace, chat and
+content revision. A changed revision still follows the usual review rules.
 
 ## Manage
 
@@ -81,7 +97,7 @@ Permission approval is never included in exported packages.
 
 ## Examples and SDK
 
-Copy a folder from `examples/mods/` into your workspace's `mint-mods/` directory:
+Copy a folder from `examples/mods/` into your workspace's `.mint-mods/` directory:
 
 - `token-meter`: displays actual usage, with explicit unavailable state.
 - `task-checklist`: input, button and table backed by per-chat state.
