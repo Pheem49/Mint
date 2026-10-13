@@ -1403,8 +1403,15 @@ impl ChatViewState {
         if key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-            || self.composer.is_empty()
         {
+            return false;
+        }
+        // Honor the transcript's visible End shortcut before draft navigation.
+        if key.code == KeyCode::End && self.scroll_from_bottom > 0 {
+            self.scroll_from_bottom = 0;
+            return true;
+        }
+        if self.composer.is_empty() {
             return false;
         }
         let (rows, row, col) = wrap_input_visual_into_rows(&self.composer, row_width, self.cursor);
@@ -6528,6 +6535,22 @@ mod pasted_prompt_render_tests {
             "first\nsecond\nthird"
         );
         assert_eq!(state.cursor, 18);
+    }
+
+    #[test]
+    fn end_returns_scrolled_transcript_to_bottom_before_moving_draft_cursor() {
+        use event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut state = ChatViewState::default();
+        state.set_draft("first line\nsecond line".into());
+        state.cursor = 2;
+        state.scroll_from_bottom = 12;
+        let end = KeyEvent::new(KeyCode::End, KeyModifiers::NONE);
+        assert!(state.navigate_composer(end, 20));
+        assert_eq!(state.scroll_from_bottom, 0);
+        assert_eq!(state.cursor, 2);
+        assert_eq!(state.composer_text(), "first line\nsecond line");
+        assert!(state.navigate_composer(end, 20));
+        assert_eq!(state.cursor, 10);
     }
 
     #[test]
