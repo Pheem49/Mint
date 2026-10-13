@@ -70,7 +70,7 @@
     "name": "Pheem49",
     "email": "killerpheem13@gmail.com"
   },
-  "license": "AGPL-3.0-only",
+  "license": "MIT",
   "type": "commonjs",
   "bin": {
     "mint": "src/bin/index.js",

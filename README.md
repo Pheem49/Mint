@@ -8,7 +8,7 @@
   [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://v2.tauri.app/)
   [![Rust](https://img.shields.io/badge/Rust-backend-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
   [![React](https://img.shields.io/badge/React-TypeScript-149ECA?logo=react&logoColor=white)](https://react.dev/)
-  [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+  [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 </div>
 
 Mint is a local-first AI coding agent you can message from Telegram, Discord, Slack, LINE, or WhatsApp. Send it a bug, feature request, or code-review task; Mint inspects your workspace, edits the code, runs tests, and reports the result back to chat — while asking for approval before risky changes.
@@ -933,4 +933,4 @@ We welcome contributions from the community! Whether you want to fix a bug, add 
 
 ## License
 
-Mint is licensed under the [AGPL-3.0-only license](LICENSE).
+Mint is licensed under the [MIT license](LICENSE). Third-party dependencies and bundled assets retain their respective licenses.
