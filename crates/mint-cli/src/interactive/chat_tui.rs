@@ -415,7 +415,7 @@ pub(crate) struct ChatViewState {
     workspace: String,
     current_dir: std::path::PathBuf,
     plan_mode: bool,
-    scroll_from_bottom: u16,
+    scroll_from_bottom: usize,
     selection_mode: bool,
     selection_anchor: usize,
     selection_head: usize,
@@ -2315,18 +2315,11 @@ impl ChatViewState {
             help_area,
         );
 
-        let text = self.transcript_text(rows[1].width);
-        let total = Paragraph::new(text.clone())
-            .wrap(Wrap { trim: false })
-            .line_count(rows[1].width.max(1));
-        let max_scroll = total.saturating_sub(rows[1].height as usize) as u16;
+        let transcript = TranscriptLayout::new(self.transcript_text(rows[1].width), rows[1].width);
+        let total = transcript.height;
+        let max_scroll = total.saturating_sub(rows[1].height as usize);
         let scroll = max_scroll.saturating_sub(self.scroll_from_bottom.min(max_scroll));
-        frame.render_widget(
-            Paragraph::new(text)
-                .wrap(Wrap { trim: false })
-                .scroll((scroll, 0)),
-            rows[1],
-        );
+        frame.render_widget(transcript.paragraph_at(scroll), rows[1]);
         if self.transcript.is_empty() && self.dialog.is_none() && self.thought_modal.is_none() {
             let watermark_height = WATERMARK_HEIGHT.min(rows[1].height);
             let watermark_width = WATERMARK_WIDTH.min(rows[1].width);
@@ -3121,6 +3114,7 @@ impl ChatViewState {
             );
         }
         RenderAreas {
+            transcript: Some(rows[1]),
             back_to_bottom: back_to_bottom_area,
             composer: rows.get(4).copied(),
             watermark: if self.transcript.is_empty()
@@ -3206,6 +3200,7 @@ fn mod_layout(area: Rect, dock: bool) -> (Rect, Option<Rect>) {
 
 #[derive(Default)]
 struct RenderAreas {
+    transcript: Option<Rect>,
     back_to_bottom: Option<Rect>,
     composer: Option<Rect>,
     watermark: Option<Rect>,
@@ -3215,6 +3210,9 @@ pub(crate) struct ChatTui {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     active: bool,
     mouse_selection: MouseSelection,
+    transcript_selection: Option<TranscriptSelection>,
+    transcript_area: Option<Rect>,
+    selection_scroll_at: std::time::Instant,
     last_frame: Option<Buffer>,
     back_to_bottom_area: Option<Rect>,
     composer_area: Option<Rect>,
@@ -3290,6 +3288,203 @@ impl MouseSelection {
 
     fn endpoints(&self) -> Option<(ScreenPoint, ScreenPoint)> {
         Some((self.anchor?, self.head?))
+    }
+}
+
+// Keep styled text and visual-row offsets, rather than cells for the whole history.
+struct TranscriptLayout {
+    text: Text<'static>,
+    row_starts: Vec<usize>,
+    height: usize,
+    width: u16,
+}
+
+impl TranscriptLayout {
+    fn new(text: Text<'static>, width: u16) -> Self {
+        let mut height = 0;
+        let row_starts = text
+            .lines
+            .iter()
+            .map(|line| {
+                let start = height;
+                height += Paragraph::new(line.clone())
+                    .wrap(Wrap { trim: false })
+                    .line_count(width.max(1))
+                    .max(1);
+                start
+            })
+            .collect();
+        Self {
+            text,
+            row_starts,
+            height,
+            width,
+        }
+    }
+    fn paragraph_at(&self, row: usize) -> Paragraph<'static> {
+        let line = self
+            .row_starts
+            .partition_point(|start| *start <= row)
+            .saturating_sub(1);
+        let offset = row.saturating_sub(self.row_starts.get(line).copied().unwrap_or(0));
+        let text = Text {
+            lines: self.text.lines.get(line..).unwrap_or_default().to_vec(),
+            style: self.text.style,
+            alignment: self.text.alignment,
+        };
+        Paragraph::new(text)
+            .wrap(Wrap { trim: false })
+            .scroll((offset.min(u16::MAX as usize) as u16, 0))
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct TranscriptPoint {
+    row: usize,
+    column: u16,
+}
+
+struct TranscriptSelection {
+    layout: TranscriptLayout,
+    area: Rect,
+    offset: usize,
+    pointer: ScreenPoint,
+    anchor: TranscriptPoint,
+    head: TranscriptPoint,
+    dragging: bool,
+    had_drag: bool,
+}
+
+impl TranscriptSelection {
+    fn from_text(text: Text<'static>, area: Rect, offset: usize, pointer: ScreenPoint) -> Self {
+        let layout = TranscriptLayout::new(text, area.width);
+        let anchor = TranscriptPoint {
+            row: offset
+                .saturating_add(pointer.row.saturating_sub(area.y) as usize)
+                .min(layout.height.saturating_sub(1)),
+            column: pointer.column.saturating_sub(area.x),
+        };
+        Self {
+            layout,
+            area,
+            offset,
+            pointer,
+            anchor,
+            head: anchor,
+            dragging: true,
+            had_drag: false,
+        }
+    }
+    fn update(&mut self, pointer: ScreenPoint) {
+        if !self.dragging {
+            return;
+        }
+        self.pointer = pointer;
+        self.had_drag = true;
+        self.head = TranscriptPoint {
+            row: self
+                .offset
+                .saturating_add(
+                    (pointer.row.clamp(self.area.y, self.area.bottom() - 1) - self.area.y) as usize,
+                )
+                .min(self.layout.height.saturating_sub(1)),
+            column: pointer.column.clamp(self.area.x, self.area.right() - 1) - self.area.x,
+        };
+    }
+    fn range(&self) -> (TranscriptPoint, TranscriptPoint) {
+        (self.anchor.min(self.head), self.anchor.max(self.head))
+    }
+    fn scroll(&mut self, scroll: &mut usize) -> bool {
+        if !self.dragging || !self.had_drag {
+            return false;
+        }
+        let max = self.layout.height.saturating_sub(self.area.height as usize);
+        let old = self.offset;
+        if self.pointer.row <= self.area.y {
+            self.offset = self.offset.saturating_sub(1);
+        } else if self.pointer.row >= self.area.bottom().saturating_sub(1) {
+            self.offset = self.offset.saturating_add(1).min(max);
+        }
+        if old == self.offset {
+            return false;
+        }
+        *scroll = max.saturating_sub(self.offset);
+        self.update(self.pointer);
+        true
+    }
+    fn paint(&self, buffer: &mut Buffer, back_button: Option<Rect>) {
+        use ratatui::widgets::Widget;
+        let mut snapshot = Buffer::empty(self.area);
+        self.layout
+            .paragraph_at(self.offset)
+            .render(self.area, &mut snapshot);
+        let (start, end) = self.range();
+        for y in self.area.y..self.area.bottom() {
+            let row = self.offset + (y - self.area.y) as usize;
+            for x in self.area.x..self.area.right() {
+                let position = Position::new(x, y);
+                if back_button.is_some_and(|area| area.contains(position))
+                    || (self.layout.height > self.area.height as usize
+                        && x == self.area.right() - 1)
+                {
+                    continue;
+                }
+                if let (Some(target), Some(source)) =
+                    (buffer.cell_mut(position), snapshot.cell(position))
+                {
+                    *target = source.clone();
+                    let column = x - self.area.x;
+                    if row >= start.row
+                        && row <= end.row
+                        && (row != start.row || column >= start.column)
+                        && (row != end.row || column <= end.column)
+                    {
+                        target.set_style(
+                            Style::default()
+                                .bg(crate::terminal_theme::BLUE)
+                                .fg(crate::terminal_theme::TEXT),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    fn text(&self) -> String {
+        use ratatui::widgets::Widget;
+        let (start, end) = self.range();
+        let mut output = String::new();
+        let mut row = start.row;
+        while row <= end.row {
+            let height = (end.row - row + 1).min(64) as u16;
+            let area = Rect::new(0, 0, self.layout.width, height);
+            let mut buffer = Buffer::empty(area);
+            self.layout.paragraph_at(row).render(area, &mut buffer);
+            let selection = MouseSelection {
+                anchor: Some(ScreenPoint {
+                    row: 0,
+                    column: if row == start.row { start.column } else { 0 },
+                }),
+                head: Some(ScreenPoint {
+                    row: height - 1,
+                    column: if row + height as usize - 1 == end.row {
+                        end.column
+                    } else {
+                        self.layout.width - 1
+                    },
+                }),
+                dragging: false,
+                had_drag: true,
+            };
+            if !output.is_empty() || row > start.row {
+                output.push('\n');
+            }
+            output.push_str(&selected_screen_text(&buffer, selection));
+            if output.len() > COPY_LIMIT {
+                break;
+            }
+            row += height as usize;
+        }
+        output
     }
 }
 
@@ -3641,6 +3836,9 @@ impl ChatTui {
                     terminal,
                     active: true,
                     mouse_selection: MouseSelection::default(),
+                    transcript_selection: None,
+                    transcript_area: None,
+                    selection_scroll_at: std::time::Instant::now(),
                     last_frame: None,
                     back_to_bottom_area: None,
                     composer_area: None,
@@ -3657,6 +3855,7 @@ impl ChatTui {
     fn draw_state(&mut self, state: &ChatViewState) -> Result<()> {
         let selection = self.mouse_selection;
         let previous = self.last_frame.as_ref();
+        let mut transcript_selection = self.transcript_selection.as_mut();
         let mut invalidated = false;
         let mut areas = RenderAreas::default();
         let completed = self.terminal.draw(|frame| {
@@ -3672,22 +3871,34 @@ impl ChatTui {
                     hint_area,
                 );
             }
-            invalidated = !selection.dragging
+            invalidated = transcript_selection.is_none()
+                && !selection.dragging
                 && selection.range().is_some()
                 && previous
                     .map(|buffer| !selected_cells_match(buffer, frame.buffer_mut(), selection))
                     .unwrap_or(false);
             if !invalidated {
-                apply_mouse_selection(frame.buffer_mut(), selection);
+                if let Some(selected) = transcript_selection.as_deref_mut() {
+                    if let Some(area) = areas
+                        .transcript
+                        .filter(|area| area.width > 0 && area.height > 0)
+                    {
+                        selected.area = area;
+                    }
+                    selected.paint(frame.buffer_mut(), areas.back_to_bottom);
+                } else {
+                    apply_mouse_selection(frame.buffer_mut(), selection);
+                }
             }
             crate::terminal_theme::apply_tui_theme(frame.buffer_mut(), state.theme);
         })?;
         self.last_frame = Some(completed.buffer.clone());
+        self.transcript_area = areas.transcript;
         self.back_to_bottom_area = areas.back_to_bottom;
         self.composer_area = areas.composer;
         self.watermark_area = areas.watermark;
         if invalidated {
-            self.mouse_selection.clear();
+            self.clear_mouse_selection();
         }
         Ok(())
     }
@@ -3701,7 +3912,7 @@ impl ChatTui {
 
         let point = ScreenPoint::from_mouse(mouse);
         if activate_back_to_bottom(state, self.back_to_bottom_area, mouse.kind, point) {
-            self.mouse_selection.clear();
+            self.clear_mouse_selection();
             return Ok(true);
         }
         match mouse.kind {
@@ -3712,33 +3923,66 @@ impl ChatTui {
                     .map(|buffer| buffer.area.contains(Position::new(point.column, point.row)))
                     .unwrap_or(false);
                 if inside_frame {
+                    self.clear_mouse_selection();
                     self.mouse_selection.start(point);
+                    if let Some(area) = self.transcript_area.filter(|area| {
+                        area.width > 0
+                            && area.height > 0
+                            && area.contains(Position::new(point.column, point.row))
+                    }) && state.dialog.is_none()
+                        && state.thought_modal.is_none()
+                        && !state.transcript.is_empty()
+                    {
+                        let text = state.transcript_text(area.width);
+                        let layout = TranscriptLayout::new(text, area.width);
+                        let max = layout.height.saturating_sub(area.height as usize);
+                        let offset = max.saturating_sub(state.scroll_from_bottom.min(max));
+                        self.transcript_selection = Some(TranscriptSelection::from_text(
+                            layout.text,
+                            area,
+                            offset,
+                            point,
+                        ));
+                    }
                     state.selection_mode = false;
                     state.clear_notice();
                 } else {
-                    self.mouse_selection.clear();
+                    self.clear_mouse_selection();
                 }
                 Ok(true)
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 self.mouse_selection.update(point);
+                if let Some(selected) = self.transcript_selection.as_mut() {
+                    selected.update(point);
+                }
                 Ok(self.mouse_selection.dragging)
             }
             MouseEventKind::Up(MouseButton::Left) => {
+                if let Some(selected) = self.transcript_selection.as_mut() {
+                    selected.update(point);
+                    selected.dragging = false;
+                }
                 if !self.mouse_selection.finish(point) {
+                    self.transcript_selection = None;
                     return Ok(true);
                 }
                 if self
                     .last_frame
                     .as_ref()
                     .map(|buffer| {
-                        selected_screen_text(buffer, self.mouse_selection)
+                        self.transcript_selection
+                            .as_ref()
+                            .map_or_else(
+                                || selected_screen_text(buffer, self.mouse_selection),
+                                TranscriptSelection::text,
+                            )
                             .trim()
                             .is_empty()
                     })
                     .unwrap_or(true)
                 {
-                    self.mouse_selection.clear();
+                    self.clear_mouse_selection();
                 }
                 Ok(true)
             }
@@ -3746,7 +3990,12 @@ impl ChatTui {
                 let text = self
                     .last_frame
                     .as_ref()
-                    .map(|buffer| selected_screen_text(buffer, self.mouse_selection))
+                    .map(|buffer| {
+                        self.transcript_selection.as_ref().map_or_else(
+                            || selected_screen_text(buffer, self.mouse_selection),
+                            TranscriptSelection::text,
+                        )
+                    })
                     .unwrap_or_default();
                 if text.trim().is_empty() {
                     return Ok(false);
@@ -3764,11 +4013,11 @@ impl ChatTui {
                     }
                     Err(error) => state.set_notice(format!("Could not copy selection: {error}")),
                 }
-                self.mouse_selection.clear();
+                self.clear_mouse_selection();
                 Ok(true)
             }
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                self.mouse_selection.clear();
+                self.clear_mouse_selection();
                 Ok(false)
             }
             _ => Ok(false),
@@ -3777,9 +4026,23 @@ impl ChatTui {
 
     fn clear_mouse_selection(&mut self) {
         self.mouse_selection.clear();
+        self.transcript_selection = None;
+    }
+
+    fn scroll_mouse_selection(&mut self, state: &mut ChatViewState) -> bool {
+        if self.selection_scroll_at.elapsed() < std::time::Duration::from_millis(50) {
+            return false;
+        }
+        self.selection_scroll_at = std::time::Instant::now();
+        self.transcript_selection
+            .as_mut()
+            .is_some_and(|selection| selection.scroll(&mut state.scroll_from_bottom))
     }
 
     fn composer_selection_range(&self, state: &ChatViewState) -> Option<(usize, usize)> {
+        if self.transcript_selection.is_some() {
+            return None;
+        }
         let area = self.composer_area?;
         let (anchor, head) = self.mouse_selection.endpoints()?;
         let (start, end) = if anchor <= head {
@@ -3803,7 +4066,12 @@ impl ChatTui {
         } else {
             self.last_frame
                 .as_ref()
-                .map(|buffer| selected_screen_text(buffer, self.mouse_selection))
+                .map(|buffer| {
+                    self.transcript_selection.as_ref().map_or_else(
+                        || selected_screen_text(buffer, self.mouse_selection),
+                        TranscriptSelection::text,
+                    )
+                })
                 .unwrap_or_default()
         };
         if text.trim().is_empty() {
@@ -3905,6 +4173,7 @@ impl ChatTui {
             }
             redraw |= state.notice_visibility_changed_since_draw(painted_notice_visible);
 
+            redraw |= self.scroll_mouse_selection(&mut state);
             if redraw {
                 let notice_visible = state.active_notice().is_some();
                 self.draw_state(&state)?;
@@ -3923,7 +4192,10 @@ impl ChatTui {
                         .unwrap_or(elapsed)
                         .saturating_sub(elapsed)
                         .min(std::time::Duration::from_millis(250))
-                } else if last_ctrl_d.is_some() || state.active_notice().is_some() {
+                } else if self.mouse_selection.dragging
+                    || last_ctrl_d.is_some()
+                    || state.active_notice().is_some()
+                {
                     std::time::Duration::from_millis(50)
                 } else {
                     std::time::Duration::from_millis(250)
@@ -4247,7 +4519,7 @@ impl ChatTui {
                             state.scroll_from_bottom = state.scroll_from_bottom.saturating_sub(10)
                         }
                         KeyCode::Home if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            state.scroll_from_bottom = u16::MAX
+                            state.scroll_from_bottom = usize::MAX
                         }
                         KeyCode::Up if !state.suggestions().is_empty() => {
                             state.slash_selected = state.slash_selected.saturating_sub(1)
@@ -4357,7 +4629,8 @@ impl ChatTui {
             state.dialog = Some(DialogState::new_choice(title, body, options, None, reply));
         }
         loop {
-            if let Ok(state) = handle.state.lock() {
+            if let Ok(mut state) = handle.state.lock() {
+                self.scroll_mouse_selection(&mut state);
                 self.draw_state(&state)?;
             }
             if let Ok(answer) = response.try_recv() {
@@ -4380,7 +4653,8 @@ impl ChatTui {
             state.dialog = Some(DialogState::new_theme_picker(current, reply));
         }
         loop {
-            if let Ok(state) = handle.state.lock() {
+            if let Ok(mut state) = handle.state.lock() {
+                self.scroll_mouse_selection(&mut state);
                 self.draw_state(&state)?;
             }
             if let Ok(answer) = response.try_recv() {
@@ -4416,7 +4690,8 @@ impl ChatTui {
             ));
         }
         loop {
-            if let Ok(state) = handle.state.lock() {
+            if let Ok(mut state) = handle.state.lock() {
+                self.scroll_mouse_selection(&mut state);
                 self.draw_state(&state)?;
             }
             if let Ok(answer) = response.try_recv() {
@@ -4453,7 +4728,8 @@ impl ChatTui {
             ));
         }
         loop {
-            if let Ok(state) = handle.state.lock() {
+            if let Ok(mut state) = handle.state.lock() {
+                self.scroll_mouse_selection(&mut state);
                 self.draw_state(&state)?;
             }
             if let Ok(answer) = response.try_recv() {
@@ -4485,7 +4761,8 @@ impl ChatTui {
             state.dialog = Some(dialog);
         }
         loop {
-            if let Ok(state) = handle.state.lock() {
+            if let Ok(mut state) = handle.state.lock() {
+                self.scroll_mouse_selection(&mut state);
                 self.draw_state(&state)?;
             }
             if let Ok(answer) = response.try_recv() {
@@ -4508,7 +4785,8 @@ impl ChatTui {
     ) -> Result<T> {
         use event::{KeyCode, KeyModifiers};
         loop {
-            if let Ok(state) = handle.state.lock() {
+            if let Ok(mut state) = handle.state.lock() {
+                self.scroll_mouse_selection(&mut state);
                 self.draw_state(&state)?;
             }
             if task.is_finished() {
@@ -5309,6 +5587,114 @@ mod dialog_tests {
                 Ok(())
             }
         }
+    }
+
+    #[test]
+    fn transcript_selection_copies_across_render_chunks_without_losing_rows() {
+        let text = format!("start\n{}end", "middle\n".repeat(64));
+        let area = Rect::new(0, 3, 8, 3);
+        let mut drag =
+            TranscriptSelection::from_text(Text::from(text.clone()), area, 0, point(0, 3));
+        drag.update(point(7, 5));
+        let mut scroll = 63;
+        for _ in 0..70 {
+            drag.scroll(&mut scroll);
+        }
+        assert_eq!(drag.text(), text);
+    }
+
+    #[test]
+    fn transcript_selection_can_copy_the_visible_tail_beyond_u16_rows() {
+        let mut lines = vec![Line::raw("earlier"); 66_000];
+        lines.extend([
+            Line::raw("tail one"),
+            Line::raw("tail two"),
+            Line::raw("tail end"),
+        ]);
+        let area = Rect::new(0, 3, 8, 3);
+        let mut drag = TranscriptSelection::from_text(Text::from(lines), area, 66_000, point(0, 3));
+        drag.update(point(7, 5));
+        assert_eq!(drag.text(), "tail one\ntail two\ntail end");
+    }
+
+    #[test]
+    fn transcript_selection_keeps_the_back_button_and_scrollbar_visible() {
+        let area = Rect::new(0, 3, 8, 3);
+        let drag = TranscriptSelection::from_text(
+            Text::from(
+                (0..9)
+                    .map(|row| Line::raw(format!("line{row}")))
+                    .collect::<Vec<_>>(),
+            ),
+            area,
+            0,
+            point(0, 4),
+        );
+        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 8));
+        screen.set_string(2, 5, "Back", Style::default());
+        screen.set_string(7, 3, "▲", Style::default());
+        drag.paint(&mut screen, Some(Rect::new(2, 5, 4, 1)));
+        assert_eq!(screen.cell(Position::new(7, 3)).unwrap().symbol(), "▲");
+        assert_eq!(screen.cell(Position::new(2, 5)).unwrap().symbol(), "B");
+    }
+
+    #[test]
+    fn transcript_drag_scrolls_both_edges_and_keeps_offscreen_text() {
+        let area = Rect::new(0, 3, 8, 3);
+        let mut drag = TranscriptSelection::from_text(
+            Text::from(
+                (0..9)
+                    .map(|row| Line::raw(format!("line{row}")))
+                    .collect::<Vec<_>>(),
+            ),
+            area,
+            0,
+            point(0, 4),
+        );
+        drag.update(point(4, 5));
+        let mut scroll = 6;
+        for _ in 0..10 {
+            drag.scroll(&mut scroll);
+        }
+        assert_eq!(scroll, 0);
+        assert_eq!(
+            drag.text(),
+            "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8"
+        );
+        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 8));
+        screen.set_string(0, 3, "new text", Style::default());
+        drag.paint(&mut screen, None);
+        assert_eq!(screen.cell(Position::new(0, 3)).unwrap().symbol(), "l");
+        assert_eq!(
+            screen.cell(Position::new(0, 3)).unwrap().bg,
+            crate::terminal_theme::BLUE
+        );
+        assert_eq!(screen.cell(Position::new(0, 2)).unwrap().symbol(), " ");
+        drag.update(point(0, 3));
+        for _ in 0..10 {
+            drag.scroll(&mut scroll);
+        }
+        assert_eq!(scroll, 6);
+        assert_eq!(drag.text(), "line0\nl");
+        drag.dragging = false;
+        drag.update(point(4, 5));
+        assert!(!drag.scroll(&mut scroll));
+        assert_eq!(scroll, 6);
+    }
+
+    #[test]
+    fn transcript_drag_interior_does_not_scroll() {
+        let area = Rect::new(0, 3, 8, 3);
+        let mut drag = TranscriptSelection::from_text(
+            Text::from(vec![Line::raw(""); 9]),
+            area,
+            2,
+            point(0, 4),
+        );
+        drag.update(point(4, 4));
+        let mut scroll = 4;
+        assert!(!drag.scroll(&mut scroll));
+        assert_eq!(scroll, 4);
     }
 
     #[test]

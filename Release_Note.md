@@ -1,5 +1,7 @@
 # Release Notes - Mint Agent v1.16.0
 
+- Fixed Full-Screen TUI transcript drag selection stopping at the visible viewport. Holding a left-button drag at the top/bottom edge now scrolls through history, retains off-screen selected text for Ctrl+C/right-click copy, and stops on release. Selected transcript content stays stable during streaming; composer selection remains available. Snapshots retain styled text and render only the viewport/copy chunks instead of allocating cells for the entire history, preserve the scrollbar and Back to bottom button, and support history beyond 65,535 visual rows.
+
 - Balanced the Saved Pictures gallery across Desktop and Web with an adaptive five-column maximum, wider content alignment, and thumbnails that show the full image without cropping portrait photos.
 
 - Expanded historical and live agent activity to the full chat column so run summaries and thought rows no longer collapse to their content width. Kept the disclosure arrow beside the “Working through task” label.
