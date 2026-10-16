@@ -1957,7 +1957,7 @@ export default function MintDashboard() {
               />
             </Suspense>
           )}
-        <ChatPanel conversation={chatConversation} actions={chatActions} tools={{
+        <ChatPanel conversation={chatConversation} actions={chatActions} showSessionSources={!isDesktopApp} tools={{
           modsPanelTarget, onOpenMods: () => openUtilitySurface('mods'),
           open: toolsPanelOpen, backgroundTaskCount,
           onToggle: isDesktopApp ? undefined : () => setToolsPanelOpen(open => !open),

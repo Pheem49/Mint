@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { collectSessionSources } from './sessionSources'
 import type { AgentProgress } from '../types'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import SessionSources from '../components/SessionSources'
 
 const search = (url: string, title = 'Reference'): AgentProgress => ({ type: 'ToolEnd', data: { action: 'web_search', input: { query: 'example' }, result: `1. ${title}\nURL: ${url}\nA useful reference` } })
 describe('session sources', () => {
@@ -17,5 +20,12 @@ describe('session sources', () => {
   it('does not turn non-web URLs or failed searches into source links', () => {
     expect(collectSessionSources({ attachments: [], webSearchProgress: [search('javascript:alert(1)'), search('file:///etc/passwd')] })).toEqual([])
     expect(collectSessionSources({ attachments: [], webSearchProgress: [search('https://example.com')] })).toHaveLength(1)
+  })
+  it('shows website favicons from the existing web-search source metadata', () => {
+    const sources = collectSessionSources({ attachments: [], webSearchProgress: [search('https://open.spotify.com/track/example?secret=private', 'Song')] })
+    expect(sources[0]).toMatchObject({ faviconUrl: 'https://www.google.com/s2/favicons?sz=32&domain=open.spotify.com' })
+    const html = renderToStaticMarkup(createElement(SessionSources, { sources, loading: false, error: '', onRetry: () => {}, onOpenLibrary: () => {} }))
+    expect(html).toContain('src="https://www.google.com/s2/favicons?sz=32&amp;domain=open.spotify.com"')
+    expect(html).toContain('referrerPolicy="no-referrer"')
   })
 })

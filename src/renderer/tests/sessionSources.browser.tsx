@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import WorkspaceContextPopover from '../shared/components/WorkspaceContextPopover'
+import SessionSources from '../shared/components/SessionSources'
 import { installRendererPlatform, installWorkspacePlatform, type RendererAdapter, type WorkspacePlatform } from '../shared/platform'
 import type { ConversationSources } from '../shared/types'
 import { sourceAttachments } from '../shared/utils/sourceAttachments'
@@ -82,6 +83,25 @@ async function run() {
   check(preventedByComponent && navigated, 'Library source navigation preserves the live application and composer')
   window.removeEventListener('popstate',navigation)
   await waitFor(()=>!document.querySelector('.workspace-context-popover'),'Source navigation closes its popover')
+  const iconFixture = document.createElement('div')
+  document.body.append(iconFixture)
+  const iconRoot = createRoot(iconFixture)
+  iconRoot.render(<SessionSources sources={[
+    { id: 'web-good', kind: 'web', name: 'Website with icon', detail: 'example.com', url: 'https://example.com/with-icon', faviconUrl: originalImage },
+    { id: 'web-broken', kind: 'web', name: 'Website without icon', detail: 'other.example', url: 'https://other.example/no-icon', faviconUrl: 'data:image/png;base64,AA==' },
+    { id: 'image-thumbnail', kind: 'image', name: 'reference.png', detail: 'Image', thumbnailDataUri: originalImage },
+  ]} loading={false} error="" onRetry={() => {}} onOpenLibrary={() => {}} />)
+  await waitFor(() => Boolean(iconFixture.querySelector<HTMLImageElement>('.is-web img')?.naturalWidth), 'Website favicon loads')
+  const favicon = iconFixture.querySelector<HTMLImageElement>('.is-web img')!
+  check(favicon.width === 20 && favicon.height === 20, 'website favicon fits its existing icon slot')
+  check(favicon.referrerPolicy === 'no-referrer', 'favicon request omits the chat page referrer')
+  await waitFor(() => Boolean(iconFixture.querySelector('[href="https://other.example/no-icon"] .is-web svg')), 'Unavailable favicon falls back')
+  check(!iconFixture.querySelector('[href="https://other.example/no-icon"] img'), 'failed favicon uses the globe instead of a broken image')
+  check(iconFixture.querySelector<HTMLImageElement>('.is-image img')?.width === 30, 'attachment thumbnails retain their existing size')
+  favicon.dispatchEvent(new Event('error'))
+  await waitFor(() => Boolean(iconFixture.querySelector('[href="https://example.com/with-icon"] .is-web svg')), 'Late favicon failure falls back')
+  check(Boolean(iconFixture.querySelector('[href="https://example.com/with-icon"]')), 'favicon failure preserves the source link')
+  iconRoot.unmount(); iconFixture.remove()
   document.getElementById('qa-results')!.textContent = results.join('\n') + '\nALL PASSED'
 }
 run().catch(error => { document.getElementById('qa-results')!.textContent = results.join('\n') + `\nFAIL ${error.message}` })

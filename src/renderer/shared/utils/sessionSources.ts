@@ -8,6 +8,7 @@ export interface SessionSource {
   detail: string
   interactionId?: number
   thumbnailDataUri?: string
+  faviconUrl?: string
   url?: string
 }
 
@@ -27,7 +28,7 @@ export function collectSessionSources(persisted: ConversationSources, liveProgre
     url.hash = ''
     if (seen.has(url.href)) continue
     seen.add(url.href)
-    web.push({ id: `web:${url.href}`, kind: 'web', name: source.title || source.domain, detail: source.domain, url: url.href })
+    web.push({ id: `web:${url.href}`, kind: 'web', name: source.title || source.domain, detail: source.domain, url: url.href, faviconUrl: source.faviconUrl })
   }
   return [...attachments, ...web]
 }

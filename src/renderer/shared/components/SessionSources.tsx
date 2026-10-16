@@ -3,6 +3,15 @@ import { File, FileText, Globe, Image, Paperclip, Video } from 'lucide-react'
 import type { SessionSource } from '../utils/sessionSources'
 import '../css/session-sources.css'
 
+function SourceIcon({ source }: { source: SessionSource }) {
+  const src = source.kind === 'web' ? source.faviconUrl : source.thumbnailDataUri
+  const [failedSrc, setFailedSrc] = useState<string>()
+  const Icon = source.kind === 'web' ? Globe : source.kind === 'image' ? Image : source.kind === 'video' ? Video : /\.(pdf|md|txt|docx?)$/i.test(source.name) ? FileText : File
+  return <span className={`session-source-icon is-${source.kind}`}>
+    {src && src !== failedSrc ? <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailedSrc(src)} /> : <Icon size={15} aria-hidden="true" />}
+  </span>
+}
+
 export default function SessionSources({ sources, loading, error, onRetry, onOpenLibrary }: {
   sources: SessionSource[]; loading: boolean; error: string; onRetry: () => void; onOpenLibrary: (url: string) => void
 }) {
@@ -25,8 +34,7 @@ export default function SessionSources({ sources, loading, error, onRetry, onOpe
       return <div className="session-sources-group" key={group.label}>
         <h3>{group.label}</h3>
         <ul>{items.map(source => {
-          const Icon = source.kind === 'web' ? Globe : source.kind === 'image' ? Image : source.kind === 'video' ? Video : /\.(pdf|md|txt|docx?)$/i.test(source.name) ? FileText : File
-          const content = <><span className={`session-source-icon is-${source.kind}`}>{source.thumbnailDataUri ? <img src={source.thumbnailDataUri} alt="" onError={event => { event.currentTarget.style.display = 'none' }} /> : <Icon size={15} aria-hidden="true" />}</span><span className="session-source-copy"><strong>{source.name}</strong><small>{source.detail}</small></span></>
+          const content = <><SourceIcon source={source} /><span className="session-source-copy"><strong>{source.name}</strong><small>{source.detail}</small></span></>
           return <li key={source.id}>{source.url ? <a className="session-source-row" href={source.url} target={source.kind === 'web' ? '_blank' : undefined} rel={source.kind === 'web' ? 'noopener noreferrer' : undefined} title={source.url} onClick={event => {
             if (source.kind === 'web' || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
             event.preventDefault()

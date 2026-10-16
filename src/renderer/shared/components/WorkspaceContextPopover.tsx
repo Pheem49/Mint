@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { FileCode2, FolderOpen, GitBranch, RefreshCw, Terminal } from 'lucide-react'
-import { conversationPlatform, workspacePlatform } from '../platform'
-import type { AgentProgress, ConversationSources, FileChange, GitBranchInfo } from '../types'
-import { collectSessionSources } from '../utils/sessionSources'
+import { workspacePlatform } from '../platform'
+import type { AgentProgress, FileChange, GitBranchInfo } from '../types'
+import { useSessionSources } from '../utils/useSessionSources'
 import SessionSources from './SessionSources'
 
 interface WorkspaceContextPopoverProps {
@@ -35,29 +35,7 @@ export default function WorkspaceContextPopover({
   const [gitInfo, setGitInfo] = useState<GitBranchInfo | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
-  const [sourceData, setSourceData] = useState<{ chatId: string; value: ConversationSources } | null>(null)
-  const [sourceError, setSourceError] = useState('')
-  const [sourceLoading, setSourceLoading] = useState(false)
-  const [sourceRetry, setSourceRetry] = useState(0)
-
-  useEffect(() => {
-    if (!open) return
-    let disposed = false
-    let busy = false
-    setSourceData(null); setSourceError(''); setSourceLoading(true)
-    const load = async () => {
-      if (busy || document.hidden) return
-      busy = true
-      try {
-        const value = await conversationPlatform.getConversationSources(chatId)
-        if (!disposed) { setSourceData({ chatId, value }); setSourceError('') }
-      } catch (error) { if (!disposed) setSourceError(String(error)) }
-      finally { busy = false; if (!disposed) setSourceLoading(false) }
-    }
-    void load()
-    const timer = window.setInterval(() => { void load() }, 2000)
-    return () => { disposed = true; window.clearInterval(timer) }
-  }, [open, chatId, sourceRetry])
+  const { sources, loading: sourceLoading, error: sourceError, retry: retrySources } = useSessionSources(chatId, liveProgress, open)
 
   const refresh = useCallback(async () => {
     if (!workspacePath.trim()) {
@@ -101,7 +79,6 @@ export default function WorkspaceContextPopover({
   const additions = recentChanges.reduce((total, change) => total + Math.max(0, change.additions || 0), 0)
   const deletions = recentChanges.reduce((total, change) => total + Math.max(0, change.deletions || 0), 0)
   const hasReview = recentChanges.length > 0
-  const sources = useMemo(() => open ? collectSessionSources(sourceData?.chatId === chatId ? sourceData.value : { attachments: [], webSearchProgress: [] }, liveProgress) : [], [open, sourceData, chatId, liveProgress])
 
   return (
     <div className="workspace-context" ref={rootRef}>
@@ -149,7 +126,7 @@ export default function WorkspaceContextPopover({
             <span className="workspace-context-status">{terminalCount}</span>
           </div>
 
-          <SessionSources key={chatId} sources={sources} loading={sourceLoading} error={sourceError} onRetry={() => setSourceRetry(value => value + 1)} onOpenLibrary={url => {
+          <SessionSources key={chatId} sources={sources} loading={sourceLoading} error={sourceError} onRetry={retrySources} onOpenLibrary={url => {
             window.history.pushState({}, '', url)
             window.dispatchEvent(new PopStateEvent('popstate'))
             setOpen(false)

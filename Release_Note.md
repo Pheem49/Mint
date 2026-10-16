@@ -32,6 +32,8 @@
 
 ## Desktop and Web
 
+- Added **Sources** beside Tools in the Web chat header. Its mobile-friendly session panel shares Desktop's source loading, attachments, web-search links and favicons, with loading/retry states and Library navigation that preserves drafts.
+- Workspace context Sources now shows website favicons for web-search pages on Desktop/Web, using the existing source metadata. Unavailable favicons fall back to the globe; broken attachment previews use their file-type icon without changing thumbnail sizing.
 - `view_image` now shows viewed images inline in Desktop/Web chat during a run and in saved history, with filenames and an expandable preview. Images remain visible with Activity collapsed, while tool details show a readable status instead of base64. CLI/TUI keeps its text status.
 - Renamed **Pictures** to **Library** on Desktop and Web, with shared All / Images / Videos / Files filters, filename search, current-conversation scope, cursor pagination, previews, original-name downloads, and reversible Library Trash. `/library` is canonical; `/pictures` remains compatible.
 - CLI/TUI uploads now use the same pre-AI Library intake and turn references as Desktop/Web, retaining files on provider failure. Agent-generated images/videos retain their conversation and running-turn references. Library refresh preserves loaded cursor pages while thumbnails update; Sources opens Library inside the app without discarding the composer.
