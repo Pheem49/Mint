@@ -2,6 +2,8 @@
 
 ## Highlights
 
+- Updated the locked `source-map-js` dependency from 1.2.1 to 1.2.2 to fix GHSA-68fv-2mgg-jv7q and restore the CI `npm audit --audit-level=high` check.
+
 - New workspace mods use **`.mint-mods/<id>/`**; existing `mint-mods/<id>/` sources remain supported. The hidden folder takes precedence for duplicate IDs, while legacy edits stay in place. Moved this workspace’s `token-weather` mod into `.mint-mods` with its files unchanged.
 - Added **Mint Mods**: custom panels, commands, and tool guards across CLI, Desktop, and Web, with hot reload, permission review, and import/export.
 - Moved Live2D into the optional **Mint Companion** app, which follows a selected Mint conversation without starting another backend.
