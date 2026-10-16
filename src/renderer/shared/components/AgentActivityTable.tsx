@@ -54,7 +54,7 @@ function renderActivityIcon(kind: AgentActivity['kind'], target: string, action?
 }
 
 function extractResultPreview(action: string | undefined, result: string | undefined): string | null {
-  if (!result || !result.trim()) return null
+  if (!result || !result.trim() || action === 'view_image') return null
   const firstLine = result.trim().split('\n')[0].trim()
   if (action === 'calculation') {
     const eqIdx = firstLine.indexOf('=')

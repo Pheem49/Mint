@@ -5,6 +5,7 @@
  */
 import type { AgentProgress } from '../types'
 import { isInternalCot } from '../agentProgress'
+import { viewedImageDataUri } from './viewedImages'
 
 export interface AgentActivity {
   label: string
@@ -318,7 +319,8 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
         if (event.data.callId && activities[index].callId !== event.data.callId) continue
         if (activities[index].action !== finished.action || activities[index].target !== finished.target) continue
         activities[index].state = event.data.status ? (event.data.status === 'success' ? 'done' : 'error') : /^(Error:|Blocked|User denied)/.test(event.data.result) ? 'error' : 'done'
-        activities[index].result = event.data.result
+        const viewedImage = event.data.action === 'view_image' ? viewedImageDataUri(event.data.result) : null
+        activities[index].result = viewedImage ? event.data.result.replace(viewedImage, '[Image displayed below]') : event.data.result
         if (event.data.action === 'read_file') {
           const loaded = event.data.result.match(/^\[Loaded skill: ([^\n]+)\]\n/)
           if (loaded) activities[index].label = `Loaded skill: ${loaded[1]}`

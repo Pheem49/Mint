@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { FormattedMessage } from './FormattedMessage'
 import ChatMessageItem, { type ChatMessageItemProps } from './ChatMessageItem'
+import type { AgentProgress } from '../types'
+import { compactAgentProgressForPersistence, reduceLiveAgentProgress } from '../agentProgress'
 
 const action = () => {}
 const base: ChatMessageItemProps = {
@@ -33,5 +35,34 @@ describe('pasted message line breaks on Desktop and Web', () => {
     expect(html.match(/class="chat-list-item chat-bullet-item"/g) ?? []).toHaveLength(3)
     expect(html).toContain('☀ Clear')
     expect(html).toContain('▲ +98.3k last turn')
+  })
+})
+
+describe('view_image results on Desktop and Web', () => {
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+  const progress: AgentProgress[] = [
+    { type: 'ToolStart', data: { callId: 'view-1', action: 'view_image', input: { path: '/workspace/screens/mobile.png' } } },
+    { type: 'ToolEnd', data: { callId: 'view-1', action: 'view_image', input: { path: '/workspace/screens/mobile.png' }, result: `${image}\n\n[Hook] Image inspected` } },
+    { type: 'ToolEnd', data: { action: 'view_image', input: { path: '/private/denied.png' }, status: 'failed', result: image } },
+    { type: 'ToolEnd', data: { action: 'read_file', input: { path: 'note.txt' }, result: image } },
+  ]
+  it.each(['completed', 'failed', 'interrupted'])('keeps viewed images visible in %s history with Activity collapsed', status => {
+    const saved = JSON.parse(JSON.stringify(compactAgentProgressForPersistence(progress)))
+    const html = renderToStaticMarkup(<ChatMessageItem {...base} interaction={{ ...base.interaction, status, agentActivity: saved }} />)
+    expect(html).toContain(`src="${image}"`)
+    expect(html).toContain('alt="Viewed image: mobile.png"')
+    expect(html).toContain('aria-label="Expand mobile.png"')
+    expect(html.match(/data-viewed-image=/g)).toHaveLength(1)
+    expect(html).not.toContain('Expand denied.png')
+  })
+  it('keeps a viewed image after many later tools complete in the same run', () => {
+    const later: AgentProgress[] = Array.from({ length: 40 }, (_, index) => ({ type: 'ToolEnd', data: { action: 'read_file', input: { path: `file-${index}.md` }, result: 'Read' } }))
+    const live = [...progress, ...later].reduce(reduceLiveAgentProgress, [] as AgentProgress[])
+    const html = renderToStaticMarkup(<ChatMessageItem {...base} agentActivitySnapshots={{ '7': live }} />)
+    expect(html).toContain('aria-label="Expand mobile.png"')
+  })
+  it.each(['https://example.com/private.png', 'data:text/html;base64,PHNjcmlwdD4=', 'data:image/png;base64,%%%invalid', 'Error: cannot read image', 'Image exists but is too large to inline'])('does not embed an unavailable or non-image result: %s', result => {
+    const html = renderToStaticMarkup(<ChatMessageItem {...base} interaction={{ ...base.interaction, agentActivity: [{ type: 'ToolEnd', data: { action: 'view_image', input: { path: 'unavailable.png' }, result } }] }} />)
+    expect(html).not.toContain('data-viewed-image=')
   })
 })

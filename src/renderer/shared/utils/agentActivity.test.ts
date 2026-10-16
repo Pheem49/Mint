@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { describeTool, activitiesFrom } from './agentActivity'
+import { viewedImagesFrom } from './viewedImages'
+import { reduceLiveAgentProgress } from '../agentProgress'
+import type { AgentProgress } from '../types'
 
 describe('skill reading activity', () => {
   const input = { path: '/repo/.agents/skills/review/SKILL.md', skill_name: 'review' }
@@ -50,4 +53,23 @@ describe('MCP tool outcomes', () => {
     ] as any)
     expect(view.items[0].state).toBe('error')
   })
+})
+
+it('shows a readable view_image result instead of raw image bytes while preserving hook notes', () => {
+  const input = { path: '/workspace/screen.png' }
+  const view = activitiesFrom([
+    { type: 'ToolStart', data: { action: 'view_image', input } },
+    { type: 'ToolEnd', data: { action: 'view_image', input, result: 'data:image/png;base64,aGVsbG8=\n\n[Hook] Checked' } },
+  ])
+  expect(view.items[0].result).not.toContain('data:image/')
+  expect(view.items[0].result).toContain('Image displayed below')
+  expect(view.items[0].result).toContain('[Hook] Checked')
+})
+
+it('keeps viewed image identity stable when earlier text-only activities are trimmed', () => {
+  const earlier: AgentProgress[] = Array.from({ length: 10 }, () => ({ type: 'ToolEnd', data: { action: 'read_file', input: {}, result: 'Read' } }))
+  const image: AgentProgress = { type: 'ToolEnd', data: { action: 'view_image', input: { path: 'image.png' }, result: 'data:image/png;base64,aGVsbG8=' } }
+  const initial = [...earlier, image]
+  const later = Array.from({ length: 40 }, () => ({ type: 'ToolEnd' as const, data: { action: 'read_file', input: {}, result: 'Read' } })).reduce(reduceLiveAgentProgress, initial)
+  expect(viewedImagesFrom(later).map(item => item.id)).toEqual(viewedImagesFrom(initial).map(item => item.id))
 })
