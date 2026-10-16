@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileCode2, FolderOpen, GitBranch, Paperclip, RefreshCw, Terminal } from 'lucide-react'
-import { workspacePlatform } from '../platform'
-import type { FileChange, GitBranchInfo } from '../types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FileCode2, FolderOpen, GitBranch, RefreshCw, Terminal } from 'lucide-react'
+import { conversationPlatform, workspacePlatform } from '../platform'
+import type { AgentProgress, ConversationSources, FileChange, GitBranchInfo } from '../types'
+import { collectSessionSources } from '../utils/sessionSources'
+import SessionSources from './SessionSources'
 
 interface WorkspaceContextPopoverProps {
   workspacePath: string
   terminalCount: number
-  sourceNames: string[]
+  chatId: string
+  liveProgress: AgentProgress[]
   recentChanges: FileChange[]
   onOpenWorkspace: () => void
   onOpenReview: (changes: FileChange[]) => void
@@ -21,7 +24,8 @@ function workspaceLabel(path: string) {
 export default function WorkspaceContextPopover({
   workspacePath,
   terminalCount,
-  sourceNames,
+  chatId,
+  liveProgress,
   recentChanges,
   onOpenWorkspace,
   onOpenReview,
@@ -31,6 +35,29 @@ export default function WorkspaceContextPopover({
   const [gitInfo, setGitInfo] = useState<GitBranchInfo | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const [sourceData, setSourceData] = useState<{ chatId: string; value: ConversationSources } | null>(null)
+  const [sourceError, setSourceError] = useState('')
+  const [sourceLoading, setSourceLoading] = useState(false)
+  const [sourceRetry, setSourceRetry] = useState(0)
+
+  useEffect(() => {
+    if (!open) return
+    let disposed = false
+    let busy = false
+    setSourceData(null); setSourceError(''); setSourceLoading(true)
+    const load = async () => {
+      if (busy || document.hidden) return
+      busy = true
+      try {
+        const value = await conversationPlatform.getConversationSources(chatId)
+        if (!disposed) { setSourceData({ chatId, value }); setSourceError('') }
+      } catch (error) { if (!disposed) setSourceError(String(error)) }
+      finally { busy = false; if (!disposed) setSourceLoading(false) }
+    }
+    void load()
+    const timer = window.setInterval(() => { void load() }, 2000)
+    return () => { disposed = true; window.clearInterval(timer) }
+  }, [open, chatId, sourceRetry])
 
   const refresh = useCallback(async () => {
     if (!workspacePath.trim()) {
@@ -74,7 +101,7 @@ export default function WorkspaceContextPopover({
   const additions = recentChanges.reduce((total, change) => total + Math.max(0, change.additions || 0), 0)
   const deletions = recentChanges.reduce((total, change) => total + Math.max(0, change.deletions || 0), 0)
   const hasReview = recentChanges.length > 0
-  const uniqueSources = [...new Set(sourceNames.filter(Boolean))]
+  const sources = useMemo(() => open ? collectSessionSources(sourceData?.chatId === chatId ? sourceData.value : { attachments: [], webSearchProgress: [] }, liveProgress) : [], [open, sourceData, chatId, liveProgress])
 
   return (
     <div className="workspace-context" ref={rootRef}>
@@ -122,11 +149,11 @@ export default function WorkspaceContextPopover({
             <span className="workspace-context-status">{terminalCount}</span>
           </div>
 
-          <div className="workspace-context-sources">
-            <div className="workspace-context-sources-heading"><span><Paperclip size={13} aria-hidden="true" /> Sources</span><span>{uniqueSources.length}</span></div>
-            {uniqueSources.length === 0 ? <p>No files attached to this message.</p> : uniqueSources.slice(0, 3).map((name) => <p key={name} title={name}><FileCode2 size={13} aria-hidden="true" /> {name}</p>)}
-            {uniqueSources.length > 3 && <p className="workspace-context-more">+{uniqueSources.length - 3} more sources</p>}
-          </div>
+          <SessionSources key={chatId} sources={sources} loading={sourceLoading} error={sourceError} onRetry={() => setSourceRetry(value => value + 1)} onOpenLibrary={url => {
+            window.history.pushState({}, '', url)
+            window.dispatchEvent(new PopStateEvent('popstate'))
+            setOpen(false)
+          }} />
         </section>
       )}
     </div>

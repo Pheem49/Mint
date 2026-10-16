@@ -10,7 +10,7 @@ pub(in crate::orchestration) async fn execute(
     input: &AgentInput,
     _root: &Path,
     config: &MintConfig,
-    _chat_id: &str,
+    chat_id: &str,
     _approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
 ) -> Result<String, OrchestrationError> {
     match action {
@@ -266,6 +266,17 @@ pub(in crate::orchestration) async fn execute(
             let res = crate::image_workflow::generate_and_save_images(config, &req)
                 .await
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            crate::library::LibraryStore::open_default()
+                .and_then(|store| {
+                    store.link_generated(
+                        &res.images
+                            .iter()
+                            .map(|image| image.id.clone())
+                            .collect::<Vec<_>>(),
+                        chat_id,
+                    )
+                })
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
             let saved_path = res.images[0].path.display().to_string();
             let json_payload = serde_json::json!({
                 "prompt": res.prompt,
@@ -307,6 +318,17 @@ pub(in crate::orchestration) async fn execute(
             };
             let res = crate::video_gen::generate_video(config, &req)
                 .await
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            crate::library::LibraryStore::open_default()
+                .and_then(|store| {
+                    store.link_generated(
+                        &res.videos
+                            .iter()
+                            .map(|video| video.id.clone())
+                            .collect::<Vec<_>>(),
+                        chat_id,
+                    )
+                })
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
             if let Some(first) = res.videos.first() {
                 let vid_md = format!(

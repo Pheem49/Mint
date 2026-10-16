@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::search::text_embedding::{encode_embedding, fact_embedding_backend};
+mod sources;
+pub use sources::{ConversationSources, SessionAttachment, SourceAttachment};
 
 pub const CHAT_CLI_ID: &str = "cli";
 pub const DEFAULT_CONVERSATION_ID: &str = "conversation-default";
@@ -51,6 +53,8 @@ pub fn subagent_name(chat_id: &str) -> Option<&str> {
 
 #[derive(Debug, Error)]
 pub enum MemoryError {
+    #[error("library error: {0}")]
+    Library(String),
     #[error("unable to determine the user config directory")]
     ConfigDirectoryUnavailable,
     #[error("unable to create database directory {path}: {source}")]
@@ -752,6 +756,10 @@ impl MemoryStore {
         let chat_id = normalized_chat_id(chat_id);
         let connection = self.connection()?;
         connection.execute(
+            "DELETE FROM library_references WHERE chat_id = ?1",
+            params![chat_id],
+        )?;
+        connection.execute(
             "DELETE FROM session_skill_reads WHERE chat_id = ?1",
             params![chat_id],
         )?;
@@ -768,6 +776,10 @@ impl MemoryStore {
         }
         let connection = self.connection()?;
         let transaction = connection.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM library_references WHERE chat_id = ?1",
+            params![chat_id],
+        )?;
         transaction.execute(
             "DELETE FROM session_skill_reads WHERE chat_id = ?1",
             params![chat_id],
@@ -1163,7 +1175,11 @@ impl MemoryStore {
         )?)
     }
 
-    fn connection(&self) -> Result<Connection, MemoryError> {
+    pub(crate) fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    pub(crate) fn connection(&self) -> Result<Connection, MemoryError> {
         if let Some(directory) = self.path.parent() {
             std::fs::create_dir_all(directory).map_err(|source| MemoryError::CreateDirectory {
                 path: directory.to_path_buf(),
@@ -1358,6 +1374,16 @@ fn initialize(
            chat_id TEXT NOT NULL,
            interaction_id INTEGER NOT NULL
          );
+         CREATE TABLE IF NOT EXISTS conversation_source_attachments (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           interaction_id INTEGER NOT NULL,
+           metadata TEXT NOT NULL,
+           UNIQUE(interaction_id, metadata)
+         );
+         CREATE TRIGGER IF NOT EXISTS trg_interaction_sources_delete
+         AFTER DELETE ON interaction_memories BEGIN
+           DELETE FROM conversation_source_attachments WHERE interaction_id = OLD.id;
+         END;
          CREATE INDEX IF NOT EXISTS idx_conversation_changes_chat_sequence
            ON conversation_changes(chat_id, sequence);
           CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -1436,6 +1462,7 @@ fn initialize(
            VALUES (new.id, new.user_text, new.ai_text);
          END;",
     )?;
+    crate::library::initialize(connection)?;
     ensure_column(
         connection,
         "interaction_memories",

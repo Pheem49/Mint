@@ -153,6 +153,11 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
     let listener = TcpListener::bind(addr).await?;
     let listener_addr = listener.local_addr()?;
     let _webhook_lease = crate::webhooks::claim_api_listener(listener_addr);
+    tokio::task::spawn_blocking(|| {
+        if let Err(error) = crate::library::LibraryStore::open_default() {
+            eprintln!("[mint] Library startup: {error}")
+        }
+    });
     crate::companion::start();
     // API server banner removed to prevent duplicate output
 
@@ -353,6 +358,12 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
             }
 
             match (method, route) {
+                ("GET" | "POST" | "DELETE", route) if route == "/api/library" || route.starts_with("/api/library/") => {
+                    routes::library::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
+                }
+                ("GET" | "POST", "/api/conversation-sources") => {
+                    routes::sources::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
+                }
                 ("GET", route) if route.starts_with("/api/mcp-artifacts/") => {
                     let id = route.trim_start_matches("/api/mcp-artifacts/").to_owned();
                     let artifact = tokio::task::spawn_blocking(move || crate::integrations::mcp_result::read_artifact(&id)).await;
@@ -1567,7 +1578,9 @@ fn picture_bytes(filename: &str) -> Result<(String, Vec<u8>), String> {
         .into_iter()
         .find(|entry| entry.filename == filename)
         .ok_or_else(|| "picture not found".to_string())?;
-    let bytes = std::fs::read(&picture.path).map_err(|error| error.to_string())?;
+    let (_, bytes) = crate::library::LibraryStore::open_default()
+        .and_then(|store| store.read(&picture.id, false))
+        .map_err(|error| error.to_string())?;
     Ok((picture.mime_type, bytes))
 }
 
@@ -1583,10 +1596,9 @@ fn thumbnail_bytes(filename: &str) -> Result<(String, Vec<u8>), String> {
         .into_iter()
         .find(|entry| entry.id == id)
         .ok_or_else(|| "picture not found".to_string())?;
-    let thumb_path = picture
-        .thumbnail_path
-        .ok_or_else(|| "thumbnail not found".to_string())?;
-    let bytes = std::fs::read(&thumb_path).map_err(|error| error.to_string())?;
+    let (_, bytes) = crate::library::LibraryStore::open_default()
+        .and_then(|store| store.read(&picture.id, true))
+        .map_err(|error| error.to_string())?;
     Ok(("image/png".to_string(), bytes))
 }
 

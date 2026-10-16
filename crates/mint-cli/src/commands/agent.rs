@@ -593,28 +593,49 @@ pub async fn handle_chat(
         .await?;
     } else {
         let image_data_uri = image_path.map(image::load_image_as_data_uri).transpose()?;
-        let (response, _) = orchestrate_chat_with_fallback(
+        let name = image_path
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned());
+        let receipt = image::prepare_attachments(
             config,
-            &ChatRequest {
-                message: message.clone(),
-                system_instruction: system,
-                chat_id: Some(CHAT_CLI_ID.to_owned()),
-                image_data_uri: image_data_uri.clone(),
-                audio_data_uri: None,
-                video_data_uri: None,
-                document_attachment: None,
-                workspace_path: Some(std::env::current_dir()?.to_string_lossy().into_owned()),
-                agent_id: None,
-                plan_mode: false,
-                pinned_mcp_server: None,
-                messages: None,
-                tools: None,
-                temperature: config.temperature,
-                ..Default::default()
-            },
+            CHAT_CLI_ID,
+            &message,
+            image_data_uri.as_deref(),
+            None,
+            name.as_deref(),
         )
         .await?;
-        image::save_sent_image_after_send(image_data_uri.as_deref(), &message, None);
+        let (response, _) = mint_core::with_turn_start_listener(
+            CHAT_CLI_ID.to_owned(),
+            move |id| {
+                if let Some(receipt) = &receipt
+                    && let Err(error) = receipt.bind(id)
+                {
+                    eprintln!("Library reference: {error}")
+                }
+            },
+            orchestrate_chat_with_fallback(
+                config,
+                &ChatRequest {
+                    message: message.clone(),
+                    system_instruction: system,
+                    chat_id: Some(CHAT_CLI_ID.to_owned()),
+                    image_data_uri: image_data_uri.clone(),
+                    audio_data_uri: None,
+                    video_data_uri: None,
+                    document_attachment: None,
+                    workspace_path: Some(std::env::current_dir()?.to_string_lossy().into_owned()),
+                    agent_id: None,
+                    plan_mode: false,
+                    pinned_mcp_server: None,
+                    messages: None,
+                    tools: None,
+                    temperature: config.temperature,
+                    ..Default::default()
+                },
+            ),
+        )
+        .await?;
         println!("{}", response.text);
     }
     Ok(())

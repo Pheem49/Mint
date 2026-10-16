@@ -111,3 +111,69 @@ pub(crate) fn get_tts_urls(text: String) -> Result<Vec<TtsUrl>, String> {
 pub(crate) async fn get_weather(city: String) -> Result<WeatherReport, String> {
     weather(&city).await.map_err(|error| error.to_string())
 }
+
+#[tauri::command]
+pub(crate) async fn list_library(
+    query: mint_core::library::LibraryQuery,
+) -> Result<mint_core::library::LibraryPage, String> {
+    tokio::task::spawn_blocking(move || {
+        mint_core::library::LibraryStore::open_default()
+            .and_then(|s| s.list(&query))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub(crate) async fn get_library_item(
+    id: String,
+) -> Result<mint_core::library::LibraryItem, String> {
+    tokio::task::spawn_blocking(move || {
+        mint_core::library::LibraryStore::open_default()
+            .and_then(|s| s.get(&id))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub(crate) async fn set_library_trashed(id: String, trashed: bool) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        mint_core::library::LibraryStore::open_default()
+            .and_then(|s| s.set_trashed(&id, trashed))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub(crate) async fn read_library_file(id: String, thumbnail: bool) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        use base64::Engine;
+        let (item, bytes) = mint_core::library::LibraryStore::open_default()
+            .and_then(|s| s.read(&id, thumbnail))
+            .map_err(|e| e.to_string())?;
+        Ok(format!(
+            "data:{};base64,{}",
+            if thumbnail {
+                "image/png"
+            } else {
+                &item.mime_type
+            },
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn remove_library_item(id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        mint_core::library::LibraryStore::open_default()
+            .and_then(|s| s.remove(&id))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

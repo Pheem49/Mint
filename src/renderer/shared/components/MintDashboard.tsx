@@ -8,7 +8,7 @@ import {
   parseFileChangesFromProgress,
 } from '../agentProgress'
 import { catalogPlatform, conversationPlatform, mediaPlatform, runtimePlatform, workspacePlatform, type SlashResponse } from '../platform'
-import type { ChatSession, DocumentAttachment, PictureEntry, RuntimeStatus } from '../types'
+import type { ChatSession, DocumentAttachment, RuntimeStatus } from '../types'
 
 const {
   clearChatHistory, deleteChatSession, renameChatSession,
@@ -16,7 +16,7 @@ const {
   listen, readClipboardImage,
 } = conversationPlatform
 const { getRuntimeStatus, setActiveModel, selectWorkspaceDirectory, selectLinkedFolderPath, isTauriRuntime } = runtimePlatform
-const { listSavedPictures, convertFileSrc } = mediaPlatform
+const { convertFileSrc } = mediaPlatform
 const {
   listLearnedSkills, addLearnedSkill, deleteLearnedSkill, detectSystemTools, reauthMcpServer,
   listMcpServerTools, setProfileValue, listCronJobs, addCronJob, removeCronJob,
@@ -237,7 +237,7 @@ const LinkedFoldersView = lazy(() => import('./LinkedFoldersView'))
 const McpServersView = lazy(() => import('./McpServersView'))
 const PluginsView = lazy(() => import('./PluginsView'))
 const CliSessionsView = lazy(() => import('./CliSessionsView'))
-const PicturesLibrary = lazy(() => import('@/components/PicturesLibrary'))
+const LibraryPage = lazy(() => import('./LibraryPage'))
 const ImageStudioPanel = lazy(() => import('./ImageStudioPanel'))
 const VeoStudioPanel = lazy(() => import('./VeoStudioPanel'))
 const CommandPalette = lazy(() => import('./CommandPalette').then(({ CommandPalette: Component }) => ({ default: Component })))
@@ -255,7 +255,7 @@ function getInitialViewFromUrl(): DashboardView {
   if (target.includes('skills')) return 'skills'
   if (target.includes('mcp')) return 'mcp'
   if (target.includes('plugins')) return 'plugins'
-  if (target.includes('picture')) return 'pictures'
+  if (target.includes('picture') || target.includes('library')) return 'pictures'
   if (target.includes('image-studio') || target.includes('imagine')) return 'imagine'
   if (target.includes('veo-studio') || target.includes('veo')) return 'veo'
   if (target.includes('code') || target === '/cli' || target === 'cli' || target.includes('cli-sessions')) return 'code'
@@ -266,7 +266,7 @@ function getCleanPathForView(v: string, activeId?: string): string {
   if (v === 'skills') return '/skills'
   if (v === 'mcp') return '/mcp'
   if (v === 'plugins') return '/plugins'
-  if (v === 'pictures') return '/pictures'
+  if (v === 'pictures') return '/library'
   if (v === 'imagine') return '/image-studio'
   if (v === 'veo' || v === 'veo_studio') return '/veo-studio'
   if (v === 'code') return '/code'
@@ -334,7 +334,6 @@ export default function MintDashboard() {
         }))
       },
       onRunCompleted: async () => {
-        await refreshPictures()
         getRuntimeStatus().then(setStatus).catch(() => {})
       },
       onVisibleRunCompleted: chatId => {
@@ -511,7 +510,6 @@ export default function MintDashboard() {
     }
   }, [])
 
-  const [pictures, setPictures] = useState<PictureEntry[]>([])
   const [thinkingExpanded, setThinkingExpanded] = useState<Record<string, boolean>>({})
   const liveThinkingOpenRef = useRef(true)
   const liveExtendedThinkingOpenRef = useRef(true)
@@ -539,11 +537,6 @@ export default function MintDashboard() {
     }),
     parseFileChangesFromProgress(agentProgress),
   ])
-  const workspaceSourceNames = [
-    ...imageAttachments.map((attachment) => attachment.name),
-    ...videoAttachments.map((attachment) => attachment.name),
-    documentAttachment?.filename || '',
-  ]
 
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
   const [planMode, setPlanMode] = useState(() => window.localStorage.getItem('mint:plan-mode') === 'true')
@@ -762,17 +755,6 @@ export default function MintDashboard() {
     }
   }, [])
 
-  const [picturesRefreshing, setPicturesRefreshing] = useState(false)
-
-  async function refreshPictures() {
-    setPicturesRefreshing(true)
-    try {
-      setPictures(await listSavedPictures())
-    } finally {
-      setPicturesRefreshing(false)
-    }
-  }
-
   useEffect(() => {
     Promise.allSettled([
       getRuntimeStatus().then(setStatus),
@@ -828,10 +810,6 @@ export default function MintDashboard() {
     const timer = window.setTimeout(() => setStartupTimedOut(true), 10000)
     return () => window.clearTimeout(timer)
   }, [])
-
-  useEffect(() => {
-    if (view === 'pictures' || view === 'imagine') refreshPictures().catch((reason: unknown) => setError(errorMessage(reason)))
-  }, [view])
 
   useEffect(() => {
     if (view === 'workspace' && !agentMode) updateAgentMode(true)
@@ -1856,7 +1834,8 @@ export default function MintDashboard() {
           sending={sending}
           onWorkspaceUndoError={showToast}
           terminalCount={toolSurfaces.filter((surface) => surface.kind === 'terminal').length}
-          sourceNames={workspaceSourceNames}
+          chatId={conversationId}
+          liveProgress={streamingConversationId === conversationId ? agentProgress : []}
           recentChanges={recentAgentChanges}
           onOpenReview={(changes) => openReviewSurface({ id: `review:workspace:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: 'Recent agent changes', changes })}
           onRefreshWorkspace={() => setWorkspaceRefreshRevision((revision) => revision + 1)}
@@ -2134,14 +2113,13 @@ export default function MintDashboard() {
         )}
         {view === 'pictures' && (
           <Suspense fallback={<LazyPanelFallback />}>
-            <PicturesLibrary view={view} pictures={pictures} onSetView={changeView} onRefreshPictures={refreshPictures} />
+            <LibraryPage chatId={conversationId} onClose={() => changeView('chat')} onOpenConversation={id => { void selectConversation(id) }} />
           </Suspense>
         )}
         {view === 'imagine' && (
           <Suspense fallback={<LazyPanelFallback />}>
             <ImageStudioPanel
               view={view}
-              onRefreshPictures={refreshPictures}
               onSendToChat={async (imagePath, imgPrompt) => {
                 try {
                   const response = await fetch(convertFileSrc(imagePath))

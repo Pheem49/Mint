@@ -84,6 +84,11 @@ pub fn run() {
             if let Some(main_window) = app.get_webview_window("main") {
                 allow_media_permission_requests(&main_window);
             }
+            std::thread::spawn(|| {
+                if let Err(error) = mint_core::library::LibraryStore::open_default() {
+                    eprintln!("[mint] Library startup: {error}")
+                }
+            });
             install_tray(app.handle())?;
             install_shortcuts(app.handle())?;
             start_system_events(app.handle().clone());
@@ -167,6 +172,8 @@ pub fn run() {
             commands::conversation::submit_tool_approval,
             commands::conversation::get_recent_interactions,
             commands::conversation::get_conversation_snapshot,
+            commands::conversation::get_conversation_sources,
+            commands::conversation::save_source_attachments,
             commands::conversation::get_conversation_changes,
             commands::conversation::save_interaction_agent_activity,
             commands::conversation::list_chat_sessions,
@@ -206,6 +213,11 @@ pub fn run() {
             commands::workspace::read_linked_folder_note,
             commands::workspace::save_linked_folder_note,
             commands::workspace::open_linked_folder_note,
+            commands::media::list_library,
+            commands::media::get_library_item,
+            commands::media::set_library_trashed,
+            commands::media::remove_library_item,
+            commands::media::read_library_file,
             commands::media::list_pictures,
             commands::media::delete_picture,
             commands::media::save_pictures,

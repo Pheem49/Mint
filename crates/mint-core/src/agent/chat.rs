@@ -343,6 +343,43 @@ const MAX_DOCUMENT_CONTEXT_CHARS: usize = 400_000;
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl ChatRequest {
+    pub(crate) fn with_stored_document_context(
+        &self,
+        _config: &crate::MintConfig,
+        path: &std::path::Path,
+    ) -> Result<ChatRequest, String> {
+        let Some(document) = &self.document_attachment else {
+            return Ok(self.clone());
+        };
+        let extracted =
+            crate::knowledge::extract_managed_document_text(path).map_err(|e| e.to_string())?;
+        self.with_document_text(document, extracted)
+    }
+    fn with_document_text(
+        &self,
+        document: &DocumentAttachment,
+        extracted: String,
+    ) -> Result<ChatRequest, String> {
+        let mut context: String = extracted.chars().take(MAX_DOCUMENT_CONTEXT_CHARS).collect();
+        if extracted.chars().count() > MAX_DOCUMENT_CONTEXT_CHARS {
+            context.push_str("\n\n[Document text truncated because it is long.]");
+        }
+
+        let filename = document.filename.trim();
+        let filename = if filename.is_empty() {
+            "attached document"
+        } else {
+            filename
+        };
+
+        let mut enriched = self.clone();
+        enriched.document_attachment = None;
+        enriched.message = format!(
+            "{}\n\nAttached document: {filename}\nUse the extracted document text below when answering. If the user asks for a summary, summarize this document.\n\n--- Extracted document text ---\n{context}\n--- End extracted document text ---",
+            self.message
+        );
+        Ok(enriched)
+    }
     pub fn with_document_context(&self, config: &crate::MintConfig) -> Result<ChatRequest, String> {
         let Some(document) = &self.document_attachment else {
             return Ok(self.clone());
@@ -404,25 +441,7 @@ impl ChatRequest {
         let _ = std::fs::remove_file(&path);
         let extracted = extracted?;
 
-        let mut context: String = extracted.chars().take(MAX_DOCUMENT_CONTEXT_CHARS).collect();
-        if extracted.chars().count() > MAX_DOCUMENT_CONTEXT_CHARS {
-            context.push_str("\n\n[Document text truncated because it is long.]");
-        }
-
-        let filename = document.filename.trim();
-        let filename = if filename.is_empty() {
-            "attached document"
-        } else {
-            filename
-        };
-
-        let mut enriched = self.clone();
-        enriched.document_attachment = None;
-        enriched.message = format!(
-            "{}\n\nAttached document: {filename}\nUse the extracted document text below when answering. If the user asks for a summary, summarize this document.\n\n--- Extracted document text ---\n{context}\n--- End extracted document text ---",
-            self.message
-        );
-        Ok(enriched)
+        self.with_document_text(document, extracted)
     }
 }
 

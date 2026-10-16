@@ -1,3 +1,5 @@
+import { createLibraryTransport } from '../shared/library/transport'
+import { createSourcesTransport } from '../shared/conversation/sourcesTransport'
 export * from '../shared/types'
 import type { MintPlatformApi } from '../shared/platform'
 import { createConversationTransport } from '../shared/conversation/transport'
@@ -2301,8 +2303,14 @@ export async function modsOperation(operation: import('../shared/mods').ModOpera
   return value
 }
 
+export const { listLibrary, getLibraryItem, setLibraryTrashed, removeLibraryItem, readLibraryFile } = createLibraryTransport({ isNative: isTauriRuntime, apiBase: getApiBase, fetch: authFetch })
+
+export const { getConversationSources, saveSourceAttachments } = createSourcesTransport({ isNative: isTauriRuntime, apiBase: getApiBase, fetch: authFetch })
+
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
+  listLibrary, getLibraryItem, setLibraryTrashed, removeLibraryItem, readLibraryFile,
+  getConversationSources, saveSourceAttachments,
   modsOperation,
   readMcpArtifact,
   listBackgroundJobs, getBackgroundJob, stopBackgroundJob, deleteBackgroundJob,

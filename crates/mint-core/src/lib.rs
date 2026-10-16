@@ -39,6 +39,7 @@ pub use media::gemini_live;
 pub use media::image_gen;
 pub use media::image_search;
 pub use media::image_workflow;
+pub use media::library;
 pub use media::mic_transcribe;
 pub use media::model_catalog;
 pub use media::pictures;

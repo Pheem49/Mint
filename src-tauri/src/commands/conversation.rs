@@ -32,6 +32,7 @@ pub(crate) async fn send_chat_message(
     app: AppHandle,
     request: ChatRequest,
     owner_token: Option<String>,
+    attachment_metadata: Option<mint_core::library::AttachmentMetadata>,
 ) -> Result<ChatResponse, String> {
     bind_background_owner(&request, owner_token)?;
     let mut config = load_config().map_err(|error| error.to_string())?;
@@ -49,7 +50,8 @@ pub(crate) async fn send_chat_message(
             let _ = save_config(&config);
         }
     }
-    let request = request.with_document_context(&config)?;
+    let (request, receipt) =
+        mint_core::library::prepare_chat(&request, attachment_metadata.as_ref(), &config).await?;
 
     if request.message.starts_with("/chat ") {
         let mut clean_request = request.clone();
@@ -58,7 +60,22 @@ pub(crate) async fn send_chat_message(
         let chat_id_str = request.chat_id.clone().unwrap_or_default();
 
         let join_handle = tokio::spawn(async move {
-            orchestrate_chat_with_fallback(&config_clone, &clean_request).await
+            let expected = clean_request
+                .chat_id
+                .clone()
+                .unwrap_or_else(|| mint_core::DEFAULT_CONVERSATION_ID.into());
+            with_turn_start_listener(
+                expected,
+                move |id| {
+                    if let Some(receipt) = &receipt
+                        && let Err(error) = receipt.bind(id)
+                    {
+                        eprintln!("Library reference: {error}")
+                    }
+                },
+                orchestrate_chat_with_fallback(&config_clone, &clean_request),
+            )
+            .await
         });
 
         let registered_task_id = join_handle.id();
@@ -112,22 +129,35 @@ pub(crate) async fn send_chat_message(
     let pinned_mcp_server_clone = request.pinned_mcp_server.clone();
 
     let join_handle = tokio::spawn(async move {
-        orchestrate_agent_loop(
-            &config_clone,
-            &message_clone,
-            &root_clone,
-            image_data_uri_clone,
-            audio_data_uri_clone,
-            video_data_uri_clone,
-            chat_id_clone.as_deref(),
-            agent_id_clone.as_deref(),
-            None,
-            pinned_mcp_server_clone.as_deref(),
-            fast_mode,
-            plan_mode,
-            approve_cb,
-            progress_cb,
-            on_chunk,
+        let expected = chat_id_clone
+            .clone()
+            .unwrap_or_else(|| mint_core::DEFAULT_CONVERSATION_ID.into());
+        with_turn_start_listener(
+            expected,
+            move |id| {
+                if let Some(receipt) = &receipt
+                    && let Err(error) = receipt.bind(id)
+                {
+                    eprintln!("Library reference: {error}")
+                }
+            },
+            orchestrate_agent_loop(
+                &config_clone,
+                &message_clone,
+                &root_clone,
+                image_data_uri_clone,
+                audio_data_uri_clone,
+                video_data_uri_clone,
+                chat_id_clone.as_deref(),
+                agent_id_clone.as_deref(),
+                None,
+                pinned_mcp_server_clone.as_deref(),
+                fast_mode,
+                plan_mode,
+                approve_cb,
+                progress_cb,
+                on_chunk,
+            ),
         )
         .await
     });
@@ -175,6 +205,7 @@ pub(crate) async fn stream_chat_message(
     request: ChatRequest,
     on_event: Channel<DesktopStreamEvent>,
     owner_token: Option<String>,
+    attachment_metadata: Option<mint_core::library::AttachmentMetadata>,
 ) -> Result<ChatResponse, String> {
     bind_background_owner(&request, owner_token)?;
     let mut config = load_config().map_err(|error| error.to_string())?;
@@ -192,7 +223,8 @@ pub(crate) async fn stream_chat_message(
             let _ = save_config(&config);
         }
     }
-    let request = request.with_document_context(&config)?;
+    let (request, receipt) =
+        mint_core::library::prepare_chat(&request, attachment_metadata.as_ref(), &config).await?;
 
     if request.message.starts_with("/chat ") {
         let mut clean_request = request.clone();
@@ -210,6 +242,11 @@ pub(crate) async fn stream_chat_message(
             with_turn_start_listener(
                 expected_chat_id,
                 move |id| {
+                    if let Some(receipt) = &receipt
+                        && let Err(error) = receipt.bind(id)
+                    {
+                        eprintln!("Library reference: {error}")
+                    }
                     let _ =
                         on_event_started.send(DesktopStreamEvent::Started { interaction_id: id });
                 },
@@ -296,6 +333,11 @@ pub(crate) async fn stream_chat_message(
         with_turn_start_listener(
             expected_chat_id,
             move |id| {
+                if let Some(receipt) = &receipt
+                    && let Err(error) = receipt.bind(id)
+                {
+                    eprintln!("Library reference: {error}")
+                }
                 let _ = on_event_started.send(DesktopStreamEvent::Started { interaction_id: id });
             },
             orchestrate_agent_loop(
@@ -447,6 +489,26 @@ pub(crate) fn get_conversation_snapshot(
     MemoryStore::open_default()
         .and_then(|memory| memory.conversation_snapshot(&chat_id, before_id, limit.unwrap_or(50)))
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn get_conversation_sources(
+    chat_id: String,
+) -> Result<mint_core::agent::memory::ConversationSources, String> {
+    MemoryStore::open_default()
+        .and_then(|store| store.conversation_sources(&chat_id))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn save_source_attachments(
+    chat_id: String,
+    interaction_id: i64,
+    attachments: Vec<mint_core::agent::memory::SourceAttachment>,
+) -> Result<(), String> {
+    MemoryStore::open_default()
+        .map_err(|error| error.to_string())?
+        .save_source_attachments(&chat_id, interaction_id, &attachments)
 }
 
 #[tauri::command]

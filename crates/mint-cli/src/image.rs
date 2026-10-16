@@ -71,40 +71,38 @@ pub fn read_clipboard_image() -> Result<Option<String>> {
     }
 }
 
-pub fn save_sent_image_after_send(
-    data_uri: Option<&str>,
+/// Save CLI/TUI attachments before provider work and return the turn-binding receipt.
+pub async fn prepare_attachments(
+    config: &mint_core::MintConfig,
+    chat_id: &str,
     message: &str,
-    tui: Option<&crate::interactive::TuiHandle>,
-) {
-    if let Some(data_uri) = data_uri {
-        let mut saved_names = Vec::new();
-        for img in data_uri.split_whitespace() {
-            match mint_core::save_sent_image(img, message) {
-                Ok(entry) => {
-                    if let Some(name) = entry.path.file_name().and_then(|f| f.to_str()) {
-                        saved_names.push(name.to_string());
-                    }
-                    if tui.is_none() {
-                        println!("\x1b[90mSaved image: {}\x1b[0m", entry.path.display());
-                    }
-                }
-                Err(error) => {
-                    if let Some(tui) = tui {
-                        tui.set_notice(format!("Warning: failed to save sent image: {error}"));
-                    } else {
-                        eprintln!("\x1b[33mWarning: failed to save sent image: {error}\x1b[0m");
-                    }
-                }
-            }
-        }
-        if let Some(tui) = tui {
-            if saved_names.len() == 1 {
-                tui.set_notice(format!("Image saved to gallery ({})", saved_names[0]));
-            } else if saved_names.len() > 1 {
-                tui.set_notice(format!("{} images saved to gallery", saved_names.len()));
-            }
-        }
-    }
+    image: Option<&str>,
+    video: Option<&str>,
+    image_name: Option<&str>,
+) -> Result<Option<mint_core::library::AttachmentReceipt>> {
+    let request = mint_core::ChatRequest {
+        message: message.into(),
+        chat_id: Some(chat_id.into()),
+        image_data_uri: image.map(str::to_owned),
+        video_data_uri: video.map(str::to_owned),
+        ..Default::default()
+    };
+    let metadata = image_name.map(|name| mint_core::library::AttachmentMetadata {
+        request_id: format!(
+            "cli-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ),
+        image_names: vec![name.into()],
+        video_names: vec![],
+    });
+    let (_, receipt) = mint_core::library::prepare_chat(&request, metadata.as_ref(), config)
+        .await
+        .map_err(anyhow::Error::msg)?;
+    Ok(receipt)
 }
 
 fn detect_mime(bytes: &[u8], path: &Path) -> &'static str {

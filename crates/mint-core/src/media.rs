@@ -9,6 +9,7 @@ pub mod image_model_fetcher;
 pub mod image_models;
 pub mod image_search;
 pub mod image_workflow;
+pub mod library;
 pub mod mic_transcribe;
 pub mod model_catalog;
 pub mod pictures;

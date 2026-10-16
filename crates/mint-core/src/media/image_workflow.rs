@@ -1,4 +1,4 @@
-//! Generate images and persist them in Pictures before reporting success.
+//! Generate images and persist them in Library before reporting success.
 
 use crate::{
     MintConfig,
@@ -27,7 +27,7 @@ pub enum ImageWorkflowError {
     Save(#[from] PictureError),
 }
 
-/// Returns persisted Pictures entries, preserving the actual generation metadata.
+/// Returns persisted Library media entries, preserving the actual generation metadata.
 /// Provider or persistence errors propagate; invalid image data is rejected before writes.
 pub async fn generate_and_save_images(
     config: &MintConfig,
@@ -88,6 +88,26 @@ mod tests {
 
     struct Fixture(PathBuf);
     impl Fixture {
+        fn store(&self) -> Result<crate::library::LibraryStore, crate::library::LibraryError> {
+            crate::library::LibraryStore::open(
+                crate::MemoryStore::open(self.0.join("memory.sqlite")),
+                self.0.join("Library"),
+                self.0.join("Pictures"),
+            )
+        }
+        fn save(
+            &self,
+            images: Vec<String>,
+            source: &str,
+            message: &str,
+        ) -> Result<Vec<PictureEntry>, PictureError> {
+            crate::pictures::save_chat_images_in(
+                self.store()?,
+                images,
+                Some(source.into()),
+                Some(message.into()),
+            )
+        }
         fn new() -> Self {
             Self(std::env::temp_dir().join(format!("mint-image-workflow-{}", uuid::Uuid::new_v4())))
         }
@@ -123,9 +143,7 @@ mod tests {
                     "data:image/png;base64,dGhlcmU=",
                 ]))
             },
-            |images, source, message| {
-                crate::pictures::save_chat_images_to_directory(&f.0, images, source, message)
-            },
+            |images, source, message| f.save(images, source, message),
         )
         .await
         .unwrap();
@@ -137,10 +155,20 @@ mod tests {
         assert_eq!(result.model, "actual-model");
         assert_eq!(result.provider, "replicate");
         assert_eq!(result.description.as_deref(), Some("description"));
-        let index: Vec<PictureEntry> =
-            serde_json::from_slice(&fs::read(f.0.join("pictures.json")).unwrap()).unwrap();
-        assert_eq!(index.len(), 2);
-        assert_eq!(index[0].id, result.images[1].id);
+        let index = f
+            .store()
+            .unwrap()
+            .list(&crate::library::LibraryQuery::default())
+            .unwrap();
+        assert_eq!(index.items.len(), 2);
+        assert!(index.items.iter().all(|item| item.origin == "generated"));
+        assert!(
+            index
+                .items
+                .iter()
+                .any(|item| item.id == result.images[1].id)
+        );
+        assert!(!f.0.join("Pictures/pictures.json").exists());
     }
 
     #[tokio::test]
@@ -148,9 +176,7 @@ mod tests {
         let f = Fixture::new();
         let result = generate_and_save_with(
             || async { Err(ImageGenError::ModelError("provider unavailable".into())) },
-            |images, source, message| {
-                crate::pictures::save_chat_images_to_directory(&f.0, images, source, message)
-            },
+            |images, source, message| f.save(images, source, message),
         )
         .await;
         assert!(matches!(
@@ -166,17 +192,10 @@ mod tests {
         fs::write(&f.0, "a file blocks the Pictures directory").unwrap();
         let result = generate_and_save_with(
             || async { Ok(generated(&["data:image/png;base64,aGk="])) },
-            |images, source, message| {
-                crate::pictures::save_chat_images_to_directory(&f.0, images, source, message)
-            },
+            |images, source, message| f.save(images, source, message),
         )
         .await;
-        assert!(matches!(
-            result,
-            Err(ImageWorkflowError::Save(
-                PictureError::CreateDirectory { .. }
-            ))
-        ));
+        assert!(matches!(result, Err(ImageWorkflowError::Save(_))));
         let _ = fs::remove_file(&f.0);
     }
 
@@ -185,9 +204,7 @@ mod tests {
         let f = Fixture::new();
         let result = generate_and_save_with(
             || async { Ok(generated(&["data:image/png;base64,aGk=", "invalid image"])) },
-            |images, source, message| {
-                crate::pictures::save_chat_images_to_directory(&f.0, images, source, message)
-            },
+            |images, source, message| f.save(images, source, message),
         )
         .await;
         assert!(matches!(

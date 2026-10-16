@@ -94,6 +94,7 @@ async fn run_interactive_agent_turn(
         plan_mode: session.plan_mode,
         queueing: true,
         pinned_mcp_server,
+        image_name: None,
         chat_id: Some(session.chat_id.clone()),
         tui: None,
     };

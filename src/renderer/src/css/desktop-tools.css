@@ -63,12 +63,13 @@
 }
 
 .workspace-context-popover {
+  max-height: calc(100dvh - 72px);
   position: absolute;
   z-index: 550;
   top: calc(100% + 5px);
   right: 6px;
   width: min(360px, calc(100vw - 24px));
-  overflow: hidden;
+  overflow: hidden auto;
   border: 1px solid var(--border-default, rgba(255, 255, 255, 0.14));
   border-radius: 12px;
   color: var(--text-main, #f1f2f4);

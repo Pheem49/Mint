@@ -3,20 +3,20 @@ use std::{
     io::Cursor,
     path::{Path, PathBuf},
     process::Command,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{ConfigError, config_path};
+use crate::ConfigError;
 
 const THUMBNAIL_MAX_SIZE: u32 = 360;
 
 #[derive(Debug, Error)]
 pub enum PictureError {
+    #[error(transparent)]
+    Library(#[from] super::library::LibraryError),
     #[error(transparent)]
     Config(#[from] ConfigError),
     #[error("unable to create Pictures directory {path}: {source}")]
@@ -71,62 +71,28 @@ pub struct PictureEntry {
 }
 
 pub fn list_saved_pictures() -> Result<Vec<PictureEntry>, PictureError> {
-    let directory = pictures_directory()?;
-    ensure_directory(&directory)?;
-    let mut changed = false;
-    let entries = read_index(&directory)?
-        .into_iter()
-        .filter(|entry| entry.path.exists())
-        .map(|mut entry| {
-            if entry
-                .thumbnail_path
-                .as_ref()
-                .is_none_or(|thumbnail_path| !thumbnail_path.exists())
-                && let Some(thumbnail_path) = create_thumbnail_from_file(&directory, &entry)
-            {
-                entry.thumbnail_path = Some(thumbnail_path);
-                changed = true;
-            }
-            entry.url = Some(file_url(&entry.path));
-            entry.thumbnail_url = entry.thumbnail_path.as_deref().map(file_url);
-            entry
-        })
-        .collect::<Vec<_>>();
-
-    if changed {
-        write_index(&directory, &entries)?;
+    let mut entries = super::library::LibraryStore::open_default()?.all_media()?;
+    for entry in &mut entries {
+        entry.url = Some(file_url(&entry.path));
+        entry.thumbnail_url = entry.thumbnail_path.as_deref().map(file_url);
     }
-
     Ok(entries)
 }
 
 pub fn delete_saved_picture(id: &str) -> Result<(), PictureError> {
-    let directory = pictures_directory()?;
-    ensure_directory(&directory)?;
-    let mut entries = read_index(&directory)?;
-
-    let target_index = entries.iter().position(|entry| {
-        entry.id == id
-            || entry.filename == id
-            || entry.path.file_name().and_then(|f| f.to_str()) == Some(id)
-            || entry.path.to_string_lossy() == id
-    });
-
-    if let Some(index) = target_index {
-        let entry = entries.remove(index);
-        if entry.path.exists() {
-            let _ = fs::remove_file(&entry.path);
-        }
-        if let Some(ref thumbnail_path) = entry.thumbnail_path {
-            if thumbnail_path.exists() {
-                let _ = fs::remove_file(thumbnail_path);
-            }
-        }
-        write_index(&directory, &entries)?;
-        Ok(())
+    let store = super::library::LibraryStore::open_default()?;
+    let item = if let Ok(item) = store.get(id) {
+        item
     } else {
-        Err(PictureError::NotFound(id.to_string()))
-    }
+        let entry = store
+            .all_media()?
+            .into_iter()
+            .find(|entry| entry.filename == id || entry.path.to_string_lossy() == id)
+            .ok_or_else(|| PictureError::NotFound(id.into()))?;
+        store.get(&entry.id)?
+    };
+    store.set_trashed(&item.id, true)?;
+    Ok(())
 }
 
 pub fn save_chat_images(
@@ -134,20 +100,62 @@ pub fn save_chat_images(
     source: Option<String>,
     message: Option<String>,
 ) -> Result<Vec<PictureEntry>, PictureError> {
-    save_chat_images_to_directory(
-        &pictures_directory()?,
+    save_chat_images_in(
+        super::library::LibraryStore::open_default()?,
         images,
-        source.as_deref().unwrap_or("chat"),
-        message.as_deref().unwrap_or_default(),
+        source,
+        message,
     )
 }
 
+pub(crate) fn save_chat_images_in(
+    store: super::library::LibraryStore,
+    images: Vec<String>,
+    source: Option<String>,
+    message: Option<String>,
+) -> Result<Vec<PictureEntry>, PictureError> {
+    let source = source.as_deref().unwrap_or("chat");
+    let files: Vec<_> = images
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, data_uri)| {
+            let (_, extension, bytes) = parse_data_uri(&data_uri)?;
+            if bytes.is_empty() {
+                return None;
+            }
+            Some(super::library::LibraryUpload {
+                name: format!("Media {}.{extension}", index + 1),
+                data_uri,
+            })
+        })
+        .collect();
+    if files.is_empty() {
+        return Ok(vec![]);
+    }
+    let origin = if matches!(source, "chat" | "web" | "cli" | "upload") {
+        "uploaded"
+    } else {
+        "generated"
+    };
+    Ok(store
+        .import(
+            &files,
+            &uuid::Uuid::new_v4().to_string(),
+            None,
+            origin,
+            source,
+            message.as_deref().unwrap_or_default(),
+        )?
+        .into_iter()
+        .map(super::library::picture_entry)
+        .collect())
+}
+
 pub fn save_sent_image(data_uri: &str, message: &str) -> Result<PictureEntry, PictureError> {
-    save_chat_images_to_directory(
-        &pictures_directory()?,
+    save_chat_images(
         vec![data_uri.to_owned()],
-        "cli",
-        &picture_message(message),
+        Some("cli".into()),
+        Some(picture_message(message)),
     )?
     .into_iter()
     .next()
@@ -173,66 +181,6 @@ pub fn parse_data_uri(raw: &str) -> Option<(String, &'static str, Vec<u8>)> {
     Some((mime_type, extension, STANDARD.decode(encoded).ok()?))
 }
 
-pub(crate) fn save_chat_images_to_directory(
-    directory: &Path,
-    images: Vec<String>,
-    source: &str,
-    message: &str,
-) -> Result<Vec<PictureEntry>, PictureError> {
-    ensure_directory(directory)?;
-    let mut index = read_index(directory)?;
-    let mut saved = Vec::new();
-    for image in images {
-        let Some((mime_type, extension, bytes)) = parse_data_uri(&image) else {
-            continue;
-        };
-        if bytes.is_empty() {
-            continue;
-        }
-        let filename = format!(
-            "mint-{}-{}.{}",
-            timestamp_for_filename(),
-            unique_suffix(),
-            extension
-        );
-        let path = directory.join(&filename);
-        fs::write(&path, &bytes).map_err(|source| PictureError::WritePicture {
-            path: path.clone(),
-            source,
-        })?;
-        let id = filename
-            .trim_end_matches(&format!(".{extension}"))
-            .to_owned();
-        let thumbnail_path = if mime_type.starts_with("image/") {
-            create_thumbnail_from_bytes(directory, &id, &bytes)
-        } else if mime_type.starts_with("video/") {
-            extract_video_thumbnail_from_bytes(directory, &id, &bytes)
-        } else {
-            None
-        };
-        let entry = PictureEntry {
-            id,
-            filename,
-            path,
-            mime_type,
-            created_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-            source: source.into(),
-            message: message.chars().take(240).collect(),
-            thumbnail_path,
-            url: None,
-            thumbnail_url: None,
-        };
-        index.insert(0, entry.clone());
-        saved.push(entry);
-    }
-    write_index(directory, &index)?;
-    Ok(saved)
-}
-
-fn pictures_directory() -> Result<PathBuf, PictureError> {
-    Ok(config_path()?.with_file_name("Pictures"))
-}
-
 fn ensure_directory(directory: &Path) -> Result<(), PictureError> {
     fs::create_dir_all(directory).map_err(|source| PictureError::CreateDirectory {
         path: directory.into(),
@@ -244,12 +192,11 @@ fn thumbnails_directory(directory: &Path) -> PathBuf {
     directory.join("thumbnails")
 }
 
-fn create_thumbnail_from_file(directory: &Path, entry: &PictureEntry) -> Option<PathBuf> {
-    let bytes = fs::read(&entry.path).ok()?;
-    create_thumbnail_from_bytes(directory, &entry.id, &bytes)
-}
-
-fn create_thumbnail_from_bytes(directory: &Path, id: &str, bytes: &[u8]) -> Option<PathBuf> {
+pub(crate) fn create_thumbnail_from_bytes(
+    directory: &Path,
+    id: &str,
+    bytes: &[u8],
+) -> Option<PathBuf> {
     let image = image::load_from_memory(bytes).ok()?;
     let thumbnail = image.thumbnail(THUMBNAIL_MAX_SIZE, THUMBNAIL_MAX_SIZE);
     let thumbnail_directory = thumbnails_directory(directory);
@@ -264,7 +211,11 @@ fn create_thumbnail_from_bytes(directory: &Path, id: &str, bytes: &[u8]) -> Opti
     Some(path)
 }
 
-fn extract_video_thumbnail_from_bytes(directory: &Path, id: &str, bytes: &[u8]) -> Option<PathBuf> {
+pub(crate) fn extract_video_thumbnail_from_bytes(
+    directory: &Path,
+    id: &str,
+    bytes: &[u8],
+) -> Option<PathBuf> {
     // Write video to temporary file
     let temp_video = std::env::temp_dir().join(format!("mint-video-{}.tmp", id));
     if fs::write(&temp_video, bytes).is_err() {
@@ -315,24 +266,6 @@ fn extract_video_thumbnail_from_bytes(directory: &Path, id: &str, bytes: &[u8]) 
     res
 }
 
-fn read_index(directory: &Path) -> Result<Vec<PictureEntry>, PictureError> {
-    let path = directory.join("pictures.json");
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let raw = fs::read_to_string(&path).map_err(|source| PictureError::ReadIndex {
-        path: path.clone(),
-        source,
-    })?;
-    serde_json::from_str(&raw).map_err(|source| PictureError::ParseIndex { path, source })
-}
-
-fn write_index(directory: &Path, entries: &[PictureEntry]) -> Result<(), PictureError> {
-    let path = directory.join("pictures.json");
-    let raw = serde_json::to_string_pretty(entries).map_err(PictureError::SerializeIndex)?;
-    fs::write(&path, format!("{raw}\n")).map_err(|source| PictureError::WriteIndex { path, source })
-}
-
 fn picture_message(message: &str) -> String {
     let message = message.trim();
     if message.contains("[Image #1]") {
@@ -359,90 +292,14 @@ fn encode_url_path(path: &str) -> String {
         .collect()
 }
 
-fn timestamp_for_filename() -> String {
-    Utc::now().format("%Y%m%d-%H%M%S").to_string()
-}
-
-fn unique_suffix() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("{:08x}", (nanos ^ u128::from(std::process::id())) as u32)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn escapes_file_url_spaces() {
         assert_eq!(
             file_url(Path::new("/tmp/mint image.png")),
             "file:///tmp/mint%20image.png"
         );
-    }
-
-    #[test]
-    fn saves_sent_image_and_updates_index() {
-        let directory =
-            std::env::temp_dir().join(format!("mint-core-pictures-test-{}", unique_suffix()));
-        let entries = save_chat_images_to_directory(
-            &directory,
-            vec!["data:image/png;base64,aGk=".into()],
-            "cli",
-            &picture_message("describe this"),
-        )
-        .unwrap();
-        let index = read_index(&directory).unwrap();
-
-        assert_eq!(fs::read(&entries[0].path).unwrap(), b"hi");
-        assert_eq!(index.len(), 1);
-        assert_eq!(index[0].mime_type, "image/png");
-        assert_eq!(index[0].source, "cli");
-        assert_eq!(index[0].message, "describe this [Image #1]");
-
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn deletes_saved_picture_and_cleans_files_and_index() {
-        let directory =
-            std::env::temp_dir().join(format!("mint-core-pictures-del-test-{}", unique_suffix()));
-        let entries = save_chat_images_to_directory(
-            &directory,
-            vec!["data:image/png;base64,aGk=".into()],
-            "cli",
-            &picture_message("test image"),
-        )
-        .unwrap();
-
-        assert_eq!(entries.len(), 1);
-        let picture_id = &entries[0].id;
-        let picture_path = entries[0].path.clone();
-
-        assert!(picture_path.exists());
-
-        // Read index before delete
-        let index_before = read_index(&directory).unwrap();
-        assert_eq!(index_before.len(), 1);
-
-        // Delete picture using read_index/write_index pattern
-        let mut entries_to_mod = read_index(&directory).unwrap();
-        let pos = entries_to_mod
-            .iter()
-            .position(|e| e.id == *picture_id)
-            .unwrap();
-        let removed = entries_to_mod.remove(pos);
-        if removed.path.exists() {
-            fs::remove_file(&removed.path).unwrap();
-        }
-        write_index(&directory, &entries_to_mod).unwrap();
-
-        assert!(!picture_path.exists());
-        let index_after = read_index(&directory).unwrap();
-        assert_eq!(index_after.len(), 0);
-
-        fs::remove_dir_all(directory).unwrap();
     }
 }

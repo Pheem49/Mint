@@ -32,8 +32,15 @@
 
 ## Desktop and Web
 
+- Renamed **Pictures** to **Library** on Desktop and Web, with shared All / Images / Videos / Files filters, filename search, current-conversation scope, cursor pagination, previews, original-name downloads, and reversible Library Trash. `/library` is canonical; `/pictures` remains compatible.
+- CLI/TUI uploads now use the same pre-AI Library intake and turn references as Desktop/Web, retaining files on provider failure. Agent-generated images/videos retain their conversation and running-turn references. Library refresh preserves loaded cursor pages while thumbnails update; Sources opens Library inside the app without discarding the composer.
+- Library imports flush original files before acquiring the catalog writer lock, reducing contention during concurrent uploads. Failed catalog batches and duplicate retries clean up their staged files.
+- Library previews now show the saved source message in up to two lines, omitting chat transport and attachment markers; entries without message text omit the excerpt.
+- Added **Remove from Mint** in Library Trash on Desktop and Web. It moves remaining originals and thumbnails to the system Trash on the machine running Mint, then removes their Library entries and source references. Missing-file records can be removed; failed moves retain the entry for retry. Ordinary Library deletion still moves entries to Library Trash for restore.
+- Uploaded chat images, videos, and supported documents/code files are now saved before document extraction or AI calls. Library stores originals once on disk with a SQLite catalog, stable IDs, names, MIME types, sizes, and conversation/turn references. Retries reuse a submission receipt; failed requests retain the composer until acceptance. AI-generated media uses the same catalog.
+- Migrates the old Pictures JSON catalog idempotently, preserves existing IDs and file paths, and keeps a backup of the original index. Missing originals remain visible. Thumbnail work runs asynchronously with at most two workers and pending work resumes at startup.
+- Workspace context **Sources** lists session images, files, videos, and AI web-search results with expandable groups. New attachments link to the same Library original and thumbnail; Trash and missing-file states stay visible. Clearing or deleting chat history removes its references while Library files remain. Earlier metadata-only attachments are retained as metadata; their originals cannot be reconstructed.
 - Moved **Mods** and **Background tasks** from the chat composer into Tools tabs on Desktop and Web, accessible from the launcher and add-tool menu without a duplicate button row below the tabs. Added a Web Tools button and a running-task badge that stays visible while Tools is closed; the Desktop interactive Terminal remains separate. Mod bands and background-job tracking continue while the panel is closed.
-
 - Refined voice recording, Gemini Live calls, notifications, error recovery, theme styling, and accessibility.
 - Added **Reduce effects** and reduced unnecessary rendering work.
 - Improved Saved Pictures browsing and previews, image-search cards, and MCP settings.

@@ -106,14 +106,15 @@ describe.each([['Desktop', desktop], ['Web', web]] as const)('%s Conversation tr
     expect(request).toMatchObject({ message: 'hello', chatId: 'chat-1', planMode: true })
   })
 
-  it('preserves IPC ownership, plan mode, events and media persistence', async () => {
+  it('preserves IPC ownership, events and the backend attachment receipt', async () => {
     ;(window as any).__TAURI_INTERNALS__ = {}
     let request: any
     let owner: unknown
     const pictures: unknown[] = []
+    let attachmentMetadata: unknown
     native.invoke.mockImplementation(async (command: string, args: any) => {
       if (command === 'save_pictures') { pictures.push(args); return }
-      request = args.request; owner = args.ownerToken
+      request = args.request; owner = args.ownerToken; attachmentMetadata = args.attachmentMetadata
       args.onEvent.onmessage({ type: 'started', interactionId: 7 })
       args.onEvent.onmessage({ type: 'chunk', chunk: 'hello' })
       args.onEvent.onmessage({ type: 'progress', progress: { type: 'ThinkingDelta', data: { id: 'thought-1', delta: 'working', elapsed_ms: 10 } } })
@@ -122,14 +123,12 @@ describe.each([['Desktop', desktop], ['Web', web]] as const)('%s Conversation tr
     const events: unknown[] = []
     await expect(adapter.streamChatMessage('hello', value => events.push(value), 'image1 image2', undefined, 'video1',
       'system', value => events.push(value), undefined, '/project', 'chat-1', 'agent-1', true, 'mcp-1',
-      undefined, id => events.push(id))).resolves.toEqual(response)
+      undefined, id => events.push(id), { requestId: 'submission-1', imageNames: ['one.png', 'two.png'], videoNames: ['clip.mp4'] })).resolves.toEqual(response)
     expect(request).toMatchObject({ planMode: true, chatId: 'chat-1', pinnedMcpServer: 'mcp-1' })
     expect(owner).toBe('owner-token')
     expect(events).toEqual([7, 'hello', { type: 'ThinkingDelta', data: { id: 'thought-1', delta: 'working', elapsed_ms: 10 } }])
-    expect(pictures).toEqual([
-      { images: ['image1', 'image2'], source: 'chat', message: 'hello [Image #1] [Image #2] [Video #1]' },
-      { images: ['video1'], source: 'chat', message: 'hello [Image #1] [Image #2] [Video #1]' },
-    ])
+    expect(pictures).toEqual([])
+    expect(attachmentMetadata).toEqual({ requestId: 'submission-1', imageNames: ['one.png', 'two.png'], videoNames: ['clip.mp4'] })
   })
 
   it('defaults to ordinary agent mode and preserves existing media markers', async () => {

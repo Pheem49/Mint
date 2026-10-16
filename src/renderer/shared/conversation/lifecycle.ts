@@ -9,6 +9,7 @@ export type ConversationTransport = Pick<MintPlatformApi,
   | 'getConversationSnapshot' | 'getConversationChanges' | 'listChatSessions'
   | 'streamChatMessage' | 'cancelChatMessage' | 'submitToolApproval'
   | 'saveInteractionAgentActivity' | 'clearChatHistory'>
+
 export interface PendingApproval { token: string; approval: Record<string, unknown> }
 export interface ConversationView extends ConversationState {
   conversationId: string
@@ -78,6 +79,7 @@ export function createConversationLifecycle(
   let sessionsSerial = 0
   let projectSerial = 0
   let poll: Session | null = null
+  const pendingSubmissions = new Map<string, { signature: string; requestId: string }>()
   const runs = new Map<string, Run>()
   const subscribers = new Set<() => void>()
   const update = (patch: Partial<ConversationView>) => {
@@ -268,7 +270,18 @@ export function createConversationLifecycle(
     const workspace = state.workspacePath || null
     update({ ...transitionConversation(state, { type: 'run_started', message: prompt, imageCount: images.length, videoCount: videos.length }),
       streamingConversationId: origin.chatId, activeTurnId: null, sessionAutoApproved: false })
-    if (options.clearComposer) dispatch({ type: 'composer_cleared' })
+    const draft = { message: state.message, images: state.imageAttachments, videos: state.videoAttachments, document: state.documentAttachment }
+    const signature = JSON.stringify([prompt, images, videos, options.documentAttachment])
+    let submission = pendingSubmissions.get(origin.chatId)
+    if (submission?.signature !== signature) {
+      submission = { signature, requestId: globalThis.crypto?.randomUUID?.() ?? `submission-${Date.now().toString(36)}-${Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')}` }
+      pendingSubmissions.set(origin.chatId, submission)
+    }
+    const metadata = { requestId: submission.requestId, imageNames: images.map(i => i.name), videoNames: videos.map(v => v.name) }
+    const accepted = () => {
+      if (pendingSubmissions.get(origin.chatId)?.requestId === metadata.requestId) pendingSubmissions.delete(origin.chatId)
+      if (options.clearComposer && currentRun(run) && state.message === draft.message && state.imageAttachments === draft.images && state.videoAttachments === draft.videos && state.documentAttachment === draft.document) dispatch({ type: 'composer_cleared' })
+    }
     try {
       const response = await transport.streamChatMessage(
         agent ? prompt : `/chat ${prompt}`, () => {}, images.map(img => img.dataUri).join(' '),
@@ -283,8 +296,13 @@ export function createConversationLifecycle(
         }, options.documentAttachment ?? null, workspace, origin.chatId, undefined,
         agent ? options.planMode : false, options.pinnedMcpServer ?? null,
         approval => { if (runs.get(origin.chatId) === run) receiveApproval(origin.chatId, approval) },
-        id => { run.turnId = id; if (currentRun(run)) update({ activeTurnId: id }) },
+        id => {
+          run.turnId = id
+          accepted()
+          if (currentRun(run)) update({ activeTurnId: id })
+        }, metadata,
       )
+      if (response.provider !== 'error') accepted()
       flushProgress(run)
       // Reveal only the authoritative completed reply, as on CLI/TUI.
       if (currentRun(run)) update({ streamedReply: response.text, streamedResponse: response })

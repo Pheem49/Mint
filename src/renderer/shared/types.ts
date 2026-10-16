@@ -40,6 +40,15 @@ export interface DocumentAttachment {
   dataUri: string
 }
 
+export interface SourceAttachment {
+  name: string
+  kind: 'image' | 'file' | 'video'
+  mimeType: string
+  thumbnailDataUri: string | null
+}
+export interface SessionAttachment extends SourceAttachment { id: number; interactionId: number | null; libraryItemId?: string | null; availability?: string | null; trashed?: boolean }
+export interface ConversationSources { attachments: SessionAttachment[]; webSearchProgress: AgentProgress[] }
+
 export interface PlanTaskItem {
   id: string
   title: string
@@ -156,6 +165,17 @@ export interface PictureEntry {
   url?: string
   thumbnailUrl?: string
 }
+
+export interface LibraryReference { chatId: string; interactionId: number | null }
+export interface LibraryItem {
+  id: string; name: string; filename: string; kind: 'image' | 'video' | 'file'; mimeType: string; size: number
+  createdAt: string; origin: 'uploaded' | 'generated' | 'legacy'; source: string; message: string
+  deletedAt: string | null; thumbnailStatus: 'pending' | 'ready' | 'unavailable'; availability: 'ready' | 'missing'
+  references: LibraryReference[]
+}
+export interface LibraryQuery { kind?: 'image' | 'video' | 'file'; search?: string; chatId?: string; trashed?: boolean; cursor?: string | null }
+export interface LibraryPage { items: LibraryItem[]; nextCursor: string | null }
+export interface AttachmentMetadata { requestId: string; imageNames: string[]; videoNames: string[] }
 
 export interface ImageGenRequest {
   prompt: string

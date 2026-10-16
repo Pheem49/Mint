@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { FileChange } from '../types'
+import type { AgentProgress, FileChange } from '../types'
 import WorkspaceContextPopover from './WorkspaceContextPopover'
 import { useWorkspaceUndo } from '../workspaceUndo'
 import ToolsPanelToggle from './ToolsPanelToggle'
@@ -28,7 +28,8 @@ interface DesktopTitlebarProps {
   sending: boolean
   onWorkspaceUndoError: (message: string) => void
   terminalCount: number
-  sourceNames: string[]
+  chatId: string
+  liveProgress: AgentProgress[]
   recentChanges: FileChange[]
   onOpenReview: (changes: FileChange[]) => void
   onRefreshWorkspace: () => void
@@ -57,7 +58,8 @@ export default function DesktopTitlebar({
   sending,
   onWorkspaceUndoError,
   terminalCount,
-  sourceNames,
+  chatId,
+  liveProgress,
   recentChanges,
   onOpenReview,
   onRefreshWorkspace,
@@ -312,7 +314,8 @@ export default function DesktopTitlebar({
         <WorkspaceContextPopover
           workspacePath={workspacePath}
           terminalCount={terminalCount}
-          sourceNames={sourceNames}
+          chatId={chatId}
+          liveProgress={liveProgress}
           recentChanges={recentChanges}
           onOpenWorkspace={onOpenWorkspace}
           onOpenReview={onOpenReview}

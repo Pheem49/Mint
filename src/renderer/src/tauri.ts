@@ -1,3 +1,5 @@
+import { createLibraryTransport } from '../shared/library/transport'
+import { createSourcesTransport } from '../shared/conversation/sourcesTransport'
 /** Returns true when running inside the Tauri webview (desktop app). */
 export const isTauriRuntime = (): boolean =>
   typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__)
@@ -2146,8 +2148,14 @@ export async function modsOperation(operation: import('../shared/mods').ModOpera
   return value
 }
 
+export const { listLibrary, getLibraryItem, setLibraryTrashed, removeLibraryItem, readLibraryFile } = createLibraryTransport({ isNative: isTauriRuntime, apiBase: getLocalApiBase, fetch: authFetch })
+
+export const { getConversationSources, saveSourceAttachments } = createSourcesTransport({ isNative: isTauriRuntime, apiBase: getLocalApiBase, fetch: authFetch })
+
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
+  listLibrary, getLibraryItem, setLibraryTrashed, removeLibraryItem, readLibraryFile,
+  getConversationSources, saveSourceAttachments,
   modsOperation,
   readMcpArtifact,
   listBackgroundJobs, getBackgroundJob, stopBackgroundJob, deleteBackgroundJob,

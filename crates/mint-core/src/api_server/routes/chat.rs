@@ -7,6 +7,7 @@ use super::super::*;
 #[serde(rename_all = "camelCase")]
 struct ApiChatRequest {
     message: String,
+    attachment_metadata: Option<crate::library::AttachmentMetadata>,
     system_instruction: Option<String>,
     chat_id: Option<String>,
     image_data_uri: Option<String>,
@@ -98,36 +99,54 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
         ("POST", "/api/chat") => {
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
                 let config = load_config().unwrap_or_default();
+                let metadata = req.attachment_metadata.clone();
                 let chat_req = req.into_chat_request(&config);
-                let mut chat_req = match chat_req.with_document_context(&config) {
-                    Ok(req) => req,
-                    Err(error) => {
-                        log_api_err("API /api/chat document error", &error);
-                        let err_json = serde_json::json!({
-                            "text": format!("Could not read the attached document: {error}")
-                        });
-                        send_json_response(socket, "400 Bad Request", &err_json.to_string()).await;
-                        return;
-                    }
-                };
-                let sent_image = chat_req.image_data_uri.clone();
-                let sent_video = chat_req.video_data_uri.clone();
-                let sent_message = chat_req.message.clone();
+                let (mut chat_req, receipt) =
+                    match crate::library::prepare_chat(&chat_req, metadata.as_ref(), &config).await
+                    {
+                        Ok(prepared) => prepared,
+                        Err(error) => {
+                            log_api_err("API /api/chat document error", &error);
+                            let err_json = serde_json::json!({
+                                "text": format!("Could not read the attached document: {error}")
+                            });
+                            send_json_response(socket, "400 Bad Request", &err_json.to_string())
+                                .await;
+                            return;
+                        }
+                    };
 
-                let response = if let Some(clean_message) =
-                    chat_req.message.strip_prefix("/chat ").map(str::to_owned)
-                {
-                    chat_req.message = clean_message;
-                    if chat_req.system_instruction.trim().is_empty() {
-                        chat_req.system_instruction = default_chat_system_instruction();
-                    }
-                    orchestrate_chat_with_fallback(&config, &chat_req)
-                        .await
-                        .map(|(response, _)| response)
-                        .map_err(|error| error.to_string())
-                } else {
-                    run_web_agent_loop(&config, &chat_req).await
-                };
+                let expected_chat_id = chat_req
+                    .chat_id
+                    .clone()
+                    .unwrap_or_else(|| DEFAULT_CONVERSATION_ID.into());
+                let response = crate::with_turn_start_listener(
+                    expected_chat_id,
+                    move |id| {
+                        if let Some(receipt) = &receipt
+                            && let Err(error) = receipt.bind(id)
+                        {
+                            eprintln!("Library reference: {error}")
+                        }
+                    },
+                    async {
+                        if let Some(clean_message) =
+                            chat_req.message.strip_prefix("/chat ").map(str::to_owned)
+                        {
+                            chat_req.message = clean_message;
+                            if chat_req.system_instruction.trim().is_empty() {
+                                chat_req.system_instruction = default_chat_system_instruction();
+                            }
+                            orchestrate_chat_with_fallback(&config, &chat_req)
+                                .await
+                                .map(|(response, _)| response)
+                                .map_err(|error| error.to_string())
+                        } else {
+                            run_web_agent_loop(&config, &chat_req).await
+                        }
+                    },
+                )
+                .await;
 
                 match response {
                     Ok(resp) => {
@@ -137,26 +156,6 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             "200 OK",
                             Some(&format!("Model: {} | {}", config.ai_provider, auth_label)),
                         );
-                        if let Some(image) = sent_image {
-                            let _ = save_chat_images(
-                                image
-                                    .split_whitespace()
-                                    .map(str::to_owned)
-                                    .collect::<Vec<_>>(),
-                                Some("web".into()),
-                                Some(sent_message.clone()),
-                            );
-                        }
-                        if let Some(video) = sent_video {
-                            let _ = save_chat_images(
-                                video
-                                    .split_whitespace()
-                                    .map(str::to_owned)
-                                    .collect::<Vec<_>>(),
-                                Some("web".into()),
-                                Some(sent_message),
-                            );
-                        }
                         if let Ok(json_str) = serde_json::to_string(&resp) {
                             send_json_response(socket, "200 OK", &json_str).await;
                             return;
@@ -231,21 +230,22 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
         ("POST", "/api/chat-stream") => {
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
                 let config = load_config().unwrap_or_default();
+                let metadata = req.attachment_metadata.clone();
                 let chat_req = req.into_chat_request(&config);
-                let mut chat_req = match chat_req.with_document_context(&config) {
-                    Ok(req) => req,
-                    Err(error) => {
-                        log_api_err("API /api/chat-stream document error", &error);
-                        let err_json = serde_json::json!({
-                            "text": format!("Could not read the attached document: {error}")
-                        });
-                        send_json_response(socket, "400 Bad Request", &err_json.to_string()).await;
-                        return;
-                    }
-                };
-                let sent_image = chat_req.image_data_uri.clone();
-                let sent_video = chat_req.video_data_uri.clone();
-                let sent_message = chat_req.message.clone();
+                let (mut chat_req, receipt) =
+                    match crate::library::prepare_chat(&chat_req, metadata.as_ref(), &config).await
+                    {
+                        Ok(prepared) => prepared,
+                        Err(error) => {
+                            log_api_err("API /api/chat-stream document error", &error);
+                            let err_json = serde_json::json!({
+                                "text": format!("Could not read the attached document: {error}")
+                            });
+                            send_json_response(socket, "400 Bad Request", &err_json.to_string())
+                                .await;
+                            return;
+                        }
+                    };
 
                 let is_chat = if let Some(clean_message) =
                     chat_req.message.strip_prefix("/chat ").map(str::to_owned)
@@ -305,6 +305,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                     .clone()
                                     .unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
                                 let result = crate::with_turn_start_listener(expected_chat_id, move |id| {
+                                    if let Some(receipt)=&receipt && let Err(error)=receipt.bind(id){eprintln!("Library reference: {error}")}
                                     let event = serde_json::json!({ "type": "started", "interactionId": id });
                                     let _ = tx_started.send(format!("{}\n", event));
                                 }, orchestrate_chat_stream_with_fallback(
@@ -427,6 +428,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                     })
                                 };
                                 let result = crate::with_turn_start_listener(agent_scoped_chat_id.clone(), move |id| {
+                                    if let Some(receipt)=&receipt && let Err(error)=receipt.bind(id){eprintln!("Library reference: {error}")}
                                     let event = serde_json::json!({ "type": "started", "interactionId": id });
                                     let _ = tx_started.send(format!("{}\n", event));
                                 }, orchestrate_agent_loop(
@@ -515,27 +517,6 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             break;
                         }
                         let _ = socket.flush().await;
-                    }
-
-                    if let Some(image) = sent_image {
-                        let _ = save_chat_images(
-                            image
-                                .split_whitespace()
-                                .map(str::to_owned)
-                                .collect::<Vec<_>>(),
-                            Some("web".into()),
-                            Some(sent_message.clone()),
-                        );
-                    }
-                    if let Some(video) = sent_video {
-                        let _ = save_chat_images(
-                            video
-                                .split_whitespace()
-                                .map(str::to_owned)
-                                .collect::<Vec<_>>(),
-                            Some("web".into()),
-                            Some(sent_message),
-                        );
                     }
                 }
                 return;

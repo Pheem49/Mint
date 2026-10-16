@@ -62,6 +62,7 @@ pub struct AgentOptions {
     pub pinned_mcp_server: Option<String>,
     /// Chat ID / session ID for this turn. Defaults to `CHAT_CLI_ID` if omitted.
     pub chat_id: Option<String>,
+    pub image_name: Option<String>,
     /// Full-screen UI event sink. When present, agent output never writes
     /// directly to stdout and stdin remains owned by the TUI controller.
     pub tui: Option<crate::interactive::TuiHandle>,
@@ -606,6 +607,21 @@ pub async fn run_code_agent_with_options(
     queued_out: Arc<Mutex<Vec<String>>>,
     draft_out: Arc<Mutex<Option<String>>>,
 ) -> Result<AgentResult> {
+    let target_chat_id = options.chat_id.as_deref().unwrap_or(CHAT_CLI_ID);
+    let receipt = crate::image::prepare_attachments(
+        config,
+        target_chat_id,
+        task,
+        image_data_uri.as_deref(),
+        video_data_uri.as_deref(),
+        options.image_name.as_deref(),
+    )
+    .await?;
+    if receipt.is_some()
+        && let Some(tui) = &options.tui
+    {
+        tui.set_notice("Attachments saved to Library");
+    }
     let started_at = Instant::now();
     crate::interactive::clear_last_thought();
     let thinking_verb = random_thinking_verb();
@@ -1414,22 +1430,32 @@ pub async fn run_code_agent_with_options(
 
     let target_chat_id = options.chat_id.as_deref().unwrap_or(CHAT_CLI_ID);
 
-    let agent_loop = orchestrate_agent_loop(
-        config,
-        task,
-        root,
-        image_data_uri,
-        None,
-        video_data_uri,
-        Some(target_chat_id),
-        None,
-        user_name.as_deref(),
-        options.pinned_mcp_server.as_deref(),
-        options.fast_mode,
-        options.plan_mode,
-        approve_cb,
-        progress_cb,
-        on_chunk,
+    let agent_loop = mint_core::with_turn_start_listener(
+        target_chat_id.to_owned(),
+        move |id| {
+            if let Some(receipt) = &receipt
+                && let Err(error) = receipt.bind(id)
+            {
+                eprintln!("Library reference: {error}")
+            }
+        },
+        orchestrate_agent_loop(
+            config,
+            task,
+            root,
+            image_data_uri,
+            None,
+            video_data_uri,
+            Some(target_chat_id),
+            None,
+            user_name.as_deref(),
+            options.pinned_mcp_server.as_deref(),
+            options.fast_mode,
+            options.plan_mode,
+            approve_cb,
+            progress_cb,
+            on_chunk,
+        ),
     );
     let res = tokio::select! {
         res = agent_loop => res,

@@ -92,6 +92,7 @@ export interface MintPlatformApi {
     chatId?: string | null,
     agentId?: string | null,
     planMode?: boolean,
+    attachmentMetadata?: import('./types').AttachmentMetadata,
   ): Promise<ChatResponse>
   streamChatMessage(
     message: string,
@@ -109,11 +110,14 @@ export interface MintPlatformApi {
     pinnedMcpServer?: string | null,
     onApprovalRequested?: (payload: { token: string; approval: any }) => void,
     onTurnStarted?: (interactionId: number) => void,
+    attachmentMetadata?: import('./types').AttachmentMetadata,
   ): Promise<ChatResponse>
   getTtsUrls(text: string): Promise<TtsUrl[]>
   cancelChatMessage(chatId: string): Promise<void>
   getRecentInteractions(limit?: number, chatId?: string | null, workspacePath?: string | null): Promise<InteractionMemory[]>
   getConversationSnapshot(chatId: string, beforeId?: number | null, limit?: number): Promise<ConversationSnapshot>
+  getConversationSources(chatId: string): Promise<import('./types').ConversationSources>
+  saveSourceAttachments(chatId: string, interactionId: number, attachments: import('./types').SourceAttachment[]): Promise<void>
   getConversationChanges(chatId: string, after: number, limit?: number): Promise<ConversationChanges>
   saveSystemInteraction(
     chatId: string,
@@ -137,6 +141,11 @@ export interface MintPlatformApi {
   saveSubagent(draft: SubagentDraft, workspacePath?: string): Promise<SubagentDefinition>
   deleteSubagent(sourcePath: string): Promise<void>
   clearChatHistory(chatId?: string | null): Promise<number>
+  listLibrary(query: import('./types').LibraryQuery): Promise<import('./types').LibraryPage>
+  getLibraryItem(id: string): Promise<import('./types').LibraryItem>
+  removeLibraryItem(id: string): Promise<void>
+  setLibraryTrashed(id: string, trashed: boolean): Promise<void>
+  readLibraryFile(id: string, thumbnail?: boolean): Promise<Blob>
   listSavedPictures(): Promise<PictureEntry[]>
   deleteSavedPicture(id: string): Promise<void>
   generateImages(req: ImageGenRequest): Promise<ImageGenResponse>
@@ -254,6 +263,7 @@ export const authPlatform = {
 
 /** Conversation transport, persistence, live voice, and checkpoint seam. */
 export const conversationPlatform = {
+  getConversationSources: operation('getConversationSources'), saveSourceAttachments: operation('saveSourceAttachments'),
   clearChatHistory: operation('clearChatHistory'), deleteChatSession: operation('deleteChatSession'),
   renameChatSession: operation('renameChatSession'), getRecentInteractions: operation('getRecentInteractions'),
   getConversationSnapshot: operation('getConversationSnapshot'), getConversationChanges: operation('getConversationChanges'),
@@ -340,3 +350,8 @@ export const workspacePlatform: WorkspacePlatform = {
 }
 
 export const modsPlatform = { operation: operation("modsOperation") }
+
+export const libraryPlatform: Pick<MintPlatformApi, 'listLibrary' | 'getLibraryItem' | 'setLibraryTrashed' | 'removeLibraryItem' | 'readLibraryFile'> = {
+ listLibrary: operation('listLibrary'), getLibraryItem: operation('getLibraryItem'),
+ removeLibraryItem: operation('removeLibraryItem'), setLibraryTrashed: operation('setLibraryTrashed'), readLibraryFile: operation('readLibraryFile'),
+}

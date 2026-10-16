@@ -42,6 +42,30 @@ function setup(overrides: Partial<ConversationTransport> = {}, callbacks: Conver
 afterEach(() => vi.useRealTimers())
 
 describe('Conversation lifecycle through the renderer interface', () => {
+  it('keeps attachments until backend acceptance and reuses a failed submission ID', async () => {
+    const received: any[] = []
+    const results = [deferred<ChatResponse>(), deferred<ChatResponse>()]
+    let started!: (id: number) => void
+    const { lifecycle } = setup({ streamChatMessage: (...args) => {
+      received.push(args[15]); started = args[14]!
+      return results[received.length - 1].promise
+    } })
+    const document = { filename: 'notes.md', dataUri: 'data:text/markdown;base64,aGVsbG8=' }
+    lifecycle.compose('Read this'); lifecycle.attachDocument(document)
+    const options = { documentAttachment: document, clearComposer: true }
+    const failed = lifecycle.sendPrompt('Read this', options)
+    expect(lifecycle.getSnapshot().documentAttachment).toEqual(document)
+    results[0].reject(new Error('Offline')); await failed
+    expect(lifecycle.getSnapshot().message).toBe('Read this')
+    const retried = lifecycle.sendPrompt('Read this', options)
+    expect(received[0]?.requestId).toBeTruthy()
+    expect(received[1]?.requestId).toBe(received[0]?.requestId)
+    started(12)
+    expect(lifecycle.getSnapshot().documentAttachment).toBeNull()
+    expect(lifecycle.getSnapshot().message).toBe('')
+    results[1].resolve(reply); await retried
+  })
+
   it('rejects old A snapshots after A → B → A, including an old failure', async () => {
     const reads = [deferred<ConversationSnapshot>(), deferred<ConversationSnapshot>(), deferred<ConversationSnapshot>()]
     let next = 0
@@ -325,4 +349,14 @@ it('flushes queued progress when the transport fails before the debounce', async
   await run
   expect(lifecycle.getSnapshot().agentProgress).toEqual([{ type: 'ThinkingDelta', data: { id: 'thinking', delta: 'working', elapsed_ms: 1 } }])
   expect(vi.getTimerCount()).toBe(0)
+})
+
+it('can submit from a LAN HTTP browser without crypto.randomUUID', async()=>{
+ vi.stubGlobal('crypto', {getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto)})
+ let receipt: any
+ const {lifecycle}=setup({streamChatMessage:async(...args)=>{receipt=args[15];return reply}})
+ await lifecycle.sendPrompt('Read',{documentAttachment:{filename:'notes.md',dataUri:'data:text/plain;base64,aGk='}})
+ expect(receipt.requestId).toBeTruthy()
+ expect(lifecycle.getSnapshot().sending).toBe(false)
+ vi.unstubAllGlobals()
 })
