@@ -1,3 +1,4 @@
+import SelectField from '../SelectField'
 import React from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
 import { 
@@ -369,11 +370,11 @@ export default function GeneralTab({
               return (
                 <div className="setting-row wide">
                   <label>Active model</label>
-                  <select
+                  <SelectField aria-label="Active model"
                     value={currentModel}
-                    onChange={(e) => updateField('customModelSelections', {
+                    onValueChange={(nextValue) => updateField('customModelSelections', {
                       ...(config.customModelSelections ?? {}),
-                      [activeId]: e.target.value
+                      [activeId]: nextValue
                     })}
                   >
                     {cp.models.map(m => (
@@ -381,7 +382,7 @@ export default function GeneralTab({
                         {m.displayName || m.modelId}
                       </option>
                     ))}
-                  </select>
+                  </SelectField>
                 </div>
               )
             })()}
@@ -724,15 +725,15 @@ export default function GeneralTab({
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>Gemini model</label>
-                  <select 
+                  <SelectField aria-label="Gemini model"
                     value={dynamicGeminiModels.includes(config.geminiModel) ? config.geminiModel : 'custom'} 
-                    onChange={(e) => updateField('geminiModel', e.target.value)}
+                    onValueChange={(nextValue) => updateField('geminiModel', nextValue)}
                   >
                     {dynamicGeminiModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
-                  </select>
+                  </SelectField>
                 </div>
                 {(!dynamicGeminiModels.includes(config.geminiModel) || config.geminiModel === 'custom') && (
                   <div className="setting-row">
@@ -776,15 +777,15 @@ export default function GeneralTab({
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>Anthropic model</label>
-                  <select 
+                  <SelectField aria-label="Anthropic model"
                     value={dynamicAnthropicModels.includes(config.anthropicModel) ? config.anthropicModel : 'custom'} 
-                    onChange={(e) => updateField('anthropicModel', e.target.value)}
+                    onValueChange={(nextValue) => updateField('anthropicModel', nextValue)}
                   >
                     {dynamicAnthropicModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
-                  </select>
+                  </SelectField>
                 </div>
                 {(!dynamicAnthropicModels.includes(config.anthropicModel) || config.anthropicModel === 'custom') && (
                   <div className="setting-row">
@@ -828,15 +829,15 @@ export default function GeneralTab({
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>OpenAI Model</label>
-                  <select 
+                  <SelectField aria-label="OpenAI Model"
                     value={dynamicOpenAIModels.includes(config.openaiModel) ? config.openaiModel : 'custom'} 
-                    onChange={(e) => updateField('openaiModel', e.target.value)}
+                    onValueChange={(nextValue) => updateField('openaiModel', nextValue)}
                   >
                     {dynamicOpenAIModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
-                  </select>
+                  </SelectField>
                 </div>
                 {(!dynamicOpenAIModels.includes(config.openaiModel) || config.openaiModel === 'custom') && (
                   <div className="setting-row">
@@ -934,15 +935,15 @@ export default function GeneralTab({
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>DeepSeek Model</label>
-                  <select
+                  <SelectField aria-label="DeepSeek Model"
                     value={dynamicDeepSeekModels.includes(config.deepseekModel) ? config.deepseekModel : 'custom'}
-                    onChange={(e) => updateField('deepseekModel', e.target.value)}
+                    onValueChange={(nextValue) => updateField('deepseekModel', nextValue)}
                   >
                     {dynamicDeepSeekModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
-                  </select>
+                  </SelectField>
                 </div>
                 {(!dynamicDeepSeekModels.includes(config.deepseekModel) || config.deepseekModel === 'custom') && (
                   <div className="setting-row">
@@ -986,15 +987,15 @@ export default function GeneralTab({
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>Hugging Face model</label>
-                  <select 
+                  <SelectField aria-label="Hugging Face model"
                     value={(HF_MODELS as readonly string[]).includes(config.hfModel) ? config.hfModel : 'custom'} 
-                    onChange={(e) => updateField('hfModel', e.target.value)}
+                    onValueChange={(nextValue) => updateField('hfModel', nextValue)}
                   >
                     {HF_MODELS.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
-                  </select>
+                  </SelectField>
                 </div>
                 {(!(HF_MODELS as readonly string[]).includes(config.hfModel) || config.hfModel === 'custom') && (
                   <div className="setting-row">
@@ -1038,15 +1039,15 @@ export default function GeneralTab({
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>LM Studio Model</label>
-                  <select 
+                  <SelectField aria-label="LM Studio Model"
                     value={dynamicLocalModels.includes(config.localModelName) ? config.localModelName : 'custom'} 
-                    onChange={(e) => updateField('localModelName', e.target.value)}
+                    onValueChange={(nextValue) => updateField('localModelName', nextValue)}
                   >
                     {dynamicLocalModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
-                  </select>
+                  </SelectField>
                 </div>
                 {(!dynamicLocalModels.includes(config.localModelName) || config.localModelName === 'custom') && (
                   <div className="setting-row">
@@ -1091,9 +1092,9 @@ export default function GeneralTab({
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>Ollama model</label>
-                  <select 
+                  <SelectField aria-label="Ollama model"
                     value={dynamicOllamaModels.includes(config.ollamaModel) ? config.ollamaModel : 'custom'} 
-                    onChange={(e) => updateField('ollamaModel', e.target.value)}
+                    onValueChange={(nextValue) => updateField('ollamaModel', nextValue)}
                   >
                     {dynamicOllamaModels.map(model => (
                       <option key={model} value={model}>{model}</option>
@@ -1102,7 +1103,7 @@ export default function GeneralTab({
                       <option value={config.ollamaModel}>{config.ollamaModel}</option>
                     )}
                     <option value="custom">Custom...</option>
-                  </select>
+                  </SelectField>
                 </div>
                 {(!dynamicOllamaModels.includes(config.ollamaModel) || config.ollamaModel === 'custom') && (
                   <div className="setting-row">
@@ -1308,14 +1309,14 @@ export default function GeneralTab({
                     {modelField && opts.length > 0 && (
                       <div className="setting-row">
                         <label>{prov.label} Model</label>
-                        <select value={currentModel} onChange={(e) => updateField(modelField, e.target.value)}>
+                        <SelectField aria-label="Model" value={currentModel} onValueChange={(nextValue) => updateField(modelField, nextValue)}>
                           {opts.map(m => (
                             <option key={m.value} value={m.value}>{m.label}</option>
                           ))}
                           {currentModel && !opts.some(m => m.value === currentModel) && (
                             <option key={currentModel} value={currentModel}>{currentModel}</option>
                           )}
-                        </select>
+                        </SelectField>
                       </div>
                     )}
                     {prov.keyField ? (
@@ -1374,11 +1375,11 @@ export default function GeneralTab({
                   const veoOpts = dynamicVideoModels?.veo || VEO_STUDIO_MODELS.veo || []
                   const currentVeoModel = config.veoModel || 'veo-3.1-generate-preview'
                   return (
-                    <select
+                    <SelectField aria-label="Default Veo model"
                       value={currentVeoModel}
-                      onChange={(e) => {
-                        updateField('veoModel', e.target.value)
-                        setActiveModel('veoModel', e.target.value, 'video')
+                      onValueChange={(nextValue) => {
+                        updateField('veoModel', nextValue)
+                        setActiveModel('veoModel', nextValue, 'video')
                       }}
                     >
                       {veoOpts.map((m) => (
@@ -1387,7 +1388,7 @@ export default function GeneralTab({
                       {currentVeoModel && !veoOpts.some((m) => m.value === currentVeoModel) && (
                         <option key={currentVeoModel} value={currentVeoModel}>{currentVeoModel}</option>
                       )}
-                    </select>
+                    </SelectField>
                   )
                 })()}
               </div>

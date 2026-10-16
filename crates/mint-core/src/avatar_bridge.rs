@@ -506,7 +506,7 @@ impl AvatarBridge {
     }
 
     /// Hook this into whatever emits `AgentProgress` for a turn (currently
-    /// wired at the `progress_cb` closure in `src-tauri/src/lib.rs` around
+    /// wired at the `progress_cb` closure in `src-tauri/src/commands/conversation.rs` around
     /// the `orchestrate_agent_loop` call).
     pub fn on_agent_progress(&self, progress: &AgentProgress) {
         if !self.is_active() {
@@ -517,6 +517,7 @@ impl AvatarBridge {
                 action,
                 input,
                 subagent,
+                ..
             } => {
                 let session = SessionMeta::for_subagent(subagent.as_deref());
                 // The model's own explicit signal is the primary source of
@@ -559,8 +560,13 @@ impl AvatarBridge {
             AgentProgress::ThinkingDelta { .. } => {}
             AgentProgress::ExtendedThinking { .. } => {}
             AgentProgress::WaitingForNetwork { .. } => {}
+            AgentProgress::ContextCompaction { .. } => {}
             AgentProgress::PlanUpdated { .. } => {}
-            AgentProgress::RunCompleted { .. } => {}
+            AgentProgress::RunCompleted { .. }
+            | AgentProgress::ToolProgress { .. }
+            | AgentProgress::ToolArtifacts { .. }
+            | AgentProgress::ToolDiscovery { .. }
+            | AgentProgress::DeviceState { .. } => {}
         }
     }
 
@@ -795,6 +801,7 @@ mod tests {
     async fn tool_start_without_subagent_uses_main_session_at_priority_zero() {
         let bridge = AvatarBridge::new(test_cfg());
         bridge.on_agent_progress(&AgentProgress::ToolStart {
+            call_id: None,
             action: "run_shell".into(),
             input: serde_json::Value::Null,
             subagent: None,
@@ -813,6 +820,7 @@ mod tests {
     async fn tool_start_inside_a_subagent_gets_its_own_lower_priority_session() {
         let bridge = AvatarBridge::new(test_cfg());
         bridge.on_agent_progress(&AgentProgress::ToolStart {
+            call_id: None,
             action: "run_shell".into(),
             input: serde_json::Value::Null,
             subagent: Some("researcher".into()),
@@ -831,6 +839,7 @@ mod tests {
     async fn thinking_falls_back_to_the_last_known_session() {
         let bridge = AvatarBridge::new(test_cfg());
         bridge.on_agent_progress(&AgentProgress::ToolStart {
+            call_id: None,
             action: "run_shell".into(),
             input: serde_json::Value::Null,
             subagent: Some("researcher".into()),

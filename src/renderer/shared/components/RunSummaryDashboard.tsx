@@ -32,19 +32,13 @@ export function RunSummaryDashboard({ summary, className = '' }: Props) {
       ? 'run-summary-badge rollback'
       : 'run-summary-badge failure'
 
-  const statusColor = isSuccess
-    ? 'var(--status-speaking, #22c55e)'
-    : isRolledBack
-      ? '#f59e0b'
-      : 'var(--status-error, #ef4444)'
-
   return (
     <div className={`run-summary-card ${className}`}>
       {/* Header */}
       <div className="run-summary-header">
         <div className="run-summary-title">
-          <Activity style={{ width: '15px', height: '15px', color: statusColor }} />
-          <span>Run telemetry #{summary.runId}</span>
+          <Activity size={16} aria-hidden="true" />
+          <span className="run-summary-heading"><strong>Run summary</strong><small title={`Run ${summary.runId}`}>#{summary.runId}</small></span>
         </div>
         <div>
           <span className={badgeClass}>
@@ -80,8 +74,8 @@ export function RunSummaryDashboard({ summary, className = '' }: Props) {
             <span>Tools</span>
           </div>
           <div className="run-kpi-value">
-            {summary.toolCallsCount}{' '}
-            <span className="run-kpi-subtext">({summary.retriesCount} retry)</span>
+            {summary.toolCallsCount}
+            {summary.retriesCount > 0 && <span className="run-kpi-subtext"> · {summary.retriesCount} retried</span>}
           </div>
         </div>
 
@@ -100,12 +94,12 @@ export function RunSummaryDashboard({ summary, className = '' }: Props) {
                 {summary.filesCreated.length}{' '}
                 <span className="run-kpi-subtext">created</span>
               </>
-            ) : (
+            ) : summary.filesChanged.length > 0 ? (
               <>
                 {summary.filesChanged.length}{' '}
                 <span className="run-kpi-subtext">modified</span>
               </>
-            )}
+            ) : <>0 <span className="run-kpi-subtext">files</span></>}
           </div>
         </div>
       </div>

@@ -267,6 +267,11 @@
     margin: 2px 0 0;
 }
 
+.reduced-effects-row input:focus-visible + .settings-toggle-slider {
+    outline: 2px solid var(--accent, #10b981);
+    outline-offset: 3px;
+}
+
 .section-current-badge {
     font-size: 0.68rem;
     font-weight: 600;

@@ -1,0 +1,86 @@
+/* Orb is the visual focus; labels and controls carry the actual call state. */
+.gemini-live-overlay.live-orb-dialog {
+  position: fixed; inset: 0; z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+  box-sizing: border-box; padding: 24px;
+  overscroll-behavior: contain; font-family: inherit;
+  background: color-mix(in srgb, var(--bg-base, #09090b) 85%, transparent);
+  overflow: auto;
+}
+.live-orb-dialog .gemini-live-card {
+  position: relative; display: flex; flex-direction: column; align-items: center;
+  box-sizing: border-box; width: min(100%, 520px); max-width: 520px;
+  max-height: calc(100dvh - 48px); padding: 28px; gap: 18px;
+  overflow-y: auto; background: var(--bg-overlay, #16181c);
+  border: 1px solid var(--border-default); border-radius: var(--radius-2xl);
+  color: var(--text-main); box-shadow: var(--shadow-lg);
+}
+.live-orb-header { text-align: center; }
+.live-orb-dialog .gemini-live-badge {
+  position: static; display: inline-block; transform: none;
+  font-size: 12px; letter-spacing: .04em; color: var(--text-muted);
+}
+.live-orb-header h2 { margin: 12px 0 0; font-size: 23px; font-weight: 500; letter-spacing: -.025em; }
+.live-orb-stage { width: min(100%, 300px); aspect-ratio: 1; flex-shrink: 0; }
+.live-orb-state { text-align: center; }
+.live-orb-dialog .gemini-live-status { font-size: 18px; font-weight: 500; }
+.live-orb-state p { margin: 8px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+.live-orb-dialog[data-status='paused'] .live-orb-stage { opacity: .45; }
+.live-orb-dialog[data-status='error'] .gemini-live-status { color: var(--danger); }
+.live-orb-dialog .gemini-live-transcript {
+  flex-shrink: 1; min-height: 44px; max-height: 150px; width: 100%;
+  padding: 14px 0; border-top: 1px solid var(--border-default); border-bottom: 1px solid var(--border-default);
+  box-sizing: border-box; text-align: left; overflow-wrap: anywhere;
+  font-size: 14px; line-height: 1.6; color: var(--text-soft); overflow-y: auto; overscroll-behavior: contain;
+}
+.live-orb-dialog .gemini-live-transcript-speaker { display: block; margin-bottom: 2px; font-size: 11px; letter-spacing: .04em; color: var(--text-muted); font-weight: 600; }
+.live-orb-empty { margin: 0; color: var(--text-muted); text-align: center; }
+.live-orb-dialog .gemini-live-transcript-line { margin: 0 0 8px; }
+.live-orb-dialog .gemini-live-transcript-line:last-child { margin-bottom: 0; }
+.live-orb-dialog .gemini-live-voice-picker { position: relative; }
+.live-orb-dialog .gemini-live-voice-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px;
+  height: 36px; font-family: inherit; font-size: 13px; border: 0;
+  border-radius: var(--radius-full); color: var(--text-soft); background: var(--bg-surface-soft);
+}
+.live-orb-dialog .gemini-live-voice-menu {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 2px; min-width: 140px; padding: 6px;
+  border-radius: var(--radius-lg); background: var(--bg-overlay);
+  border: 1px solid var(--border-default); box-shadow: var(--shadow-md);
+  max-height: 180px; overflow: auto; z-index: 2;
+}
+.live-orb-dialog .gemini-live-voice-option {
+  padding: 7px 10px; border-radius: var(--radius-md); border: 0;
+  background: transparent; color: var(--text-soft); font: inherit; font-size: 13px; text-align: left;
+}
+.live-orb-dialog .gemini-live-voice-option:hover,
+.live-orb-dialog .gemini-live-voice-option.active { background: var(--bg-surface-hover); color: var(--text-main); }
+.live-orb-dialog .gemini-live-controls { display: flex; align-items: center; margin: 0; padding: 0; background: none; border: 0; gap: 12px; width: 100%; }
+.live-orb-dialog .gemini-live-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; background: var(--bg-surface-soft); color: var(--text-main);
+  box-sizing: border-box; flex: 1; width: auto; height: 44px; gap: 8px; padding: 0 16px;
+  font-family: inherit; font-size: 14px; font-weight: 500; border-radius: var(--radius-lg);
+}
+.live-orb-dialog .gemini-live-btn:hover { background: var(--bg-surface-hover); }
+.live-orb-dialog .gemini-live-end { background: var(--danger); color: var(--pure-white); }
+.live-orb-dialog .gemini-live-end:hover { background: color-mix(in srgb, var(--danger) 85%, black); }
+.live-orb-dialog button:disabled { opacity: .5; cursor: default; }
+.live-orb-dialog button:focus-visible, .live-orb-dialog .gemini-live-transcript:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 560px) {
+  .gemini-live-overlay.live-orb-dialog { padding: 12px; }
+  .live-orb-dialog .gemini-live-card { padding: 22px 18px; max-height: calc(100dvh - 24px); gap: 16px; }
+  .live-orb-stage { width: min(100%, 250px); }
+}
+@media (max-height: 720px) {
+  .live-orb-stage { width: min(100%, 200px); }
+  .live-orb-dialog .gemini-live-card { gap: 12px; padding-block: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gemini-live-overlay.live-orb-dialog { animation: none; }
+  .live-orb-dialog button { transition: none; }
+}
+@media (forced-colors: active) {
+  .live-orb-dialog .gemini-live-card, .live-orb-dialog .gemini-live-btn { border: 1px solid ButtonText; }
+}

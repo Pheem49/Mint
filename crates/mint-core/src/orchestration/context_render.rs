@@ -214,3 +214,107 @@ pub(super) fn format_trajectory_step(
     );
     s
 }
+
+/// Sends a lifecycle around the actual summarizer await; callers retain the
+/// original messages on failure. Short histories do not enter this UI state.
+pub(super) async fn report_context_compaction<F>(
+    eligible: bool,
+    total_tokens: u32,
+    window: usize,
+    work: F,
+    progress: &mut impl FnMut(AgentProgress),
+) -> Result<Option<(Vec<ChatMessage>, Option<String>)>, ChatError>
+where
+    F: Future<Output = Result<Option<(Vec<ChatMessage>, Option<String>)>, ChatError>>,
+{
+    if !eligible {
+        return work.await;
+    }
+    progress(AgentProgress::ContextCompaction {
+        subagent: None,
+        status: "started".into(),
+        message: "Summarizing earlier steps to continue working".into(),
+    });
+    let result = work.await;
+    let (status, message) = match &result {
+        Ok(Some((_, fallback))) => {
+            let fallback_note = fallback
+                .as_ref()
+                .map(|p| format!("; summary generated via fallback provider {p}"))
+                .unwrap_or_default();
+            (
+                "completed",
+                format!(
+                    "Context compacted — earlier steps summarized to continue working ({total_tokens}/{window} tokens before compaction){fallback_note}."
+                ),
+            )
+        }
+        Ok(None) => (
+            "completed",
+            "Context unchanged — no earlier steps needed summarizing.".into(),
+        ),
+        Err(error) => (
+            "failed",
+            format!(
+                "Context compaction failed: {error}. Continuing with the original context; it may still reach the model's limit."
+            ),
+        ),
+    };
+    progress(AgentProgress::ContextCompaction {
+        subagent: None,
+        status: status.into(),
+        message,
+    });
+    result
+}
+
+#[cfg(test)]
+mod compaction_progress_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[tokio::test]
+    async fn compaction_reports_start_before_await_and_completion_after_success() {
+        let events = RefCell::new(Vec::new());
+        let work = async {
+            assert!(
+                matches!(&events.borrow()[0], AgentProgress::ContextCompaction { status, .. } if status == "started")
+            );
+            Ok(Some((Vec::new(), None)))
+        };
+        report_context_compaction(true, 75, 100, work, &mut |e| events.borrow_mut().push(e))
+            .await
+            .unwrap();
+        assert!(
+            matches!(&events.borrow()[1], AgentProgress::ContextCompaction { status, message, .. } if status == "completed" && message.starts_with("Context compacted"))
+        );
+    }
+
+    #[tokio::test]
+    async fn short_history_never_announces_compaction() {
+        let events = RefCell::new(Vec::new());
+        report_context_compaction(false, 75, 100, async { Ok(None) }, &mut |e| {
+            events.borrow_mut().push(e)
+        })
+        .await
+        .unwrap();
+        assert!(events.borrow().is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_compaction_reports_original_context_will_be_retained() {
+        let events = RefCell::new(Vec::new());
+        let result = report_context_compaction(
+            true,
+            75,
+            100,
+            async { Err(ChatError::UnsupportedProvider("offline".into())) },
+            &mut |e| events.borrow_mut().push(e),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(
+            matches!(&events.borrow()[1], AgentProgress::ContextCompaction { status, message, .. } if status == "failed" && message.contains("offline") && message.contains("original context"))
+        );
+    }
+}

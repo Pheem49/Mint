@@ -1,21 +1,22 @@
-import { lazy, Suspense, type ChangeEvent, type CSSProperties, type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { createWorkspacePreview } from '../utils/workspacePreview'
+import { shouldNotify } from '../utils/notificationSettings'
+import { deliverNotification, receiveProactiveNotification } from '../utils/notifications'
+import '../css/notification-notice.css'
+import { lazy, Suspense, type ChangeEvent, type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  compactAgentProgressForPersistence,
-  mergeActivitySnapshots,
   mergeFileChanges,
   parseFileChangesFromProgress,
 } from '../agentProgress'
-import { catalogPlatform, conversationPlatform, mediaPlatform, runtimePlatform, type SlashResponse } from '../platform'
-import type { AgentProgress, ChatResponse, ChatSession, DocumentAttachment, PictureEntry, RuntimeStatus } from '../types'
+import { catalogPlatform, conversationPlatform, mediaPlatform, runtimePlatform, workspacePlatform, type SlashResponse } from '../platform'
+import type { ChatSession, DocumentAttachment, RuntimeStatus } from '../types'
 
 const {
   clearChatHistory, deleteChatSession, renameChatSession,
-  getConversationSnapshot, getConversationChanges,
-  saveSystemInteraction, listChatSessions, updateChatSessionWorkspace, saveInteractionAgentActivity, streamChatMessage,
-  cancelChatMessage, submitToolApproval, listen, readClipboardImage,
+  saveSystemInteraction, updateChatSessionWorkspace,
+  listen, readClipboardImage,
 } = conversationPlatform
 const { getRuntimeStatus, setActiveModel, selectWorkspaceDirectory, selectLinkedFolderPath, isTauriRuntime } = runtimePlatform
-const { listSavedPictures, convertFileSrc } = mediaPlatform
+const { convertFileSrc } = mediaPlatform
 const {
   listLearnedSkills, addLearnedSkill, deleteLearnedSkill, detectSystemTools, reauthMcpServer,
   listMcpServerTools, setProfileValue, listCronJobs, addCronJob, removeCronJob,
@@ -27,7 +28,7 @@ import ChatPanel, { type ConversationActions, type ConversationViewModel } from 
 import ScreenCaptureDialog from './ScreenCaptureDialog'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import DesktopTitlebar from './DesktopTitlebar'
-import type { ModelInteraction } from '@/components/ModelPanel'
+import ErrorNotice from './ErrorNotice'
 import type { ToolSurface } from './ToolSurfacePage'
 import {
   errorMessage,
@@ -38,29 +39,17 @@ import {
   applyThemeStyles,
   parseUtcDate,
 } from '../utils/ui'
+import { workspacePaths } from '../utils/workspaces'
 import { executeSlashCommand } from '../utils/slashCommandProcessor'
 import { captureScreenForChat } from '../utils/screenCapture'
 import { useConversationCoordinator } from '../conversation/useConversationCoordinator'
-import { matchesActiveRun, matchesActiveSession } from '../conversation/syncView'
+import { isPersistedConversation } from '../conversation/projectNavigation'
+import type { PromptOptions } from '../conversation/lifecycle'
 
 
-const EXPRESSIONS = [
-  "Default",
-  "Dumb Cat",
-  "Dumb Cat Eye Roll",
-  "Take Photo",
-  "Poke",
-  "Cat Filter",
-]
 
-const ACCESSORIES = [
-  "None",
-  "Apron",
-  "Glasses",
-  "Hold Pen",
-]
-
-import { DEFAULT_CONFIG, migrateTypographyScale } from '../constants/config'
+import { DEFAULT_CONFIG, migrateFontFamily, migrateTypographyScale } from '../constants/config'
+import { BackgroundTerminals } from './BackgroundTerminals'
 
 const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
 const RECENT_WORKSPACE_PATHS_KEY = 'mint:recent-workspace-paths'
@@ -238,9 +227,8 @@ const MOCK_WELCOME_INTERACTION = {
 
 
 import { isSupportedDocument } from '../utils/documentTypes'
-import { useCompanionWidget } from '@/companionWidget'
+import { useProactiveSuggestions } from '@/proactiveSuggestions'
 
-const ModelPanel = lazy(() => import('@/components/ModelPanel'))
 const WorkspacePanel = lazy(() => import('@/components/WorkspacePanel'))
 const ToolSurfacePage = lazy(() => import('./ToolSurfacePage'))
 const SkillsView = lazy(() => import('./SkillsView'))
@@ -249,7 +237,7 @@ const LinkedFoldersView = lazy(() => import('./LinkedFoldersView'))
 const McpServersView = lazy(() => import('./McpServersView'))
 const PluginsView = lazy(() => import('./PluginsView'))
 const CliSessionsView = lazy(() => import('./CliSessionsView'))
-const PicturesLibrary = lazy(() => import('@/components/PicturesLibrary'))
+const LibraryPage = lazy(() => import('./LibraryPage'))
 const ImageStudioPanel = lazy(() => import('./ImageStudioPanel'))
 const VeoStudioPanel = lazy(() => import('./VeoStudioPanel'))
 const CommandPalette = lazy(() => import('./CommandPalette').then(({ CommandPalette: Component }) => ({ default: Component })))
@@ -267,7 +255,7 @@ function getInitialViewFromUrl(): DashboardView {
   if (target.includes('skills')) return 'skills'
   if (target.includes('mcp')) return 'mcp'
   if (target.includes('plugins')) return 'plugins'
-  if (target.includes('picture')) return 'pictures'
+  if (target.includes('picture') || target.includes('library')) return 'pictures'
   if (target.includes('image-studio') || target.includes('imagine')) return 'imagine'
   if (target.includes('veo-studio') || target.includes('veo')) return 'veo'
   if (target.includes('code') || target === '/cli' || target === 'cli' || target.includes('cli-sessions')) return 'code'
@@ -278,7 +266,7 @@ function getCleanPathForView(v: string, activeId?: string): string {
   if (v === 'skills') return '/skills'
   if (v === 'mcp') return '/mcp'
   if (v === 'plugins') return '/plugins'
-  if (v === 'pictures') return '/pictures'
+  if (v === 'pictures') return '/library'
   if (v === 'imagine') return '/image-studio'
   if (v === 'veo' || v === 'veo_studio') return '/veo-studio'
   if (v === 'code') return '/code'
@@ -317,87 +305,56 @@ function describeApproval(payload: any): string {
   }
 }
 
-/** Fires the same notification mechanism as a finished AI reply, but only
- * while the window is unfocused — reused so both surfaces get identical
- * title/permission/dedupe behavior, just a different body string. */
-function notifyPendingApproval(payload: any) {
-  if (document.hidden || !document.hasFocus()) {
-    window.api?.notifyAiResponse?.(truncateForNotification(describeApproval(payload)))
-  }
-}
-
 export default function MintDashboard() {
   const isDesktopApp = isTauriRuntime()
   const [view, setViewState] = useState<DashboardView>(getInitialViewFromUrl)
-  const [conversationId, setConversationId] = useState(activeConversationId)
+  const [initialConversationId] = useState(activeConversationId)
   // Declared here (not further down with the rest of the workspace-related
   // state) so the URL-change effect below can read it.
   const { conversation, actions: conversationActions } = useConversationCoordinator(
     {
       workspacePath: window.localStorage.getItem(LAST_WORKSPACE_PATH_KEY) || '',
-      message: readDraft(conversationId),
+      message: readDraft(initialConversationId),
     },
     {
-      conversationId,
+      conversationId: initialConversationId,
       draftKeyPrefix: DRAFT_KEY_PREFIX,
       workspaceStorageKey: LAST_WORKSPACE_PATH_KEY,
+      historyVisible: view === 'chat',
+      onError: reason => setError(errorMessage(reason)),
+      onApproval: (payload, chatId) => notifyPendingApproval(payload, chatId),
+      onReply: (response, chatId) => {
+        if (document.hidden || !document.hasFocus()) return sendNotification(response.text || 'Mint finished your request.', chatId)
+      },
+      onActivityPersisted: id => {
+        const key = String(id)
+        setThinkingExpanded(current => ({ ...current,
+          ...(liveThinkingOpenRef.current ? { [key]: true } : {}),
+          ...(liveExtendedThinkingOpenRef.current ? { [`extended-${key}`]: true } : {}),
+        }))
+      },
+      onRunCompleted: async () => {
+        getRuntimeStatus().then(setStatus).catch(() => {})
+      },
+      onVisibleRunCompleted: chatId => {
+        const pathname = (window.location.pathname || '').replace(/\/+$/, '')
+        const hash = (window.location.hash || '').replace(/^#\/?/, '').replace(/\/+$/, '')
+        const target = (pathname || hash).toLowerCase()
+        if (!target || target === '/chat' || target === 'chat' || target === '/index.html' || target === 'index.html') {
+          window.history.replaceState({}, '', `/chat/${encodeURIComponent(chatId)}`)
+        }
+      },
     },
   )
   const {
-    workspacePath, message, imageAttachments, videoAttachments, documentAttachment,
+    conversationId, workspacePath, message, imageAttachments, videoAttachments, documentAttachment,
     sending, sendingMessage, sendingImageCount, sendingVideoCount, streamedReply,
-    streamedResponse, agentProgress,
+    streamedResponse, agentProgress, interactions, hasOlderInteractions,
+    streamingConversationId, activeTurnId, agentActivitySnapshots, pendingApprovals,
+    sessionAutoApproved, chatSessions,
   } = conversation
-  const activeConversationRef = useRef(conversationId)
-  const sessionGenerationRef = useRef(0)
-  const runGenerationRef = useRef(0)
-  const conversationCursorRef = useRef<{ chatId: string; cursor: number } | null>(null)
-  const historyLoadSerialRef = useRef(0)
-  const [pendingApprovals, setPendingApprovals] = useState<Record<string, { token: string; approval: any }>>({})
-  const autoApprovedChatIdRef = useRef<string | null>(null)
-  const isCurrentSession = (chatId: string, generation: number) => matchesActiveSession(
-    { chatId, generation },
-    { chatId: activeConversationRef.current, generation: sessionGenerationRef.current },
-  )
   const activateConversation = (id: string) => {
-    if (activeConversationRef.current !== id) {
-      activeConversationRef.current = id
-      sessionGenerationRef.current += 1
-      runGenerationRef.current += 1
-      conversationCursorRef.current = null
-      setInteractions([])
-      setHasOlderInteractions(false)
-      setAgentActivitySnapshots({})
-      setStreamingConversationId(null)
-      setActiveTurnId(null)
-    }
-    setConversationId(id)
-  }
-  async function loadConversationHistory(chatId: string, generation: number) {
-    const serial = ++historyLoadSerialRef.current
-    const snapshot = await getConversationSnapshot(chatId, null, 50)
-    if (!isCurrentSession(chatId, generation) || serial !== historyLoadSerialRef.current) return
-    const currentCursor = conversationCursorRef.current
-    if (currentCursor?.chatId === chatId && currentCursor.cursor > snapshot.cursor) return
-    conversationCursorRef.current = { chatId, cursor: snapshot.cursor }
-    setInteractions((current) => {
-      if (!isCurrentSession(chatId, generation) || serial !== historyLoadSerialRef.current) return current
-      if (conversationCursorRef.current?.chatId === chatId
-        && conversationCursorRef.current.cursor > snapshot.cursor) return current
-      return snapshot.interactions
-    })
-    setHasOlderInteractions((current) => {
-      if (!isCurrentSession(chatId, generation) || serial !== historyLoadSerialRef.current) return current
-      if (conversationCursorRef.current?.chatId === chatId
-        && conversationCursorRef.current.cursor > snapshot.cursor) return current
-      return snapshot.hasOlder
-    })
-    setAgentActivitySnapshots((current) => {
-      if (!isCurrentSession(chatId, generation) || serial !== historyLoadSerialRef.current) return current
-      if (conversationCursorRef.current?.chatId === chatId
-        && conversationCursorRef.current.cursor > snapshot.cursor) return current
-      return mergeActivitySnapshots(current, snapshot.interactions)
-    })
+    conversationActions.activate(id)
   }
   // Web only in practice (desktop's window has no mobile-width breakpoint,
   // so nothing ever sets this true there) — declared unconditionally so
@@ -416,18 +373,25 @@ export default function MintDashboard() {
   const [workspaceRefreshRevision, setWorkspaceRefreshRevision] = useState(0)
   const [recentWorkspacePaths, setRecentWorkspacePaths] = useState<string[]>(readRecentWorkspacePaths)
 
-  useEffect(() => {
-    const currentPath = workspacePath.trim()
-    if (!currentPath) return
-    const recent = [currentPath, ...readRecentWorkspacePaths().filter((path) => path !== currentPath)]
-      .slice(0, MAX_RECENT_WORKSPACES)
+  function rememberWorkspace(path: string) {
+    const recent = workspacePaths([path, ...readRecentWorkspacePaths()]).slice(0, MAX_RECENT_WORKSPACES)
     try {
       window.localStorage.setItem(RECENT_WORKSPACE_PATHS_KEY, JSON.stringify(recent))
     } catch {
       /* Keep the in-memory recent list usable when storage is unavailable. */
     }
     setRecentWorkspacePaths(recent)
+  }
+
+  useEffect(() => {
+    if (workspacePath.trim()) rememberWorkspace(workspacePath)
   }, [workspacePath])
+
+  async function selectCodeHubFolder() {
+    const selected = await selectLinkedFolderPath()
+    if (selected) rememberWorkspace(selected)
+    return selected
+  }
 
   const changeView = (newView: any, targetConversationId?: string) => {
     setMobileSidebarOpen(false)
@@ -443,7 +407,10 @@ export default function MintDashboard() {
         }
         return prev
       }
-      const mappedView: DashboardView = (next === 'veo_studio' ? 'veo' : next) as DashboardView
+      const requestedView: DashboardView = (next === 'veo_studio' ? 'veo' : next) as DashboardView
+      // The Web app can select a project for chat context, but its local file
+      // browser is Desktop-only. Keep any Workspace navigation on Web in chat.
+      const mappedView: DashboardView = !isDesktopApp && requestedView === 'workspace' ? 'chat' : requestedView
       const targetPath = getCleanPathForView(mappedView, targetConversationId || conversationId)
       if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
         window.history.pushState({}, '', targetPath)
@@ -467,16 +434,12 @@ export default function MintDashboard() {
       if (urlSessionId && urlSessionId !== conversationId) {
         window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, urlSessionId)
         activateConversation(urlSessionId)
-        const generation = sessionGenerationRef.current
-        loadConversationHistory(urlSessionId, generation).catch((error) => {
+        conversationActions.refreshHistory().catch((error) => {
           console.error('Failed to load conversation history:', error)
         })
       } else if (!urlSessionId && isRootOrNewChatRoute()) {
         const next = createConversationId()
         activateConversation(next)
-        setInteractions([])
-        setAgentActivitySnapshots({})
-        conversationActions.switchSession()
       }
     }
     window.addEventListener('popstate', handleUrlChange)
@@ -501,24 +464,62 @@ export default function MintDashboard() {
   }, [])
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [error, setError] = useState('')
-  // When `conversationId` changes we swap `message` to that chat's saved draft;
-  // this ref tells the persist effect to skip the render right after that swap,
-  // so the outgoing chat's text is never written under the incoming chat's key.
-  const [interactions, setInteractions] = useState<any[]>([])
-  const [hasOlderInteractions, setHasOlderInteractions] = useState(false)
-  const [pictures, setPictures] = useState<PictureEntry[]>([])
-  const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null)
-  const [activeTurnId, setActiveTurnId] = useState<number | null>(null)
-  const [agentActivitySnapshots, setAgentActivitySnapshots] = useState<Record<string, AgentProgress[]>>({})
+  const [notificationNotice, setNotificationNotice] = useState<{ message: string; chatId?: string; type?: string } | null>(null)
+  const notificationNavigationRef = useRef(selectConversation)
+  notificationNavigationRef.current = selectConversation
+  const sendNotification = (body: string, chatId?: string, kind: 'replies' | 'approvals' | 'system' = 'replies') => deliverNotification(
+    () => shouldNotify(notificationConfigRef.current?.notificationSettings, kind, 'os')
+      ? window.api?.notifyAiResponse?.(truncateForNotification(body), chatId) : undefined,
+    setError,
+  )
+  const notifyPendingApproval = (payload: any, chatId?: string) => {
+    if (document.hidden || !document.hasFocus()) {
+      void sendNotification(describeApproval(payload), chatId ?? payload.chatId, 'approvals')
+    }
+  }
+  useEffect(() => {
+    let disposed = false
+    const cleanups: Array<() => void> = []
+    const register = (subscription: Promise<any> | undefined) => {
+      subscription?.then(unlisten => {
+        if (typeof unlisten !== 'function') return
+        if (disposed) unlisten()
+        else cleanups.push(unlisten)
+      }).catch(reason => { if (!disposed) setError(errorMessage(reason)) })
+    }
+    const openChat = (chatId?: string) => {
+      if (chatId) void notificationNavigationRef.current(chatId).catch(reason => setError(errorMessage(reason)))
+    }
+    const clicked = (event: Event) => openChat((event as CustomEvent).detail?.chatId)
+    window.addEventListener('mint:notification-click', clicked)
+    register(listen('notification-clicked', (event: { payload: { chatId?: string } }) => openChat(event.payload?.chatId)))
+    register(Promise.resolve(window.api?.onProactiveNotification?.((payload: any) => {
+      if (disposed) return
+      void receiveProactiveNotification(payload, document.hidden || !document.hasFocus(),
+        notice => { if (shouldNotify(notificationConfigRef.current?.notificationSettings, 'system', 'inApp')) setNotificationNotice(notice) },
+        (body, chatId) => sendNotification(body, chatId, 'system'))
+        .catch(reason => setError(errorMessage(reason)))
+    })))
+    const visible = () => { if (!document.hidden) window.api?.clearAiNotifications?.() }
+    document.addEventListener('visibilitychange', visible)
+    return () => {
+      disposed = true
+      cleanups.forEach(unlisten => unlisten())
+      window.removeEventListener('mint:notification-click', clicked)
+      document.removeEventListener('visibilitychange', visible)
+    }
+  }, [])
+
   const [thinkingExpanded, setThinkingExpanded] = useState<Record<string, boolean>>({})
   const liveThinkingOpenRef = useRef(true)
   const liveExtendedThinkingOpenRef = useRef(true)
-  const [sessionAutoApproved, setSessionAutoApproved] = useState(false)
-  const sessionAutoApprovedRef = useRef(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
   const [toolSurfaces, setToolSurfaces] = useState<ToolSurface[]>([])
   const [activeSurfaceId, setActiveSurfaceId] = useState<string | null>(null)
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
+  const [modsPanelTarget, setModsPanelTarget] = useState<HTMLDivElement | null>(null)
+  const [backgroundPanelTarget, setBackgroundPanelTarget] = useState<HTMLDivElement | null>(null)
+  const [backgroundTaskCount, setBackgroundTaskCount] = useState(0)
   const [terminalRightWidth, setTerminalRightWidth] = useState(() => {
     const saved = Number(window.localStorage.getItem('mint:terminal-right-width'))
     return saved >= 280 && saved <= 900 ? saved : 440
@@ -536,11 +537,6 @@ export default function MintDashboard() {
     }),
     parseFileChangesFromProgress(agentProgress),
   ])
-  const workspaceSourceNames = [
-    ...imageAttachments.map((attachment) => attachment.name),
-    ...videoAttachments.map((attachment) => attachment.name),
-    documentAttachment?.filename || '',
-  ]
 
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
   const [planMode, setPlanMode] = useState(() => window.localStorage.getItem('mint:plan-mode') === 'true')
@@ -548,33 +544,19 @@ export default function MintDashboard() {
   const [dashboardDataReady, setDashboardDataReady] = useState(false)
   const [startupTimedOut, setStartupTimedOut] = useState(false)
   const [settingsConfig, setSettingsConfig] = useState<any>(null)
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
+  const notificationConfigRef = useRef(settingsConfig)
+  notificationConfigRef.current = settingsConfig
+  useEffect(() => {
+    if (!shouldNotify(settingsConfig?.notificationSettings, 'system', 'inApp')) setNotificationNotice(null)
+    if (settingsConfig?.notificationSettings?.enabled === false || settingsConfig?.notificationSettings?.os === false) window.api?.clearAiNotifications?.()
+  }, [settingsConfig])
+  const availableWorkspacePaths = useMemo(() => workspacePaths(
+    recentWorkspacePaths, workspacePath, chatSessions.map(session => session.workspacePath),
+  ), [recentWorkspacePaths, workspacePath, chatSessions])
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const lastNativePasteTimeRef = useRef(0)
-  const {
-    modelVisible,
-    scale,
-    interactionEnabled,
-    showInteractionGuide,
-    isLocked,
-    layoutPreset,
-    expressionIndex,
-    accessoryIndex,
-    modelReady,
-    proactiveSuggestion,
-    setScale,
-    setIsLocked,
-    setExpressionIndex,
-    setAccessoryIndex,
-    setModelReady,
-    toggleModel,
-    changeLayoutPreset,
-    updateInteractionEnabled,
-    updateInteractionGuide,
-    dismissProactiveSuggestion,
-    handleProactiveAction,
-  } = useCompanionWidget((message) => setError(message))
-  const startupReady = (dashboardDataReady && modelReady) || startupTimedOut
+  const { proactiveSuggestion, dismissProactiveSuggestion, handleProactiveAction } = useProactiveSuggestions((message) => setError(message))
+  const startupReady = dashboardDataReady || startupTimedOut
 
   const [mcpName, setMcpName] = useState('')
   const [mcpCmd, setMcpCmd] = useState('')
@@ -685,118 +667,6 @@ export default function MintDashboard() {
     }
   }, [isSearchOpen])
 
-  // Another process — the CLI's interactive chat, a scheduled task, a
-  // messaging bridge — can add messages to this same conversation while
-  // this page is open, and nothing here would otherwise notice: Mint's
-  // surfaces only share a SQLite file, not a live event bus, so this polls
-  // for changes instead of requiring a manual refresh. Kept in a ref rather
-  // than the effect's own dependency array so a poll landing doesn't tear
-  // down and recreate the interval on every tick.
-  const interactionsRef = useRef(interactions)
-  const chatPollInFlightRef = useRef<{ chatId: string; generation: number } | null>(null)
-  useEffect(() => {
-    interactionsRef.current = interactions
-  }, [interactions])
-  useEffect(() => {
-    if (interactions.length === 0) setHasOlderInteractions(false)
-  }, [interactions.length])
-
-  // Load the saved draft whenever the active conversation changes. Declared
-  // before the persist effect so it runs first within the same commit. The
-  // first run is a no-op: `message`'s initial value already came from the
-  // lazy `useState` initializer above.
-  useEffect(() => {
-    if (view !== 'chat' || !conversationId) return
-    let disposed = false
-    const generation = sessionGenerationRef.current
-    const isCurrent = () => !disposed && isCurrentSession(conversationId, generation)
-    const syncHistory = async () => {
-      // A shared SQLite database has no cross-process event bus. Refresh as
-      // soon as the user returns, but avoid work while hidden or overlapping
-      // a slow read with the next polling tick.
-      if (
-        !isCurrent() ||
-        document.visibilityState !== 'visible' ||
-        (chatPollInFlightRef.current?.chatId === conversationId
-          && chatPollInFlightRef.current.generation === generation)
-      ) return
-
-      const poll = { chatId: conversationId, generation }
-      chatPollInFlightRef.current = poll
-      try {
-        if (conversationCursorRef.current?.chatId !== conversationId) {
-          await loadConversationHistory(conversationId, generation)
-          return
-        }
-        let cursor = conversationCursorRef.current.cursor
-        let changed = false
-        for (let page = 0; page < 10; page++) {
-          const batch = await getConversationChanges(conversationId, cursor, 100)
-          if (!isCurrent()) return
-          if (conversationCursorRef.current?.chatId === conversationId
-            && conversationCursorRef.current.cursor > batch.cursor) return
-          cursor = batch.cursor
-          if (batch.changes.length > 0) {
-            changed = true
-            setInteractions((current) => {
-              if (!isCurrent()) return current
-              if (conversationCursorRef.current?.chatId === conversationId
-                && conversationCursorRef.current.cursor > batch.cursor) return current
-              const byId = new Map(current.map((interaction) => [interaction.id, interaction]))
-              for (const change of batch.changes) {
-                if (change.interaction) byId.set(change.interactionId, change.interaction)
-                else byId.delete(change.interactionId)
-              }
-              return Array.from(byId.values()).sort((a, b) => a.id - b.id)
-            })
-            setAgentActivitySnapshots((current) => {
-              if (!isCurrent()) return current
-              if (conversationCursorRef.current?.chatId === conversationId
-                && conversationCursorRef.current.cursor > batch.cursor) return current
-              const merged = { ...current }
-              for (const change of batch.changes) {
-                const key = String(change.interactionId)
-                if (change.interaction) {
-                  if (change.interaction.agentActivity && Array.isArray(change.interaction.agentActivity)) {
-                    merged[key] = change.interaction.agentActivity
-                  }
-                } else {
-                  delete merged[key]
-                }
-              }
-              return merged
-            })
-          }
-          if (!batch.hasMore) break
-        }
-        if (conversationCursorRef.current?.chatId === conversationId
-          && conversationCursorRef.current.cursor > cursor) return
-        conversationCursorRef.current = { chatId: conversationId, cursor }
-        if (changed) {
-          const sessions = await listChatSessions()
-          if (isCurrent()) setChatSessions(sessions)
-        }
-      } catch {
-        // Best-effort — a transient fetch failure just waits for the next tick.
-      } finally {
-        if (chatPollInFlightRef.current === poll) chatPollInFlightRef.current = null
-      }
-    }
-
-    const syncWhenActive = () => { void syncHistory() }
-    syncWhenActive()
-    window.addEventListener('focus', syncWhenActive)
-    document.addEventListener('visibilitychange', syncWhenActive)
-    const interval = window.setInterval(syncWhenActive, 1500)
-
-    return () => {
-      disposed = true
-      window.clearInterval(interval)
-      window.removeEventListener('focus', syncWhenActive)
-      document.removeEventListener('visibilitychange', syncWhenActive)
-    }
-  }, [view, conversationId, workspacePath])
-
   const filteredSessions = chatSessions.filter((session) => {
     if (session.kind === 'cli' || session.id === 'conversation-default') return false
     return session.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -848,71 +718,31 @@ export default function MintDashboard() {
   const groupedSearchSessions = groupSessionsByDate(filteredSessions)
 
 
-  async function refreshHistory() {
-    const chatId = conversationId
-    const generation = sessionGenerationRef.current
-    await loadConversationHistory(chatId, generation)
-  }
-
+  const refreshHistory = conversationActions.refreshHistory
   const refreshChatSessions = useCallback(async () => {
-    try {
-      const sessions = await listChatSessions()
-      setChatSessions((prev) => {
-        if (
-          prev.length === sessions.length &&
-          prev.every(
-            (s, i) =>
-              s.id === sessions[i]?.id &&
-              s.updatedAt === sessions[i]?.updatedAt &&
-              s.title === sessions[i]?.title &&
-              s.messageCount === sessions[i]?.messageCount &&
-              s.totalBytes === sessions[i]?.totalBytes
-          )
-        ) {
-          return prev
-        }
-        return sessions
-      })
-    } catch (e) {
-      console.error('Failed to refresh chat sessions:', e)
-    }
-  }, [])
+    try { await conversationActions.refreshSessions() }
+    catch (error) { console.error('Failed to refresh chat sessions:', error) }
+  }, [conversationActions])
+  const loadOlderInteractions = conversationActions.loadOlder
 
-  useEffect(() => {
-    const refreshVisible = () => {
-      if (document.visibilityState === 'visible') void refreshChatSessions()
-    }
-    const interval = window.setInterval(refreshVisible, 5000)
-    window.addEventListener('focus', refreshVisible)
-    document.addEventListener('visibilitychange', refreshVisible)
-    return () => {
-      window.clearInterval(interval)
-      window.removeEventListener('focus', refreshVisible)
-      document.removeEventListener('visibilitychange', refreshVisible)
-    }
-  }, [refreshChatSessions])
-
-  const loadOlderInteractions = useCallback(async () => {
-    const generation = sessionGenerationRef.current
-    const firstId = interactionsRef.current[0]?.id
-    if (firstId == null) return
-    const page = await getConversationSnapshot(conversationId, firstId, 50)
-    if (!isCurrentSession(conversationId, generation)) return
-    setHasOlderInteractions(page.hasOlder)
-    if (page.interactions.length === 0) return
-    setInteractions((current) => {
-      if (!isCurrentSession(conversationId, generation)) return current
-      const byId = new Map([...page.interactions, ...current].map((interaction) => [interaction.id, interaction]))
-      return Array.from(byId.values()).sort((a, b) => a.id - b.id)
-    })
-  }, [conversationId])
-
+  const workspaceUpdateQueues = useRef(new Map<string, Promise<void>>())
   const handleUpdateSessionWorkspace = useCallback(async (sessionId: string, targetPath: string | null) => {
-    try {
+    // Preserve selection order if the user switches folders quickly.
+    const previous = workspaceUpdateQueues.current.get(sessionId) ?? Promise.resolve()
+    const update = previous.catch(() => {}).then(async () => {
       await updateChatSessionWorkspace(sessionId, targetPath)
       await refreshChatSessions()
+    })
+    workspaceUpdateQueues.current.set(sessionId, update)
+    try {
+      await update
     } catch (e) {
       console.error('Failed to update session workspace:', e)
+      setError(errorMessage(e))
+    } finally {
+      if (workspaceUpdateQueues.current.get(sessionId) === update) {
+        workspaceUpdateQueues.current.delete(sessionId)
+      }
     }
   }, [refreshChatSessions])
 
@@ -925,17 +755,6 @@ export default function MintDashboard() {
     }
   }, [])
 
-  const [picturesRefreshing, setPicturesRefreshing] = useState(false)
-
-  async function refreshPictures() {
-    setPicturesRefreshing(true)
-    try {
-      setPictures(await listSavedPictures())
-    } finally {
-      setPicturesRefreshing(false)
-    }
-  }
-
   useEffect(() => {
     Promise.allSettled([
       getRuntimeStatus().then(setStatus),
@@ -943,7 +762,7 @@ export default function MintDashboard() {
       refreshChatSessions(),
       window.settingsApi?.getSettings()
         .then((loaded: any) => {
-          const migrated = migrateTypographyScale(loaded)
+          const migrated = migrateFontFamily(migrateTypographyScale(loaded))
           setSettingsConfig(migrated)
           applyThemeStyles({ ...DEFAULT_CONFIG, ...migrated })
         }),
@@ -956,18 +775,11 @@ export default function MintDashboard() {
       changeView('chat')
       conversationActions.compose(query)
     })
-    const unlistenVision = window.api.onVisionReady((image) => {
-      createTrimmedImagePreview(image)
-        .catch(() => image)
-        .then((previewDataUri) => {
-          conversationActions.attachImage({ dataUri: image, previewDataUri, name: 'Screen capture' })
-        })
-    })
     const handleWindowFocus = () => {
       getRuntimeStatus().then(setStatus).catch(() => {})
       window.settingsApi?.getSettings?.().then((loaded: any) => {
         if (loaded) {
-          const migrated = migrateTypographyScale(loaded)
+          const migrated = migrateFontFamily(migrateTypographyScale(loaded))
           setSettingsConfig(migrated)
           applyThemeStyles(migrated)
         }
@@ -977,7 +789,7 @@ export default function MintDashboard() {
     window.addEventListener('focus', handleWindowFocus)
 
     window.api?.onSettingsChanged?.((loaded: any) => {
-      const migrated = migrateTypographyScale(loaded)
+      const migrated = migrateFontFamily(migrateTypographyScale(loaded))
       setSettingsConfig(migrated)
       applyThemeStyles(migrated)
       getRuntimeStatus().then(setStatus).catch(() => {})
@@ -985,21 +797,12 @@ export default function MintDashboard() {
 
     const unlistenPromise = listen('tool-approval-requested', (event: { payload: any }) => {
       const chatId = event.payload.chatId as string | undefined
-      if (!chatId) return
-      if (sessionAutoApprovedRef.current && autoApprovedChatIdRef.current === chatId) {
-        submitToolApproval(event.payload.token, true).catch((err) => {
-          console.error("Auto approval failed:", err)
-        })
-      } else {
-        setPendingApprovals((current) => ({ ...current, [chatId]: event.payload }))
-        notifyPendingApproval(event.payload)
-      }
+      if (chatId) conversationActions.receiveApproval(chatId, event.payload)
     })
     return () => {
       window.removeEventListener('focus', handleWindowFocus)
       unlistenPromise?.then?.((unlisten) => unlisten?.())
       unlistenSpotlight?.then?.((unlisten) => unlisten?.())
-      unlistenVision?.then?.((unlisten) => unlisten?.())
     }
   }, [])
 
@@ -1007,10 +810,6 @@ export default function MintDashboard() {
     const timer = window.setTimeout(() => setStartupTimedOut(true), 10000)
     return () => window.clearTimeout(timer)
   }, [])
-
-  useEffect(() => {
-    if (view === 'pictures' || view === 'imagine') refreshPictures().catch((reason: unknown) => setError(errorMessage(reason)))
-  }, [view])
 
   useEffect(() => {
     if (view === 'workspace' && !agentMode) updateAgentMode(true)
@@ -1021,7 +820,7 @@ export default function MintDashboard() {
     setTimeout(() => setToastMessage((current) => current === nextMessage ? '' : current), 3000)
   }
 
-  const openMintBrowser = async (url: string) => {
+  const openMintBrowser = async (url: string, throwOnError = false) => {
     if (!isDesktopApp) {
       window.open(url, '_blank', 'noopener,noreferrer')
       return
@@ -1031,7 +830,32 @@ export default function MintDashboard() {
       const { invoke } = await import('@tauri-apps/api/core')
       await invoke('open_mint_browser', { url })
     } catch (error) {
+      if (throwOnError) throw error
       showToast(`Could not open browser: ${String(error)}`)
+    }
+  }
+
+  const openHtmlFile = async (root: string, relativePath: string, mode: 'external' | 'mint') => {
+    if (!isDesktopApp && !['localhost', '127.0.0.1', '[::1]', '::1'].includes(window.location.hostname)) {
+      throw new Error('HTML preview requires a browser on the same machine as the Mint backend.')
+    }
+    const popup = !isDesktopApp && mode === 'external' ? window.open('about:blank', '_blank') : null
+    if (popup) popup.opener = null
+    try {
+      const preview = await workspacePlatform.startHtmlPreview(root, relativePath, !isDesktopApp && mode === 'mint')
+      if (mode === 'mint') {
+        if (isDesktopApp) await openMintBrowser(preview.url, true)
+      } else if (isDesktopApp) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('run_desktop_action', { action: { type: 'open_url', target: preview.url } })
+      } else {
+        if (!popup) throw new Error('Allow browser popups, then open the HTML file again.')
+        popup.location.replace(preview.url)
+      }
+      showToast('HTML preview is running. Open Tools → Background tasks to view or stop the server.')
+    } catch (error) {
+      popup?.close()
+      throw error
     }
   }
 
@@ -1053,6 +877,17 @@ export default function MintDashboard() {
     })
   }
 
+  const openUtilitySurface = (kind: 'mods' | 'background') => {
+    setToolsPanelOpen(true)
+    setToolSurfaces(current => current.some(surface => surface.id === kind) ? current : [...current, { id: kind, kind, title: kind === 'mods' ? 'Mods' : 'Background tasks' }])
+    setActiveSurfaceId(kind)
+  }
+
+  const closeToolsPanel = () => {
+    setToolsPanelOpen(false)
+    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.tools-panel-toggle')?.focus())
+  }
+
   const openNativeBrowser = (url = 'https://www.google.com') => {
     void openMintBrowser(url)
   }
@@ -1061,6 +896,7 @@ export default function MintDashboard() {
     setToolSurfaces((current) => {
       const source = current.find((surface) => surface.id === id)
       if (!source) return current
+      if (source.kind === 'mods' || source.kind === 'background') return current
       const duplicateId = `${source.kind}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`
       const duplicate = { ...source, id: duplicateId, title: `${source.title} copy` } as ToolSurface
       setActiveSurfaceId(duplicateId)
@@ -1106,12 +942,21 @@ export default function MintDashboard() {
   const openArtifactSurface = (artifact: import('./ArtifactPreviewPanel').ArtifactFile) => {
     setToolsPanelOpen(true)
     const fileName = artifact.path.replace(/\\/g, '/').split('/').pop() || artifact.path
-    const id = `preview:${artifact.path}`
+    artifact = { ...artifact, workspacePath: artifact.workspacePath ?? workspacePath }
+    const id = `preview:${JSON.stringify([artifact.workspacePath, artifact.path])}`
     setToolSurfaces((current) => {
       const next = current.filter((surface) => surface.id !== id)
       return [...next, { id, kind: 'preview', title: fileName, artifact }]
     })
     setActiveSurfaceId(id)
+  }
+
+  const openWorkspacePreview = async (root: string, path: string) => {
+    const artifact = await createWorkspacePreview(root, path, {
+      readWorkspaceFile: (file, workspace) => runtimePlatform.readWorkspaceFile(file, workspace),
+      startHtmlPreview: (workspace, file) => workspacePlatform.startHtmlPreview(workspace, file),
+    })
+    openArtifactSurface(artifact)
   }
 
   const openReviewSurface = (review: Extract<ToolSurface, { kind: 'review' }>) => {
@@ -1194,217 +1039,25 @@ export default function MintDashboard() {
     setPlanMode(enabled)
   }
 
-  const updateWorkspacePath = (path: string) => {
+  const updateWorkspacePath = (path: string, persist = true) => {
     const next = path.trim()
     conversationActions.selectWorkspace(next)
-  }
-
-  useEffect(() => {
-    if (!sending) {
-      sessionAutoApprovedRef.current = false
-      autoApprovedChatIdRef.current = null
-      setSessionAutoApproved(false)
-    }
-  }, [sending])
-
-  async function handleApproval(approved: boolean, autoApproveSession = false, answer?: string) {
-    const chatId = conversationId
-    const pendingApproval = pendingApprovals[chatId]
-    if (!pendingApproval) return
-    try {
-      if (autoApproveSession) {
-        sessionAutoApprovedRef.current = true
-        autoApprovedChatIdRef.current = chatId
-        setSessionAutoApproved(true)
-      }
-      await submitToolApproval(pendingApproval.token, approved, answer)
-      setPendingApprovals((current) => {
-        if (current[chatId]?.token !== pendingApproval.token) return current
-        const next = { ...current }
-        delete next[chatId]
-        return next
-      })
-    } catch (reason) {
-      setError(errorMessage(reason))
+    const activeId = conversationActions.getSnapshot().conversationId
+    if (persist && isPersistedConversation(activeId, chatSessions)) {
+      void handleUpdateSessionWorkspace(activeId, next || null)
     }
   }
 
-  async function handleCancelMessage() {
-    if (!sending || !streamingConversationId) return
-    runGenerationRef.current += 1
-    try {
-      await conversationActions.executeCancellation(() =>
-        cancelChatMessage(streamingConversationId),
-      )
-    } catch (e) {
-      console.error("Failed to cancel message stream:", e)
-    } finally {
-      setPendingApprovals((current) => {
-        const next = { ...current }
-        delete next[streamingConversationId]
-        return next
-      })
-      setStreamingConversationId(null)
-      setActiveTurnId(null)
-    }
-  }
+  const handleApproval = conversationActions.resolveApproval
+  const handleCancelMessage = conversationActions.cancel
 
-  async function sendPrompt(
-    promptText: string,
-    options: {
-      imageAttachments?: Array<{ dataUri: string; name: string; previewDataUri?: string }>
-      videoAttachments?: Array<{ dataUri: string; name: string }>
-      audioDataUri?: string | null
-      documentAttachment?: DocumentAttachment | null
-      systemInstruction?: string
-      clearComposer?: boolean
-      pinnedMcpServer?: string
-      forceAgentMode?: boolean
-    } = {},
-  ) {
-    if (sending) return
-    const originChatId = conversationId
-    const originWorkspacePath = workspacePath || null
-    const sessionGeneration = sessionGenerationRef.current
-    const runGeneration = ++runGenerationRef.current
-    const originRun = { chatId: originChatId, sessionGeneration, runGeneration }
-    const isCurrentRun = () => matchesActiveRun(originRun, {
-      chatId: activeConversationRef.current,
-      sessionGeneration: sessionGenerationRef.current,
-      runGeneration: runGenerationRef.current,
-    })
-    let turnId: number | null = null
-    const outgoingImages = options.imageAttachments ?? []
-    const outgoingVideos = options.videoAttachments ?? []
-    const outgoingDocument = options.documentAttachment ?? null
-    const shouldUseAgentMode = agentMode || options.forceAgentMode || promptText.toLowerCase().startsWith('search web:')
-    const outgoingImage = outgoingImages.map((img) => img.dataUri).join(' ')
-    const outgoingVideo = outgoingVideos.map((vid) => vid.dataUri).join(' ')
-    const outgoingImageCount = outgoingImages.length
-    conversationActions.startRun(promptText, outgoingImageCount, outgoingVideos.length)
-    setStreamingConversationId(conversationId)
-    setActiveTurnId(null)
+  async function sendPrompt(promptText: string, options: PromptOptions = {}) {
+    if (conversationActions.getSnapshot().sending) return
     setError('')
     liveThinkingOpenRef.current = true
     liveExtendedThinkingOpenRef.current = true
-    setThinkingExpanded((current) => ({ ...current, live: true, 'live-extended': true }))
-    const progressSnapshot: AgentProgress[] = []
-    let pendingProgress: AgentProgress[] = []
-    let progressFlushTimer: ReturnType<typeof setTimeout> | null = null
-    const flushPendingProgress = () => {
-      if (progressFlushTimer) {
-        clearTimeout(progressFlushTimer)
-        progressFlushTimer = null
-      }
-      if (pendingProgress.length === 0) return
-      const batch = pendingProgress
-      pendingProgress = []
-      if (isCurrentRun()) conversationActions.receiveProgress(batch)
-    }
-    const queueProgress = (progress: AgentProgress) => {
-      pendingProgress.push(progress)
-      if (progress.type !== 'ThinkingDelta') {
-        flushPendingProgress()
-      } else if (!progressFlushTimer) {
-        progressFlushTimer = setTimeout(flushPendingProgress, 75)
-      }
-    }
-    if (options.clearComposer) {
-      conversationActions.clearComposer()
-    }
-
-    try {
-      const response = await conversationActions.executeStream((onChunk) => streamChatMessage(
-        shouldUseAgentMode ? promptText : `/chat ${promptText}`,
-        onChunk,
-        outgoingImage,
-        options.audioDataUri ?? null,
-        outgoingVideo,
-        options.systemInstruction ?? '',
-        (progress) => {
-          progressSnapshot.push(progress)
-          queueProgress(progress)
-        },
-        outgoingDocument,
-        originWorkspacePath,
-        originChatId,
-        undefined,
-        shouldUseAgentMode ? planMode : false,
-        options.pinnedMcpServer ?? null,
-        (payload) => {
-          if (sessionAutoApprovedRef.current && autoApprovedChatIdRef.current === originChatId) {
-            submitToolApproval(payload.token, true).catch((err) => {
-              console.error("Auto approval failed:", err)
-            })
-          } else {
-            setPendingApprovals((current) => ({ ...current, [originChatId]: payload }))
-            notifyPendingApproval(payload)
-          }
-        },
-        (id) => {
-          turnId = id
-          if (isCurrentRun()) setActiveTurnId(id)
-        },
-      ), isCurrentRun)
-      flushPendingProgress()
-      if (document.hidden || !document.hasFocus()) {
-        window.api?.notifyAiResponse?.(truncateForNotification(response.text))
-      }
-      const persistedProgress = compactAgentProgressForPersistence(progressSnapshot)
-      if (persistedProgress.length > 0) {
-        if (turnId != null) {
-          const interactionKey = String(turnId)
-          await saveInteractionAgentActivity(turnId, persistedProgress)
-          if (isCurrentRun()) {
-            setAgentActivitySnapshots((current) => ({
-              ...current,
-              [interactionKey]: persistedProgress.slice(),
-            }))
-            setThinkingExpanded((current) => ({
-              ...current,
-              ...(liveThinkingOpenRef.current ? { [interactionKey]: true } : {}),
-              ...(liveExtendedThinkingOpenRef.current ? { [`extended-${interactionKey}`]: true } : {}),
-            }))
-          }
-        } else {
-          console.warn('Agent activity was not saved because the stream did not provide a turn ID')
-        }
-      }
-      if (isCurrentRun()) {
-        try {
-          await loadConversationHistory(originChatId, sessionGeneration)
-        } catch (error) {
-          console.error('Failed to refresh completed conversation:', error)
-        }
-      }
-      await refreshChatSessions()
-      await refreshPictures()
-      if (isCurrentRun() && typeof window !== 'undefined') {
-        const pathname = (window.location.pathname || '').replace(/\/+$/, '')
-        const hash = (window.location.hash || '').replace(/^#\/?/, '').replace(/\/+$/, '')
-        const target = (pathname || hash).toLowerCase()
-        if (!target || target === '' || target === '/chat' || target === 'chat' || target === '/index.html' || target === 'index.html') {
-          window.history.replaceState({}, '', `/chat/${encodeURIComponent(originChatId)}`)
-        }
-      }
-      getRuntimeStatus().then(setStatus).catch(() => {})
-      if (isCurrentRun()) conversationActions.clearStream()
-    } catch (reason) {
-      if (isCurrentRun()) setError(errorMessage(reason))
-    } finally {
-      flushPendingProgress()
-      setPendingApprovals((current) => {
-        if (!current[originChatId]) return current
-        const next = { ...current }
-        delete next[originChatId]
-        return next
-      })
-      if (isCurrentRun()) {
-        conversationActions.finishRun()
-        setStreamingConversationId(null)
-        setActiveTurnId(null)
-      }
-    }
+    setThinkingExpanded(current => ({ ...current, live: true, 'live-extended': true }))
+    await conversationActions.sendPrompt(promptText, { ...options, agentMode, planMode })
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1421,7 +1074,7 @@ export default function MintDashboard() {
       // comes back as `not_handled` and falls through to the TS processor below.
       let engineResp: SlashResponse | null = null
       try {
-        engineResp = await runSlashCommand(trimmed, workspacePath || null)
+        engineResp = await runSlashCommand(trimmed, workspacePath || null, conversationId)
       } catch {
         engineResp = null
       }
@@ -1464,7 +1117,7 @@ export default function MintDashboard() {
               provider: 'system',
               model: 'mint-cli',
             }
-            setInteractions((prev) => [...prev, systemMsg])
+            conversationActions.appendInteraction(systemMsg)
           } else {
             const systemMsg = {
               id: Date.now(),
@@ -1474,7 +1127,7 @@ export default function MintDashboard() {
               provider: 'system',
               model: 'mint-cli',
             }
-            setInteractions((prev) => [...prev, systemMsg])
+            conversationActions.appendInteraction(systemMsg)
           }
           return
         }
@@ -1488,7 +1141,7 @@ export default function MintDashboard() {
             provider: 'system',
             model: 'mint-cli',
           }
-          setInteractions((prev) => [...prev, systemMsg])
+          conversationActions.appendInteraction(systemMsg)
           saveSystemInteraction(conversationId, trimmed, slashResult.systemText || '', 'system', 'mint-cli').catch(() => {})
         }
         return
@@ -1657,16 +1310,16 @@ export default function MintDashboard() {
     conversationActions.compose(message.trim() ? `Search web: ${message.trim()}` : 'Search web: ')
   }
 
-  async function selectWorkspace(path?: string) {
-    try {
-      const selected = path || await selectWorkspaceDirectory()
-      if (selected) {
-        updateWorkspacePath(selected)
-        changeView('workspace')
-      }
-    } catch (reason) {
-      setError(errorMessage(reason))
-    }
+  async function selectWorkspace(path?: string, showWorkspace = false) {
+    const targetView = isDesktopApp && (showWorkspace || view === 'workspace') ? 'workspace' : 'chat'
+    await conversationActions.selectProject(
+      async () => path || await selectLinkedFolderPath(),
+      {
+        openSession: (session, nextView) => selectConversation(session.id, session, nextView),
+        newChat: (targetPath, nextView) => clearHistory('New chat', targetPath, nextView),
+        showCurrentView: nextView => changeView(nextView, conversationActions.getSnapshot().conversationId),
+      }, targetView,
+    )
   }
 
   function captureScreen() {
@@ -1692,27 +1345,17 @@ export default function MintDashboard() {
       })
   }
 
-  async function clearHistory(action: 'New chat' | 'Clear history', targetWorkspacePath?: string | null) {
-    const originChatId = conversationId
-    const generation = sessionGenerationRef.current
+  async function clearHistory(action: 'New chat' | 'Clear history', targetWorkspacePath?: string | null, targetView: 'chat' | 'workspace' = 'chat') {
     try {
       if (action === 'New chat') {
         const next = createConversationId()
         activateConversation(next)
-        setInteractions([])
-        setAgentActivitySnapshots({})
-        conversationActions.switchSession()
-        setViewState('chat')
+        setViewState(targetView)
 
         if (targetWorkspacePath !== undefined) {
           updateWorkspacePath(targetWorkspacePath || '')
         } else {
-          const currentSession = chatSessions.find((s) => s.id === conversationId)
-          if (!currentSession || !currentSession.workspacePath) {
-            updateWorkspacePath('')
-          } else {
-            updateWorkspacePath(currentSession.workspacePath)
-          }
+          updateWorkspacePath(workspacePath)
         }
 
         if (typeof window !== 'undefined') {
@@ -1724,12 +1367,8 @@ export default function MintDashboard() {
         return
       } else {
         if (!window.confirm(`${action} will clear the current conversation history. Continue?`)) return
-        await clearChatHistory(originChatId)
+        await conversationActions.clearHistory()
       }
-      if (!isCurrentSession(originChatId, generation)) return
-      setInteractions([])
-      setAgentActivitySnapshots({})
-      conversationActions.switchSession()
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -1747,7 +1386,7 @@ export default function MintDashboard() {
       provider: 'system',
       model: 'mint-cli',
     }
-    setInteractions((prev) => [...prev, systemMsg])
+    conversationActions.appendInteraction(systemMsg)
     saveSystemInteraction(conversationId, userText, aiText, 'system', 'mint-cli').catch(() => {})
   }
 
@@ -1775,13 +1414,19 @@ export default function MintDashboard() {
   async function handleEngineSlashResponse(userText: string, resp: SlashResponse) {
     switch (resp.kind) {
       case 'message':
-        pushSystemMessage(userText, resp.markdown)
+        pushSystemMessage(userText.startsWith('/mods set ') ? '/mods' : userText, resp.markdown)
+        if (userText.startsWith('/mods set ')) {
+          requestAnimationFrame(() => document.getElementById('chat-input')?.focus())
+        }
         break
       case 'applied': {
         const wsChange = resp.effects.find((e) => e.kind === 'workspace_changed') as
           | { kind: 'workspace_changed'; path: string }
           | undefined
-        if (wsChange) conversationActions.selectWorkspace(wsChange.path)
+        if (wsChange) updateWorkspacePath(wsChange.path)
+        if (resp.effects.some((effect) => effect.kind === 'workspace_files_changed')) {
+          setWorkspaceRefreshRevision((revision) => revision + 1)
+        }
         const planModeChange = resp.effects.find((e) => e.kind === 'plan_mode_changed') as
           | { kind: 'plan_mode_changed'; enabled: boolean }
           | undefined
@@ -1793,25 +1438,17 @@ export default function MintDashboard() {
           // Render the same "✨ Gemini • model" chip the GUI's own /models shows.
           // The engine already logged the `provider_change` row into the shared
           // "cli" conversation, so this is just the immediate local echo.
-          setInteractions((prev) => [
-            ...prev,
-            {
-              id: Date.now(),
-              userText: providerChange.display,
-              aiText: '',
-              createdAt: new Date().toISOString(),
-              provider: 'system',
-              model: 'provider_change',
-            },
-          ])
+          conversationActions.appendInteraction({
+            id: Date.now(),
+            userText: providerChange.display,
+            aiText: '',
+            createdAt: new Date().toISOString(),
+            provider: 'system',
+            model: 'provider_change',
+          })
         }
         if (resp.effects.some((e) => e.kind === 'history_cleared')) {
-          const chatId = conversationId
-          const generation = sessionGenerationRef.current
-          await clearChatHistory(chatId).catch(() => {})
-          if (isCurrentSession(chatId, generation)) {
-            setInteractions([])
-          }
+          await conversationActions.clearHistory().catch(() => {})
         }
         if (resp.markdown) pushSystemMessage(userText, resp.markdown)
         if (resp.effects.some((e) => e.kind !== 'history_cleared' && e.kind !== 'workspace_changed')) {
@@ -1844,35 +1481,33 @@ export default function MintDashboard() {
     setThinkingExpanded((current) => ({ ...current, [key]: open }))
   }
 
-  async function selectConversation(id: string) {
+  async function selectConversation(id: string, selectedSession?: ChatSession, targetView: 'chat' | 'workspace' = 'chat') {
     window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, id)
     touchActiveTimestamp()
     activateConversation(id)
-    const generation = sessionGenerationRef.current
-    changeView('chat', id)
-    conversationActions.switchSession()
-    const session = chatSessions.find((item) => item.id === id)
+    changeView(targetView, id)
+    const session = selectedSession ?? chatSessions.find((item) => item.id === id)
     if (session) {
       if (session.workspacePath) {
         if (session.workspacePath !== workspacePath) {
-          updateWorkspacePath(session.workspacePath)
+          updateWorkspacePath(session.workspacePath, false)
         }
       } else {
         if (workspacePath) {
-          updateWorkspacePath('')
+          updateWorkspacePath('', false)
         }
       }
     }
     try {
-      await loadConversationHistory(id, generation)
+      await conversationActions.refreshHistory()
     } catch (reason) {
-      if (isCurrentSession(id, generation)) setError(errorMessage(reason))
+      setError(errorMessage(reason))
     }
   }
 
-  const handleNewChatInProject = useCallback((targetPath: string) => {
-    clearHistory('New chat', targetPath)
-  }, [])
+  const handleNewChatInProject = (targetPath: string) => {
+    void clearHistory('New chat', targetPath)
+  }
 
   async function deleteConversation(id: string) {
     if (id === 'cli') {
@@ -1894,7 +1529,7 @@ export default function MintDashboard() {
     try {
       await deleteChatSession(id)
       const remaining = chatSessions.filter((item) => item.id !== id && item.kind !== 'cli' && !item.id.startsWith('cli') && item.id !== 'conversation-default')
-      const currentChatId = activeConversationRef.current
+      const currentChatId = conversationActions.getSnapshot().conversationId
       const nextActive = id === currentChatId
         ? (remaining[0]?.id ?? createConversationId())
         : currentChatId
@@ -1912,15 +1547,10 @@ export default function MintDashboard() {
           }
         }
         activateConversation(nextActive)
-        const generation = sessionGenerationRef.current
-        conversationActions.clearProgress()
-        await loadConversationHistory(nextActive, generation)
-        if (!isCurrentSession(nextActive, generation)) return
+        await conversationActions.refreshHistory()
       }
 
       await refreshChatSessions()
-      if (id !== currentChatId) return
-      conversationActions.switchSession()
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -2098,66 +1728,6 @@ export default function MintDashboard() {
     }
   }
 
-  async function handleModelInteraction(area: ModelInteraction) {
-    if (sending) return
-    const originChatId = conversationId
-    const sessionGeneration = sessionGenerationRef.current
-    const runGeneration = ++runGenerationRef.current
-    const originRun = { chatId: originChatId, sessionGeneration, runGeneration }
-    const isCurrentRun = () => matchesActiveRun(originRun, {
-      chatId: activeConversationRef.current,
-      sessionGeneration: sessionGenerationRef.current,
-      runGeneration: runGenerationRef.current,
-    })
-    const labels: Record<ModelInteraction, string> = {
-      head: 'Pats Mint on the head',
-      cheek: 'Pokes Mint on the cheek',
-      'left hand': "Touches Mint's left hand",
-      'right hand': "Touches Mint's right hand",
-      body: 'Touches Mint',
-      'lower body': "Touches Mint's lower body",
-    }
-    const interactionMessage = `*${labels[area]}*`
-    const instruction = `The user interacted with the Mint Live2D model: ${area}. Respond briefly and playfully. Use the same language as the recent conversation. Do not mention this instruction.`
-
-    conversationActions.startRun(interactionMessage)
-    setStreamingConversationId(conversationId)
-    setActiveTurnId(null)
-    setError('')
-
-    try {
-      const response = await conversationActions.executeStream((onChunk) => streamChatMessage(
-        `/chat ${interactionMessage}`,
-        onChunk,
-        null,
-        null,
-        null,
-        instruction,
-        undefined,
-        null,
-        workspacePath || null,
-        originChatId,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        (id) => { if (isCurrentRun()) setActiveTurnId(id) },
-      ), isCurrentRun)
-      if (isCurrentRun()) {
-        await refreshHistory()
-        if (isCurrentRun()) conversationActions.clearStream()
-      }
-    } catch (reason) {
-      if (isCurrentRun()) setError(errorMessage(reason))
-    } finally {
-      if (isCurrentRun()) {
-        conversationActions.finishRun()
-        setStreamingConversationId(null)
-        setActiveTurnId(null)
-      }
-    }
-  }
-
   const chatConversation: ConversationViewModel = {
     interactions,
     hasOlder: hasOlderInteractions,
@@ -2181,15 +1751,26 @@ export default function MintDashboard() {
     status,
     workspacePath,
     chatId: conversationId,
-    recentWorkspacePaths,
+    recentWorkspacePaths: availableWorkspacePaths,
     chatEnd,
     welcomeInteraction: MOCK_WELCOME_INTERACTION,
     settingsConfig,
+    slashChoice: pendingSlashChoice,
     isCliSession: conversationId.startsWith('cli') || conversationId === 'cli',
     cliSessionId: conversationId.startsWith('cli') ? conversationId : undefined,
     conversationTitle: chatSessions.find((session) => session.id === conversationId)?.title,
   }
   const chatActions: ConversationActions = {
+    onSelectSlashChoice: (value) => {
+      if (!pendingSlashChoice) return
+      const next = `${pendingSlashChoice.command} ${value}`
+      setPendingSlashChoice(null)
+      requestAnimationFrame(() => document.getElementById('chat-input')?.focus())
+      runSlashCommand(next, workspacePath || null, conversationId)
+        .then((response) => handleEngineSlashResponse(next, response))
+        .catch(() => {})
+    },
+    onDismissSlashChoice: () => setPendingSlashChoice(null),
     onLoadOlder: loadOlderInteractions,
     onThinkingExpandedChange: handleThinkingExpandedChange,
     onSubmit: handleSubmit,
@@ -2207,7 +1788,7 @@ export default function MintDashboard() {
     onSetAgentMode: updateAgentMode,
     onSetPlanMode: isDesktopApp ? updatePlanMode : undefined,
     onSetProvider: changeProvider,
-    onSelectWorkspace: isDesktopApp ? selectWorkspace : undefined,
+    onSelectWorkspace: selectWorkspace,
     onWorkspaceChanged: () => setWorkspaceRefreshRevision((revision) => revision + 1),
     onApproval: handleApproval,
     onUpdateSettings: (updated) => setSettingsConfig(updated),
@@ -2237,23 +1818,37 @@ export default function MintDashboard() {
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={toggleSidebar}
           onNewChat={() => clearHistory('New chat')}
-          onOpenWorkspace={() => selectWorkspace()}
+          onOpenWorkspace={() => selectWorkspace(undefined, true)}
           onOpenTerminal={openTerminalSurface}
           onToggleTerminal={toggleTerminalSurface}
           onOpenBrowser={() => openNativeBrowser()}
           toolsPanelOpen={toolsPanelOpen}
+          backgroundTaskCount={backgroundTaskCount}
           onToggleToolsPanel={() => setToolsPanelOpen((open) => !open)}
           onOpenSettings={() => changeView('settings')}
           onCheckForUpdates={checkForUpdatesFromMenu}
           onShowAbout={() => showToast('Mint Agent — AI workspace')}
           workspacePath={workspacePath}
+          workspaceActive={view === 'workspace' && !toolsPanelOpen}
+          workspaceRevision={workspaceRefreshRevision}
+          sending={sending}
+          onWorkspaceUndoError={showToast}
           terminalCount={toolSurfaces.filter((surface) => surface.kind === 'terminal').length}
-          sourceNames={workspaceSourceNames}
+          chatId={conversationId}
+          liveProgress={streamingConversationId === conversationId ? agentProgress : []}
           recentChanges={recentAgentChanges}
           onOpenReview={(changes) => openReviewSurface({ id: `review:workspace:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: 'Recent agent changes', changes })}
           onRefreshWorkspace={() => setWorkspaceRefreshRevision((revision) => revision + 1)}
         />
       )}
+      {notificationNotice && (
+        <section className="mint-notification-notice" role="status" data-kind={notificationNotice.type}>
+          <span>{notificationNotice.message}</span>
+          {notificationNotice.chatId && <button type="button" onClick={() => { void notificationNavigationRef.current(notificationNotice.chatId!); setNotificationNotice(null) }}>Open chat</button>}
+          <button type="button" aria-label="Dismiss notification" onClick={() => setNotificationNotice(null)}>×</button>
+        </section>
+      )}
+      {error && <ErrorNotice key={error} message={error} onDismiss={() => setError('')} />}
       <div
         className={`app-body ${(sidebarCollapsed && window.innerWidth > 760) ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''} ${toolsPanelOpen ? 'tool-surface-active' : ''}`}
         style={{
@@ -2298,17 +1893,11 @@ export default function MintDashboard() {
             }}
           />
         )}
+        {toastMessage && <div role="status" style={{ position: 'fixed', bottom: 22, right: 22, zIndex: 10000, padding: '12px 18px', borderRadius: 10, background: 'var(--bg-surface)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}>{toastMessage}</div>}
         <DashboardSidebar
           view={view}
           sidebarCollapsed={sidebarCollapsed}
-          modelVisible={modelVisible}
           sending={sending}
-          expressionIndex={expressionIndex}
-          accessoryIndex={accessoryIndex}
-          expressions={EXPRESSIONS}
-          accessories={ACCESSORIES}
-          interactionEnabled={interactionEnabled}
-          showInteractionGuide={showInteractionGuide}
           onToggleSidebar={toggleSidebar}
           onSidebarResize={handleSidebarResize}
           onSidebarResizeEnd={handleSidebarResizeEnd}
@@ -2319,12 +1908,6 @@ export default function MintDashboard() {
           onDeleteConversation={deleteConversation}
           onRenameConversation={renameConversation}
           onSetView={changeView}
-          onToggleModel={toggleModel}
-          onSetExpressionIndex={setExpressionIndex}
-          onSetAccessoryIndex={setAccessoryIndex}
-          onSetInteractionEnabled={updateInteractionEnabled}
-          onSetShowInteractionGuide={updateInteractionGuide}
-          onShowToast={showToast}
           isSearchOpen={isSearchOpen}
           onSetSearchOpen={setIsSearchOpen}
           showWorkspaceTab={isDesktopApp}
@@ -2335,7 +1918,7 @@ export default function MintDashboard() {
           onUpdateSessionWorkspace={handleUpdateSessionWorkspace}
           onNewChatInProject={handleNewChatInProject}
         />
-        <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible || view === 'workspace' ? '' : 'model-hidden'} ${view === 'workspace' ? 'workspace-open' : ''}`} style={(view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' || view === 'pictures' || view === 'imagine' || view === 'veo' || view === 'code') ? { display: 'none' } : undefined}>
+        <main className={`assistant-workspace ${view === 'workspace' ? '' : 'chat-only'} ${view === 'workspace' ? 'workspace-open' : ''}`} style={(view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' || view === 'pictures' || view === 'imagine' || view === 'veo' || view === 'code') ? { display: 'none' } : undefined}>
           {proactiveSuggestion && (
             <div className="proactive-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 }}>
               <div className="proactive-header">
@@ -2358,37 +1941,10 @@ export default function MintDashboard() {
               </div>
             </div>
           )}
-          {pendingSlashChoice && (
-            <div className="proactive-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 }}>
-              <div className="proactive-header">
-                <span className="proactive-icon">⚡</span>
-                <div className="proactive-message">{pendingSlashChoice.title}</div>
-                <button className="proactive-dismiss-btn" onClick={() => setPendingSlashChoice(null)}>
-                  Dismiss
-                </button>
-              </div>
-              <div className="proactive-chips">
-                {pendingSlashChoice.options.map((opt) => (
-                  <button
-                    key={opt.value}
-                    className="suggestion-chip"
-                    onClick={() => {
-                      const next = `${pendingSlashChoice.command} ${opt.value}`
-                      setPendingSlashChoice(null)
-                      runSlashCommand(next, workspacePath || null)
-                        .then((r) => handleEngineSlashResponse(next, r))
-                        .catch(() => {})
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
           {view === 'workspace' && (
             <Suspense fallback={<LazyPanelFallback />}>
               <WorkspacePanel
+                key={workspacePath}
                 agentMode={agentMode}
                 sending={sending}
                 workspacePath={workspacePath}
@@ -2396,38 +1952,29 @@ export default function MintDashboard() {
                 onSetMessage={conversationActions.compose}
                 onWorkspaceReady={updateWorkspacePath}
                 refreshRevision={workspaceRefreshRevision}
+                onOpenHtml={openHtmlFile}
+                onOpenPreview={openWorkspacePreview}
               />
             </Suspense>
           )}
-          <Suspense fallback={null}>
-            <ModelPanel
-              scale={scale}
-              expressionIndex={expressionIndex}
-              accessoryIndex={accessoryIndex}
-              isLocked={isLocked}
-              isActive={modelVisible && view !== 'pictures' && view !== 'workspace' && view !== 'imagine' && view !== 'veo' && view !== 'skills' && view !== 'mcp' && view !== 'plugins'}
-              layoutPreset={layoutPreset}
-              sending={sending}
-              interactionEnabled={interactionEnabled}
-              showInteractionGuide={showInteractionGuide}
-              toastMessage={toastMessage}
-              onSetScale={setScale}
-              onSetLocked={setIsLocked}
-              onSetView={changeView}
-              onChangeLayoutPreset={changeLayoutPreset}
-              onDismissToast={() => setToastMessage('')}
-              onInteract={handleModelInteraction}
-              onModelLoadComplete={() => setModelReady(true)}
-            />
-          </Suspense>
-        <ChatPanel conversation={chatConversation} actions={chatActions} />
+        <ChatPanel conversation={chatConversation} actions={chatActions} showSessionSources={!isDesktopApp} tools={{
+          modsPanelTarget, onOpenMods: () => openUtilitySurface('mods'),
+          open: toolsPanelOpen, backgroundTaskCount,
+          onToggle: isDesktopApp ? undefined : () => setToolsPanelOpen(open => !open),
+        }} />
         </main>
-        {isDesktopApp && toolsPanelOpen && (
+        {toolsPanelOpen && (
           <Suspense fallback={<LazyPanelFallback />}>
             <ToolSurfacePage
               surfaces={toolSurfaces}
               activeSurfaceId={activeSurfaceId}
               workspacePath={workspacePath}
+              desktopTools={isDesktopApp}
+              backgroundTaskCount={backgroundTaskCount}
+              onOpenMods={() => openUtilitySurface('mods')}
+              onOpenBackgroundTasks={() => openUtilitySurface('background')}
+              onModsPanelTarget={setModsPanelTarget}
+              onBackgroundPanelTarget={setBackgroundPanelTarget}
               terminalSize={terminalRightWidth}
               onSelect={setActiveSurfaceId}
               onClose={closeToolSurface}
@@ -2444,7 +1991,7 @@ export default function MintDashboard() {
                 changeView('workspace')
               }}
               onOpenSideChat={() => { setActiveSurfaceId(null); setToolsPanelOpen(false) }}
-              onClosePanel={() => setToolsPanelOpen(false)}
+              onClosePanel={closeToolsPanel}
               onResizeTerminal={(size) => {
                 setTerminalRightWidth(size)
                 if (terminalSaveTimeoutRef.current) clearTimeout(terminalSaveTimeoutRef.current)
@@ -2462,6 +2009,7 @@ export default function MintDashboard() {
             />
           </Suspense>
         )}
+        <BackgroundTerminals workspacePath={workspacePath} panelTarget={backgroundPanelTarget} onCountChange={setBackgroundTaskCount} />
         {view === 'skills' && (
           <div className="web-view-scroll" style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
             <Suspense fallback={<LazyPanelFallback />}>
@@ -2550,6 +2098,8 @@ export default function MintDashboard() {
                 chatSessions={chatSessions}
                 activeConversationId={conversationId}
                 workspacePath={workspacePath}
+                recentWorkspacePaths={availableWorkspacePaths}
+                onSelectFolder={selectCodeHubFolder}
                 onSelectSession={(id) => {
                   selectConversation(id)
                 }}
@@ -2563,14 +2113,13 @@ export default function MintDashboard() {
         )}
         {view === 'pictures' && (
           <Suspense fallback={<LazyPanelFallback />}>
-            <PicturesLibrary view={view} pictures={pictures} onSetView={changeView} onRefreshPictures={refreshPictures} />
+            <LibraryPage chatId={conversationId} onClose={() => changeView('chat')} onOpenConversation={id => { void selectConversation(id) }} />
           </Suspense>
         )}
         {view === 'imagine' && (
           <Suspense fallback={<LazyPanelFallback />}>
             <ImageStudioPanel
               view={view}
-              onRefreshPictures={refreshPictures}
               onSendToChat={async (imagePath, imgPrompt) => {
                 try {
                   const response = await fetch(convertFileSrc(imagePath))
@@ -2608,17 +2157,6 @@ export default function MintDashboard() {
           <div className="startup-loading-text">Loading Mint Agent</div>
         </div>
       </div>
-      {error && (
-        <div className="mint-error" style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 100, margin: 0, boxShadow: '0 8px 24px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span>{error}</span>
-          <button onClick={() => setError('')} style={{ background: 'transparent', border: 0, color: 'white', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', padding: 0 }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
-        </div>
-      )}
 
       {isSearchOpen && (
         <Suspense fallback={null}>

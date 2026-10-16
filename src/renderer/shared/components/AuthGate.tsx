@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useEffect, useId, useState } from 'react'
+import { Eye, EyeOff, LoaderCircle } from 'lucide-react'
 import type { AuthUser } from '../types'
 import { authPlatform, runtimePlatform } from '../platform'
 import '../css/auth-gate.css'
@@ -98,11 +99,15 @@ function AuthForm({ onSuccess }: { onSuccess: (user: AuthUser) => void }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const passwordId = useId()
+  const errorId = useId()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (loading) return
     setLoading(true)
     setError(null)
     try {
@@ -112,7 +117,7 @@ function AuthForm({ onSuccess }: { onSuccess: (user: AuthUser) => void }) {
           : await authRegister(name || undefined, email, password)
       onSuccess(user)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.')
+      setError(err instanceof Error && err.message.trim() ? err.message : 'Unable to continue. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -122,18 +127,22 @@ function AuthForm({ onSuccess }: { onSuccess: (user: AuthUser) => void }) {
     <div className="auth-gate-overlay">
       <form className="auth-gate-card" onSubmit={handleSubmit}>
         <img src={runtimePlatform.appIconPath()} alt="" className="auth-gate-logo" />
-        <h1 className="auth-gate-title">
-          {mode === 'login' ? 'Sign in to Mint' : 'Create your Mint account'}
-        </h1>
-        <p className="auth-gate-subtitle">
-          Uses the same account as Mint search — sign in once, use everywhere.
-        </p>
+        <div className="auth-gate-heading">
+          <h1 className="auth-gate-title">
+            {mode === 'login' ? 'Sign in to Mint' : 'Create your Mint account'}
+          </h1>
+          <p className="auth-gate-subtitle">
+            {mode === 'login' ? 'Sign in to continue to Mint' : 'Create an account to get started with Mint'}
+          </p>
+        </div>
 
         {mode === 'register' && (
           <label className="auth-gate-field">
             <span>Name</span>
             <input
               type="text"
+              autoComplete="name"
+              disabled={loading}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Your name"
@@ -145,6 +154,9 @@ function AuthForm({ onSuccess }: { onSuccess: (user: AuthUser) => void }) {
           <span>Email</span>
           <input
             type="email"
+            autoComplete="username"
+            disabled={loading}
+            aria-describedby={error ? errorId : undefined}
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -152,39 +164,63 @@ function AuthForm({ onSuccess }: { onSuccess: (user: AuthUser) => void }) {
           />
         </label>
 
-        <label className="auth-gate-field">
-          <span>Password</span>
-          <input
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-          />
-        </label>
+        <div className="auth-gate-field">
+          <label htmlFor={passwordId}>Password</label>
+          <div className="auth-gate-password">
+            <input
+              id={passwordId}
+              type={showPassword ? 'text' : 'password'}
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              disabled={loading}
+              aria-describedby={error ? errorId : undefined}
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+            />
+            <button
+              type="button"
+              className="auth-gate-password-toggle"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              aria-controls={passwordId}
+              disabled={loading}
+              onClick={() => setShowPassword((visible) => !visible)}
+            >
+              {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+            </button>
+          </div>
+        </div>
 
-        {error && <div className="auth-gate-error">{error}</div>}
+        {error && <div id={errorId} className="auth-gate-error" role="alert">{error}</div>}
 
-        <button type="submit" className="auth-gate-submit" disabled={loading}>
-          {loading
-            ? mode === 'login'
-              ? 'Signing in…'
-              : 'Creating account…'
-            : mode === 'login'
-              ? 'Sign in'
-              : 'Create account'}
+        <button type="submit" className="auth-gate-submit" disabled={loading} aria-busy={loading}>
+          {loading && <LoaderCircle size={18} className="auth-gate-spinner" aria-hidden="true" />}
+          <span role="status">
+            {loading
+              ? mode === 'login'
+                ? 'Signing in…'
+                : 'Creating account…'
+              : mode === 'login'
+                ? 'Sign in'
+                : 'Create account'}
+          </span>
         </button>
 
-        <button
-          type="button"
-          className="auth-gate-switch"
-          onClick={() => {
-            setMode(mode === 'login' ? 'register' : 'login')
-            setError(null)
-          }}
-        >
-          {mode === 'login' ? "Don't have an account? Create one" : 'Already have an account? Sign in'}
-        </button>
+        <div className="auth-gate-account-prompt">
+          <span>{mode === 'login' ? "Don't have an account?" : 'Already have an account?'}</span>
+          <button
+            type="button"
+            className="auth-gate-switch"
+            disabled={loading}
+            onClick={() => {
+              setMode(mode === 'login' ? 'register' : 'login')
+              setShowPassword(false)
+              setError(null)
+            }}
+          >
+            {mode === 'login' ? 'Create account' : 'Sign in'}
+          </button>
+        </div>
       </form>
     </div>
   )

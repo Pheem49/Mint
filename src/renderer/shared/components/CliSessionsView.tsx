@@ -1,15 +1,20 @@
+import SelectField from './SelectField'
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import type { ChatSession } from '../types'
 import { parseUtcDate } from '../utils/ui'
+import { normalizeWorkspacePath, workspacePaths } from '../utils/workspaces'
+import WorkspaceSelector from './WorkspaceSelector'
 import '../css/code-sessions.css'
 
 export interface CliSessionsViewProps {
   chatSessions: ChatSession[]
   activeConversationId: string
   workspacePath?: string
+  recentWorkspacePaths?: string[]
   onSelectSession: (id: string) => void
   onDeleteSession: (id: string) => void
   onRenameSession: (id: string, newTitle: string) => void
+  onSelectFolder?: () => Promise<string | null>
   onRefreshSessions?: () => void
   onShowToast?: (message: string) => void
 }
@@ -40,13 +45,16 @@ function getFolderBasename(path?: string | null): string {
   return parts[parts.length - 1] || path
 }
 
+
 export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(function CliSessionsView({
   chatSessions,
   activeConversationId,
   workspacePath,
+  recentWorkspacePaths,
   onSelectSession,
   onDeleteSession,
   onRenameSession,
+  onSelectFolder,
   onRefreshSessions,
   onShowToast,
 }) {
@@ -55,6 +63,14 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
   const [sortBy, setSortBy] = useState<'recent' | 'messages' | 'oldest'>('recent')
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editTitleValue, setEditTitleValue] = useState('')
+  const [selectedWorkspace, setSelectedWorkspace] = useState(() => normalizeWorkspacePath(workspacePath))
+  useEffect(() => {
+    setSelectedWorkspace(normalizeWorkspacePath(workspacePath))
+  }, [workspacePath])
+  const currentWorkspace = selectedWorkspace
+  const projectName = getFolderBasename(currentWorkspace)
+  const projectPaths = useMemo(() => workspacePaths(recentWorkspacePaths || [], selectedWorkspace),
+    [recentWorkspacePaths, selectedWorkspace])
 
   const onRefreshRef = useRef(onRefreshSessions)
   useEffect(() => {
@@ -74,12 +90,17 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
   const allCliSessions = useMemo(() => {
     return chatSessions.filter((s) => s.kind === 'cli' || s.id.startsWith('cli'))
   }, [chatSessions])
+  const projectSessionCount = allCliSessions.filter((session) =>
+    currentWorkspace && normalizeWorkspacePath(session.workspacePath) === currentWorkspace).length
+  const otherSessionCount = allCliSessions.length - projectSessionCount
+  const showOtherSessions = scopeFilter === 'workspace' && !searchQuery.trim()
+    && projectSessionCount === 0 && otherSessionCount > 0
 
   const filteredSessions = useMemo(() => {
     return allCliSessions
       .filter((s) => {
-        if (scopeFilter === 'workspace' && workspacePath && s.workspacePath) {
-          if (s.workspacePath !== workspacePath) return false
+        if (scopeFilter === 'workspace') {
+          if (!currentWorkspace || normalizeWorkspacePath(s.workspacePath) !== currentWorkspace) return false
         }
 
         if (!searchQuery.trim()) return true
@@ -103,7 +124,7 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
         }
         return timeB - timeA
       })
-  }, [allCliSessions, scopeFilter, workspacePath, searchQuery, sortBy])
+  }, [allCliSessions, scopeFilter, currentWorkspace, searchQuery, sortBy])
 
   const handleCopyResumeCommand = (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation()
@@ -162,22 +183,42 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
               <span>Code sessions</span>
             </h1>
             <span className="code-header-count">
-              {allCliSessions.length} {allCliSessions.length === 1 ? 'session' : 'sessions'}
+              {filteredSessions.length} {filteredSessions.length === 1 ? 'session' : 'sessions'}
             </span>
           </div>
           <p className="code-header-subtitle">
-            Terminal conversations and agent runs from your active repositories.
+            {scopeFilter === 'workspace'
+              ? currentWorkspace
+                ? <>CLI sessions in <strong title={currentWorkspace}>{projectName}</strong>.</>
+                : 'Select a project above to view its CLI sessions.'
+              : 'CLI sessions across all repositories.'}
           </p>
         </div>
 
         {/* Right side controls: Scope switch & refresh */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <div className="code-header-controls">
+          <WorkspaceSelector
+            currentPath={currentWorkspace}
+            recentPaths={projectPaths}
+            placement="below"
+            onSelectWorkspace={async (path) => {
+              try {
+                const selected = path || await onSelectFolder?.()
+                if (selected) {
+                  setSelectedWorkspace(normalizeWorkspacePath(selected))
+                  setScopeFilter('workspace')
+                }
+              } catch (error) {
+                onShowToast?.(`Could not open folder: ${error instanceof Error ? error.message : String(error)}`)
+              }
+            }}
+          />
           <div className="code-segmented-toggle">
             <button
               type="button"
               className={`code-segmented-btn ${scopeFilter === 'workspace' ? 'active' : ''}`}
               onClick={() => setScopeFilter('workspace')}
-              title="Show sessions from current workspace"
+              title="Show sessions from the selected project"
             >
               Current Project
             </button>
@@ -191,16 +232,16 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
             </button>
           </div>
 
-          <select
+          <SelectField fullWidth={false} aria-label="Sort sessions"
             className="code-sort-select"
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
+            onValueChange={(nextValue) => setSortBy(nextValue as any)}
             title="Sort sessions"
           >
             <option value="recent">Recently active</option>
             <option value="messages">Most turns</option>
             <option value="oldest">Oldest first</option>
-          </select>
+          </SelectField>
 
           {onRefreshSessions && (
             <button
@@ -265,12 +306,19 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
           </div>
           <div className="code-terminal-body">
             <p className="code-terminal-text">
-              {searchQuery
+              {searchQuery.trim()
                 ? 'No terminal sessions match your query.'
-                : scopeFilter === 'workspace' && allCliSessions.length > 0
-                ? 'No sessions found in this project. Switch to "All Repositories" or start one in this directory:'
+                : scopeFilter === 'workspace'
+                ? currentWorkspace
+                  ? `No CLI sessions found in ${projectName}.${otherSessionCount > 0 ? ` ${otherSessionCount} CLI ${otherSessionCount === 1 ? 'session' : 'sessions'} outside this project.` : ' Run Mint in this project directory to begin:'}`
+                  : 'Select a project above, or switch to "All Repositories" to view your CLI sessions.'
                 : 'No terminal sessions recorded yet. Launch Mint in any repository to begin:'}
             </p>
+            {showOtherSessions && (
+              <button type="button" className="code-segmented-btn active code-show-all-btn"
+                onClick={() => { setSearchQuery(''); setScopeFilter('all') }}
+              >Show all sessions</button>
+            )}
             <div className="code-terminal-codeblock">
               <span>$ mint</span>
               <button

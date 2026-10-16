@@ -40,6 +40,15 @@ export interface DocumentAttachment {
   dataUri: string
 }
 
+export interface SourceAttachment {
+  name: string
+  kind: 'image' | 'file' | 'video'
+  mimeType: string
+  thumbnailDataUri: string | null
+}
+export interface SessionAttachment extends SourceAttachment { id: number; interactionId: number | null; libraryItemId?: string | null; availability?: string | null; trashed?: boolean }
+export interface ConversationSources { attachments: SessionAttachment[]; webSearchProgress: AgentProgress[] }
+
 export interface PlanTaskItem {
   id: string
   title: string
@@ -72,13 +81,24 @@ export interface RunTelemetrySummary {
   retriesCount: number
 }
 
+export type ToolStatus = 'success' | 'failed' | 'timed_out' | 'cancelled'
+export interface McpArtifact {
+  id: string; name: string; mimeType: string; kind: 'image' | 'file' | 'link'; size: number
+  chatId: string; callId: string; server: string; uri?: string
+}
+
 export type AgentProgress =
+  | { type: 'ToolDiscovery'; data: { server: string; tool: string; message: string } }
+  | { type: 'DeviceState'; data: { callId: string; server: string; tool: string; update: { state: 'accepted' | 'running' | 'verified' | 'failed' | 'unconfirmed'; deviceId?: string | null; operationId?: string | null; target: Record<string, unknown> | null; actual: Record<string, unknown> | null; observationSeq?: number | null; elapsedSecs: number; message: string } } }
+  | { type: 'ToolProgress'; data: { callId: string; server: string; tool: string; update: { progress: number; total?: number; message?: string; elapsedSecs: number } } }
+  | { type: 'ToolArtifacts'; data: { callId: string; artifacts: McpArtifact[]; warnings: string[] } }
   | { type: 'Thinking'; data: { elapsed_secs: number; agent_name?: string; model_name?: string } }
+  | { type: 'ContextCompaction'; data: { status: 'started' | 'completed' | 'failed'; message: string; subagent?: string } }
   | { type: 'Thought'; data: { thought: string } }
   | { type: 'ThinkingDelta'; data: { id: string; delta: string; elapsed_ms: number } }
   | { type: 'ExtendedThinking'; data: { id?: string; thought: string; elapsed_ms?: number } }
-  | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown>; subagent?: string } }
-  | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string; subagent?: string } }
+  | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown>; subagent?: string; callId?: string } }
+  | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string; subagent?: string; callId?: string; status?: ToolStatus } }
   | { type: 'PlanUpdated'; data: { plan: ActivePlan } }
   | { type: 'RunCompleted'; data: { summary: RunTelemetrySummary } }
 
@@ -146,6 +166,17 @@ export interface PictureEntry {
   thumbnailUrl?: string
 }
 
+export interface LibraryReference { chatId: string; interactionId: number | null }
+export interface LibraryItem {
+  id: string; name: string; filename: string; kind: 'image' | 'video' | 'file'; mimeType: string; size: number
+  createdAt: string; origin: 'uploaded' | 'generated' | 'legacy'; source: string; message: string
+  deletedAt: string | null; thumbnailStatus: 'pending' | 'ready' | 'unavailable'; availability: 'ready' | 'missing'
+  references: LibraryReference[]
+}
+export interface LibraryQuery { kind?: 'image' | 'video' | 'file'; search?: string; chatId?: string; trashed?: boolean; cursor?: string | null }
+export interface LibraryPage { items: LibraryItem[]; nextCursor: string | null }
+export interface AttachmentMetadata { requestId: string; imageNames: string[]; videoNames: string[] }
+
 export interface ImageGenRequest {
   prompt: string
   negativePrompt?: string
@@ -190,6 +221,7 @@ export interface WorkspaceTreeEntry {
 }
 export interface WorkspaceSnapshot { path: string; tree: WorkspaceTreeEntry; git: GitBranchInfo; revision: number }
 export interface WorkspaceOperation { root: string; relativePath: string; revision: number }
+export interface WorkspaceHistoryEntry { id: string; label: string; path: string; kind: string; destination: string | null; expected: string | null; backup: string | null }
 
 export interface VideoGenRequest {
   prompt: string
@@ -352,4 +384,26 @@ export interface CustomProviderConfig {
   apiKey: string
   models: CustomProviderModel[]
   headers: CustomProviderHeader[]
+}
+
+export type BackgroundJobStatus = 'running' | 'stopping' | 'completed' | 'failed' | 'stopped'
+export interface BackgroundJob {
+  id: string
+  command: string
+  cwd: string
+  workspacePath: string
+  chatId: string | null
+  pid: number | null
+  status: BackgroundJobStatus
+  exitCode: number | null
+  error: string | null
+  startedAt: number
+  endedAt: number | null
+  elapsedSeconds: number
+  serverUrl: string | null
+}
+export interface BackgroundJobOutput extends BackgroundJob {
+  stdout: string
+  stderr: string
+  truncated: boolean
 }

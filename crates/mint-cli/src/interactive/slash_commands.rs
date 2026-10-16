@@ -184,6 +184,7 @@ async fn execute_core_slash(
         input: trimmed.to_string(),
         cwd: Some(session.current_dir.to_string_lossy().to_string()),
         surface: Some("cli".to_string()),
+        chat_id: Some(session.chat_id.clone()),
     };
 
     if matches!(
@@ -237,6 +238,7 @@ async fn execute_core_slash(
                         session.history.clear();
                         ui.clear_transcript();
                     }
+                    SlashEffect::WorkspaceFilesChanged => {}
                     SlashEffect::ThinkingChanged { .. } => {
                         save_needed = true;
                     }
@@ -259,7 +261,8 @@ async fn execute_core_slash(
                 .iter()
                 .map(|opt| ChoiceItem::new(opt.label.clone(), opt.value.clone()))
                 .collect();
-            match ui.prompt_choice(&title, "", &choice_items) {
+            let (heading, body) = title.split_once('\n').unwrap_or((&title, ""));
+            match ui.prompt_choice(heading, body, &choice_items) {
                 Ok(Some(idx)) => {
                     let opt = &options[idx];
                     if opt.value == "__action:search" {
@@ -337,6 +340,33 @@ pub async fn handle_slash_command(
         .split_once(char::is_whitespace)
         .map(|(c, r)| (c, r.trim()))
         .unwrap_or((trimmed, ""));
+
+    if cmd == "/mods" && rest == "run-tools" {
+        let chat = mint_core::scoped_chat_id(
+            &session.chat_id,
+            Some(&session.current_dir.to_string_lossy()),
+        );
+        match mint_core::mods::pending_requests(&session.current_dir, &chat) {
+            Ok(requests) => {
+                for request in requests {
+                    let body = format!(
+                        "{} requests {}\n{}",
+                        request["modId"],
+                        request["action"],
+                        serde_json::to_string_pretty(&request["input"]).unwrap_or_default()
+                    );
+                    if ui.prompt_confirm(&body, false).unwrap_or(false) {
+                        let operation=serde_json::from_value(serde_json::json!({"workspacePath":session.current_dir,"chatId":chat,"action":"run_request","command":request["id"],"grantPermissions":true})).unwrap();
+                        if let Err(error) = mint_core::mods::operate_async(operation).await {
+                            ui.push_command_output(error);
+                        }
+                    }
+                }
+            }
+            Err(error) => ui.push_command_output(error),
+        }
+        return Some(SlashResult::Handled);
+    }
 
     // Check CLI-specific commands and interactive bare wizards first:
     let is_cli_only_or_wizard = matches!(
@@ -1044,7 +1074,7 @@ pub async fn handle_slash_command(
                 session.config.auto_skill_writing = rest == "on";
                 match mint_core::save_config(&session.config) {
                     Ok(()) => println!(
-                        "{DIM}Auto skill writing set to: {}{RESET}\n",
+                        "{DIM}Skill suggestions (approval required to save) set to: {}{RESET}\n",
                         if session.config.auto_skill_writing {
                             "Enabled"
                         } else {
@@ -1057,7 +1087,7 @@ pub async fn handle_slash_command(
                 println!("{WARN}Usage: /autoskill [on|off]{RESET}\n");
             } else {
                 println!(
-                    "{DIM}When enabled, the agent may write a new .agents/skills/<name>/SKILL.md after finishing a non-trivial, reusable task.{RESET}"
+                    "{DIM}When enabled, the agent proposes a skill after a reusable task. Each proposed diff needs your approval before saving.{RESET}"
                 );
                 let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
                 let current = if session.config.auto_skill_writing {
@@ -1065,12 +1095,12 @@ pub async fn handle_slash_command(
                 } else {
                     &options[1]
                 };
-                match prompt_interactive_select("Auto Skill Writing", &options, current) {
+                match prompt_interactive_select("Skill Suggestions", &options, current) {
                     Ok(Some(sel)) => {
                         session.config.auto_skill_writing = sel.starts_with("on");
                         match mint_core::save_config(&session.config) {
                             Ok(()) => println!(
-                                "{DIM}Auto skill writing set to: {}{RESET}\n",
+                                "{DIM}Skill suggestions (approval required to save) set to: {}{RESET}\n",
                                 if session.config.auto_skill_writing {
                                     "Enabled"
                                 } else {
@@ -1625,8 +1655,11 @@ pub async fn handle_slash_command(
         }
 
         "/shells" => {
-            if rest.is_empty() {
-                let jobs = mint_core::bg_shell::list_jobs();
+            if rest.is_empty() || rest == "all" {
+                let jobs: Vec<_> = mint_core::bg_shell::list_jobs()
+                    .into_iter()
+                    .filter(|job| rest == "all" || job.workspace == session.current_dir)
+                    .collect();
                 if jobs.is_empty() {
                     ui.push_notice(
                         "No background shell jobs. The agent starts one when it calls run_shell with background: true."
@@ -1638,6 +1671,7 @@ pub async fn handle_slash_command(
                             mint_core::bg_shell::JobStatus::Running => {
                                 format!("{MINT}running{RESET}")
                             }
+                            mint_core::bg_shell::JobStatus::Stopping => "stopping".to_string(),
                             mint_core::bg_shell::JobStatus::Exited(0) => "exited(0)".to_string(),
                             mint_core::bg_shell::JobStatus::Exited(code) => {
                                 format!("{ERROR}exited({code}){RESET}")
@@ -1656,9 +1690,14 @@ pub async fn handle_slash_command(
                             ""
                         };
                         lines.push(format!(
-                            "  {:<6} [{status_str}] {DIM}{:>4}s{RESET}  {preview}{suffix}",
-                            job.id, job.elapsed_secs,
+                            "  {:<6} [{status_str}] {DIM}{:>4}s{RESET}  {preview}{suffix} · {}",
+                            job.id,
+                            job.elapsed_secs,
+                            job.workspace.display(),
                         ));
+                        if let Some(url) = &job.server_url {
+                            lines.push(format!("    Ready URL: {url}"));
+                        }
                     }
                     ui.push_command_output(lines.join("\n"));
                 }
@@ -1675,6 +1714,10 @@ pub async fn handle_slash_command(
                     Ok(job) => {
                         let mut lines =
                             vec![format!("{BLUE}Job {} — {}{RESET}", job.id, job.command)];
+                        lines.push(format!("Status: {:?} · {}s", job.status, job.elapsed_secs));
+                        if let Some(url) = &job.server_url {
+                            lines.push(format!("Ready URL: {url}"));
+                        }
                         if let Some(pid) = job.pid {
                             lines.push(format!(
                                 "{DIM}pid: {pid}  cwd: {}{RESET}",
@@ -1683,15 +1726,18 @@ pub async fn handle_slash_command(
                         }
                         lines.push(format!("{DIM}stdout:{RESET}\n{}", job.stdout));
                         lines.push(format!("{DIM}stderr:{RESET}\n{}", job.stderr));
+                        if job.truncated {
+                            lines.push("[Older output truncated]".into());
+                        }
                         ui.push_command_output(lines.join("\n"));
                     }
                     Err(_) => ui.push_notice("No such job."),
                 },
-                "kill" if !arg.is_empty() => match mint_core::bg_shell::kill_job(arg) {
+                "kill" | "stop" if !arg.is_empty() => match mint_core::bg_shell::kill_job(arg) {
                     Ok(msg) => ui.push_notice(msg),
                     Err(_) => ui.push_notice("No such job."),
                 },
-                _ => ui.push_notice("Usage: /shells [show <id>|kill <id>]"),
+                _ => ui.push_notice("Usage: /shells [all|show <id>|stop <id>|kill <id>]"),
             }
             Some(SlashResult::Handled)
         }
@@ -1860,17 +1906,16 @@ pub async fn handle_slash_command(
                         mask_data_uri: None,
                         mode: Some("edit".to_owned()),
                     };
-                    match mint_core::generate_images(&session.config, &req).await {
+                    match mint_core::image_workflow::generate_and_save_images(&session.config, &req)
+                        .await
+                    {
                         Ok(resp) => {
                             if let Some(first) = resp.images.first() {
                                 println!(
                                     "{DIM}Image edited successfully using {} ({}){RESET}\n",
                                     resp.provider, resp.model
                                 );
-                                println!(
-                                    "{DIM}Image data URI prefix: {}{RESET}\n",
-                                    &first.data_uri[..first.data_uri.len().min(60)]
-                                );
+                                println!("{DIM}Saved image: {}{RESET}\n", first.path.display());
                             }
                         }
                         Err(e) => {
@@ -1927,49 +1972,34 @@ pub async fn handle_slash_command(
 
         "/learn" => {
             if rest.is_empty() {
-                let mut skills = match MemoryStore::open_default() {
-                    Ok(m) => match m.learned_skills(100) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            println!("{ERROR}Error loading custom skills: {e}{RESET}\n");
-                            return Some(SlashResult::Handled);
-                        }
-                    },
-                    Err(e) => {
-                        println!("{ERROR}Memory error: {e}{RESET}\n");
+                let unique_skills = match MemoryStore::open_default()
+                    .map_err(|e| e.to_string())
+                    .and_then(|memory| {
+                        mint_core::skill_inventory::list_available_skills(
+                            &memory,
+                            Some(&session.current_dir),
+                        )
+                        .map_err(|e| e.to_string())
+                    }) {
+                    Ok(skills) => skills,
+                    Err(error) => {
+                        println!("{ERROR}Error loading skills: {error}{RESET}\n");
                         return Some(SlashResult::Handled);
                     }
                 };
-
-                if let Some(home) = dirs::home_dir() {
-                    let global_skills_path = home.join(".config").join("mint").join("mint-skills");
-                    mint_core::skills::load_skills_from_dir(&global_skills_path, &mut skills);
-                }
-                let workspace_skills_path1 = session.current_dir.join(".agents").join("skills");
-                mint_core::skills::load_skills_from_dir(&workspace_skills_path1, &mut skills);
-                let workspace_skills_path2 = session.current_dir.join("skills");
-                mint_core::skills::load_skills_from_dir(&workspace_skills_path2, &mut skills);
-
-                let mut unique_skills = std::collections::BTreeMap::new();
-                for skill in skills {
-                    let loc = if skill.source_path.contains("/.config/mint/mint-skills") {
-                        "Global"
-                    } else if skill.source_path.contains("/skills")
-                        || skill.source_path.contains("/.agents/skills")
-                    {
-                        "Workspace"
-                    } else {
-                        "Taught"
-                    };
-                    unique_skills.insert(skill.name.clone(), (skill, loc));
-                }
-
                 if unique_skills.is_empty() {
                     println!("No learned skills found. Use '/learn <path>' to add one.\n");
                 } else {
                     println!("Learned AI Skills:");
-                    for (name, (skill, loc)) in &unique_skills {
-                        if *loc == "Taught" {
+                    for entry in &unique_skills {
+                        let skill = &entry.skill;
+                        let name = &skill.name;
+                        let loc = match entry.location {
+                            mint_core::skill_inventory::SkillLocation::Database => "Taught",
+                            mint_core::skill_inventory::SkillLocation::Global => "Global",
+                            mint_core::skill_inventory::SkillLocation::Workspace => "Workspace",
+                        };
+                        if loc == "Taught" {
                             println!("  ● [{}] {}", loc, name);
                         } else {
                             println!("  ● [{}] {} (Source: {})", loc, name, skill.source_path);
@@ -2528,10 +2558,9 @@ pub async fn handle_slash_command(
         }
 
         "/release-notes" => {
-            const RELEASE_NOTES: &str = include_str!("../../../../Release_Note.md");
             ui.push_command_output(format!(
                 "\n{BLUE}────────────────────────────────────────────{RESET}\n{}\n{BLUE}────────────────────────────────────────────{RESET}",
-                RELEASE_NOTES.trim()
+                mint_core::release_notes::text()
             ));
             Some(SlashResult::Handled)
         }
@@ -3215,8 +3244,11 @@ fn handle_mcp_slash(
                             None,
                             Some((!value.is_empty()).then(|| value.to_string())),
                         ),
+                        "timeout" | "timeoutsecs" | "timeout-secs" => {
+                            crate::mcp::set_timeout(name, value)
+                        }
                         _ => {
-                            ui.push_notice("Editable fields: command | args | icon");
+                            ui.push_notice("Editable fields: command | args | icon | timeout");
                             return;
                         }
                     };
@@ -3229,7 +3261,7 @@ fn handle_mcp_slash(
                         Err(e) => ui.push_notice(format!("MCP error: {e}")),
                     }
                 }
-                _ => ui.push_notice("/mcp edit usage: <name> command|args|icon <value>"),
+                _ => ui.push_notice("/mcp edit usage: <name> command|args|icon|timeout <value>"),
             }
         }
 
@@ -3838,6 +3870,11 @@ fn mcp_edit_flow(session: &mut InteractiveSession, ui: &mut dyn CommandUi, name:
         ChoiceItem::with_description("command", &srv.command, "command"),
         ChoiceItem::with_description("args", srv.args.join(" "), "args"),
         ChoiceItem::with_description("icon", srv.icon.as_deref().unwrap_or("(none)"), "icon"),
+        ChoiceItem::with_description(
+            "Tool timeout",
+            format!("{} seconds", srv.timeout_secs.unwrap_or(300)),
+            "timeout",
+        ),
         ChoiceItem::with_description("Back", "Cancel edit", "back"),
     ];
     let Ok(Some(idx)) = ui.prompt_choice(&format!("Edit {name}"), "Select field to edit", &fields)
@@ -3845,6 +3882,17 @@ fn mcp_edit_flow(session: &mut InteractiveSession, ui: &mut dyn CommandUi, name:
         return;
     };
     let result = match fields[idx].value.as_str() {
+        "timeout" => {
+            let current = srv.timeout_secs.unwrap_or(300).to_string();
+            let Ok(Some(value)) = ui.prompt_text(
+                &format!("Edit {name}"),
+                "Tool timeout (seconds, 1–3600)",
+                Some(&current),
+            ) else {
+                return;
+            };
+            crate::mcp::set_timeout(name, &value)
+        }
         "command" => {
             let value = ui
                 .prompt_text(&format!("Edit {name}"), "Command", Some(&srv.command))
@@ -3910,6 +3958,110 @@ fn mcp_edit_flow(session: &mut InteractiveSession, ui: &mut dyn CommandUi, name:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_tui_timeout_edit_persists_and_invalid_or_cancel_preserves_it() {
+        if std::env::var_os("MINT_TIMEOUT_REVIEW_CHILD").is_none() {
+            let dir = std::env::temp_dir().join(format!("mint-tui-timeout-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("config.json");
+            let mut cfg = MintConfig::default();
+            cfg.extra.insert(
+                "mcpServers".into(),
+                serde_json::json!({"timer":{"command":"cat"}}),
+            );
+            std::fs::write(&path, serde_json::to_vec(&cfg).unwrap()).unwrap();
+            let output=std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact","interactive::slash_commands::tests::review_tui_timeout_edit_persists_and_invalid_or_cancel_preserves_it","--nocapture"])
+                .env("MINT_TIMEOUT_REVIEW_CHILD","1").env("MINT_CONFIG_PATH",&path).output().unwrap();
+            std::fs::remove_dir_all(dir).unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        struct TimeoutUi {
+            answer: Option<String>,
+        }
+        impl CommandUi for TimeoutUi {
+            fn push_notice_str(&mut self, _: &str) {}
+            fn push_command_output_str(&mut self, _: &str) {}
+            fn set_status(&mut self, _: Vec<String>) {}
+            fn clear_status(&mut self) {}
+            fn prompt_choice(
+                &mut self,
+                _: &str,
+                _: &str,
+                options: &[ChoiceItem],
+            ) -> anyhow::Result<Option<usize>> {
+                Ok(options.iter().position(|o| o.value == "timeout"))
+            }
+            fn prompt_text(
+                &mut self,
+                _: &str,
+                _: &str,
+                _: Option<&str>,
+            ) -> anyhow::Result<Option<String>> {
+                Ok(self.answer.take())
+            }
+            fn prompt_confirm(&mut self, _: &str, _: bool) -> anyhow::Result<bool> {
+                Ok(false)
+            }
+            fn prompt_multi_choice(
+                &mut self,
+                _: &str,
+                _: &str,
+                _: &[ChoiceItem],
+            ) -> anyhow::Result<Option<Vec<usize>>> {
+                Ok(None)
+            }
+            fn report_error(&mut self, _: &anyhow::Error) {}
+        }
+        let mut session = InteractiveSession {
+            chat_id: mint_core::CHAT_CLI_ID.into(),
+            config: mint_core::load_config().unwrap(),
+            current_dir: std::env::current_dir().unwrap(),
+            fast_mode: false,
+            plan_mode: false,
+            pending_image: None,
+            history: Vec::new(),
+            jobs: BackgroundJobs::new(),
+        };
+        for value in [1, 300, 3600] {
+            mcp_edit_flow(
+                &mut session,
+                &mut TimeoutUi {
+                    answer: Some(value.to_string()),
+                },
+                "timer",
+            );
+            assert_eq!(
+                session.config.extra["mcpServers"]["timer"]["timeoutSecs"],
+                value
+            );
+            assert_eq!(
+                mint_core::load_config().unwrap().extra["mcpServers"]["timer"]["timeoutSecs"],
+                value
+            );
+        }
+        let before = std::fs::read(mint_core::config_path().unwrap()).unwrap();
+        for answer in [Some("0"), Some("3601"), Some("1.5"), Some("nope"), None] {
+            mcp_edit_flow(
+                &mut session,
+                &mut TimeoutUi {
+                    answer: answer.map(str::to_string),
+                },
+                "timer",
+            );
+            assert_eq!(
+                std::fs::read(mint_core::config_path().unwrap()).unwrap(),
+                before
+            );
+        }
+    }
 
     /// Commands that are dispatched but deliberately left undocumented —
     /// shortcuts for another command's own token, not gaps in `SLASH_COMMANDS`.

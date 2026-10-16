@@ -155,7 +155,8 @@ fn approval_subject(approval: &AgentApproval) -> Option<(&'static str, String)> 
             tool,
             arguments,
         } => Some(("mcp_tool", format!("{server}:{tool}:{arguments}"))),
-        AgentApproval::UserApproval { .. }
+        AgentApproval::SkillWrite { .. }
+        | AgentApproval::UserApproval { .. }
         | AgentApproval::ExitPlanMode { .. }
         | AgentApproval::EnterPlanMode { .. }
         | AgentApproval::AskUser { .. } => None,
@@ -172,7 +173,10 @@ fn cron_approve_callback(
     root: PathBuf,
 ) -> impl FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> {
     move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
-        if matches!(approval, AgentApproval::AskUser { .. }) {
+        if matches!(
+            approval,
+            AgentApproval::AskUser { .. } | AgentApproval::SkillWrite { .. }
+        ) {
             return Ok(ApprovalOutcome::Denied);
         }
         match approval_subject(approval) {
@@ -182,5 +186,33 @@ fn cron_approve_callback(
             },
             None => Ok(ApprovalOutcome::Approved),
         }
+    }
+}
+
+#[cfg(test)]
+mod skill_approval_tests {
+    use super::*;
+
+    #[test]
+    fn unattended_jobs_decline_skill_changes() {
+        let mut approve = cron_approve_callback(MintConfig::default(), PathBuf::from("/workspace"));
+        assert_eq!(
+            approve(&AgentApproval::SkillWrite {
+                path: ".agents/skills/example/SKILL.md".into(),
+                content: "instructions".into(),
+                diff: "+instructions".into()
+            })
+            .unwrap(),
+            ApprovalOutcome::Denied
+        );
+        assert_eq!(
+            approve(&AgentApproval::WriteFile {
+                path: "app.rs".into(),
+                content: "source".into(),
+                diff: "+source".into()
+            })
+            .unwrap(),
+            ApprovalOutcome::Approved
+        );
     }
 }

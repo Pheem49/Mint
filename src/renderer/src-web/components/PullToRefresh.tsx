@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import '../css/pull-to-refresh.css'
 
-const SCROLL_SURFACES = '.chat-container, .pictures-library, .img-studio-content, .veo-studio-content, .web-view-scroll'
+const SCROLL_SURFACES = '.chat-container, .pictures-library, .library-page, .img-studio-content, .veo-studio-content, .web-view-scroll'
 const BLOCKED_TARGETS = 'input, textarea, select, button, [contenteditable="true"], .workspace-sidebar, .sidebar-backdrop, [role="dialog"], .model-spotlight-popover'
 const REFRESH_THRESHOLD = 64
 

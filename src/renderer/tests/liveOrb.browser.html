@@ -1,0 +1,49 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Live orb regression</title></head>
+<body><button id="launcher">Live</button><div id="chat-host" style="position:absolute;left:80px;top:140px;width:260px;height:160px;transform:translateZ(0);overflow:hidden"><div id="root"></div></div><pre id="result">RUNNING</pre><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import GeminiLiveOverlay from '../shared/components/GeminiLiveOverlay';
+import {VoicePoweredOrb} from '../shared/components/ui/voice-powered-orb';
+import '@fontsource/prompt/400.css';import '@fontsource/prompt/500.css';
+import '../shared/theme/tokens.css';import '../src-web/css/app-shell.css';
+const results=[];const assert=(ok,msg)=>{if(!ok)throw Error(msg);results.push(msg)};
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+let paused=false,ended=false,voice='Puck';const analyserRef={current:{frequencyBinCount:256,getByteFrequencyData(buf){buf.fill(100)}}};
+let micRequests=0;Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>{micRequests++;throw Error('Unexpected second microphone')}}});
+const previousOverflow=document.body.style.overflow;
+const root=createRoot(document.getElementById('root'));
+const frames=new Map();let frameId=0;window.requestAnimationFrame=cb=>{frames.set(++frameId,cb);return frameId};window.cancelAnimationFrame=id=>frames.delete(id);
+const advance=()=>{for(let i=0;i<30;i++){const batch=[...frames.values()];frames.clear();batch.forEach(cb=>cb(performance.now()+i*16));}};
+const render=(status='listening')=>root.render(React.createElement(GeminiLiveOverlay,{status,isPaused:paused,userTranscript:'สวัสดี Mint',assistantTranscript:'Hello, how can I help?',voice,voices:['Puck','Kore'],analyserRef,onTogglePause:()=>{paused=!paused;render(paused?'paused':'listening')},onEndCall:()=>{ended=true;root.unmount()},onChangeVoice:v=>{voice=v;render()}}));
+try{
+ if(location.search.includes('preview')){document.getElementById('result').style.display='none';document.getElementById('launcher').style.visibility='hidden'}
+ document.getElementById('launcher').focus();render();await wait(400);advance();
+ const overlay=document.querySelector('.gemini-live-overlay');const bounds=overlay.getBoundingClientRect();
+ assert(bounds.left===0&&bounds.top===0&&bounds.width===innerWidth&&bounds.height===innerHeight,'popup covers viewport outside clipped chat');
+ assert(document.body.style.overflow==='hidden','popup locks background scrolling');
+ assert(overlay.contains(document.elementFromPoint(10,10)),'backdrop intercepts clicks outside card');
+ const panel=document.querySelector('.gemini-live-card').getBoundingClientRect();assert(Math.abs((panel.left+panel.right)/2-innerWidth/2)<2&&Math.abs((panel.top+panel.bottom)/2-innerHeight/2)<2,'popup is centered in viewport');
+ const canvas=document.querySelector('.voice-powered-orb canvas');assert(canvas,'supplied orb renders a WebGL canvas');
+ assert(micRequests===0,'existing session analyser does not open another microphone');
+ const gl=canvas.getContext('webgl2')||canvas.getContext('webgl');const px=new Uint8Array(canvas.width*canvas.height*4);gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,px);
+ assert(px.some((v,i)=>i%4!==3&&v>40),'shader produces visible colored pixels');
+ if(location.search.includes('reduced')){
+  assert(matchMedia('(prefers-reduced-motion: reduce)').matches,'browser reports reduced-motion preference');
+  advance();const still=new Uint8Array(px.length);gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,still);assert(px.every((v,i)=>v===still[i]),'reduced motion freezes shader rotation and distortion');
+ }
+ assert(canvas.width<=canvas.clientWidth*2+1,'device pixel ratio is applied once and capped');
+ const card=document.querySelector('.gemini-live-card').getBoundingClientRect();assert(card.left>=0&&card.right<=innerWidth&&card.top>=0&&card.bottom<=innerHeight,'call fits viewport');
+ const endButton=document.querySelector('[aria-label="End Live conversation"]').getBoundingClientRect();assert(endButton.left>=panel.left&&endButton.right<=panel.right&&endButton.bottom<=panel.bottom,'end control stays inside popup');
+ if(!location.search.includes('preview')){
+ const transcript=document.querySelector('[aria-label="Conversation transcript"]');transcript.focus();document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true}));assert(document.activeElement.getAttribute('aria-label')==='End Live conversation','keyboard focus stays inside call');
+ document.querySelector('[aria-label="Pause microphone"]').click();await wait(100);advance();assert(document.querySelector('[aria-label="Resume microphone"]'),'pause remains usable with orb');
+ document.querySelector('[aria-label="Resume microphone"]').click();await wait(100);
+ document.querySelector('[aria-label="Change voice"]').click();await wait(100);document.querySelector('[role="option"][data-voice="Kore"]').click();await wait(100);assert(voice==='Kore','voice selection retains callback');
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await wait(100);assert(ended,'Escape ends call');assert(document.body.style.overflow===previousOverflow,'ending call restores background scrolling');assert(document.activeElement.id==='launcher','call returns focus');assert(frames.size===0,'orb releases animation frame on end');
+ let resolveMic;const stream={getTracks:()=>[{stop(){stream.stopped=true}}],stopped:false};navigator.mediaDevices.getUserMedia=()=>{micRequests++;return new Promise(r=>resolveMic=r)};
+ const standalone=createRoot(document.getElementById('root'));standalone.render(React.createElement('div',{style:{width:200,height:200}},React.createElement(VoicePoweredOrb)));await wait(100);assert(micRequests===1,'standalone orb opens microphone once');standalone.unmount();resolveMic(stream);await wait(100);assert(stream.stopped,'late standalone permission releases microphone on unmount');assert(frames.size===0,'standalone orb releases RAF');
+ const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return type.startsWith('webgl')?null:original.call(this,type,...args)};
+ const fallback=createRoot(document.getElementById('root'));fallback.render(React.createElement(GeminiLiveOverlay,{status:'error',isPaused:false,userTranscript:'',assistantTranscript:'Permission denied',voice:'Puck',voices:['Puck'],onTogglePause(){},onEndCall(){},onChangeVoice(){}}));await wait(100);assert(document.querySelector('.voice-powered-orb__fallback')&&document.querySelector('[aria-label="End Live conversation"]'),'graphics failure retains call status and end control');fallback.unmount();HTMLCanvasElement.prototype.getContext=original;
+ }
+ document.getElementById('result').textContent='PASS\n'+results.join('\n');
+}catch(e){document.getElementById('result').textContent='FAIL: '+e.message+'\n'+results.join('\n');}
+</script></body></html>

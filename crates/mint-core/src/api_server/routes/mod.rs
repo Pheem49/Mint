@@ -1,7 +1,10 @@
 pub(super) mod auth;
+pub(super) mod background_jobs;
 pub(super) mod chat;
 pub(super) mod cron_mcp;
 pub(super) mod gemini_live;
+pub(super) mod html_preview;
+pub(super) mod library;
 pub(super) mod linked_folders;
 pub(super) mod media_gen;
 pub(super) mod misc;
@@ -9,6 +12,7 @@ pub(super) mod profile_oauth;
 pub(super) mod sessions;
 pub(super) mod skills_subagents;
 pub(super) mod slash;
+pub(super) mod sources;
 pub(super) mod status_health;
 
 /// Parsed pieces of a request, shared across every route handler — grouped
@@ -25,3 +29,5 @@ pub(super) struct RequestCtx<'a> {
     pub(super) header_end: usize,
     pub(super) auth_label: String,
 }
+
+pub(super) mod mods;

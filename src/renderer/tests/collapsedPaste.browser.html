@@ -1,0 +1,70 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Collapsed paste input</title></head><body><div id="root"></div><pre id="result">RUNNING</pre><script type="module">
+import React, { useRef, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { CollapsiblePasteInput } from '../shared/components/CollapsiblePasteInput';
+const desktop = new URLSearchParams(location.search).get('surface') === 'desktop';
+if (desktop) await import('../src/css/chat.css'); else await import('../src-web/css/chat.css');
+const submitted = [];
+let reset;
+let setAttachment;
+function App() {
+  const [value, setValue] = useState('');
+  const [attached, setAttached] = useState(false);
+  setAttachment = setAttached;
+  const inputRef = useRef(null);
+  reset = setValue;
+  return React.createElement('form', { id: 'chat-form', style: { width: '600px' }, onSubmit: event => { event.preventDefault(); submitted.push(value); setValue(''); } },
+    attached && React.createElement('div', { className: 'mint-attachment', style: { height: '30px' } }, 'Image attachment'),
+    React.createElement(CollapsiblePasteInput, { id: 'chat-input', value, inputRef, onValueChange: setValue, onChange: event => setValue(event.target.value), onResizeInput: input => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 120) + 'px'; } }),
+    React.createElement('button', { id: 'send-btn', type: 'submit' }, 'Send'));
+}
+createRoot(document.getElementById('root')).render(React.createElement(App));
+const pause = () => new Promise(resolve => setTimeout(resolve, 70));
+const check = (ok, message) => { if (!ok) throw Error(message); };
+const input = () => document.getElementById('chat-input');
+const paste = text => {
+  const data = new DataTransfer(); data.setData('text/plain', text);
+  input().dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+};
+const edit = value => {
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input(), value);
+  input().dispatchEvent(new Event('input', { bubbles: true }));
+};
+await pause();
+try {
+  paste('a\rb\rc\rd\re\rf\rg'); await pause();
+  let badge = document.querySelector('.chat-pasted-content');
+  check(badge?.textContent.includes('[Pasted Content 13 chars]'), 'Missing long-paste badge');
+  check(badge.getBoundingClientRect().width > 400, 'Paste badge did not span the composer columns');
+  check(getComputedStyle(input()).display === 'none', 'Full paste still occupies the composer');
+  input().style.height = '0px';
+  badge.click(); await pause();
+  check(input().clientHeight >= 60, 'Opening did not restore the editable textarea height');
+  check(input().value === 'a\nb\nc\nd\ne\nf\ng', 'Opening lost full paste text');
+  check(input().selectionStart === 0, 'Opening did not reveal the first line');
+  edit('a edited\nb\nc\nd\ne\nf\ng'); await pause();
+  input().dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true, cancelable: true })); await pause();
+  badge = document.querySelector('.chat-pasted-content');
+  check(badge?.textContent.includes('[Pasted Content 20 chars]'), 'F2 did not refold the edited paste with its new character count');
+  badge.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true, cancelable: true })); await pause();
+  check(input().value === 'a edited\nb\nc\nd\ne\nf\ng', 'Reopening lost the edits');
+  input().dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true, cancelable: true })); await pause();
+  document.querySelector('.chat-pasted-content').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); await pause();
+  check(submitted[0] === 'a edited\nb\nc\nd\ne\nf\ng', 'Edited content did not reach submit');
+  paste('1\n2\n3\n4\n5\n6\n7'); await pause();
+  document.querySelector('.chat-pasted-content').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); await pause();
+  check(submitted[1] === '1\n2\n3\n4\n5\n6\n7', 'Collapsed submit sent a badge instead of full text');
+  check(!document.querySelector('.chat-pasted-content'), 'Submitted paste remained attached');
+  reset('before selection after'); await pause();
+  input().setSelectionRange(7, 16); paste('a\rb\rc\rd\re\rf\rg'); await pause();
+  badge = document.querySelector('.chat-pasted-content');
+  badge.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); await pause();
+  check(input().value === 'before a\nb\nc\nd\ne\nf\ng after', 'Paste replaced surrounding instructions');
+  reset(''); await pause(); paste('a\r\nb\rc\nd\ne\nf\r\n'); await pause();
+  check(!document.querySelector('.chat-pasted-content') && input().value === 'a\nb\nc\nd\ne\nf\n', 'Six-line paste should stay inline and retain its trailing newline');
+  reset(''); setAttachment(true); await pause(); paste('1\n2\n3\n4\n5\n6\n7'); await pause();
+  badge = document.querySelector('.chat-pasted-content');
+  check(badge.getBoundingClientRect().top >= document.querySelector('.mint-attachment').getBoundingClientRect().bottom, 'Paste badge overlapped image attachments');
+  document.getElementById('result').textContent = 'PASS (' + (desktop ? 'Desktop' : 'Web') + '): repeated F2 open/collapse, edits, full Enter submit, reset, selection, six-line boundary and attachment layout';
+} catch (error) { document.getElementById('result').textContent = 'FAIL: ' + error.message; }
+</script></body></html>

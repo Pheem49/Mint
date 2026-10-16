@@ -61,6 +61,11 @@ pub fn edit(
     Ok(update_mcp_server(name, command, args, env, icon)?)
 }
 
+pub fn set_timeout(name: &str, value: &str) -> Result<bool> {
+    let seconds = mint_core::mcp::parse_mcp_timeout(value)?;
+    Ok(mint_core::mcp::set_mcp_timeout(name, seconds)?)
+}
+
 pub fn registry() -> &'static [McpRegistryEntry] {
     mcp_registry()
 }

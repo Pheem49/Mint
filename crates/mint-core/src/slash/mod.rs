@@ -1,7 +1,7 @@
 //! UI-agnostic slash-command engine, shared by the CLI
 //! (`crates/mint-cli/src/interactive/slash_commands.rs`), the web API server
 //! (`crate::api_server::routes::slash`), and the desktop Tauri host
-//! (`src-tauri/src/lib.rs::run_slash_command`).
+//! (`src-tauri/src/commands/conversation.rs::run_slash_command`).
 //!
 //! `execute` is a pure function of its `input` string plus the `MintConfig` it
 //! is handed: it mutates the config in place for config commands and reports
@@ -17,6 +17,7 @@
 
 use crate::MintConfig;
 use std::path::{Path, PathBuf};
+mod mods;
 
 /// The instruction `/init` hands to the code agent (via
 /// [`SlashResponse::ForwardToAgent`]). Mirrors Claude Code's `/init`, but
@@ -48,6 +49,8 @@ use render::{local_time, md_heading, md_list, md_table};
 #[derive(serde::Deserialize)]
 pub struct SlashRequest {
     pub input: String,
+    #[serde(default)]
+    pub chat_id: Option<String>,
     /// Active workspace directory; defaults to the process cwd.
     #[serde(default)]
     pub cwd: Option<String>,
@@ -128,6 +131,7 @@ pub enum SlashEffect {
     WorkspaceChanged {
         path: String,
     },
+    WorkspaceFilesChanged,
     /// `/clear` — caller wipes the current conversation.
     HistoryCleared,
     FastModeChanged {
@@ -193,20 +197,37 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         return SlashResponse::NotHandled;
     };
 
+    if token == "/mods" || token.starts_with("/mods:") {
+        let Some(chat) = req.chat_id.as_deref().filter(|s| !s.is_empty()) else {
+            return error("Mods require an explicit chat ID");
+        };
+        let root = req.workspace();
+        if let Err(e) = crate::assert_path_capability(&root, crate::Capability::Read, config) {
+            return error(e.to_string());
+        }
+        if token == "/mods" {
+            if let Some(response) = mods::picker(&root, chat, rest) {
+                return response.unwrap_or_else(error);
+            }
+        }
+        return match crate::mods::slash(&root, chat, &req.input) {
+            Ok(text) => message(text),
+            Err(e) => error(e),
+        };
+    }
     match token.as_str() {
+        "/mint-web" => match crate::system::mint_web::command(&req.workspace(), rest, None, config) { Ok(text) => message(text), Err(err) => error(err) },
+        "/shells" if !req.is_cli() => match crate::bg_shell::shells_command(rest, &req.workspace(), &None, config) {
+            Ok(text) => message(text), Err(err) => error(err.to_string()),
+        },
+        "/preview" => match crate::system::html_preview::command(&req.workspace(), rest, None, config) { Ok(text) => message(text), Err(err) => error(err) },
         "/help" => cmd_help(req.is_cli()),
         "/init" => SlashResponse::ForwardToAgent {
             prompt: INIT_AGENTS_MD_PROMPT.to_string(),
             agent_mode: true,
             plan_mode: false,
         },
-        "/release-notes" => message(
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../Release_Note.md"
-            ))
-            .trim(),
-        ),
+        "/release-notes" => message(crate::release_notes::text()),
         "/clear" => SlashResponse::Applied {
             markdown: "🧹 Conversation history cleared.".into(),
             effects: vec![SlashEffect::HistoryCleared],
@@ -219,7 +240,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         "/autoskill" => cmd_bool_toggle(
             rest,
             "/autoskill",
-            "Auto Skill Writing",
+            "Skill Suggestions (approval required to save)",
             config.auto_skill_writing,
             |cfg, v| cfg.auto_skill_writing = v,
             config,
@@ -270,6 +291,10 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             }
         }
         "/rewind" => cmd_rewind(req, rest),
+        "/history" | "/undo" => {
+            if !rest.trim().is_empty() { error(format!("Usage: {token}")) }
+            else { cmd_workspace_history(req, token == "/undo", config) }
+        }
         "/fast" => match parse_on_off(rest) {
             None if rest.is_empty() => needs_on_off("/fast", "Fast Mode (hide thinking)"),
             None => error("Usage: /fast [on|off]"),
@@ -572,6 +597,44 @@ fn cmd_bool_toggle(
                 ),
                 effects: vec![SlashEffect::ConfigChanged],
             }
+        }
+    }
+}
+
+fn cmd_workspace_history(req: &SlashRequest, undo: bool, config: &MintConfig) -> SlashResponse {
+    let capability = if undo {
+        crate::Capability::Write
+    } else {
+        crate::Capability::Read
+    };
+    let root = match crate::assert_path_capability(&req.workspace(), capability, config) {
+        Ok(root) => root,
+        Err(reason) => return error(reason),
+    };
+    if undo {
+        match crate::system::workspace_history::undo(&root, None) {
+            Ok(Some(entry)) => SlashResponse::Applied {
+                markdown: format!("✅ {}", entry.label),
+                effects: vec![SlashEffect::WorkspaceFilesChanged],
+            },
+            Ok(None) => message("There is no workspace action to undo."),
+            Err(reason) => error(reason),
+        }
+    } else {
+        match crate::system::workspace_history::list(&root) {
+            Ok(entries) if entries.is_empty() => message(
+                "No workspace file history yet. File edits are backed up before changes, including projects without Git.",
+            ),
+            Ok(entries) => message(format!(
+                "Recent workspace file actions (newest first):\n\n{}\n\nUse `/undo` to undo the latest action. Changed files and occupied restore paths are protected.",
+                entries
+                    .iter()
+                    .take(20)
+                    .map(|entry| format!("- {}", entry.label.trim_start_matches("Undo ")))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )),
+            Err(reason) => error(reason),
         }
     }
 }
@@ -2237,6 +2300,7 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
                             url: Some(target.to_string()),
                             headers: None,
                             transport: Some("sse".to_string()),
+                            timeout_secs: None,
                         }
                     } else {
                         crate::McpServer {
@@ -2248,6 +2312,7 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
                             url: None,
                             headers: None,
                             transport: None,
+                            timeout_secs: None,
                         }
                     };
                     match crate::upsert_server_in(config, name, server) {
@@ -2297,9 +2362,21 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
         "edit" => {
             let mut parts = args.splitn(3, char::is_whitespace);
             let (Some(name), Some(field)) = (parts.next(), parts.next()) else {
-                return error("Usage: /mcp edit <name> command|args|icon <value>");
+                return error("Usage: /mcp edit <name> command|args|icon|timeout <value>");
             };
             let value = parts.next().unwrap_or("").trim();
+            if matches!(
+                field.to_ascii_lowercase().as_str(),
+                "timeout" | "timeoutsecs" | "timeout-secs"
+            ) {
+                return match crate::mcp::parse_mcp_timeout(value)
+                    .and_then(|seconds| crate::mcp::set_server_timeout_in(config, name, seconds))
+                {
+                    Ok(true) => applied(format!("🔌 Updated `{name}` tool timeout.")),
+                    Ok(false) => error(format!("No MCP server named `{name}`.")),
+                    Err(e) => error(e),
+                };
+            }
             let edit = match field.to_ascii_lowercase().as_str() {
                 "command" if !value.is_empty() => (Some(value.to_string()), None, None),
                 "command" => return error("`/mcp edit <name> command <value>` needs a value"),
@@ -2313,7 +2390,7 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
                     None,
                     Some((!value.is_empty()).then(|| value.to_string())),
                 ),
-                _ => return error("Editable fields: command | args | icon"),
+                _ => return error("Editable fields: command | args | icon | timeout"),
             };
             match crate::update_server_in(config, name, edit.0, edit.1, None, edit.2) {
                 Ok(true) => applied(format!("🔌 Updated `{name}`.")),
@@ -2429,6 +2506,7 @@ mod tests {
             input: input.to_string(),
             cwd: None,
             surface: None,
+            chat_id: None,
         }
     }
 
@@ -2437,6 +2515,43 @@ mod tests {
             input: input.to_string(),
             cwd: None,
             surface: Some(surface.to_string()),
+            chat_id: None,
+        }
+    }
+
+    #[test]
+    fn mint_web_command_is_registered_and_validates_usage_on_all_surfaces() {
+        for surface in ["cli", "desktop", "web"] {
+            assert!(catalog::SLASH_COMMANDS.iter().any(
+                |spec| spec.token == "/mint-web" && spec.surfaces.iter().any(|s| s == surface)
+            ));
+            match execute(
+                &req_surface("/mint-web unexpected", surface),
+                &mut MintConfig::default(),
+            ) {
+                SlashResponse::Message { markdown } => {
+                    assert!(markdown.contains("Usage: /mint-web"))
+                }
+                _ => panic!("Mint Web command was not routed on {surface}"),
+            }
+        }
+    }
+
+    #[test]
+    fn release_notes_are_available_on_every_surface() {
+        for surface in ["cli", "desktop", "web"] {
+            match execute(
+                &req_surface("/release-notes", surface),
+                &mut MintConfig::default(),
+            ) {
+                SlashResponse::Message { markdown } => {
+                    assert!(markdown.starts_with("# Release Notes - Mint Agent"));
+                }
+                other => panic!(
+                    "expected release notes on {surface}, got {}",
+                    serde_json::to_value(other).unwrap()
+                ),
+            }
         }
     }
 
@@ -2658,6 +2773,44 @@ mod tests {
     }
 
     #[test]
+    fn review_timeout_slash_validates_without_corrupting_config_on_every_surface() {
+        for surface in ["cli", "desktop", "web"] {
+            let mut cfg = MintConfig::default();
+            execute(&req_surface("/mcp add timer sh -c cat", surface), &mut cfg);
+            for (field, value) in [("timeout", 1), ("timeoutSecs", 300), ("timeout-secs", 3600)] {
+                let response = execute(
+                    &req_surface(&format!("/mcp edit timer {field} {value}"), surface),
+                    &mut cfg,
+                );
+                assert!(
+                    matches!(response, SlashResponse::Applied { .. }),
+                    "timeout edit was not applied on {surface}"
+                );
+                assert_eq!(cfg.extra["mcpServers"]["timer"]["timeoutSecs"], value);
+            }
+            let saved = cfg.extra.clone();
+            for invalid in ["0", "3601", "1.5", "banana", ""] {
+                assert!(matches!(
+                    execute(
+                        &req_surface(&format!("/mcp edit timer timeout {invalid}"), surface),
+                        &mut cfg
+                    ),
+                    SlashResponse::Message { .. }
+                ));
+                assert_eq!(cfg.extra, saved, "invalid input modified config");
+            }
+            assert!(matches!(
+                execute(
+                    &req_surface("/mcp edit ghost timeout 600", surface),
+                    &mut cfg
+                ),
+                SlashResponse::Message { .. }
+            ));
+            assert_eq!(cfg.extra, saved);
+        }
+    }
+
+    #[test]
     fn mcp_registry_lists_the_catalog() {
         let mut cfg = MintConfig::default();
         match execute(&req("/mcp registry"), &mut cfg) {
@@ -2740,6 +2893,16 @@ mod tests {
                 assert!(markdown.contains("`/bg`")); // cli-only, present in the cli list
             }
             _ => panic!("expected Message"),
+        }
+    }
+
+    #[test]
+    fn mods_are_discoverable_in_help_on_every_surface() {
+        for surface in ["cli", "desktop", "web"] {
+            match execute(&req_surface("/help", surface), &mut MintConfig::default()) {
+                SlashResponse::Message { markdown } => assert!(markdown.contains("`/mods`")),
+                _ => panic!("expected help Message"),
+            }
         }
     }
 

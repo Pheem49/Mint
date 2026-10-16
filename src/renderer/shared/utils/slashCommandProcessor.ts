@@ -74,7 +74,7 @@ export function executeSlashCommand(input: string): SlashCommandExecutionResult 
         handled: true,
         action: 'system_message',
         systemText:
-          '🧍 **Project Avatar** — the desktop app renders the live companion automatically. Use the CLI `/avatar link` to pair an external viewer.',
+          '🧍 **Project Avatar** — use the CLI `/avatar link` to pair a Project Avatar viewer. The separate Mint Companion app connects locally to Mint for Live2D.',
       }
 
     default:

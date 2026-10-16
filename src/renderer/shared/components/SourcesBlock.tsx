@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import type { WebSearchSource } from '../utils/agentActivity'
 import { resolveMediaUrl } from '../utils/markdown'
+import '../css/sources-block.css'
 
 export interface SourcesBlockProps {
   sources: WebSearchSource[]
@@ -87,7 +88,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
   const hiddenGroups = domainGroups.slice(MAX_INITIAL_CARDS)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px', marginTop: '4px' }}>
+    <div className="sources-block" style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px', marginTop: '4px' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <svg
@@ -110,6 +111,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
 
       {/* Domain Cards Container (wraps to next line if exceeding frame width) */}
       <div
+        className="sources-cards"
         style={{
           display: 'flex',
           flexWrap: 'wrap',
@@ -124,18 +126,11 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
           return (
             <div
               key={group.domain}
-              style={{
-                position: 'relative',
-                flex: '1 1 180px',
-                maxWidth: '240px',
-                minWidth: '160px',
-                boxSizing: 'border-box',
-              }}
+              className="source-card-group"
             >
               <div
+                className="source-card"
                 style={{
-                  display: 'flex',
-                  flexDirection: 'column',
                   justifyContent: 'space-between',
                   borderRadius: '16px',
                   background: 'var(--bg-surface-soft)',
@@ -143,7 +138,6 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                   transition: 'all 0.15s ease',
                   cursor: 'pointer',
                   minHeight: '68px',
-                  height: '100%',
                   boxSizing: 'border-box',
                   overflow: 'hidden',
                 }}
@@ -173,7 +167,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
               >
                 {/* Thumbnail (if this source has an associated image) */}
                 {primaryItem.imageUrl && (
-                  <div style={{ width: '100%', height: '80px', overflow: 'hidden', background: 'var(--bg-surface-raised)', flexShrink: 0 }}>
+                  <div className="source-card-thumbnail" style={{ overflow: 'hidden', background: 'var(--bg-surface-raised)', flexShrink: 0 }}>
                     <img
                       src={resolveMediaUrl(primaryItem.imageUrl)}
                       alt={primaryItem.title}
@@ -185,7 +179,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                   </div>
                 )}
 
-                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '10px 12px' }}>
+                <div className="source-card-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '10px 12px' }}>
                   {/* Title */}
                   <div
                     title={primaryItem.title}
@@ -280,7 +274,6 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                     position: 'absolute',
                     top: '100%',
                     left: 0,
-                    width: '260px',
                     marginTop: '6px',
                     background: 'var(--bg-overlay)',
                     border: '1px solid var(--border-default)',
@@ -357,7 +350,10 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
 
         {/* Overflow "View X more" Card */}
         {!isExpanded && remainingSourcesCount > 0 && (
-          <div
+          <button
+            type="button"
+            className="sources-more-button"
+            aria-expanded={false}
             onClick={() => setIsExpanded(true)}
             style={{
               display: 'flex',
@@ -369,10 +365,6 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
               border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)'}`,
               cursor: 'pointer',
               transition: 'all 0.15s ease',
-              minHeight: '68px',
-              height: '100%',
-              flex: '1 1 160px',
-              maxWidth: '200px',
               boxSizing: 'border-box',
             }}
             onMouseEnter={(e) => {
@@ -412,7 +404,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
             <span style={{ fontSize: '0.78rem', fontWeight: 500, color: '#94a3b8', marginLeft: '8px' }}>
               View {remainingSourcesCount} more
             </span>
-          </div>
+          </button>
         )}
       </div>
 

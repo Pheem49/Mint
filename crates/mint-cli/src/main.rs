@@ -46,9 +46,6 @@ pub(crate) async fn run_code_agent_with_saved_image(
     video_data_uri: Option<String>,
     options: agent::AgentOptions,
 ) -> Result<(Vec<String>, Option<String>)> {
-    let sent_image = image_data_uri.clone();
-    let sent_video = video_data_uri.clone();
-    let tui_handle = options.tui.clone();
     // Follow-up messages the user typed into the queueing box while this
     // turn was still running (see `agent::run_code_agent_with_options`)
     // land here; the caller is responsible for dispatching them. On error
@@ -95,9 +92,6 @@ pub(crate) async fn run_code_agent_with_saved_image(
     {
         mint_core::live_sync::note_own_interaction(row.id);
     }
-    // Save any attached images and videos that were sent with the task
-    image::save_sent_image_after_send(sent_image.as_deref(), task, tui_handle.as_ref());
-    image::save_sent_image_after_send(sent_video.as_deref(), task, tui_handle.as_ref());
     let queued = queue
         .lock()
         .map(|mut q| std::mem::take(&mut *q))
@@ -172,6 +166,9 @@ pub(crate) async fn run_oneshot_agent_task(
         queueing: false,
         pinned_mcp_server,
         chat_id: None,
+        image_name: image_path
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned()),
         tui: None,
     };
 
@@ -212,7 +209,6 @@ pub(crate) async fn run_oneshot_agent_task(
         mint_core::live_sync::note_own_interaction(row.id);
     }
 
-    image::save_sent_image_after_send(image_data_uri.as_deref(), task, None);
     Ok(())
 }
 
@@ -323,6 +319,10 @@ fn log_panic_to_file(message: &str) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--mint-mod-host") {
+        return mint_mod_runtime::worker_main().map_err(anyhow::Error::msg);
+    }
+    let _background_shutdown = mint_core::bg_shell::ShutdownGuard;
     install_panic_hook();
     let mut cli = Cli::parse();
 
@@ -331,6 +331,7 @@ async fn main() -> Result<()> {
     }
 
     let mut config = load_config()?;
+    mint_core::companion::start();
     if let Some(ref m) = cli.model {
         apply_temporary_model_override(&mut config, m);
     }
@@ -379,6 +380,7 @@ async fn main() -> Result<()> {
     // its shutdown signal) funnels back here on a clean exit. `SESSIONS` is a
     // `static`, so `McpSession::Drop` won't run at process teardown — do it
     // explicitly so we don't leave orphaned MCP server processes behind.
+    mint_core::companion::shutdown();
     mint_core::close_all_mcp_sessions();
     Ok(())
 }
@@ -530,3 +532,7 @@ mod cli_tests {
         }
     }
 }
+
+mod mods_cli;
+
+mod mods_ui;

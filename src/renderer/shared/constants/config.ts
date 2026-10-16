@@ -1,9 +1,11 @@
+import { DEFAULT_NOTIFICATION_SETTINGS } from '../utils/notificationSettings'
 /**
  * shared/constants/config.ts
  * Canonical DEFAULT_CONFIG — single source of truth for Desktop UI and Web UI settings.
  */
 
 export const DEFAULT_CONFIG = {
+  notificationSettings: { ...DEFAULT_NOTIFICATION_SETTINGS },
   theme: 'dark',
   tuiTheme: 'dark' as 'system' | 'dark' | 'light',
   accentColor: '#10b981',
@@ -14,7 +16,8 @@ export const DEFAULT_CONFIG = {
   customPanelBg: '#1e293b',
   surfaceStyle: 'opaque' as 'opaque' | 'glass',
   glassBlur: 'none',
-  fontFamily: "'Prompt', sans-serif",
+  reducedEffects: false,
+  fontFamily: "'IBM Plex Sans Thai', 'Noto Sans Thai', 'Inter', ui-sans-serif, system-ui, sans-serif",
   fontSize: '16px',
   typographyScaleVersion: 2,
   apiKey: '',
@@ -171,6 +174,32 @@ export const migrateTuiTheme = <T extends Record<string, any>>(config: T): T & {
   const legacyTheme = config.tuiTheme || config.theme
   const tuiTheme = legacyTheme === 'system' || legacyTheme === 'light' ? legacyTheme : 'dark'
   return { ...config, tuiTheme }
+}
+
+/** Move saved selections for fonts that are no longer bundled to a local family. */
+export function migrateFontFamily<T extends Record<string, any>>(config: T): T {
+  const family = config.fontFamily
+  if (!family) return config
+  if (family === "'Inter', 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif") {
+    return { ...config, fontFamily: DEFAULT_CONFIG.fontFamily }
+  }
+  if (family === "'Noto Sans Thai', sans-serif" || family === "'Noto Sans Thai', 'Inter', ui-sans-serif, system-ui, sans-serif") {
+    return { ...config, fontFamily: "'Noto Sans Thai', 'Inter', ui-sans-serif, system-ui, sans-serif" }
+  }
+  const retiredFamilies = [
+    "'Prompt', sans-serif",
+    "'Outfit', sans-serif",
+    "'Inter', sans-serif",
+    "'Sarabun', sans-serif",
+    "'Kanit', sans-serif",
+    "'Mitr', sans-serif",
+    "'Mali', sans-serif",
+    "'Mali', cursive",
+  ]
+  if (retiredFamilies.includes(family)) {
+    return { ...config, fontFamily: DEFAULT_CONFIG.fontFamily }
+  }
+  return config
 }
 
 /**

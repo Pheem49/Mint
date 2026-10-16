@@ -1,3 +1,5 @@
+import { Bell } from 'lucide-react'
+import NotificationsTab from '../../shared/components/Settings/NotificationsTab'
 import React, { useState, useEffect, useRef } from 'react'
 // This view is lazy-loaded on the web. Keep every settings stylesheet with the
 // component so its modal does not render as unstyled HTML before its chunk loads.
@@ -42,12 +44,12 @@ export type {
   CustomProviderConfig,
 } from '../../shared/types'
 
-import { DEFAULT_CONFIG, migrateTuiTheme } from '../../shared/constants/config'
+import { DEFAULT_CONFIG, migrateFontFamily, migrateTuiTheme } from '../../shared/constants/config'
 export { DEFAULT_CONFIG }
 import { applyThemeStyles } from '../../shared/utils/ui'
 import { APP_VERSION } from '../../shared/version'
 
-type TabType = 'sect-general' | 'sect-profile' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
+type TabType = 'sect-notifications' | 'sect-general' | 'sect-profile' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
 
 interface SettingsNavItem {
   id: TabType
@@ -57,6 +59,7 @@ interface SettingsNavItem {
 }
 
 const SETTINGS_NAV: SettingsNavItem[] = [
+  { id: 'sect-notifications', label: 'Notifications', group: 'Workspace', icon: <Bell size={14} aria-hidden="true" /> },
   {
     id: 'sect-general',
     label: 'General',
@@ -111,8 +114,8 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   },
   {
     id: 'sect-memory',
-    label: 'Memory & Profile',
-    group: 'Workspace',
+    label: 'Personal Memory',
+    group: 'Account',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
@@ -269,7 +272,7 @@ export default function SettingsWindow() {
         }
         
         if (loadedConfig) {
-          const merged = { ...DEFAULT_CONFIG, ...migrateTuiTheme(loadedConfig) }
+          const merged = { ...DEFAULT_CONFIG, ...migrateTuiTheme(migrateFontFamily(loadedConfig)) }
           setConfig(merged)
           
           // sync helper custom models
@@ -716,6 +719,8 @@ export default function SettingsWindow() {
               onSaveWithoutClosing={handleSaveWithoutClosing}
             />
           )}
+
+          {activeTab === 'sect-notifications' && <NotificationsTab settings={config.notificationSettings} onChange={value => updateField('notificationSettings', value)} />}
 
           {activeTab === 'sect-profile' && (
             <ProfileTab

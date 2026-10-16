@@ -31,32 +31,13 @@ pub fn video_model_options_for_provider(_config: &MintConfig, provider: &str) ->
     .collect()
 }
 
-/// Tries the provider's live API first to fetch available video models,
-/// falling back to static presets on network error, timeout, or missing key.
+/// Discovers models with saved credentials and appends missing static presets.
+/// The shared catalog owns credential selection and fallback behavior.
 pub async fn video_model_options_for_provider_async(
     config: &MintConfig,
     provider: &str,
 ) -> Vec<String> {
-    use super::video_model_fetcher;
-
-    let lower = provider.trim().to_lowercase();
-    let api_key = match lower.as_str() {
-        "veo" | "gemini" | "google" => &config.api_key,
-        _ => return video_model_options_for_provider(config, provider),
-    };
-
-    let dynamic = video_model_fetcher::fetch_video_provider_models(&lower, api_key).await;
-    if !dynamic.is_empty() {
-        let mut merged = dynamic;
-        for preset in video_model_options_for_provider(config, provider) {
-            if !merged.contains(&preset) {
-                merged.push(preset);
-            }
-        }
-        merged
-    } else {
-        video_model_options_for_provider(config, provider)
-    }
+    super::model_catalog::video_models(config, provider, "").await
 }
 
 /// Get the active model for a video provider from config.

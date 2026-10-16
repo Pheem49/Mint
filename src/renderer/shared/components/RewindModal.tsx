@@ -1,3 +1,4 @@
+import SelectField from './SelectField'
 import React, { useState, useEffect } from 'react'
 import type { GitCheckpoint, FileChange } from '../types'
 
@@ -192,26 +193,18 @@ export const RewindModal: React.FC<RewindModalProps> = ({
                 Target Checkpoint
               </span>
               {checkpoints.length > 1 && (
-                <select
+                <SelectField aria-label="Target checkpoint" fullWidth={false}
                   value={selectedStep}
-                  onChange={(e) => setSelectedStep(Number(e.target.value))}
+                  onValueChange={(nextValue) => setSelectedStep(Number(nextValue))}
                   disabled={isLoading}
-                  style={{
-                    background: 'var(--input-bg, #111)',
-                    color: 'var(--text-main)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '6px',
-                    fontSize: '12px',
-                    padding: '3px 8px',
-                    cursor: 'pointer',
-                  }}
+
                 >
                   {checkpoints.map((cp) => (
                     <option key={cp.step} value={cp.step}>
                       Step {cp.step} ({cp.commitHash.slice(0, 7)})
                     </option>
                   ))}
-                </select>
+                </SelectField>
               )}
             </div>
 

@@ -52,7 +52,6 @@ use crate::{
     destroy_session,
     detect_silence,
     find_paths,
-    generate_images,
     generate_srt,
     generate_video,
     get_user,
@@ -124,6 +123,26 @@ pub(crate) fn log_api_err(context: &str, error: &dyn std::fmt::Display) {
 /// duplicate Discord gateway connections, duplicate replies to the owner).
 mod routes;
 
+/// Observe terminal shutdown without taking ownership of the host's lifetime.
+/// Embedded hosts must also request their own exit: stopping this HTTP server
+/// alone leaves a GUI event loop alive after Tokio intercepts the OS signal.
+pub async fn shutdown_on_signal(on_shutdown: impl FnOnce()) {
+    let shutdown = async {
+        #[cfg(unix)]
+        {
+            if let Ok(mut signal) =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            {
+                tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = signal.recv() => {} }
+                return;
+            }
+        }
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    shutdown.await;
+    on_shutdown();
+}
+
 pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
     start_api_server_on(SocketAddr::from(([0, 0, 0, 0], port))).await
 }
@@ -132,6 +151,14 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 /// loopback so only its local web proxy can reach the API directly.
 pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error> {
     let listener = TcpListener::bind(addr).await?;
+    let listener_addr = listener.local_addr()?;
+    let _webhook_lease = crate::webhooks::claim_api_listener(listener_addr);
+    tokio::task::spawn_blocking(|| {
+        if let Err(error) = crate::library::LibraryStore::open_default() {
+            eprintln!("[mint] Library startup: {error}")
+        }
+    });
+    crate::companion::start();
     // API server banner removed to prevent duplicate output
 
     // Start background messaging bridges (Telegram, Discord, Slack)
@@ -139,8 +166,17 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
     // Start the cron scheduler so scheduled agent tasks fire while this server is up
     crate::start_cron_scheduler();
 
+    let shutdown = shutdown_on_signal(|| {});
+    tokio::pin!(shutdown);
     loop {
-        let (mut socket, peer_addr) = match listener.accept().await {
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
+            _ = &mut shutdown => {
+                let _ = tokio::task::spawn_blocking(crate::bg_shell::shutdown).await;
+                return Ok(());
+            }
+        };
+        let (mut socket, peer_addr) = match accepted {
             Ok(val) => val,
             Err(_) => continue,
         };
@@ -148,6 +184,11 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
         // only safe for, a browser on this same machine — capture that now
         // while we still have the peer address.
         let from_loopback = peer_addr.ip().is_loopback();
+        // A wildcard API listener can cover more interfaces than a webhook is
+        // configured to accept. Classify callbacks by this connection's destination.
+        let Ok(connection_addr) = socket.local_addr() else {
+            continue;
+        };
 
         tokio::spawn(async move {
             // Isolates a panic anywhere in this connection's handling (a malformed
@@ -242,6 +283,20 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
 
             let (route, query) = path.split_once('?').unwrap_or((path, ""));
 
+            // Provider-authenticated callbacks share this listener when their configured
+            // interface and port match it. Ordinary API routes still use the API token.
+            if let Ok(config) = crate::load_config()
+                && let Some(service) = crate::webhooks::api_service(&config, connection_addr, method, path)
+            {
+                let request = crate::webhooks::Request {
+                    method: method.into(), path: path.into(),
+                    headers: request_str[..header_end].into(),
+                    body: request_bytes[header_end + 4..].to_vec(),
+                };
+                crate::webhooks::handle(socket, service, config, request).await;
+                return;
+            }
+
             if !api_auth_ok(&request_str) {
                 send_json_response(
                     socket,
@@ -303,6 +358,37 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
             }
 
             match (method, route) {
+                ("GET" | "POST" | "DELETE", route) if route == "/api/library" || route.starts_with("/api/library/") => {
+                    routes::library::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
+                }
+                ("GET" | "POST", "/api/conversation-sources") => {
+                    routes::sources::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
+                }
+                ("GET", route) if route.starts_with("/api/mcp-artifacts/") => {
+                    let id = route.trim_start_matches("/api/mcp-artifacts/").to_owned();
+                    let artifact = tokio::task::spawn_blocking(move || crate::integrations::mcp_result::read_artifact(&id)).await;
+                    match artifact {
+                        Ok(Ok((entry, bytes))) => {
+                            let mime = if entry.kind == "image" { entry.mime_type.as_str() } else { "application/octet-stream" };
+                            let disposition = if entry.kind == "image" {"inline"} else {"attachment"};
+                            let header = format!("HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nContent-Disposition: {disposition}; filename=\"{}\"\r\nX-Content-Type-Options: nosniff\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n", bytes.len(), entry.id);
+                            let mut socket = socket;
+                            let _ = socket.write_all(header.as_bytes()).await;
+                            let _ = socket.write_all(&bytes).await;
+                        }
+                        _ => send_json_response(socket, "404 Not Found", "{\"error\":\"Artifact unavailable\"}").await,
+                    }
+                }
+                ("POST", "/api/html-preview") => {
+                    routes::html_preview::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
+                }
+                ("GET" | "POST" | "DELETE", route) if route == "/api/background-jobs" || route.starts_with("/api/background-jobs/") => {
+                    routes::background_jobs::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
+                }
+
+                ("POST", "/api/mods") => {
+                    routes::mods::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
+                }
                                 ("GET", "/api/status") => {
                     routes::status_health::execute(
                         routes::RequestCtx {
@@ -543,7 +629,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                     )
                     .await;
                 }
-                                ("POST", "/api/chat-sessions/rename") => {
+                                ("POST", "/api/chat-sessions/rename" | "/api/chat-sessions/workspace") => {
                     routes::sessions::execute(
                         routes::RequestCtx {
                             method,
@@ -1131,11 +1217,14 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                     .await;
                 }
                 ("GET", "/api/models")
+                | ("GET", "/api/live-models")
                 | ("GET", "/api/image-models")
                 | ("GET", "/api/video-models")
                 | ("GET", "/api/checkpoints")
                 | ("POST", "/api/checkpoints/rollback")
                 | ("POST", "/api/checkpoints/undo")
+                | ("GET", "/api/workspace-history")
+                | ("POST", "/api/workspace-history/undo")
                 | ("GET", "/api/file/read") => {
                     routes::misc::execute(
                         routes::RequestCtx {
@@ -1314,7 +1403,7 @@ async fn run_web_agent_loop(
         None,
         request.pinned_mcp_server.as_deref(),
         fast_mode,
-        false,
+        request.plan_mode,
         |_| Ok(ApprovalOutcome::Denied),
         |_| {},
         |_| {},
@@ -1489,7 +1578,9 @@ fn picture_bytes(filename: &str) -> Result<(String, Vec<u8>), String> {
         .into_iter()
         .find(|entry| entry.filename == filename)
         .ok_or_else(|| "picture not found".to_string())?;
-    let bytes = std::fs::read(&picture.path).map_err(|error| error.to_string())?;
+    let (_, bytes) = crate::library::LibraryStore::open_default()
+        .and_then(|store| store.read(&picture.id, false))
+        .map_err(|error| error.to_string())?;
     Ok((picture.mime_type, bytes))
 }
 
@@ -1505,10 +1596,9 @@ fn thumbnail_bytes(filename: &str) -> Result<(String, Vec<u8>), String> {
         .into_iter()
         .find(|entry| entry.id == id)
         .ok_or_else(|| "picture not found".to_string())?;
-    let thumb_path = picture
-        .thumbnail_path
-        .ok_or_else(|| "thumbnail not found".to_string())?;
-    let bytes = std::fs::read(&thumb_path).map_err(|error| error.to_string())?;
+    let (_, bytes) = crate::library::LibraryStore::open_default()
+        .and_then(|store| store.read(&picture.id, true))
+        .map_err(|error| error.to_string())?;
     Ok(("image/png".to_string(), bytes))
 }
 
@@ -1589,6 +1679,25 @@ fn authorized_user_id(request_str: &str) -> Option<String> {
     let header = get_header(request_str, "Authorization")?;
     let token = header.strip_prefix("Bearer ")?;
     session_user_id(token.trim())
+}
+
+fn background_request_owner(request: &str) -> Result<Option<String>, &'static str> {
+    let owner = authorized_user_id(request);
+    if get_header(request, "Authorization").is_some() && owner.is_none() {
+        let configured = load_config().ok().and_then(|c| {
+            c.extra
+                .get("apiAuthToken")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
+        if !configured
+            .filter(|t| !t.is_empty())
+            .is_some_and(|token| token_matches(request, &token))
+        {
+            return Err("Session expired or invalid");
+        }
+    }
+    Ok(owner)
 }
 
 fn percent_decode(raw: &str) -> String {

@@ -1,0 +1,116 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Composer command and model menus</title></head>
+<body><div id="menu-fixture"></div><pre id="result">RUNNING</pre><script type="module">
+import React, { useRef, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import SlashSuggestions from '../shared/components/SlashSuggestions';
+import SlashChoicePanel from '../shared/components/SlashChoicePanel';
+import ModelSelectorPopover from '../shared/components/ModelSelectorPopover';
+const params = new URLSearchParams(location.search);
+const desktop = params.get('surface') === 'desktop';
+await import('../shared/theme/tokens.css');
+if (desktop) await import('../src/css/dashboard.css'); else await import('../src-web/css/dashboard.css');
+await import('../shared/css/slash-choice.css');
+const style = document.createElement('style');
+style.textContent = 'body{margin:0;background:var(--bg-base,#181818);color:var(--text-main);font-family:Inter,system-ui,sans-serif}#menu-fixture{height:auto!important;position:absolute;bottom:36px;left:50%;transform:translateX(-50%);width:min(736px,calc(100% - 32px))}#result{font-size:11px;position:absolute;top:0;left:8px;white-space:pre-wrap}';
+document.head.append(style);
+let setMessage, setAttached, setChoice;
+const choiceValues=[];
+const selected = [], sent = [];
+function App() {
+  const [message, update] = useState('/'); setMessage = update;
+  const [attached, attach] = useState(false); setAttached = attach;
+  const [choice, updateChoice] = useState(null); setChoice=updateChoice;
+  const [model, updateModel] = useState('qwen3');
+  const inputRef = useRef(null), slashRef = useRef(null);
+  return React.createElement('form', {id:'chat-form', onSubmit:e=>{e.preventDefault();sent.push(message)}},
+    choice && React.createElement(SlashChoicePanel,{choice,inputRef,onSelect:value=>{choiceValues.push(value);updateChoice(null)},onDismiss:()=>updateChoice(null)}),
+    attached && React.createElement('div',{className:'mint-attachment'},'Image attachment'),
+    React.createElement('textarea',{id:'chat-input',ref:inputRef,value:message,onChange:e=>update(e.target.value),onKeyDown:e=>{
+      if(slashRef.current?.handleKeyDown(e)) return;
+      if(e.key==='Enter') { e.preventDefault();sent.push(message); }
+    }}),
+    React.createElement(SlashSuggestions,{ref:slashRef,message,onComplete:update,anchorRef:inputRef,suppressed:Boolean(choice)}),
+    React.createElement('div',{className:'chat-tool-menu-wrap'},React.createElement('button',{type:'button',id:'chat-tool-btn'},'+')),
+    React.createElement(ModelSelectorPopover,{activeProvider:'ollama',activeModel:model,availableProviders:['ollama'],dynamicOllamaModels:['qwen3','deepseek-r1','llama3.3'],settingsConfig:{thinkingEnabled:true,thinkingEffort:'medium'},onSelect:(provider,id)=>{selected.push([provider,id]);updateModel(id)}}),
+    React.createElement('button',{type:'submit',id:'send-btn'},'↑'));
+}
+createRoot(document.getElementById('menu-fixture')).render(React.createElement(App));
+const pause=()=>new Promise(r=>setTimeout(r,150));
+const check=(value,message)=>{if(!value) throw Error(message)};
+const input=()=>document.getElementById('chat-input');
+const bounds=selector=>document.querySelector(selector).getBoundingClientRect();
+function checkMenu(selector) {
+  const menu=bounds(selector), form=bounds('#chat-form');
+  check(menu.bottom<=form.top-4,'Menu must sit above composer');
+  check(Math.abs(menu.left-form.left)<=2 && Math.abs(menu.width-form.width)<=2,'Menu must align with composer width');
+  check(menu.top>=0 && menu.left>=0 && menu.right<=innerWidth,selector+' must stay within viewport: '+JSON.stringify({top:menu.top,left:menu.left,right:menu.right,width:innerWidth,height:innerHeight}));
+}
+try {
+ await pause();
+ if(params.get('preview')==='model') {setMessage('');await pause();document.querySelector('.model-selector-trigger').click();await pause();document.getElementById('result').textContent='Model menu preview';}
+ else if(params.has('preview')) {document.getElementById('result').textContent='Command menu preview';}
+ else {
+   const height=bounds('#chat-form').height;
+   checkMenu('.slash-suggestions-popup');
+   setAttached(true);await pause();checkMenu('.slash-suggestions-popup');
+   setAttached(false);setMessage('/statistics');await pause();
+   check(document.querySelector('[role="option"]').textContent.includes('/stats'),'Description search should find executable stats command');
+   document.querySelector('[role="option"]').click();await pause();
+   check(input().value==='/stats ','Click should complete command');
+   check(!document.querySelector('.slash-suggestions-popup'),'Completion should dismiss menu');
+   setMessage('/models');await pause();
+   input().dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await pause();
+   check(sent.at(-1)==='/models','Fully typed commands should submit on first Enter');
+   setMessage('/');await pause();
+   input().dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause();
+   check(!document.querySelector('.slash-suggestions-popup'),'Escape should close suggestions');
+   input().dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));await pause();
+   check(Boolean(document.querySelector('.slash-suggestions-popup')),'Arrow should reopen suggestions');
+   setMessage('');await pause();
+   check(Math.abs(bounds('#chat-form').height-height)<2,'Suggestions must not enlarge composer');
+   document.querySelector('.model-selector-trigger').click();await pause();checkMenu('.model-spotlight-popover');
+   const leftPane=document.querySelector('.model-spotlight-left-pane');
+   const rightPane=document.querySelector('.model-spotlight-right-pane');
+   if(innerWidth>760) {
+     check(getComputedStyle(rightPane).display!=='none','Desktop model menu must show Options beside Models');
+     check(Math.abs(bounds('.model-spotlight-left-pane').width-bounds('.model-spotlight-right-pane').width)<3,'Desktop Models and Options must each take half the menu');
+   } else {
+     check(getComputedStyle(rightPane).display==='none','Narrow model menu starts with Models');
+     const optionsTab=document.querySelectorAll('[role="tab"]')[1];
+     const tabEnter=new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true});
+     optionsTab.dispatchEvent(tabEnter);await pause();
+     check(selected.length===0 && !tabEnter.defaultPrevented,'Enter on a tab must not select a model');
+     optionsTab.click();await pause();
+     check(getComputedStyle(rightPane).display!=='none','Thinking options must remain accessible');
+     document.querySelectorAll('[role="tab"]')[0].click();await pause();
+   }
+   document.querySelectorAll('.model-spotlight-item')[1].click();await pause();
+   check(selected.at(-1)?.[1]==='deepseek-r1','Mouse selection should choose model');
+   check(!document.querySelector('.model-spotlight-popover'),'Model selection should dismiss menu');
+   setAttached(true);await pause();document.querySelector('.model-selector-trigger').click();await pause();checkMenu('.model-spotlight-popover');
+   document.querySelector('.model-spotlight-input').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause();
+   check(!document.querySelector('.model-spotlight-popover'),'Escape should dismiss model list');
+   const providerChoice={command:'/models',title:'Select AI provider',options:[{label:'OpenRouter',value:'openrouter'},{label:'DeepSeek',value:'deepseek'},{label:'Gemini',value:'gemini'}]};
+   setChoice(providerChoice);await pause();input().focus();
+   const sendsBefore=sent.length;
+   const press=async key=>{input().dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));await pause()};
+   await press('ArrowDown');
+   check(document.querySelector('.slash-choice-options button[aria-pressed="true"]')?.textContent.includes('DeepSeek'),'ArrowDown should highlight next provider');
+   await press('Enter');
+   check(choiceValues.at(-1)==='deepseek','Enter should choose highlighted provider');
+   check(sent.length===sendsBefore,'Choice Enter must not submit composer');
+   setChoice({...providerChoice,title:'Select model',options:[{label:'Model A',value:'a'},{label:'Model B',value:'b'}]});await pause();
+   await press('ArrowUp');await press('Enter');
+   check(choiceValues.at(-1)==='b','New choice should reset selection and ArrowUp should wrap');
+   setChoice({...providerChoice,title:'Long model list',options:Array.from({length:40},(_,i)=>({label:'Model '+i,value:String(i)}))});await pause();
+   await press('ArrowUp');
+   const activeChoice=document.querySelector('.slash-choice-options button[aria-pressed="true"]').getBoundingClientRect();
+   const panelBounds=bounds('.slash-choice-panel');
+   check(activeChoice.top>=panelBounds.top && activeChoice.bottom<=panelBounds.bottom,'Arrow navigation should scroll highlighted option into view');
+   await press('Enter');check(choiceValues.at(-1)==='39','Enter should choose last option after wrapping');
+   setChoice(providerChoice);await pause();await press('Escape');
+   check(!document.querySelector('.slash-choice-panel'),'Escape should dismiss choices');
+   document.getElementById('result').textContent='PASS: '+(desktop?'Desktop':'Web')+' '+innerWidth+'px — menu placement, attachment layout, search, completion, Enter, Escape, reopen, model selection thinking options and slash choice keyboard navigation';
+ }
+} catch(error) {document.getElementById('result').textContent='FAIL: '+error.message;}
+</script></body></html>

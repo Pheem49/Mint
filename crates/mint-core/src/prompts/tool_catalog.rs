@@ -137,6 +137,32 @@ fn finish_tool() -> ToolSpec {
 fn all_tools() -> Vec<ToolSpec> {
     vec![
         tool(
+            "mod_help",
+            "Read the Mint Mods authoring guide. Call before creating or editing a mod from a user prompt.",
+            schema(json!({}), &[]),
+        ),
+        tool(
+            "mod_list",
+            "Inspect workspace mods, sources, hashes, permissions and active revisions.",
+            schema(json!({}), &[]),
+        ),
+        tool(
+            "mod_validate",
+            "Compile and preview a single-file Mint mod without running real tools. Follow mod_help; fix errors before publishing.",
+            schema(
+                json!({"arguments":{"type":"object","properties":{"manifest":{"type":"object"},"source":{"type":"string"},"readme":{"type":"string"}},"required":["manifest","source"]}}),
+                &["arguments"],
+            ),
+        ),
+        tool(
+            "mod_publish",
+            "Publish a validated mod in workspace/.mint-mods/<id> and open it in this chat. Use only when the user requests mod creation/editing. Requested special permissions require approval. Existing source requires expectedHash.",
+            schema(
+                json!({"arguments":{"type":"object","properties":{"manifest":{"type":"object"},"source":{"type":"string"},"readme":{"type":"string"},"expectedHash":{"type":"string"}},"required":["manifest","source"]}}),
+                &["arguments"],
+            ),
+        ),
+        tool(
             "conversation_summary",
             "Internal tool representing a compacted conversation history summary from previous steps.",
             schema(
@@ -655,7 +681,7 @@ fn all_tools() -> Vec<ToolSpec> {
         tool(
             "run_shell",
             "Run a local shell command. Subject to safety classification and user approval; destructive commands are blocked outright. \
-             Set 'background' to true for a long-running command (a dev server, a watcher, ...) so it doesn't \
+             Always set 'background' to true for development servers and watchers. For example: {command: 'python3 -u -m http.server 8000', background: true}. Check output and HTTP readiness before claiming the server is ready. Set 'background' to true for a long-running command (a dev server, a watcher, ...) so it doesn't \
              block you — it returns a job_id immediately instead of waiting for the command to exit. Use the \
              'shell_output' tool to check on it later and 'kill_shell' to stop it.",
             schema(
@@ -750,7 +776,7 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "apply_patch",
-            "Apply one or more find-and-replace hunks to an existing file. This is the only way to edit existing files (write_file is for new files only). Keep oldText minimal (1-3 exact lines) per hunk; use separate hunks for separate edit locations.",
+            "Apply one or more find-and-replace hunks to an existing file. Pass patch as a JSON object, never a JSON-encoded string: {\"patch\":{\"path\":\"style.css\",\"hunks\":[{\"oldText\":\"exact existing text\",\"newText\":\"replacement text\"}]}}. This is the only way to edit existing files (write_file is for new files only). Keep oldText minimal (1-3 exact lines) per hunk; use separate hunks for separate edit locations.",
             schema(
                 json!({
                     "patch": {

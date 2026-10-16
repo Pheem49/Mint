@@ -335,6 +335,32 @@ export function renderHighlightedCode(
   language: string,
   showLineNumbers = true
 ): ReactNode {
+  const key = `${language}:${showLineNumbers ? 1 : 0}:${code}`
+  const cached = highlightedCodeCache.get(key)
+  if (cached) {
+    highlightedCodeCache.delete(key)
+    highlightedCodeCache.set(key, cached)
+    return cached.node
+  }
+  const node = buildHighlightedCode(code, language, showLineNumbers)
+  // Bound retained source and React elements when virtualized rows remount.
+  // Large blocks still get per-component memoization without global retention.
+  if (code.length <= 50_000) {
+    highlightedCodeCache.set(key, { node, chars: code.length })
+    cachedCodeChars += code.length
+    while (highlightedCodeCache.size > 32 || cachedCodeChars > 100_000) {
+      const oldest = highlightedCodeCache.keys().next().value!
+      cachedCodeChars -= highlightedCodeCache.get(oldest)!.chars
+      highlightedCodeCache.delete(oldest)
+    }
+  }
+  return node
+}
+
+const highlightedCodeCache = new Map<string, { node: ReactNode; chars: number }>()
+let cachedCodeChars = 0
+
+function buildHighlightedCode(code: string, language: string, showLineNumbers: boolean): ReactNode {
   const lines = code.split('\n')
 
   return (

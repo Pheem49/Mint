@@ -1,0 +1,68 @@
+/* One compact command menu for Desktop and Web, aligned to the composer. */
+#chat-form > .slash-suggestions-popup {
+  position: absolute;
+  inset-inline: 0;
+  bottom: calc(100% + 8px);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: min(38dvh, 340px);
+  overflow: hidden;
+  color: var(--text-main);
+  background: var(--panel-bg);
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 18px;
+  box-shadow: var(--shadow-lg);
+  font-family: var(--font-sans, Inter, system-ui, sans-serif);
+}
+.slash-suggestions-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.slash-suggestions-count { font-size: 11px; }
+.slash-suggestions-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 5px 5px;
+  scrollbar-width: thin;
+}
+.slash-suggestions-group-label {
+  padding: 8px 7px 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.slash-suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: start;
+  font: inherit;
+  cursor: pointer;
+}
+.slash-suggestion-item:hover, .slash-suggestion-item.active { background: var(--surface-hover, var(--bg-surface-soft)); }
+.slash-suggestion-item:focus-visible { outline: 2px solid var(--text-muted); outline-offset: -2px; }
+.slash-cmd-icon { display: flex; flex: 0 0 15px; color: var(--text-muted); }
+.slash-cmd-name { flex: 0 0 auto; color: var(--text-main); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.slash-cmd-body { flex: 1; min-width: 0; }
+.slash-cmd-desc { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
+.skill-badge { flex: 0 0 auto; color: var(--text-muted); font-size: 11px; }
+.slash-cmd-usage { color: var(--text-muted); font: 12px var(--font-mono, monospace); overflow-wrap: anywhere; }
+.slash-suggestions-empty { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; color: var(--text-muted); font-size: 13px; }
+.slash-suggestions-hint { padding: 7px 12px; border-top: 1px solid var(--border-default, var(--border)); color: var(--text-muted); font-size: 10px; }
+@media (max-width: 760px) {
+  #chat-form > .slash-suggestions-popup { max-height: min(34dvh, 280px); border-radius: 16px; }
+  .slash-suggestion-item { min-height: 40px; }
+  .slash-cmd-name { max-width: 48%; overflow: hidden; text-overflow: ellipsis; }
+}

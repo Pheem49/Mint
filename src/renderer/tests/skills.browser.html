@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>*{box-sizing:border-box}body{margin:24px;background:#121212;color:#eee;font-family:Arial,sans-serif}pre{white-space:pre-wrap}</style></head>
+<body><div id="root"></div><pre id="result">RUNNING</pre>
+<script type="module">
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import {AgentActivityTable} from '/shared/components/AgentActivityTable.tsx';
+import {activitiesFrom} from '/shared/utils/agentActivity.ts';
+const root=createRoot(document.getElementById('root'));
+const input={path:'/repo/.agents/skills/review/SKILL.md',skill_name:'review'};
+const start={type:'ToolStart',data:{action:'read_file',input}};
+const end=result=>({type:'ToolEnd',data:{action:'read_file',input,result}});
+async function render(events){root.render(React.createElement(AgentActivityTable,{activityView:activitiesFrom(events)}));await new Promise(resolve=>setTimeout(resolve,50));}
+function check(text){if(!document.getElementById('root').textContent.includes(text))throw Error(`Missing ${text}`)}
+try {
+  await render([start]);check('Reading skill: review');
+  await render([start,end('[Loaded skill: review]\nReview the changed files.')]);check('Loaded skill: review');
+  await render([start,end('Error: denied')]);check('Failed to read skill: review');
+  await render([start,end('1 | header only')]);check('Read skill preview: review');
+  await render([start,end('[Loaded skill: review]\nReview the changed files.')]);
+  document.getElementById('result').textContent='PASS: rendered reading, loaded, failed, and preview states';
+} catch(error){document.getElementById('result').textContent='FAIL: '+error.stack;}
+</script></body></html>

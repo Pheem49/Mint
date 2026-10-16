@@ -11,6 +11,17 @@ use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
 
+pub mod approvals;
+mod mcp_review;
+#[cfg(test)]
+mod mod_authoring_regressions;
+mod progress_clock;
+mod repeated_failures;
+#[cfg(all(test, unix))]
+mod review_regressions;
+pub(crate) mod run_control;
+use repeated_failures::RepeatedFailures;
+
 use crate::chat::{
     ChatMessage, ChatRole, ChatStreamEvent, ContentBlock, send_chat_with_fallback,
     stream_chat_events_with_fallback, stream_chat_with_fallback,
@@ -76,6 +87,7 @@ where
 /// Owns one persisted turn, including its cross-process queue lease. Dropping a
 /// cancelled task marks its prompt interrupted instead of leaving it running.
 struct TurnLease {
+    chat_id: String,
     memory: MemoryStore,
     id: i64,
     heartbeat: tokio::task::JoinHandle<()>,
@@ -86,6 +98,7 @@ struct TurnLease {
 impl TurnLease {
     async fn start(memory: &MemoryStore, chat_id: &str, text: &str) -> Result<Self, MemoryError> {
         let id = memory.start_turn(chat_id, text)?;
+        crate::companion::queued(chat_id, id, text);
         let _ = TURN_START_LISTENER.try_with(|listener| {
             if listener.chat_id == chat_id {
                 (listener.callback)(id);
@@ -101,6 +114,7 @@ impl TurnLease {
             }
         });
         let mut lease = Self {
+            chat_id: chat_id.to_owned(),
             memory: memory.clone(),
             id,
             heartbeat,
@@ -109,7 +123,15 @@ impl TurnLease {
         };
         loop {
             match memory.claim_turn(chat_id, id) {
-                Ok(true) => return Ok(lease),
+                Ok(true) => {
+                    crate::companion::update(
+                        chat_id,
+                        id,
+                        mint_companion_protocol::Status::Thinking,
+                        None,
+                    );
+                    return Ok(lease);
+                }
                 Ok(false) => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
                 Err(error) => {
                     lease.fail();
@@ -143,6 +165,12 @@ impl TurnLease {
         self.memory
             .finish_turn(self.id, summary, provider, model, fallback_provider)?;
         self.finished = true;
+        crate::companion::update(
+            &self.chat_id,
+            self.id,
+            mint_companion_protocol::Status::Completed,
+            Some(summary.to_owned()),
+        );
         Ok(())
     }
 
@@ -158,6 +186,24 @@ impl TurnLease {
     fn fail(&mut self) {
         self.persist_activity();
         let _ = self.memory.end_turn(self.id, "failed");
+        crate::companion::update(
+            &self.chat_id,
+            self.id,
+            mint_companion_protocol::Status::Failed,
+            None,
+        );
+        self.finished = true;
+    }
+
+    fn interrupt(&mut self) {
+        self.persist_activity();
+        let _ = self.memory.end_turn(self.id, "interrupted");
+        crate::companion::update(
+            &self.chat_id,
+            self.id,
+            mint_companion_protocol::Status::Interrupted,
+            None,
+        );
         self.finished = true;
     }
 }
@@ -168,6 +214,12 @@ impl Drop for TurnLease {
         if !self.finished {
             self.persist_activity();
             let _ = self.memory.end_turn(self.id, "interrupted");
+            crate::companion::update(
+                &self.chat_id,
+                self.id,
+                mint_companion_protocol::Status::Interrupted,
+                None,
+            );
         }
     }
 }
@@ -237,6 +289,13 @@ pub async fn orchestrate_chat(
     request: &ChatRequest,
 ) -> Result<ChatResponse, OrchestrationError> {
     let memory = MemoryStore::open_default()?;
+    if let Some(workspace) = request
+        .workspace_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+    {
+        memory.set_chat_session_workspace(&request_chat_id(request), Some(workspace.trim()))?;
+    }
     let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
@@ -249,11 +308,6 @@ pub async fn orchestrate_chat(
         }
     };
     turn.complete(&response)?;
-    if let Some(ref ws) = request.workspace_path {
-        if !ws.trim().is_empty() {
-            let _ = memory.set_chat_session_workspace(&request_chat_id(request), Some(ws.trim()));
-        }
-    }
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -279,11 +333,28 @@ where
     F: FnMut(String),
 {
     let memory = MemoryStore::open_default()?;
+    if let Some(workspace) = request
+        .workspace_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+    {
+        memory.set_chat_session_workspace(&request_chat_id(request), Some(workspace.trim()))?;
+    }
     let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
     let enriched = enrich_request(config, &memory, &resolved_request)?;
-    let response = match stream_chat(config, &enriched, on_chunk).await {
+    let response = match {
+        let mut on_chunk = on_chunk;
+        let chat = turn.chat_id.clone();
+        let id = turn.id;
+        stream_chat(config, &enriched, move |chunk: String| {
+            crate::companion::chunk(&chat, id, &chunk);
+            on_chunk(chunk);
+        })
+    }
+    .await
+    {
         Ok(response) => response,
         Err(error) => {
             turn.fail();
@@ -291,11 +362,6 @@ where
         }
     };
     turn.complete(&response)?;
-    if let Some(ref ws) = request.workspace_path {
-        if !ws.trim().is_empty() {
-            let _ = memory.set_chat_session_workspace(&request_chat_id(request), Some(ws.trim()));
-        }
-    }
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -317,6 +383,13 @@ pub async fn orchestrate_chat_with_fallback(
     request: &ChatRequest,
 ) -> Result<(ChatResponse, Option<String>), OrchestrationError> {
     let memory = MemoryStore::open_default()?;
+    if let Some(workspace) = request
+        .workspace_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+    {
+        memory.set_chat_session_workspace(&request_chat_id(request), Some(workspace.trim()))?;
+    }
     let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
@@ -354,11 +427,28 @@ where
     F: FnMut(String),
 {
     let memory = MemoryStore::open_default()?;
+    if let Some(workspace) = request
+        .workspace_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+    {
+        memory.set_chat_session_workspace(&request_chat_id(request), Some(workspace.trim()))?;
+    }
     let mut turn = TurnLease::start(&memory, &request_chat_id(request), &request.message).await?;
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
     let enriched = enrich_request(config, &memory, &resolved_request)?;
-    let (response, fallback) = match stream_chat_with_fallback(config, &enriched, on_chunk).await {
+    let (response, fallback) = match {
+        let mut on_chunk = on_chunk;
+        let chat = turn.chat_id.clone();
+        let id = turn.id;
+        stream_chat_with_fallback(config, &enriched, move |chunk: String| {
+            crate::companion::chunk(&chat, id, &chunk);
+            on_chunk(chunk);
+        })
+    }
+    .await
+    {
         Ok(result) => result,
         Err(error) => {
             turn.fail();
@@ -366,11 +456,6 @@ where
         }
     };
     turn.complete(&response)?;
-    if let Some(ref ws) = request.workspace_path {
-        if !ws.trim().is_empty() {
-            let _ = memory.set_chat_session_workspace(&request_chat_id(request), Some(ws.trim()));
-        }
-    }
     spawn_auto_memory_update(
         config.clone(),
         request.message.clone(),
@@ -385,6 +470,28 @@ where
         turn.id,
     );
     Ok((response, fallback))
+}
+
+// Full skill reads must reach the model exactly; other tools keep bounded output.
+fn model_tool_result(action: &str, result: &str) -> String {
+    if action.starts_with("browser_")
+        || (action == "read_file" && result.starts_with("[Loaded skill: "))
+    {
+        result.to_owned()
+    } else {
+        truncate(result)
+    }
+}
+
+fn tool_progress_input(root: &Path, decision: &AgentDecision) -> Value {
+    let mut input = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+    if decision.action == "read_file"
+        && let Some(skill) = crate::skills::skill_for_read_path(root, &decision.input.path)
+        && let Some(object) = input.as_object_mut()
+    {
+        object.insert("skill_name".into(), Value::String(skill.name));
+    }
+    input
 }
 
 /// Truncates `text` to at most `max_chars` characters (not bytes, so this
@@ -522,6 +629,8 @@ use workspace_helpers::*;
 /// tasks earlier, but 24 turned out too tight for legitimate multi-file
 /// work, cutting it off mid-task — raised to 40 as a middle ground.
 const MAX_STEPS: usize = 40;
+// A tool gets its own correction budget, renewed after successful execution.
+const MAX_TOOL_ARGUMENT_RETRIES: usize = 5;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
 /// Compact `native_messages` once a step's reported token usage crosses this
 /// fraction of `MintConfig::context_window_tokens`. Every step resends the whole
@@ -554,6 +663,12 @@ pub struct AskUserOption {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentApproval {
+    /// Persistent agent instructions need a decision for each concrete diff.
+    SkillWrite {
+        path: String,
+        content: String,
+        diff: String,
+    },
     WriteFile {
         path: String,
         content: String,
@@ -621,6 +736,31 @@ pub const MCP_ALLOW_ALL_SENTINEL: &str = "__mcp_allow_all__";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum AgentProgress {
+    ToolDiscovery {
+        server: String,
+        tool: String,
+        message: String,
+    },
+    DeviceState {
+        #[serde(rename = "callId")]
+        call_id: String,
+        server: String,
+        tool: String,
+        update: crate::mcp::device::DeviceUpdate,
+    },
+    ToolProgress {
+        #[serde(rename = "callId")]
+        call_id: String,
+        server: String,
+        tool: String,
+        update: crate::mcp::McpProgress,
+    },
+    ToolArtifacts {
+        #[serde(rename = "callId")]
+        call_id: String,
+        artifacts: Vec<crate::integrations::mcp_result::McpArtifact>,
+        warnings: Vec<String>,
+    },
     Thinking {
         elapsed_secs: u64,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -685,6 +825,13 @@ pub enum AgentProgress {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         elapsed_ms: Option<u64>,
     },
+    /// Lifecycle of native context summarization, including actionable failures.
+    ContextCompaction {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent: Option<String>,
+        status: String,
+        message: String,
+    },
     /// Emitted while retrying a step after every configured provider was
     /// unreachable (`ChatError::NetworkUnavailable`) — distinct from
     /// `Thinking` because there's nothing to wait *on* here except the
@@ -694,6 +841,8 @@ pub enum AgentProgress {
         max_attempts: usize,
     },
     ToolStart {
+        #[serde(default, rename = "callId", skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
         action: String,
         input: Value,
         /// Name of the subagent this tool call happened inside, if any —
@@ -706,6 +855,12 @@ pub enum AgentProgress {
         subagent: Option<String>,
     },
     ToolEnd {
+        #[serde(default, alias = "elapsedMs", skip_serializing_if = "Option::is_none")]
+        elapsed_ms: Option<u64>,
+        #[serde(default, rename = "callId", skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<crate::integrations::mcp_result::ToolStatus>,
         action: String,
         input: Value,
         result: String,
@@ -762,7 +917,32 @@ pub fn compact_agent_progress(progress: &[AgentProgress]) -> Vec<AgentProgress> 
     let mut interrupted: std::collections::HashMap<String, (String, Option<u64>)> =
         std::collections::HashMap::new();
 
-    for event in progress {
+    let latest_progress: std::collections::HashMap<(u8, &str), usize> = progress
+        .iter()
+        .enumerate()
+        .filter_map(|(i, event)| match event {
+            AgentProgress::ToolProgress { call_id, .. } => Some(((0, call_id.as_str()), i)),
+            AgentProgress::DeviceState {
+                call_id, update, ..
+            } if !matches!(update.state, crate::mcp::device::DevicePhase::Accepted) => {
+                Some(((1, call_id.as_str()), i))
+            }
+            _ => None,
+        })
+        .collect();
+    for (index, event) in progress.iter().enumerate() {
+        let key = match event {
+            AgentProgress::ToolProgress { call_id, .. } => Some((0, call_id.as_str())),
+            AgentProgress::DeviceState {
+                call_id, update, ..
+            } if !matches!(update.state, crate::mcp::device::DevicePhase::Accepted) => {
+                Some((1, call_id.as_str()))
+            }
+            _ => None,
+        };
+        if key.is_some_and(|key| latest_progress.get(&key) != Some(&index)) {
+            continue;
+        }
         match event {
             AgentProgress::ThinkingDelta {
                 id,
@@ -1092,7 +1272,59 @@ fn deserialize_agent_input<'de, D>(deserializer: D) -> Result<AgentInput, D::Err
 where
     D: serde::Deserializer<'de>,
 {
-    Ok(Option::<AgentInput>::deserialize(deserializer)?.unwrap_or_default())
+    let value = Option::<Value>::deserialize(deserializer)?;
+    value
+        .map(decode_agent_input)
+        .transpose()
+        .map_err(serde::de::Error::custom)
+        .map(|input| input.unwrap_or_default())
+}
+
+// Some providers encode the structured patch twice. Decode only that field;
+// retain strict typing for all other arguments and never infer a target file.
+fn decode_agent_input(mut value: Value) -> Result<AgentInput, String> {
+    let outer_path = value.get("path").and_then(Value::as_str).map(str::to_owned);
+    if let Some(patch) = value.get_mut("patch").filter(|patch| !patch.is_null()) {
+        if let Value::String(encoded) = patch {
+            *patch = serde_json::from_str(encoded).map_err(|_| {
+                "patch must contain a valid JSON object with path and hunks".to_owned()
+            })?;
+        }
+        let object = patch
+            .as_object_mut()
+            .ok_or_else(|| "patch must be an object with path and hunks".to_owned())?;
+        if !object.contains_key("path") {
+            if let Some(path) = &outer_path {
+                object.insert("path".into(), Value::String(path.clone()));
+            }
+        }
+        let path = object
+            .get("path")
+            .and_then(Value::as_str)
+            .filter(|path| !path.trim().is_empty())
+            .ok_or_else(|| {
+                "patch.path is required; supply the target file explicitly".to_owned()
+            })?;
+        if outer_path
+            .as_deref()
+            .is_some_and(|outer| !outer.is_empty() && outer != path)
+        {
+            return Err("path and patch.path must name the same target file".into());
+        }
+        serde_json::from_value::<AgentPatch>(patch.clone())
+            .map_err(|_| "patch requires a string path and hunks containing string oldText/newText and optional boolean replaceAll".to_owned())?;
+    }
+    serde_json::from_value(value).map_err(|error| {
+        let message = error.to_string();
+        if message.chars().count() > 400 {
+            format!(
+                "{}… (argument value omitted)",
+                message.chars().take(400).collect::<String>()
+            )
+        } else {
+            message
+        }
+    })
 }
 
 fn resolve_agent_config(
@@ -1248,6 +1480,7 @@ async fn stream_chat_with_network_retry(
             Ok((response, fallback)) => {
                 if !stream_json_prompt
                     && allow_final_stream
+                    && !provider_truncated_response(response.stop_reason.as_deref())
                     && response
                         .tool_calls
                         .as_ref()
@@ -1456,38 +1689,83 @@ where
     Progress: FnMut(AgentProgress) + Send + 'a,
     Chunk: FnMut(String) + Send + 'a,
 {
-    Box::pin(async move {
-        let started_at = Instant::now();
-        let root = root.canonicalize().map_err(|e| {
-            OrchestrationError::Agent(format!(
-                "unable to resolve workspace root {}: {}",
-                root.display(),
-                e
-            ))
-        })?;
-        let chat_id = chat_id
+    Box::pin(run_control::scope(
+        chat_id
             .map(str::trim)
-            .filter(|chat_id| !chat_id.is_empty())
-            .unwrap_or(DEFAULT_CONVERSATION_ID);
-        // `root` is always resolved to a real, canonicalized directory above
-        // (never optional here, unlike the plain-chat path's `ChatRequest.
-        // workspace_path`), so an agent-mode conversation is always scoped to
-        // *some* workspace — it just never falls back to the plain global
-        // "cli" bucket the way plain chat can. Idempotent on chat ids that
-        // are already scoped or aren't "cli" at all (see `scoped_chat_id`).
-        let chat_id = crate::agent::memory::scoped_chat_id(chat_id, Some(&root.to_string_lossy()));
-        let chat_id = chat_id.as_str();
-        let memory = MemoryStore::open_default()?;
-        let mut turn = TurnLease::start(&memory, chat_id, task).await?;
-        let record_activity = Arc::clone(&turn.activity);
-        let mut progress = move |event: AgentProgress| {
-            if let Ok(mut lock) = record_activity.lock() {
-                lock.push(event.clone());
-            }
-            progress(event);
-        };
-        let resolved_task = resolve_github_links(task, config).await;
-        let agent_result = crate::browser::run_session(async {
+            .filter(|id| !id.is_empty())
+            .unwrap_or(DEFAULT_CONVERSATION_ID),
+        async move {
+            run_control::check()?;
+            let started_at = Instant::now();
+            let root = root.canonicalize().map_err(|e| {
+                OrchestrationError::Agent(format!(
+                    "unable to resolve workspace root {}: {}",
+                    root.display(),
+                    e
+                ))
+            })?;
+            let chat_id = chat_id
+                .map(str::trim)
+                .filter(|chat_id| !chat_id.is_empty())
+                .unwrap_or(DEFAULT_CONVERSATION_ID);
+            // `root` is always resolved to a real, canonicalized directory above
+            // (never optional here, unlike the plain-chat path's `ChatRequest.
+            // workspace_path`), so an agent-mode conversation is always scoped to
+            // *some* workspace — it just never falls back to the plain global
+            // "cli" bucket the way plain chat can. Idempotent on chat ids that
+            // are already scoped or aren't "cli" at all (see `scoped_chat_id`).
+            let chat_id =
+                crate::agent::memory::scoped_chat_id(chat_id, Some(&root.to_string_lossy()));
+            let chat_id = chat_id.as_str();
+            let memory = MemoryStore::open_default()?;
+            // Agent requests use a real workspace even when the provider fails.
+            // Persist it before the first turn so all session lists group it correctly.
+            memory.set_chat_session_workspace(chat_id, Some(root.to_string_lossy().as_ref()))?;
+            let mut turn = run_control::run(TurnLease::start(&memory, chat_id, task)).await?;
+            let record_activity = Arc::clone(&turn.activity);
+            let progress_chat_id = turn.chat_id.clone();
+            let companion_turn_id = turn.id;
+            let chunk_chat_id = turn.chat_id.clone();
+            let mut on_chunk = move |chunk: String| {
+                crate::companion::chunk(&chunk_chat_id, companion_turn_id, &chunk);
+                on_chunk(chunk);
+            };
+            let approval_chat_id = turn.chat_id.clone();
+            let mut approve = move |request: &AgentApproval| {
+                crate::companion::update(
+                    &approval_chat_id,
+                    companion_turn_id,
+                    mint_companion_protocol::Status::Waiting,
+                    None,
+                );
+                let result = approve(request);
+                crate::companion::update(
+                    &approval_chat_id,
+                    companion_turn_id,
+                    mint_companion_protocol::Status::Thinking,
+                    None,
+                );
+                result
+            };
+            let mut progress_clock = progress_clock::ProgressClock::default();
+            let mut progress = move |mut event: AgentProgress| {
+                progress_clock.stamp(&mut event, Instant::now());
+                crate::companion::progress(&progress_chat_id, companion_turn_id, &event);
+                if let Ok(mut lock) = record_activity.lock() {
+                    lock.push(event.clone());
+                }
+                progress(event);
+            };
+            let _ = crate::mods::event(
+                &root,
+                chat_id,
+                "turn_start",
+                serde_json::json!({"turnId":companion_turn_id}),
+                None,
+            );
+            let mut mod_usage = crate::mods::UsageTracker::new(&root, chat_id, companion_turn_id);
+            let resolved_task = resolve_github_links(task, config).await;
+            let agent_result = crate::browser::run_session(async {
         // Subagent runs use a synthetic `{parent_chat_id}::subagent::{name}` chat id
         // (see the `dispatch_subagent` arm in `execute_tool`) so their own memory
         // interaction doesn't leak into the parent conversation's history. That
@@ -1497,7 +1775,7 @@ where
         let allow_subagent_dispatch = !chat_id.contains("::subagent::");
         let skills =
             crate::skills::learned_skills_context(Some(&root), Some(chat_id)).unwrap_or_default();
-        let mut observation = initial_observation(&resolved_task, &root, &skills);
+        let mut observation = initial_observation(&resolved_task, &root, "See the current skill catalog in system instructions.");
         let mut pending_image = image_data_uri;
         let mut pending_audio = audio_data_uri;
         let mut pending_video = video_data_uri;
@@ -1555,6 +1833,8 @@ where
         let mut final_fallback = None;
         let mut final_fallback_reason = None;
         let mut action_counts = BTreeMap::<String, usize>::new();
+        let mut invalid_tool_calls = ToolArgumentRetries::default();
+        let mut repeated_failures = RepeatedFailures::default();
         let mut streamed_finish_summary = String::new();
         let mut streamed_direct_text = String::new();
         // Track the most recent step (if any) that successfully modified a file
@@ -1604,12 +1884,17 @@ where
         let mut last_input_tokens: u64 = 0;
         let mut turn_generated_tokens: u64 = 0;
         let mut executed_tools: Vec<ToolExecutionRecord> = Vec::new();
+        let mut mod_truncation_retries = 0;
+        let mut mcp_review = mcp_review::McpReview::default();
         let mut files_modified: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
         let mut files_created: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
 
         'steps: for step in 1..=MAX_STEPS {
+            crate::mods::set_turn_policy(&root, chat_id, plan_mode, pinned_mcp_server);
+            let _ = execute_mod_requests(&root, chat_id, config, plan_mode, &mut approve, &mut progress, None).await;
+            if run_control::cancelled() { turn.interrupt(); return Err(OrchestrationError::Agent("Agent turn canceled by user".into())); }
             let thought_id = if let Some(name) = chat_id.split("::subagent::").nth(1) {
                 format!("subagent-{name}-step-{step}")
             } else {
@@ -1631,6 +1916,16 @@ where
             });
 
             let mut active_system_prompt = system_prompt.clone();
+            let mcp_context = mcp_review.context();
+            if !mcp_context.is_empty() { active_system_prompt.push_str(&format!("\n\n{mcp_context}")); }
+            // Pin the catalog and only successfully read, unchanged skill bodies
+            // to every request, including after JSON history rebuilds/compaction.
+            let visible_history = if active_config.tool_calling_mode() == ToolCallingMode::Native { render_messages_as_text(&native_messages) } else { observation.clone() };
+            let skill_context = crate::skills::learned_skills_context_with_history(Some(&root), Some(chat_id), &visible_history)
+                .unwrap_or_default();
+            if !skill_context.is_empty() {
+                active_system_prompt.push_str(&format!("\n\n[Available skills and retained instructions]\n{skill_context}"));
+            }
             if let Some(ref model_name) = active_model_name {
                 active_system_prompt.push_str(&format!(
                     "\n\n[Active Environment Context]\n\
@@ -1718,7 +2013,7 @@ where
                             on_chunk(delta);
                         }
                     };
-                    stream_chat_with_network_retry(
+                    run_control::run(stream_chat_with_network_retry(
                         &active_config,
                         &ChatRequest {
                             message: String::new(),
@@ -1749,7 +2044,7 @@ where
                         false,
                         allow_final_stream,
                         &mut emit_stream_chunk,
-                    )
+                    ))
                     .await?
                 }
             } else {
@@ -1764,7 +2059,7 @@ where
                             on_chunk(delta);
                         }
                     };
-                    stream_chat_with_network_retry(
+                    run_control::run(stream_chat_with_network_retry(
                         &active_config,
                         &ChatRequest {
                             message: observation.clone(),
@@ -1790,7 +2085,7 @@ where
                         true,
                         allow_final_stream,
                         &mut emit_stream_chunk,
-                    )
+                    ))
                     .await?
                 }
             };
@@ -1798,6 +2093,8 @@ where
             final_provider = response.provider.clone();
             final_model = response.model.clone();
             turn_total_tokens += response.total_tokens.unwrap_or(0) as u64;
+            let usage_payload = mod_usage.record(&active_config, &response);
+            let _ = crate::mods::event(&root, chat_id, "usage_update", usage_payload, None);
             turn_generated_tokens += response.output_tokens.unwrap_or(0) as u64;
             if let Some(input) = response.input_tokens {
                 last_input_tokens = input as u64;
@@ -1824,35 +2121,53 @@ where
                 }
             }
 
+            // A provider-limited design draft is not a completed mod. Recover
+            // only after successful mod preparation, before publication, and
+            // within a per-turn budget. All subsequent tools keep their normal
+            // plan-mode, capability and approval checks.
+            if tool_mode == ToolCallingMode::Native
+                && !plan_mode
+                && !active_config.disabled_tools.iter().any(|tool| tool == "mod_publish")
+                && response.tool_calls.as_ref().is_none_or(|calls| calls.is_empty())
+                && provider_truncated_response(response.stop_reason.as_deref())
+                && mod_truncation_retries < 2
+                && executed_tools.iter().any(|tool| tool.success && matches!(tool.action.as_str(), "mod_help" | "mod_validate"))
+                && !executed_tools.iter().any(|tool| tool.success && tool.action == "mod_publish")
+            {
+                mod_truncation_retries += 1;
+                let instruction = "Your previous response reached the provider output-length limit before completing the request. Use the already loaded Mint Mods guide and choose reasonable defaults. If the user requested a mod, send the source through mod_validate and then mod_publish using their tool arguments, with at most one short progress sentence. Follow the existing permissions and approvals. If the request cannot be completed, call finish with a concise explanation. Otherwise answer the original question concisely. Avoid repeating the design discussion.";
+                native_messages.push(ChatMessage {
+                    role: ChatRole::User,
+                    content: vec![ContentBlock::Text { text: instruction.into() }],
+                });
+                trajectory.push(format_trajectory_step(step, "", "mod_authoring_recovery", instruction));
+                progress(AgentProgress::Thought {
+                    thought: "Mod preparation reached the provider output limit; continuing with the authoring tools.".into(),
+                });
+                continue 'steps;
+            }
+
             // `decisions` is normally a single `(call_id, AgentDecision)`, matching the
             // original one-action-per-step design. Native tool-calling can return
             // several tool calls in one model turn, in which case they're executed
             // sequentially and all their results are fed back before the next call —
             // `finish` never appears alongside real tool calls (see below), so this
             // never conflicts with the early-return finish handling.
+            let mut step_tool_results: Vec<ToolResultEntry> = Vec::new();
             let decisions: Vec<(String, AgentDecision)> = if tool_mode == ToolCallingMode::Native {
                 match response.tool_calls.clone() {
-                    Some(calls) if !calls.is_empty() => calls
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, call)| {
-                            let thought = if index == 0 {
-                                response.text.trim().to_string()
-                            } else {
-                                String::new()
-                            };
-                            let input: AgentInput =
-                                serde_json::from_value(call.input).unwrap_or_default();
-                            (
-                                call.id,
-                                AgentDecision {
-                                    thought,
-                                    action: call.name,
-                                    input,
-                                },
-                            )
-                        })
-                        .collect(),
+                    Some(calls) if !calls.is_empty() => {
+                        let (decisions, errors) = prepare_native_tool_calls(
+                            calls, response.text.trim(), &mut invalid_tool_calls,
+                        )?;
+                        for ToolResultEntry{action,input,text:error,..} in &errors {
+                            progress(AgentProgress::ToolStart { call_id: None, action: action.clone(), input: input.clone(), subagent: None });
+                            progress(AgentProgress::ToolEnd { elapsed_ms: None, call_id: None, status: None, action: action.clone(), input: input.clone(), result: error.clone(), subagent: None });
+                            trajectory.push(format_trajectory_step(step, "", action, error));
+                        }
+                        step_tool_results.extend(errors);
+                        decisions
+                    }
                     // No tool calls means the model answered directly — treat exactly
                     // like the JSON-prompt path's fallback for plain, non-JSON text
                     // (see `parse_decision_or_finish`): finish with that text as the
@@ -1889,7 +2204,7 @@ where
                 let mut decision = match parse_decision_or_finish(&response.text) {
                     Ok(decision) => decision,
                     Err(_) => {
-                        let (repaired, _) = send_chat_with_fallback(
+                        let (repaired, _) = run_control::run(send_chat_with_fallback(
                             &active_config,
                             &ChatRequest {
                                 message: format!(
@@ -1913,7 +2228,7 @@ where
                                 temperature: active_config.temperature,
                                 ..Default::default()
                             },
-                        )
+                        ))
                         .await?;
                         parse_decision_or_finish(&repaired.text).map_err(|e| {
                             OrchestrationError::Agent(format!(
@@ -1951,7 +2266,6 @@ where
                 extended_emitted = true;
             }
 
-            let mut step_tool_results: Vec<(String, String, Value, String)> = Vec::new();
             // Screenshots (and any future binary/image tool result) are kept out of
             // `step_tool_results`'s plain-text `final_result` — that string is what
             // both the text `trajectory` and the JSON-prompt `observation` are built
@@ -1960,11 +2274,11 @@ where
             // data URI is stashed here by `call_id` instead, and re-attached as a
             // real `ContentBlock::Image` when building `native_messages` below, so
             // the model actually sees the pixels instead of a truncated text blob.
-            let mut step_images: std::collections::HashMap<String, String> =
+            let mut step_images: std::collections::HashMap<String, Vec<String>> =
                 std::collections::HashMap::new();
 
             if decisions_are_parallel_subagent_batch(&decisions) {
-                step_tool_results = run_parallel_subagent_batch(
+                let completed = run_parallel_subagent_batch(
                     &decisions,
                     step,
                     &root,
@@ -1976,8 +2290,10 @@ where
                     &mut trajectory,
                 )
                 .await;
+                invalid_tool_calls.observe_completed(&completed);
+                step_tool_results.extend(completed);
             } else if decisions_are_parallel_read_only_batch(&decisions) {
-                step_tool_results = run_parallel_read_only_batch(
+                let completed = run_parallel_read_only_batch(
                     &decisions,
                     step,
                     &root,
@@ -1993,8 +2309,11 @@ where
                     fast_mode,
                 )
                 .await;
+                invalid_tool_calls.observe_completed(&completed);
+                step_tool_results.extend(completed);
             } else {
                 for (call_id, decision) in decisions {
+                    if run_control::cancelled() { turn.interrupt(); return Err(OrchestrationError::Agent("Agent turn canceled by user".into())); }
                     let d_thought = decision.thought.trim();
                     if !fast_mode && !d_thought.is_empty() {
                         let already_extended = extended_emitted
@@ -2127,6 +2446,20 @@ where
                             on_chunk(remainder.to_owned());
                         }
 
+                        if config.auto_skill_writing && allow_subagent_dispatch && !run_control::cancelled() && looks_skill_worthy(step, &action_counts) {
+                            match auto_write_skill(config, task, &summary, &root, &skills, &mut approve).await {
+                                Ok(Some(message)) => {
+                                    on_chunk(format!("\n\n{message}"));
+                                    summary.push_str(&format!("\n\n{message}"));
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    let message = format!("Skill proposal was not saved: {error}");
+                                    on_chunk(format!("\n\n{message}"));
+                                    summary.push_str(&format!("\n\n{message}"));
+                                }
+                            }
+                        }
                         memory.save_workspace_session(
                             &root.to_string_lossy(),
                             &summary,
@@ -2145,15 +2478,6 @@ where
                             summary.clone(),
                             turn.id,
                         );
-                        if config.auto_skill_writing && looks_skill_worthy(step, &action_counts) {
-                            spawn_auto_skill_write(
-                                config.clone(),
-                                task.to_string(),
-                                summary.clone(),
-                                root.clone(),
-                                skills.clone(),
-                            );
-                        }
                         let run_summary = RunTelemetrySummary {
                             run_id: format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
                             task: task.to_string(),
@@ -2170,6 +2494,7 @@ where
                             tool_timeline: executed_tools.clone(),
                             retries_count: executed_tools.iter().filter(|t| t.retried).count(),
                         };
+                        let _ = execute_mod_requests(&root, chat_id, config, plan_mode, &mut approve, &mut progress, None).await;
                         progress(AgentProgress::RunCompleted {
                             summary: run_summary,
                         });
@@ -2194,6 +2519,27 @@ where
                         });
                     }
 
+                    if decision.action == "mcp_tool" && mcp_review.blocks_repeat(&decision.input.server,&decision.input.tool,&decision.input.arguments) {
+                        let message="Error: Automatic repeat blocked: this Device command's completion is unconfirmed. Read its status or wait for a new user instruction; do not send the command again this turn.".to_string();
+                        trajectory.push(format_trajectory_step(step,&decision.thought,&decision.action,&message));
+                        step_tool_results.push((call_id.clone(),decision.action.clone(),tool_progress_input(&root,&decision),message).into());
+                        continue;
+                    }
+
+                    if decision.action == "mcp_tool" && !plan_mode
+                        && pinned_mcp_server.is_none_or(|p|p==decision.input.server)
+                        && let Some(preparation) = tools::plugins_mcp::prepare(
+                            &decision.input,config,chat_id,&mut mcp_review,&mut approve,&mut progress,
+                        ).await? {
+                            if preparation.status == crate::mcp_result::ToolStatus::Cancelled || run_control::cancelled() {
+                                progress(AgentProgress::Thought{thought:preparation.text.clone()});
+                                turn.interrupt();return Err(OrchestrationError::Agent(preparation.text));
+                            }
+                            trajectory.push(format_trajectory_step(step,&decision.thought,&decision.action,&preparation.text));
+                            step_tool_results.push(ToolResultEntry{call_id:call_id.clone(),action:decision.action.clone(),input:tool_progress_input(&root,&decision),text:preparation.text,status:preparation.status});
+                            continue;
+                    }
+
                     let action_key = action_fingerprint(&decision);
                     let action_count = {
                         let count = action_counts.entry(action_key).or_insert(0);
@@ -2205,6 +2551,10 @@ where
                     // stays false for plan-mode/hook blocks and the duplicate-shell skip, since
                     // those don't actually run anything and shouldn't count toward verification.
                     let mut action_succeeded = false;
+                    let mut outcome_status = None;
+                    // Provider tool IDs may restart at call_0 on the next model step.
+                    // Activity and artifact IDs must identify this invocation across the chat.
+                    let activity_call_id = uuid::Uuid::new_v4().to_string();
                     let target_file_existed = match decision.action.as_str() {
                         "write_file" => {
                             !decision.input.path.is_empty()
@@ -2303,8 +2653,8 @@ where
                         )
                     } else {
                         let input_val =
-                            serde_json::to_value(&decision.input).unwrap_or(Value::Null);
-                        progress(AgentProgress::ToolStart {
+                            tool_progress_input(&root, &decision);
+                        progress(AgentProgress::ToolStart { call_id: Some(activity_call_id.clone()),
                             action: decision.action.clone(),
                             input: input_val.clone(),
                             subagent: None,
@@ -2342,20 +2692,31 @@ where
                                     );
                                 }
 
-                                let (tool_result, success) = match execute_tool(
+                                let (tool_result, success) = match execute_tool_outcome_reviewed(
                                     &root,
                                     config,
                                     &decision,
                                     chat_id,
                                     &mut approve,
                                     &mut progress,
+                                    &activity_call_id,
+                                    Some(&mcp_review),
                                 )
                                 .await
                                 {
-                                    Ok(result) => (result, true),
+                                    Ok(outcome) => {
+                                        if decision.action=="mcp_tool" {mcp_review.record_result(&decision.input.server,&decision.input.tool,&decision.input.arguments,&outcome);}
+                                        if matches!(decision.action.as_str(),"mcp_tool"|"mcp_list_tools") { outcome_status = Some(outcome.status); }
+                                        if !outcome.images.is_empty() { step_images.insert(call_id.clone(), outcome.images); }
+                                        let success = outcome.status == crate::integrations::mcp_result::ToolStatus::Success;
+                                        (outcome.text, success)
+                                    },
                                     Err(error) => (format!("Error: {}", error), false),
                                 };
                                 action_succeeded = success;
+                                if success {
+                                    invalid_tool_calls.succeeded(&decision.action);
+                                }
                                 let hook_messages = crate::hooks::run_post_tool_hooks(
                                     &hooks,
                                     &decision.action,
@@ -2381,9 +2742,17 @@ where
                         }
                     };
 
-                    progress(AgentProgress::ToolEnd {
+                    if outcome_status.is_none() && matches!(decision.action.as_str(), "mcp_tool" | "mcp_list_tools") {
+                        outcome_status = Some(if action_succeeded {
+                            crate::integrations::mcp_result::ToolStatus::Success
+                        } else {
+                            crate::integrations::mcp_result::ToolStatus::Failed
+                        });
+                    }
+                    if run_control::cancelled() {outcome_status = Some(crate::mcp_result::ToolStatus::Cancelled);}
+                    progress(AgentProgress::ToolEnd { elapsed_ms: None, call_id: Some(activity_call_id), status: outcome_status,
                         action: decision.action.clone(),
-                        input: serde_json::to_value(&decision.input).unwrap_or(Value::Null),
+                        input: tool_progress_input(&root, &decision),
                         result: result.clone(),
                         subagent: None,
                     });
@@ -2408,6 +2777,11 @@ where
                         success,
                         retried,
                     });
+
+                    if outcome_status == Some(crate::integrations::mcp_result::ToolStatus::Cancelled) {
+                        turn.interrupt();
+                        return Err(OrchestrationError::Agent(result));
+                    }
 
                     if action_succeeded {
                         match decision.action.as_str() {
@@ -2452,7 +2826,7 @@ where
                                 | "video_waveform"
                                 | "view_image"
                         ) {
-                        step_images.insert(call_id.clone(), result.clone());
+                        step_images.insert(call_id.clone(), vec![result.clone()]);
                         match decision.action.as_str() {
                             "video_filmstrip" => "[Filmstrip generated — see attached image: \
                                 sampled frames across the video timeline]"
@@ -2464,7 +2838,7 @@ where
                             _ => "[Screenshot captured — see attached image]".to_string(),
                         }
                     } else {
-                        if decision.action.starts_with("browser_") {result.clone()} else {truncate(&result)}
+                        model_tool_result(&decision.action, &result)
                     };
                     if matches!(
                         decision.action.as_str(),
@@ -2505,54 +2879,42 @@ where
                         &final_result,
                     ));
 
-                    step_tool_results.push((
-                        call_id,
-                        decision.action.clone(),
-                        serde_json::to_value(&decision.input).unwrap_or(Value::Null),
-                        final_result,
-                    ));
+                    step_tool_results.push(ToolResultEntry {
+                        call_id, action:decision.action.clone(), input:tool_progress_input(&root,&decision),
+                        text:final_result, status:outcome_status.unwrap_or(if success {crate::mcp_result::ToolStatus::Success}else{crate::mcp_result::ToolStatus::Failed}),
+                    });
                 } // end `for (call_id, decision) in decisions`
             } // end `else` (sequential path)
 
-            if tool_mode == ToolCallingMode::Native {
-                let mut assistant_content: Vec<ContentBlock> = Vec::new();
-                let response_text = response.text.trim();
-                if !response_text.is_empty() {
-                    assistant_content.push(ContentBlock::Text {
-                        text: response_text.to_string(),
-                    });
-                }
-                let mut tool_result_content: Vec<ContentBlock> = Vec::new();
-                for (call_id, action, input_value, final_result) in &step_tool_results {
-                    assistant_content.push(ContentBlock::ToolUse {
-                        id: call_id.clone(),
-                        name: action.clone(),
-                        input: input_value.clone(),
-                        thought_signature: step_thought_signatures.get(call_id).cloned(),
-                    });
-                    tool_result_content.push(ContentBlock::ToolResult {
-                        tool_use_id: call_id.clone(),
-                        content: final_result.clone(),
-                        is_error: false,
-                    });
-                    if let Some(data_uri) = step_images.get(call_id) {
-                        tool_result_content.push(ContentBlock::Image {
-                            data_uri: data_uri.clone(),
-                        });
+            if run_control::cancelled() { turn.interrupt(); return Err(OrchestrationError::Agent("Agent turn canceled by user".into())); }
+
+            // All interfaces and both native/JSON tool modes share this guard.
+            // Inspect failures, not action counts: legitimate repeated reads
+            // and successful edits must not be stopped as loops.
+            match repeated_failures.observe(step, &mut step_tool_results) {
+                Ok(warnings) => {
+                    for warning in warnings {
+                        progress(AgentProgress::Thought { thought: warning.clone() });
+                        trajectory.push(format!("Step {step} loop warning: {warning}"));
                     }
                 }
-                if !assistant_content.is_empty() {
-                    native_messages.push(ChatMessage {
-                        role: ChatRole::Assistant,
-                        content: assistant_content,
-                    });
+                Err(error) => {
+                    progress(AgentProgress::Thought { thought: error.to_string() });
+                    return Err(error);
                 }
-                if !tool_result_content.is_empty() {
-                    native_messages.push(ChatMessage {
-                        role: ChatRole::Tool,
-                        content: tool_result_content,
-                    });
-                }
+            }
+
+            if tool_mode == ToolCallingMode::JsonPrompt && !step_images.is_empty() {
+                pending_image = Some(step_images.values().flatten().cloned().collect::<Vec<_>>().join(" "));
+            }
+            if tool_mode == ToolCallingMode::Native {
+                append_native_tool_results(
+                    &mut native_messages,
+                    response.text.trim(),
+                    &step_tool_results,
+                    &step_thought_signatures,
+                    &step_images,
+                );
 
                 if let Some(total_tokens) = response.total_tokens {
                     let window = active_config.context_window_tokens();
@@ -2560,38 +2922,20 @@ where
                         ((total_tokens as f64 / window as f64) * 100.0).clamp(0.0, 255.0) as u8,
                     );
                     if (total_tokens as f64) >= (window as f64) * COMPACTION_TRIGGER_RATIO {
-                        match compact_native_messages(&active_config, &native_messages).await {
-                            Ok(Some((compacted, fallback_provider))) => {
-                                native_messages = compacted;
-                                let fallback_note = fallback_provider
-                                    .as_deref()
-                                    .map(|p| {
-                                        format!(
-                                            " (summary generated via fallback provider \
-                                             \"{p}\" — the primary provider failed for this \
-                                             call)"
-                                        )
-                                    })
-                                    .unwrap_or_default();
-                                progress(AgentProgress::Thought {
-                                    thought: format!(
-                                        "[Context] Compacted earlier steps to stay under the \
-                                     context window ({total_tokens}/{window} tokens before \
-                                     compaction){fallback_note}."
-                                    ),
-                                });
-                            }
-                            // Nothing worth compacting yet (too little history) — routine, no warning.
-                            Ok(None) => {}
-                            Err(error) => {
-                                progress(AgentProgress::Thought {
-                                    thought: format!(
-                                        "[Context] Context is approaching the model's window \
-                                     ({total_tokens}/{window} tokens) but compaction failed: \
-                                     {error}. Continuing without compacting this step."
-                                    ),
-                                });
-                            }
+                        let eligible = native_messages.len().saturating_sub(1) / 2 > COMPACTION_KEEP_RECENT_STEPS;
+                        if let Ok(Some((compacted, _))) = run_control::run(report_context_compaction(
+                            eligible,
+                            total_tokens,
+                            window,
+                            compact_native_messages(&active_config, &native_messages),
+                            &mut progress,
+                        )).await {
+                            native_messages = compacted;
+                            let payload = mod_usage.compacted();
+                            let _ = crate::mods::event(&root, chat_id, "context_compacted", payload, None);
+                            // Wait for actual usage from the next request, rather than
+                            // displaying the pre-compaction percentage as current.
+                            last_context_pct = None;
                         }
                     }
                 }
@@ -2626,11 +2970,23 @@ where
             MAX_STEPS, crate::browser::session_last_state().await
         )))
         }).await;
-        if agent_result.is_err() {
-            turn.fail();
-        }
-        agent_result
-    })
+            if agent_result.is_err() && !turn.finished {
+                if run_control::cancelled() {
+                    turn.interrupt();
+                } else {
+                    turn.fail();
+                }
+            }
+            let mut mod_turn_end = mod_usage.finish();
+            mod_turn_end["success"] = serde_json::json!(agent_result.is_ok());
+            mod_turn_end["cancelled"] = serde_json::json!(run_control::cancelled());
+            let _ = crate::mods::event(&root, chat_id, "turn_end", mod_turn_end, None);
+            if run_control::cancelled() {
+                crate::mods::close_chat(&root, chat_id);
+            }
+            agent_result
+        },
+    ))
 }
 
 /// Whether `action` may run while plan mode is active. `run_shell` gets a
@@ -2770,20 +3126,39 @@ async fn dispatch_one_subagent(
     let subagent_name = definition.name.clone();
     let mut nested_progress = |event: AgentProgress| {
         let tagged = match event {
-            AgentProgress::ToolStart { action, input, .. } => AgentProgress::ToolStart {
+            AgentProgress::ToolStart {
+                action,
+                input,
+                call_id,
+                ..
+            } => AgentProgress::ToolStart {
+                call_id,
                 action,
                 input,
                 subagent: Some(subagent_name.clone()),
             },
             AgentProgress::ToolEnd {
+                elapsed_ms,
                 action,
                 input,
                 result,
+                call_id,
+                status,
                 ..
             } => AgentProgress::ToolEnd {
+                elapsed_ms,
+                call_id,
+                status,
                 action,
                 input,
                 result,
+                subagent: Some(subagent_name.clone()),
+            },
+            AgentProgress::ContextCompaction {
+                status, message, ..
+            } => AgentProgress::ContextCompaction {
+                status,
+                message,
                 subagent: Some(subagent_name.clone()),
             },
             other => other,
@@ -2828,17 +3203,9 @@ async fn dispatch_one_subagent(
     outcome
 }
 
-/// Runs a step's `dispatch_subagent` decisions concurrently (see
-/// `decisions_are_parallel_subagent_batch` for when this is used instead of
-/// the normal one-at-a-time loop), capped at `PARALLEL_SUBAGENT_LIMIT` in
-/// flight at once. `progress`/`action_counts`/`trajectory` are only touched
-/// after every future has completed — back in single-threaded code, in the
-/// decisions' original order — so this never needs to share those across
-/// concurrent tasks. `approve` is the one resource genuinely needed *during*
-/// concurrent execution (a subagent's own risky actions still need real user
-/// approval), so it's wrapped in a `std::sync::Mutex` for the batch: each
-/// concurrent subagent gets a small adapter closure over a shared `&Mutex`,
-/// serializing just the moment of invoking it rather than the whole call.
+/// Runs subagent decisions concurrently, capped at `PARALLEL_SUBAGENT_LIMIT`.
+/// Progress and approvals use short Mutex-backed adapters during execution;
+/// action counts and trajectory are updated afterward in decision order.
 #[allow(clippy::too_many_arguments)]
 async fn run_parallel_subagent_batch(
     decisions: &[(String, AgentDecision)],
@@ -2850,7 +3217,7 @@ async fn run_parallel_subagent_batch(
     progress: &mut (dyn FnMut(AgentProgress) + Send),
     action_counts: &mut BTreeMap<String, usize>,
     trajectory: &mut Vec<String>,
-) -> Vec<(String, String, Value, String)> {
+) -> Vec<ToolResultEntry> {
     let approve_mutex = std::sync::Mutex::new(approve);
     // Concurrently-running subagents share one real `progress` sink the same
     // way they share one real `approve` gate above — each gets a small
@@ -2865,13 +3232,23 @@ async fn run_parallel_subagent_batch(
         let call_id = call_id.clone();
         let thought = decision.thought.clone();
         let action = decision.action.clone();
-        let input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+        let input_val = tool_progress_input(&root, &decision);
         let action_key = action_fingerprint(decision);
         let name = decision.input.name.clone();
         let task_text = decision.input.instruction.clone();
         let approve_mutex = &approve_mutex;
         let progress_mutex = &progress_mutex;
         dispatches.push(async move {
+            let mut progress_adapter = |event: AgentProgress| {
+                let mut guard = progress_mutex.lock().unwrap();
+                (*guard)(event);
+            };
+            progress_adapter(AgentProgress::ToolStart {
+                call_id: Some(call_id.clone()),
+                action: action.clone(),
+                input: input_val.clone(),
+                subagent: None,
+            });
             let result: Result<String, OrchestrationError> = if name.trim().is_empty() {
                 Err(OrchestrationError::Agent("name is required".into()))
             } else if task_text.trim().is_empty() {
@@ -2882,10 +3259,6 @@ async fn run_parallel_subagent_batch(
                         let mut guard = approve_mutex.lock().unwrap();
                         (*guard)(approval)
                     };
-                let mut progress_adapter = |event: AgentProgress| {
-                    let mut guard = progress_mutex.lock().unwrap();
-                    (*guard)(event);
-                };
                 dispatch_one_subagent(
                     root,
                     config,
@@ -2897,8 +3270,27 @@ async fn run_parallel_subagent_batch(
                 )
                 .await
             };
+            let tool_result = match result {
+                Ok(text) => text,
+                Err(error) => format!("Error: {}", error),
+            };
+            progress_adapter(AgentProgress::ToolEnd {
+                elapsed_ms: None,
+                call_id: Some(call_id.clone()),
+                status: None,
+                action: action.clone(),
+                input: input_val.clone(),
+                result: tool_result.clone(),
+                subagent: None,
+            });
             (
-                index, call_id, thought, action, input_val, action_key, result,
+                index,
+                call_id,
+                thought,
+                action,
+                input_val,
+                action_key,
+                tool_result,
             )
         });
     }
@@ -2908,35 +3300,14 @@ async fn run_parallel_subagent_batch(
         .collect::<Vec<_>>()
         .await;
     results.sort_by_key(|(index, ..)| *index);
-    // All `dispatches` futures (the only borrowers of `progress_mutex`) have
-    // finished by now, so this is the sole remaining handle — safe to unwrap
-    // back into a plain `&mut dyn FnMut` for the rest of this function.
-    let progress = progress_mutex.into_inner().unwrap();
-
     let mut step_tool_results = Vec::with_capacity(results.len());
-    for (_, call_id, thought, action, input_val, action_key, result) in results {
-        progress(AgentProgress::ToolStart {
-            action: action.clone(),
-            input: input_val.clone(),
-            subagent: None,
-        });
-        let tool_result = match result {
-            Ok(text) => text,
-            Err(error) => format!("Error: {}", error),
-        };
-        progress(AgentProgress::ToolEnd {
-            action: action.clone(),
-            input: input_val.clone(),
-            result: tool_result.clone(),
-            subagent: None,
-        });
-
+    for (_, call_id, thought, action, input_val, action_key, tool_result) in results {
         let action_count = {
             let count = action_counts.entry(action_key).or_insert(0);
             *count += 1;
             *count
         };
-        let mut final_result = truncate(&tool_result);
+        let mut final_result = model_tool_result(&action, &tool_result);
         if action_count >= 3 && !action.starts_with("browser_") {
             final_result.push_str(
                 "\n\n[System Tip: You repeated the same tool action three or more times. \
@@ -2951,7 +3322,7 @@ async fn run_parallel_subagent_batch(
             &action,
             &final_result,
         ));
-        step_tool_results.push((call_id, action, input_val, final_result));
+        step_tool_results.push((call_id, action, input_val, final_result).into());
     }
     step_tool_results
 }
@@ -2967,11 +3338,11 @@ async fn run_parallel_read_only_batch(
     progress: &mut (dyn FnMut(AgentProgress) + Send),
     action_counts: &mut BTreeMap<String, usize>,
     trajectory: &mut Vec<String>,
-    step_images: &mut std::collections::HashMap<String, String>,
+    step_images: &mut std::collections::HashMap<String, Vec<String>>,
     hooks: &[crate::hooks::HookEntry],
     pinned_mcp_server: Option<&str>,
     fast_mode: bool,
-) -> Vec<(String, String, Value, String)> {
+) -> Vec<ToolResultEntry> {
     let approve_mutex = std::sync::Mutex::new(approve);
     let progress_mutex = std::sync::Mutex::new(progress);
 
@@ -2980,7 +3351,7 @@ async fn run_parallel_read_only_batch(
         let call_id = call_id.clone();
         let thought = decision.thought.clone();
         let action = decision.action.clone();
-        let input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+        let input_val = tool_progress_input(&root, &decision);
         let action_key = action_fingerprint(decision);
         let approve_mutex = &approve_mutex;
         let progress_mutex = &progress_mutex;
@@ -3005,7 +3376,7 @@ async fn run_parallel_read_only_batch(
 
             {
                 let mut guard = progress_mutex.lock().unwrap();
-                (*guard)(AgentProgress::ToolStart {
+                (*guard)(AgentProgress::ToolStart { call_id: Some(call_id.clone()),
                     action: action.clone(),
                     input: input_val.clone(),
                     subagent: None,
@@ -3080,7 +3451,7 @@ async fn run_parallel_read_only_batch(
 
             {
                 let mut guard = progress_mutex.lock().unwrap();
-                (*guard)(AgentProgress::ToolEnd {
+                (*guard)(AgentProgress::ToolEnd { elapsed_ms: None, call_id: Some(call_id.clone()), status: None,
                     action: action.clone(),
                     input: input_val.clone(),
                     result: result.clone(),
@@ -3114,7 +3485,7 @@ async fn run_parallel_read_only_batch(
                 action.as_str(),
                 "browser_screenshot" | "video_filmstrip" | "video_waveform" | "view_image"
             ) {
-            step_images.insert(call_id.clone(), result.clone());
+            step_images.insert(call_id.clone(), vec![result.clone()]);
             match action.as_str() {
                 "video_filmstrip" => {
                     "[Filmstrip generated — see attached image: sampled frames across the video timeline]".to_string()
@@ -3126,7 +3497,7 @@ async fn run_parallel_read_only_batch(
                 _ => "[Screenshot captured — see attached image]".to_string(),
             }
         } else {
-            truncate(&result)
+            model_tool_result(&action, &result)
         };
 
         if action_count >= 3 && !action.starts_with("browser_") {
@@ -3144,7 +3515,7 @@ async fn run_parallel_read_only_batch(
             &final_result,
         ));
 
-        step_tool_results.push((call_id, action, input_val, final_result));
+        step_tool_results.push((call_id, action, input_val, final_result).into());
     }
 
     step_tool_results
@@ -3166,11 +3537,211 @@ async fn execute_tool(
     config: &MintConfig,
     decision: &AgentDecision,
     chat_id: &str,
+    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
+) -> Result<String, OrchestrationError> {
+    Ok(execute_tool_outcome(
+        root,
+        config,
+        decision,
+        chat_id,
+        approve,
+        progress,
+        &uuid::Uuid::new_v4().to_string(),
+    )
+    .await?
+    .text)
+}
+
+async fn execute_tool_outcome(
+    root: &Path,
+    config: &MintConfig,
+    decision: &AgentDecision,
+    chat_id: &str,
+    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
+    call_id: &str,
+) -> Result<crate::integrations::mcp_result::ToolOutcome, OrchestrationError> {
+    execute_tool_outcome_reviewed(
+        root, config, decision, chat_id, approve, progress, call_id, None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_tool_outcome_reviewed(
+    root: &Path,
+    config: &MintConfig,
+    decision: &AgentDecision,
+    chat_id: &str,
+    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
+    call_id: &str,
+    expected: Option<&mcp_review::McpReview>,
+) -> Result<crate::integrations::mcp_result::ToolOutcome, OrchestrationError> {
+    run_control::check()?;
+    let origin = MOD_ORIGIN.try_with(Clone::clone).ok().flatten();
+    let input = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+    crate::mods::event(
+        root,
+        chat_id,
+        "pre_tool_use",
+        serde_json::json!({"callId":call_id,"action":decision.action,"input":input}),
+        origin.as_deref(),
+    )
+    .map_err(OrchestrationError::Agent)?;
+    let result = execute_tool_outcome_reviewed_inner(
+        root, config, decision, chat_id, approve, progress, call_id, expected,
+    )
+    .await;
+    let _ = crate::mods::event(
+        root,
+        chat_id,
+        "post_tool_use",
+        serde_json::json!({"callId":call_id,"action":decision.action,"input":input,"result":result.as_ref().map(|r|r.text.clone()).unwrap_or_else(|e|e.to_string()),"success":result.is_ok()}),
+        origin.as_deref(),
+    );
+    result
+}
+
+tokio::task_local! { static MOD_ORIGIN: Option<String>; }
+
+/// Run queued requests through the same policy and approval path as agent tools.
+pub async fn execute_mod_requests(
+    root: &Path,
+    chat: &str,
+    config: &MintConfig,
+    plan_mode: bool,
+    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
+    selected: Option<&[String]>,
+) -> Result<(), String> {
+    let requests = match selected {
+        Some(ids) => crate::mods::take_selected_requests(root, chat, ids)?,
+        None => crate::mods::take_requests(root, chat)?,
+    };
+    let (remembered_plan, pin) = crate::mods::turn_policy(root, chat);
+    let plan_mode = plan_mode || remembered_plan;
+    for request in requests {
+        let action = request["action"].as_str().unwrap_or("");
+        let id = request["modId"].as_str().unwrap_or("");
+        let input = match decode_agent_input(request["input"].clone()) {
+            Ok(input) => input,
+            Err(error) => {
+                crate::mods::complete_request(
+                    root,
+                    chat,
+                    id,
+                    request["hash"].as_str().unwrap_or(""),
+                    serde_json::json!({"requestId":request["id"],"action":action,"error":error}),
+                )?;
+                continue;
+            }
+        };
+        let allowed = crate::prompts::agent::base_allowed_actions().contains(&action)
+            && !action.starts_with("mod_")
+            && !config.disabled_tools.iter().any(|t| t == action)
+            && (!plan_mode || plan_mode_allows(action, &input))
+            && pin.as_deref().is_none_or(|p| {
+                !matches!(action, "mcp_tool" | "mcp_list_tools") || input.server == p
+            });
+        let result = if allowed {
+            let decision = AgentDecision {
+                thought: String::new(),
+                action: action.into(),
+                input,
+            };
+            MOD_ORIGIN
+                .scope(
+                    Some(id.into()),
+                    execute_tool_outcome_reviewed(
+                        root,
+                        config,
+                        &decision,
+                        chat,
+                        approve,
+                        progress,
+                        request["id"].as_str().unwrap_or(""),
+                        None,
+                    ),
+                )
+                .await
+                .map(|r| r.text)
+                .map_err(|e| e.to_string())
+        } else {
+            Err("This tool is unavailable to mods in the current mode".into())
+        };
+        crate::mods::complete_request(
+            root,
+            chat,
+            id,
+            request["hash"].as_str().unwrap_or(""),
+            serde_json::json!({"requestId":request["id"],"action":action,"result":result.as_ref().ok(),"error":result.as_ref().err()}),
+        )?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_tool_outcome_reviewed_inner(
+    root: &Path,
+    config: &MintConfig,
+    decision: &AgentDecision,
+    chat_id: &str,
+    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
+    call_id: &str,
+    expected: Option<&mcp_review::McpReview>,
+) -> Result<crate::integrations::mcp_result::ToolOutcome, OrchestrationError> {
+    run_control::check()?;
+    if matches!(decision.action.as_str(), "mcp_tool" | "mcp_list_tools") {
+        let mut out = tools::plugins_mcp::execute_reviewed(
+            &decision.action,
+            &decision.input,
+            config,
+            chat_id,
+            call_id,
+            expected,
+            approve,
+            progress,
+        )
+        .await?;
+        if !out.images.is_empty()
+            && config.extra.get("mcpImageInput").and_then(Value::as_bool) == Some(false)
+        {
+            out.images.clear();
+            let warning="Model image input is disabled for MCP. Use attachment metadata only; do not claim visual inspection.".to_string();
+            out.text.push_str(&format!("\nWarning: {warning}"));
+            out.warnings.push(warning);
+        }
+        if !out.artifacts.is_empty() || !out.warnings.is_empty() {
+            progress(AgentProgress::ToolArtifacts {
+                call_id: call_id.into(),
+                artifacts: out.artifacts.clone(),
+                warnings: out.warnings.clone(),
+            });
+        }
+        Ok(out)
+    } else {
+        execute_tool_text(root, config, decision, chat_id, approve, progress)
+            .await
+            .map(Into::into)
+    }
+}
+
+async fn execute_tool_text(
+    root: &Path,
+    config: &MintConfig,
+    decision: &AgentDecision,
+    chat_id: &str,
     approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
     progress: &mut (dyn FnMut(AgentProgress) + Send),
 ) -> Result<String, OrchestrationError> {
     let input = &decision.input;
     match decision.action.as_str() {
+        "mod_help" | "mod_list" | "mod_validate" | "mod_publish" => {
+            tools::mods::execute(&decision.action, input, root, config, chat_id, approve_cb).await
+        }
         "list_files" | "read_file" | "note_write" | "apply_patch" | "write_file" => {
             tools::files::execute(
                 decision.action.as_str(),
@@ -3374,17 +3945,544 @@ where
     let decision = AgentDecision {
         thought: String::new(),
         action: action.to_string(),
-        input: serde_json::from_value(input).unwrap_or_default(),
+        input: parse_tool_input(action, input)?,
     };
     // No progress channel from the realtime voice session — tool-call
     // activity isn't surfaced there the way it is in the CLI/GUI.
     execute_tool(root, config, &decision, chat_id, approve_cb, &mut |_| {}).await
 }
 
+fn parse_tool_input(action: &str, input: Value) -> Result<AgentInput, OrchestrationError> {
+    decode_agent_input(input).map_err(|error| {
+        OrchestrationError::Agent(format!("invalid arguments for tool '{action}': {error}"))
+    })
+}
+
+fn append_native_tool_results(
+    messages: &mut Vec<ChatMessage>,
+    response_text: &str,
+    results: &[ToolResultEntry],
+    signatures: &std::collections::HashMap<String, String>,
+    images: &std::collections::HashMap<String, Vec<String>>,
+) {
+    let mut assistant_content: Vec<ContentBlock> = Vec::new();
+    if !response_text.is_empty() {
+        assistant_content.push(ContentBlock::Text {
+            text: response_text.to_string(),
+        });
+    }
+    let mut tool_result_content: Vec<ContentBlock> = Vec::new();
+    for ToolResultEntry {
+        call_id,
+        action,
+        input: input_value,
+        text: final_result,
+        status,
+    } in results
+    {
+        // Activity annotations are for the UI, not parameters of the provider tool schema.
+        let mut tool_input = input_value.clone();
+        if let Some(object) = tool_input.as_object_mut() {
+            object.remove("skill_name");
+        }
+        assistant_content.push(ContentBlock::ToolUse {
+            id: call_id.clone(),
+            name: action.clone(),
+            input: tool_input,
+            thought_signature: signatures.get(call_id).cloned(),
+        });
+        tool_result_content.push(ContentBlock::ToolResult {
+            tool_use_id: call_id.clone(),
+            content: final_result.clone(),
+            is_error: *status != crate::mcp_result::ToolStatus::Success,
+        });
+        if let Some(data_uris) = images.get(call_id) {
+            for data_uri in data_uris {
+                tool_result_content.push(ContentBlock::Image {
+                    data_uri: data_uri.clone(),
+                });
+            }
+        }
+    }
+    if !assistant_content.is_empty() {
+        messages.push(ChatMessage {
+            role: ChatRole::Assistant,
+            content: assistant_content,
+        });
+    }
+    if !tool_result_content.is_empty() {
+        messages.push(ChatMessage {
+            role: ChatRole::Tool,
+            content: tool_result_content,
+        });
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ToolResultEntry {
+    call_id: String,
+    action: String,
+    input: Value,
+    text: String,
+    status: crate::mcp_result::ToolStatus,
+}
+
+// Legacy tools determine their outcome once at this adapter; MCP supplies its
+// explicit status directly, regardless of the wording of server text.
+impl From<(String, String, Value, String)> for ToolResultEntry {
+    fn from((call_id, action, input, text): (String, String, Value, String)) -> Self {
+        let mut status = crate::mcp_result::ToolOutcome::from(text.clone()).status;
+        if text.starts_with("Skipped")
+            || (matches!(
+                action.as_str(),
+                "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter"
+            ) && shell_result_failed(&text))
+        {
+            status = crate::mcp_result::ToolStatus::Failed;
+        }
+        Self {
+            call_id,
+            action,
+            input,
+            text,
+            status,
+        }
+    }
+}
+type PreparedToolCalls = (Vec<(String, AgentDecision)>, Vec<ToolResultEntry>);
+
+#[derive(Debug, Default)]
+struct ToolArgumentRetries {
+    failures: BTreeMap<String, usize>,
+}
+
+impl ToolArgumentRetries {
+    fn succeeded(&mut self, tool: &str) {
+        self.failures.remove(tool);
+    }
+
+    fn observe_completed(&mut self, results: &[ToolResultEntry]) {
+        for ToolResultEntry {
+            action: tool,
+            status,
+            ..
+        } in results
+        {
+            // Parallel batches encode execution errors and hook blocks in
+            // their results. Neither is a successful execution.
+            if *status == crate::mcp_result::ToolStatus::Success {
+                self.succeeded(tool);
+            }
+        }
+    }
+}
+
+/// Invalid calls never become executable decisions. Return their original
+/// arguments and call IDs so the next model turn can repair them.
+fn prepare_native_tool_calls(
+    calls: Vec<crate::chat::ToolCall>,
+    thought: &str,
+    retries: &mut ToolArgumentRetries,
+) -> Result<PreparedToolCalls, OrchestrationError> {
+    let mut decisions = Vec::new();
+    let mut errors = Vec::new();
+    for (index, call) in calls.into_iter().enumerate() {
+        match parse_tool_input(&call.name, call.input.clone()) {
+            Ok(input) => decisions.push((
+                call.id,
+                AgentDecision {
+                    thought: if index == 0 {
+                        thought.to_owned()
+                    } else {
+                        String::new()
+                    },
+                    action: call.name,
+                    input,
+                },
+            )),
+            Err(error) => {
+                let invalid_count = retries.failures.entry(call.name.clone()).or_default();
+                if *invalid_count >= MAX_TOOL_ARGUMENT_RETRIES {
+                    return Err(OrchestrationError::Agent(format!(
+                        "Tool '{}' exhausted its {MAX_TOOL_ARGUMENT_RETRIES} argument-correction retries without a successful execution. Other tools have independent budgets. {error}",
+                        call.name
+                    )));
+                }
+                *invalid_count += 1;
+                errors.push((call.id, call.name, call.input, format!(
+                    "Error: {error}. No tool was executed for this call. Correct the arguments to match the tool schema, or choose another suitable tool. Correction retries for this tool: {}/{MAX_TOOL_ARGUMENT_RETRIES}. This counter resets only after this tool executes successfully; changing arguments alone does not reset it. Other tools have independent counters. Continued failures for this tool will stop the run.",
+                    *invalid_count,
+                )).into());
+            }
+        }
+    }
+    Ok((decisions, errors))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::AgentConfig;
+
+    #[test]
+    fn stringified_patch_uses_explicit_outer_target() {
+        let patch =
+            serde_json::json!({"hunks": [{"oldText": "old", "newText": "new"}]}).to_string();
+        let input = parse_tool_input(
+            "apply_patch",
+            serde_json::json!({"path": "style.css", "patch": patch}),
+        )
+        .unwrap();
+        let patch = input.patch.unwrap();
+        assert_eq!(patch.path, PathBuf::from("style.css"));
+        assert_eq!(patch.hunks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn stringified_patch_executes_only_after_approval_and_can_be_undone() {
+        let root = std::env::temp_dir().join(format!("mint-patch-repro-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("style.css"), "body { color: black; }").unwrap();
+        let config = MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            allowed_write_paths: vec![root.clone()],
+            blocked_paths: vec![],
+            blocked_file_names: vec![],
+            ..MintConfig::default()
+        };
+        let input = serde_json::json!({"path": "style.css", "patch": serde_json::json!({"hunks": [{"oldText": "black", "newText": "orange"}]}).to_string()});
+        execute_tool_from_json(
+            &root,
+            &config,
+            "apply_patch",
+            input.clone(),
+            "patch-repro",
+            &mut |_| Ok(ApprovalOutcome::Denied),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("style.css")).unwrap(),
+            "body { color: black; }"
+        );
+        execute_tool_from_json(
+            &root,
+            &config,
+            "apply_patch",
+            input,
+            "patch-repro",
+            &mut |_| Ok(ApprovalOutcome::Approved),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("style.css")).unwrap(),
+            "body { color: orange; }"
+        );
+        crate::system::workspace_history::undo(&root, None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("style.css")).unwrap(),
+            "body { color: black; }"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn patch_decoding_preserves_strict_types_and_rejects_ambiguous_targets() {
+        let patch = serde_json::json!({"path": "style.css", "hunks": [{"oldText": "old", "newText": "new"}]});
+        assert!(parse_tool_input("apply_patch", serde_json::json!({"patch": patch})).is_ok());
+        assert!(
+            parse_tool_input(
+                "apply_patch",
+                serde_json::json!({"path": "other.css", "patch": patch.to_string()})
+            )
+            .is_err()
+        );
+        assert!(
+            parse_tool_input(
+                "apply_patch",
+                serde_json::json!({"patch": "{\"hunks\": []}"})
+            )
+            .is_err()
+        );
+        assert!(parse_tool_input("apply_patch", serde_json::json!({"patch": "not JSON"})).is_err());
+        assert!(parse_tool_input("list_files", serde_json::json!({"limit": "100"})).is_err());
+        let huge = "private-code-marker".repeat(1000);
+        let error = parse_tool_input(
+            "apply_patch",
+            serde_json::json!({"patch": {"path": "style.css", "hunks": huge}}),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.len() < 600);
+        assert!(!error.contains("private-code-marker"));
+        let decision: AgentDecision = serde_json::from_value(serde_json::json!({"action": "apply_patch", "input": {"path": "style.css", "patch": serde_json::json!({"hunks": [{"oldText": "old", "newText": "new"}]}).to_string()}})).unwrap();
+        assert_eq!(
+            decision.input.patch.unwrap().path,
+            PathBuf::from("style.css")
+        );
+    }
+
+    fn test_list_call(id: &str, input: Value) -> crate::chat::ToolCall {
+        crate::chat::ToolCall {
+            id: id.into(),
+            name: "list_files".into(),
+            input,
+            thought_signature: Some("signature".into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn native_argument_error_is_returned_and_corrected_call_can_execute() {
+        let raw = serde_json::json!({"path": "Downloads/YOUTUBE_DL/playlist", "limit": "100"});
+        let mut count = ToolArgumentRetries::default();
+        let (decisions, errors) =
+            prepare_native_tool_calls(vec![test_list_call("bad", raw.clone())], "", &mut count)
+                .unwrap();
+        assert!(decisions.is_empty());
+        assert_eq!(errors.len(), 1);
+        let mut messages = Vec::new();
+        let signatures = std::collections::HashMap::from([("bad".into(), "signature".into())]);
+        append_native_tool_results(&mut messages, "", &errors, &signatures, &Default::default());
+        assert!(
+            matches!(&messages[0].content[0], ContentBlock::ToolUse { id, input, thought_signature, .. }
+            if id == "bad" && input == &raw && thought_signature.as_deref() == Some("signature"))
+        );
+        assert!(
+            matches!(&messages[1].content[0], ContentBlock::ToolResult { tool_use_id, content, is_error }
+            if tool_use_id == "bad" && *is_error && content.contains("Correct the arguments"))
+        );
+
+        let root =
+            std::env::temp_dir().join(format!("mint-tool-recovery-{}", uuid::Uuid::new_v4()));
+        let nested = root.join("Downloads/YOUTUBE_DL/playlist");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("song.txt"), "song").unwrap();
+        let config = MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            blocked_paths: vec![],
+            blocked_file_names: vec![],
+            ..MintConfig::default()
+        };
+        let (decisions, errors) = prepare_native_tool_calls(
+            vec![test_list_call(
+                "fixed",
+                serde_json::json!({"path": "Downloads/YOUTUBE_DL/playlist", "limit": 100}),
+            )],
+            "",
+            &mut count,
+        )
+        .unwrap();
+        assert!(errors.is_empty());
+        let output = execute_tool(
+            &root,
+            &config,
+            &decisions[0].1,
+            "regression",
+            &mut |_| panic!("listing must not request approval"),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+        let entries: Vec<Value> = serde_json::from_str(&output).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0]["path"],
+            serde_json::json!(nested.join("song.txt"))
+        );
+        // Parsing the repaired call alone must not renew its budget.
+        assert_eq!(count.failures["list_files"], 1);
+        count.observe_completed(&[
+            ("fixed".into(), "list_files".into(), Value::Null, output).into()
+        ]);
+        assert!(!count.failures.contains_key("list_files"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_invalid_calls_are_bounded_without_blocking_valid_alternatives() {
+        let mut count = ToolArgumentRetries::default();
+        for _ in 0..MAX_TOOL_ARGUMENT_RETRIES {
+            let (decisions, errors) = prepare_native_tool_calls(
+                vec![test_list_call(
+                    "bad",
+                    serde_json::json!({"path": "~/Downloads/YOUTUBE_DL", "limit": "100"}),
+                )],
+                "",
+                &mut count,
+            )
+            .unwrap();
+            assert!(decisions.is_empty());
+            assert_eq!(errors.len(), 1);
+        }
+        let alternative = crate::chat::ToolCall {
+            id: "alternative".into(),
+            name: "run_shell".into(),
+            input: serde_json::json!({"command": "ls ~/Downloads/YOUTUBE_DL"}),
+            thought_signature: None,
+        };
+        let (decisions, errors) =
+            prepare_native_tool_calls(vec![alternative], "", &mut count).unwrap();
+        assert_eq!(decisions[0].1.action, "run_shell");
+        assert!(errors.is_empty());
+        assert_eq!(count.failures["list_files"], MAX_TOOL_ARGUMENT_RETRIES);
+        let error =
+            prepare_native_tool_calls(vec![test_list_call("bad", Value::Null)], "", &mut count)
+                .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("exhausted its 5 argument-correction retries")
+        );
+        // One exhausted tool must not consume another tool's corrections.
+        let other = crate::chat::ToolCall {
+            id: "other-bad".into(),
+            name: "read_file".into(),
+            input: serde_json::json!({"path": 123}),
+            thought_signature: None,
+        };
+        let (_, errors) = prepare_native_tool_calls(vec![other], "", &mut count).unwrap();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(count.failures["read_file"], 1);
+        for result in [
+            "Error: execution failed",
+            "Blocked by hook",
+            "Skipped duplicate",
+        ] {
+            count.observe_completed(&[(
+                "x".into(),
+                "list_files".into(),
+                Value::Null,
+                result.into(),
+            )
+                .into()]);
+            assert_eq!(count.failures["list_files"], MAX_TOOL_ARGUMENT_RETRIES);
+        }
+        count.succeeded("list_files");
+        assert_eq!(count.failures["read_file"], 1);
+        assert!(!count.failures.contains_key("list_files"));
+        assert!(
+            prepare_native_tool_calls(vec![test_list_call("fresh", Value::Null)], "", &mut count)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn native_mixed_batch_keeps_valid_calls_and_matches_each_error_to_its_id() {
+        let mut count = ToolArgumentRetries::default();
+        let (decisions, errors) = prepare_native_tool_calls(
+            vec![
+                test_list_call("bad", Value::Null),
+                test_list_call("valid-1", serde_json::json!({"path": "."})),
+                test_list_call("valid-2", serde_json::json!({"path": "src"})),
+            ],
+            "",
+            &mut count,
+        )
+        .unwrap();
+        assert_eq!(decisions.len(), 2);
+        assert!(decisions_are_parallel_read_only_batch(&decisions));
+        assert_eq!(errors[0].call_id, "bad");
+        let mut results = errors;
+        results.extend(decisions.iter().map(|(id, d)| {
+            (
+                id.clone(),
+                d.action.clone(),
+                serde_json::to_value(&d.input).unwrap(),
+                "[]".into(),
+            )
+                .into()
+        }));
+        let mut messages = Vec::new();
+        append_native_tool_results(
+            &mut messages,
+            "",
+            &results,
+            &Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(messages[0].content.len(), 3);
+        assert_eq!(messages[1].content.len(), 3);
+        assert!(
+            matches!(&messages[1].content[0], ContentBlock::ToolResult { tool_use_id, is_error: true, .. } if tool_use_id == "bad")
+        );
+        assert!(
+            matches!(&messages[1].content[1], ContentBlock::ToolResult { tool_use_id, is_error: false, .. } if tool_use_id == "valid-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn list_files_rejects_invalid_arguments_instead_of_listing_workspace() {
+        let config = MintConfig::default();
+        // A nonexistent root ensures no filesystem lookup occurs for bad input.
+        let root = Path::new("/nonexistent-mint-list-files-regression");
+        for input in [
+            serde_json::json!({"path": "~/Downloads/YOUTUBE_DL", "limit": "100"}),
+            serde_json::json!({"path": "~/Downloads/YOUTUBE_DL", "limit": -1}),
+            serde_json::json!({"path": null}),
+            Value::String(r#"{"path":"~/Downloads/YOUTUBE_DL""#.into()),
+            Value::Null,
+        ] {
+            let error = execute_tool_from_json(
+                root,
+                &config,
+                "list_files",
+                input,
+                "regression",
+                &mut |_| panic!("invalid arguments must not request approval"),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("invalid arguments for tool 'list_files'")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn list_files_preserves_nested_paths_and_default_directory() {
+        let root =
+            std::env::temp_dir().join(format!("mint-list-files-paths-{}", std::process::id()));
+        let nested = root.join("Downloads/YOUTUBE_DL/playlist");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("song.txt"), "song").unwrap();
+        let config = MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            blocked_paths: vec![],
+            blocked_file_names: vec![],
+            ..MintConfig::default()
+        };
+        for input in [
+            serde_json::json!({"path": "Downloads/YOUTUBE_DL/playlist", "limit": 100}),
+            serde_json::json!({"path": nested}),
+            serde_json::json!({}),
+        ] {
+            let expected = if input.get("path").is_some() {
+                &nested
+            } else {
+                &root
+            };
+            let output = execute_tool_from_json(
+                &root,
+                &config,
+                "list_files",
+                input,
+                "regression",
+                &mut |_| panic!("listing must not request approval"),
+            )
+            .await
+            .unwrap();
+            let entries: Vec<Value> = serde_json::from_str(&output).unwrap();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(
+                Path::new(entries[0]["path"].as_str().unwrap()).parent(),
+                Some(expected.as_path())
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn turn_start_listener_reports_only_the_matching_chat() {
@@ -3416,6 +4514,7 @@ mod tests {
     fn test_compact_agent_progress_cleans_deltas_and_preserves_tools() {
         let events = vec![
             AgentProgress::ToolStart {
+                call_id: None,
                 action: "read_file".into(),
                 input: serde_json::json!({ "path": "src/main.rs" }),
                 subagent: None,
@@ -3436,6 +4535,9 @@ mod tests {
                 elapsed_ms: Some(200),
             },
             AgentProgress::ToolEnd {
+                elapsed_ms: None,
+                call_id: None,
+                status: None,
                 action: "read_file".into(),
                 input: serde_json::json!({ "path": "src/main.rs" }),
                 result: "fn main() {}".into(),
@@ -3485,11 +4587,15 @@ mod tests {
             .lock()
             .unwrap()
             .push(AgentProgress::ToolStart {
+                call_id: None,
                 action: "run_shell".into(),
                 input: serde_json::json!({ "command": "ls -la" }),
                 subagent: None,
             });
         turn.activity.lock().unwrap().push(AgentProgress::ToolEnd {
+            elapsed_ms: None,
+            call_id: None,
+            status: None,
             action: "run_shell".into(),
             input: serde_json::json!({ "command": "ls -la" }),
             result: "file.txt".into(),
@@ -3527,6 +4633,7 @@ mod tests {
             .lock()
             .unwrap()
             .push(AgentProgress::ToolStart {
+                call_id: None,
                 action: "read_file".into(),
                 input: serde_json::json!({ "path": "test.txt" }),
                 subagent: None,
@@ -4192,5 +5299,793 @@ mod tests {
         rebuild_observation(task, root, &extended_trajectory, &mut buffer);
 
         assert!(buffer.contains("Step 3:\n- Thought: All done"));
+    }
+}
+
+#[cfg(test)]
+mod full_skill_result_tests {
+    use super::*;
+    #[test]
+    fn large_loaded_skill_results_reach_the_model_without_losing_middle_instructions() {
+        let content = format!(
+            "[Loaded skill: review]\n{}\nREQUIRED-MIDDLE-INSTRUCTION\n{}",
+            "a".repeat(40_000),
+            "z".repeat(40_000)
+        );
+        assert_eq!(model_tool_result("read_file", &content), content);
+        assert!(model_tool_result("run_shell", &"x".repeat(80_000)).len() < 20_000);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod mcp_outcome_tests {
+    use super::*;
+    use std::time::Duration;
+    fn generic_server(tool: &str, response: Value) -> String {
+        format!(
+            r#"
+import sys,json
+response=json.loads({:?})
+for line in sys.stdin:
+ r=json.loads(line);m=r.get('method')
+ if m=='initialize': result={{}}
+ elif m=='tools/list': result={{'tools':[{{'name':{:?},'inputSchema':{{'type':'object'}}}}]}}
+ elif m=='tools/call': result=response
+ else: continue
+ print(json.dumps({{'jsonrpc':'2.0','id':r['id'],'result':result}}),flush=True)
+"#,
+            response.to_string(),
+            tool
+        )
+    }
+
+    #[test]
+    fn compact_device_progress_keeps_acceptance_and_latest_observation() {
+        let events=["accepted","running","running","verified"].into_iter().enumerate().map(|(seq,state)|serde_json::from_value(serde_json::json!({"type":"DeviceState","data":{"callId":"one","server":"motor","tool":"move","update":{"state":state,"target":{"rpm":100},"actual":{"rpm":seq},"observationSeq":seq,"elapsedSecs":seq,"message":"observed"}}})).unwrap()).collect::<Vec<AgentProgress>>();
+        let compacted = compact_agent_progress(&events);
+        assert_eq!(
+            compacted.len(),
+            2,
+            "saved history should retain acceptance and the final fresh observation"
+        );
+        assert!(matches!(
+            &compacted[1],
+            AgentProgress::DeviceState {
+                update: crate::mcp::device::DeviceUpdate {
+                    state: crate::mcp::device::DevicePhase::Verified,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn mcp_definitions_reach_native_and_json_models_before_any_command() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for native in [true, false] {
+            let marker =
+                std::env::temp_dir().join(format!("mint-model-command-{}", uuid::Uuid::new_v4()));
+            let server = format!("model-mcp-{}", uuid::Uuid::new_v4());
+            let mut cfg = MintConfig::default();
+            let script=generic_server("move",serde_json::json!({"content":[{"type":"text","text":"moved"}]})).replace("elif m=='tools/call': result=response",&format!("elif m=='tools/call':\n  open({:?},'a').write('called\\n')\n  result=response",marker.to_string_lossy())).replace("'name':\"move\",'inputSchema'","'name':\"move\",'description':'Move the mock axis. RPM are integer units.', 'inputSchema'");
+            cfg.extra.insert("mcpServers".into(),serde_json::json!({server.clone():{"command":"python3","args":["-u","-c",script],"timeoutSecs":5}}));
+            cfg.extra.insert(
+                "allowedMcpTools".into(),
+                serde_json::json!({server.clone():["*"]}),
+            );
+            cfg.ai_provider = "ollama".into();
+            cfg.ollama_model = "qwen2.5".into();
+            cfg.extra
+                .insert("forceJsonPromptMode".into(), serde_json::json!(!native));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            cfg.ollama_host = format!("http://{}", listener.local_addr().unwrap());
+            let recorded = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+            let requests = Arc::clone(&recorded);
+            let observed_marker = marker.clone();
+            let name = server.clone();
+            let provider = tokio::spawn(async move {
+                for step in 0..3 {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut bytes = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    let (end, len) = loop {
+                        let n = socket.read(&mut chunk).await.unwrap();
+                        assert!(n > 0);
+                        bytes.extend_from_slice(&chunk[..n]);
+                        if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                            let header = String::from_utf8_lossy(&bytes[..end]);
+                            let len = header
+                                .lines()
+                                .find_map(|l| {
+                                    l.to_ascii_lowercase()
+                                        .strip_prefix("content-length:")
+                                        .and_then(|v| v.trim().parse::<usize>().ok())
+                                })
+                                .unwrap();
+                            break (end + 4, len);
+                        }
+                    };
+                    while bytes.len() < end + len {
+                        let n = socket.read(&mut chunk).await.unwrap();
+                        assert!(n > 0);
+                        bytes.extend_from_slice(&chunk[..n]);
+                    }
+                    requests
+                        .lock()
+                        .unwrap()
+                        .push(serde_json::from_slice(&bytes[end..end + len]).unwrap());
+                    if step == 1 {
+                        assert!(
+                            !observed_marker.exists(),
+                            "initial preparation sent a tools/call"
+                        );
+                    }
+                    let (action, input) = if step < 2 {
+                        (
+                            "mcp_tool",
+                            serde_json::json!({"server":name,"tool":"move","arguments":{}}),
+                        )
+                    } else {
+                        (
+                            "finish",
+                            serde_json::json!({"summary":"done","verification":"Mock command verified"}),
+                        )
+                    };
+                    let message = if native {
+                        serde_json::json!({"role":"assistant","content":"","tool_calls":[{"function":{"name":action,"arguments":input}}]})
+                    } else {
+                        serde_json::json!({"role":"assistant","content":serde_json::json!({"thought":"test","action":action,"input":input}).to_string()})
+                    };
+                    let body = format!(
+                        "{}\n",
+                        serde_json::json!({"model":"qwen2.5","message":message,"done":true,"prompt_eval_count":100,"eval_count":10})
+                    );
+                    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+                }
+            });
+            let chat = format!("model-review-{}", uuid::Uuid::new_v4());
+            let mut events = Vec::new();
+            let outcome = tokio::time::timeout(
+                Duration::from_secs(15),
+                orchestrate_agent_loop(
+                    &cfg,
+                    "Use the mock MCP move tool",
+                    Path::new("."),
+                    None,
+                    None,
+                    None,
+                    Some(&chat),
+                    None,
+                    None,
+                    None,
+                    true,
+                    false,
+                    |_| Ok(ApprovalOutcome::Denied),
+                    |e| events.push(e),
+                    |_| {},
+                ),
+            )
+            .await;
+            provider.abort();
+            crate::mcp::close_mcp_session(&server);
+            assert!(
+                matches!(outcome, Ok(Ok(_))),
+                "native={native}, {outcome:?}; requests={}, events={:?}",
+                recorded.lock().unwrap().len(),
+                events.iter().rev().take(5).collect::<Vec<_>>()
+            );
+            let requests = recorded.lock().unwrap();
+            assert_eq!(requests.len(), 3);
+            assert!(
+                requests[1].to_string().contains("Move the mock axis"),
+                "full tool definition missing from model request: {}",
+                requests[1]
+            );
+            assert!(
+                requests[2].to_string().contains("Move the mock axis"),
+                "definition must remain in later requests"
+            );
+            assert_eq!(std::fs::read_to_string(&marker).unwrap().lines().count(), 1);
+            std::fs::remove_file(marker).unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(
+                        |e| matches!(e,AgentProgress::ToolStart {action,..} if action=="mcp_tool")
+                    )
+                    .count(),
+                1
+            );
+            let memory = MemoryStore::open_default().unwrap();
+            let _ = memory.delete_chat_session(&chat);
+        }
+    }
+
+    #[tokio::test]
+    async fn device_command_waits_for_a_fresh_verified_observation() {
+        let server = format!("device-{}", uuid::Uuid::new_v4());
+        let mut cfg = MintConfig::default();
+        cfg.extra.insert("mcpServers".into(),serde_json::json!({server.clone():{"command":"node","args":[Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/device-mcp/server.mjs")],"timeoutSecs":5}}));
+        cfg.extra.insert(
+            "allowedMcpTools".into(),
+            serde_json::json!({server.clone():["*"]}),
+        );
+        let decision:AgentDecision=serde_json::from_value(serde_json::json!({"action":"mcp_tool","input":{"server":server,"tool":"set_speed","arguments":{"deviceId":"mock-device","rpm":100}}})).unwrap();
+        let mut events = Vec::new();
+        let out = execute_tool_outcome(
+            Path::new("."),
+            &cfg,
+            &decision,
+            "device-test",
+            &mut |_| Ok(ApprovalOutcome::Denied),
+            &mut |e| events.push(e),
+            "device-command",
+        )
+        .await
+        .unwrap();
+        crate::mcp::close_mcp_session(&server);
+        assert_eq!(
+            out.status,
+            crate::integrations::mcp_result::ToolStatus::Success
+        );
+        let events = serde_json::to_value(events).unwrap();
+        assert!(
+            events
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["type"] == "DeviceState" && e["data"]["update"]["state"] == "verified"),
+            "receipt must not be considered a verified device state: {events}"
+        );
+    }
+
+    #[tokio::test]
+    async fn device_capture_preserves_verified_images_and_explicit_stop_confirms_zero() {
+        let server = format!("device-photo-{}", uuid::Uuid::new_v4());
+        let mut cfg = MintConfig::default();
+        cfg.extra.insert("mcpServers".into(),serde_json::json!({server.clone():{"command":"node","args":[Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/device-mcp/server.mjs")],"timeoutSecs":10}}));
+        cfg.extra.insert(
+            "allowedMcpTools".into(),
+            serde_json::json!({server.clone():["*"]}),
+        );
+        let photo:AgentDecision=serde_json::from_value(serde_json::json!({"action":"mcp_tool","input":{"server":server,"tool":"capture_photo","arguments":{"deviceId":"mock-device"}}})).unwrap();
+        let out = execute_tool_outcome(
+            Path::new("."),
+            &cfg,
+            &photo,
+            "photo-test",
+            &mut |_| Ok(ApprovalOutcome::Denied),
+            &mut |_| {},
+            "photo-command",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            out.status,
+            crate::integrations::mcp_result::ToolStatus::Success
+        );
+        assert_eq!(out.images.len(), 1);
+        assert!(out.warnings.is_empty());
+        remove_test_artifacts(&out.artifacts);
+        crate::mcp::call_mcp_tool_async(
+            &cfg,
+            &server,
+            "set_speed",
+            serde_json::json!({"deviceId":"mock-device","rpm":1000}),
+            "photo-test",
+            |_| {},
+        )
+        .await
+        .unwrap();
+        let stop:AgentDecision=serde_json::from_value(serde_json::json!({"action":"mcp_tool","input":{"server":server,"tool":"stop","arguments":{"deviceId":"mock-device"}}})).unwrap();
+        let mut events = Vec::new();
+        let out = execute_tool_outcome(
+            Path::new("."),
+            &cfg,
+            &stop,
+            "photo-test",
+            &mut |_| Ok(ApprovalOutcome::Denied),
+            &mut |e| events.push(e),
+            "stop-command",
+        )
+        .await
+        .unwrap();
+        crate::mcp::close_mcp_session(&server);
+        assert_eq!(
+            out.status,
+            crate::integrations::mcp_result::ToolStatus::Success
+        );
+        assert!(events.iter().any(|e|matches!(e,AgentProgress::DeviceState {update,..} if matches!(update.state,crate::mcp::device::DevicePhase::Verified) && update.actual["rpm"]==0)));
+    }
+
+    fn device_fixture(status: Value, timeout: u64) -> (MintConfig, String, PathBuf) {
+        let name = format!("device-fault-{}", uuid::Uuid::new_v4());
+        let log = std::env::temp_dir().join(format!("mint-device-calls-{}", uuid::Uuid::new_v4()));
+        let schema = serde_json::json!({"type":"object","properties":{"deviceId":{"type":"string"},"operationId":{"type":"string"},"rpm":{"type":"integer"}},"required":["deviceId"],"additionalProperties":false});
+        let tools = serde_json::json!([{"name":"set_speed","inputSchema":schema,"outputSchema":{"type":"object"},"_meta":{"mint/device":{"version":1,"statusTool":"get_status"}}},{"name":"get_status","inputSchema":schema,"outputSchema":{"type":"object"}}]);
+        let receipt = serde_json::json!({"deviceId":"mock","operationId":"one","state":"accepted","observationSeq":1,"target":{"rpm":100},"actual":{"rpm":0}});
+        let script = format!(
+            r#"
+import sys,json
+tools=json.loads({:?});receipt=json.loads({:?});status=json.loads({:?})
+for line in sys.stdin:
+ r=json.loads(line);m=r.get('method')
+ if m=='initialize': result={{}}
+ elif m=='tools/list': result={{'tools':tools}}
+ elif m=='tools/call':
+  with open({:?},'a') as f: f.write(json.dumps(r['params'])+'\n')
+  result={{'structuredContent':receipt if r['params']['name']=='set_speed' else status,'content':[]}}
+ else: continue
+ print(json.dumps({{'jsonrpc':'2.0','id':r['id'],'result':result}}),flush=True)
+"#,
+            tools.to_string(),
+            receipt.to_string(),
+            status.to_string(),
+            log.to_string_lossy()
+        );
+        let mut cfg = MintConfig::default();
+        cfg.extra.insert("mcpServers".into(),serde_json::json!({name.clone():{"command":"python3","args":["-u","-c",script],"timeoutSecs":timeout}}));
+        cfg.extra.insert(
+            "allowedMcpTools".into(),
+            serde_json::json!({name.clone():["*"]}),
+        );
+        (cfg, name, log)
+    }
+
+    #[tokio::test]
+    async fn device_stale_observations_cannot_confirm_completion() {
+        let (cfg, server, log) = device_fixture(
+            serde_json::json!({"deviceId":"mock","operationId":"one","state":"completed","observationSeq":1,"target":{"rpm":100},"actual":{"rpm":100}}),
+            1,
+        );
+        let decision:AgentDecision=serde_json::from_value(serde_json::json!({"action":"mcp_tool","input":{"server":server,"tool":"set_speed","arguments":{"deviceId":"mock","rpm":100}}})).unwrap();
+        let out = execute_tool_outcome(
+            Path::new("."),
+            &cfg,
+            &decision,
+            "stale-test",
+            &mut |_| Ok(ApprovalOutcome::Denied),
+            &mut |_| {},
+            "stale-command",
+        )
+        .await
+        .unwrap();
+        crate::mcp::close_mcp_session(&server);
+        let calls = std::fs::read_to_string(&log).unwrap();
+        std::fs::remove_file(log).unwrap();
+        assert_eq!(calls.lines().filter(|l| l.contains("set_speed")).count(), 1);
+        assert_eq!(
+            out.status,
+            crate::integrations::mcp_result::ToolStatus::TimedOut
+        );
+        assert!(
+            out.completion_unconfirmed,
+            "a dispatched command remains uncertain after stale observations"
+        );
+    }
+
+    #[tokio::test]
+    async fn review_device_session_loss_preserves_receipt_without_reconnecting_or_repeating() {
+        let (mut cfg, server, log) = device_fixture(
+            serde_json::json!({"deviceId":"mock","operationId":"one","state":"running","observationSeq":2,"target":{"rpm":100},"actual":{"rpm":50}}),
+            5,
+        );
+        let starts = log.with_extension("starts");
+        let script = cfg.extra["mcpServers"][&server]["args"][2]
+            .as_str()
+            .unwrap()
+            .replace(
+                "import sys,json",
+                &format!(
+                    "import sys,json,os\nopen({:?},'a').write('start\\n')",
+                    starts.to_string_lossy()
+                ),
+            );
+        cfg.extra.get_mut("mcpServers").unwrap()[&server]["args"][2] = serde_json::json!(format!(
+            "{script}\n if m=='tools/call' and r['params']['name']=='get_status': os._exit(0)\n"
+        ));
+        let decision=serde_json::from_value(serde_json::json!({"action":"mcp_tool","input":{"server":server,"tool":"set_speed","arguments":{"deviceId":"mock","rpm":100}}})).unwrap();
+        let mut events = Vec::new();
+        let out = execute_tool_outcome(
+            Path::new("."),
+            &cfg,
+            &decision,
+            "review-device-loss",
+            &mut |_| Ok(ApprovalOutcome::Denied),
+            &mut |e| events.push(e),
+            "command",
+        )
+        .await
+        .unwrap();
+        crate::mcp::close_mcp_session(&server);
+        let calls = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(std::fs::read_to_string(&starts).unwrap(), "start\n");
+        let _ = std::fs::remove_file(log);
+        let _ = std::fs::remove_file(starts);
+        assert_eq!(calls.lines().filter(|l| l.contains("set_speed")).count(), 1);
+        assert_eq!(
+            calls.lines().filter(|l| l.contains("get_status")).count(),
+            1
+        );
+        assert_eq!(out.status, crate::mcp_result::ToolStatus::Failed);
+        assert!(out.completion_unconfirmed);
+        assert!(
+            out.text.contains("one"),
+            "operation receipt lost: {}",
+            out.text
+        );
+        assert!(events.iter().any(|e|matches!(e,AgentProgress::DeviceState{update,..} if matches!(update.state,crate::mcp::device::DevicePhase::Unconfirmed) && update.operation_id.as_deref()==Some("one"))));
+        assert!(!events.iter().any(|e|matches!(e,AgentProgress::DeviceState{update,..} if matches!(update.state,crate::mcp::device::DevicePhase::Verified))));
+    }
+
+    #[tokio::test]
+    async fn device_wrong_operation_and_physical_failure_never_report_success() {
+        for status in [
+            serde_json::json!({"deviceId":"mock","operationId":"other","state":"completed","observationSeq":2,"target":{"rpm":100},"actual":{"rpm":100}}),
+            serde_json::json!({"deviceId":"mock","operationId":"one","state":"failed","observationSeq":2,"target":{"rpm":100},"actual":{"rpm":0},"error":"jammed"}),
+        ] {
+            let (cfg, server, log) = device_fixture(status, 3);
+            let decision:AgentDecision=serde_json::from_value(serde_json::json!({"action":"mcp_tool","input":{"server":server,"tool":"set_speed","arguments":{"deviceId":"mock","rpm":100}}})).unwrap();
+            let out = execute_tool_outcome(
+                Path::new("."),
+                &cfg,
+                &decision,
+                "wrong-operation",
+                &mut |_| Ok(ApprovalOutcome::Denied),
+                &mut |_| {},
+                "wrong-command",
+            )
+            .await
+            .unwrap();
+            crate::mcp::close_mcp_session(&server);
+            std::fs::remove_file(log).unwrap();
+            assert_eq!(
+                out.status,
+                crate::integrations::mcp_result::ToolStatus::Failed
+            );
+            assert!(
+                out.text.starts_with("Error:"),
+                "Native tool results must carry an error marker for failed verification: {}",
+                out.text
+            );
+            assert!(
+                !out.text.contains("no tool was executed"),
+                "verification errors must acknowledge the already dispatched command: {}",
+                out.text
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn device_failed_receipt_is_terminal_without_status_polling() {
+        let (mut cfg, server, log) = device_fixture(
+            serde_json::json!({"deviceId":"mock","operationId":"one","state":"completed","observationSeq":2,"target":{"rpm":100},"actual":{"rpm":100}}),
+            3,
+        );
+        let script = cfg.extra["mcpServers"][&server]["args"][2]
+            .as_str()
+            .unwrap()
+            .replace("accepted", "failed");
+        cfg.extra.get_mut("mcpServers").unwrap()[&server]["args"][2] = serde_json::json!(script);
+        let decision:AgentDecision=serde_json::from_value(serde_json::json!({"action":"mcp_tool","input":{"server":server,"tool":"set_speed","arguments":{"deviceId":"mock","rpm":100}}})).unwrap();
+        let out = execute_tool_outcome(
+            Path::new("."),
+            &cfg,
+            &decision,
+            "failed-receipt",
+            &mut |_| Ok(ApprovalOutcome::Denied),
+            &mut |_| {},
+            "failed-command",
+        )
+        .await
+        .unwrap();
+        crate::mcp::close_mcp_session(&server);
+        let calls = std::fs::read_to_string(&log).unwrap();
+        std::fs::remove_file(log).unwrap();
+        assert_eq!(
+            out.status,
+            crate::integrations::mcp_result::ToolStatus::Failed
+        );
+        assert!(
+            !calls.contains("get_status"),
+            "failed receipt must not be overwritten by a later status"
+        );
+    }
+
+    #[tokio::test]
+    async fn device_denied_status_access_blocks_movement_before_dispatch() {
+        let (mut cfg, server, log) = device_fixture(serde_json::json!({}), 3);
+        cfg.extra.insert(
+            "allowedMcpTools".into(),
+            serde_json::json!({server.clone():["set_speed"]}),
+        );
+        let decision:AgentDecision=serde_json::from_value(serde_json::json!({"action":"mcp_tool","input":{"server":server,"tool":"set_speed","arguments":{"deviceId":"mock","rpm":100}}})).unwrap();
+        let mut approvals = Vec::new();
+        let out = execute_tool_outcome(
+            Path::new("."),
+            &cfg,
+            &decision,
+            "denied-status",
+            &mut |a| {
+                approvals.push(serde_json::to_value(a).unwrap());
+                Ok(ApprovalOutcome::Denied)
+            },
+            &mut |_| {},
+            "blocked-command",
+        )
+        .await
+        .unwrap();
+        crate::mcp::close_mcp_session(&server);
+        assert!(
+            !log.exists(),
+            "command was dispatched without access to status verification"
+        );
+        assert_eq!(
+            out.status,
+            crate::integrations::mcp_result::ToolStatus::Failed
+        );
+        assert!(
+            serde_json::to_string(&approvals)
+                .unwrap()
+                .contains("get_status")
+        );
+    }
+
+    #[tokio::test]
+    async fn canceling_between_device_observations_does_not_issue_another_command() {
+        let (cfg, server, log) = device_fixture(
+            serde_json::json!({"deviceId":"mock","operationId":"one","state":"running","observationSeq":2,"target":{"rpm":100},"actual":{"rpm":20}}),
+            15,
+        );
+        let decision:AgentDecision=serde_json::from_value(serde_json::json!({"action":"mcp_tool","input":{"server":server,"tool":"set_speed","arguments":{"deviceId":"mock","rpm":100}}})).unwrap();
+        let chat = format!("cancel-between-{}", uuid::Uuid::new_v4());
+        let name = chat.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut tx = Some(tx);
+        let running = tokio::spawn(async move {
+            execute_tool_outcome(
+                Path::new("."),
+                &cfg,
+                &decision,
+                &name,
+                &mut |_| Ok(ApprovalOutcome::Denied),
+                &mut |e| {
+                    if matches!(
+                        e,
+                        AgentProgress::DeviceState {
+                            update: crate::mcp::device::DeviceUpdate {
+                                state: crate::mcp::device::DevicePhase::Running,
+                                ..
+                            },
+                            ..
+                        }
+                    ) && let Some(tx) = tx.take()
+                    {
+                        let _ = tx.send(());
+                    }
+                },
+                "cancel-command",
+            )
+            .await
+            .unwrap()
+        });
+        tokio::time::timeout(Duration::from_secs(10), rx)
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(crate::mcp::cancel_mcp_calls(&chat) > 0);
+        let out = tokio::time::timeout(Duration::from_secs(2), running)
+            .await
+            .unwrap()
+            .unwrap();
+        crate::mcp::close_mcp_session(&server);
+        assert_eq!(
+            out.status,
+            crate::integrations::mcp_result::ToolStatus::Cancelled
+        );
+        let calls = std::fs::read_to_string(&log).unwrap();
+        std::fs::remove_file(log).unwrap();
+        assert_eq!(calls.lines().filter(|l| l.contains("set_speed")).count(), 1);
+        assert!(!calls.contains("\"stop\""));
+    }
+
+    #[tokio::test]
+    async fn approval_feedback_does_not_mark_an_unexecuted_mcp_call_successful() {
+        let decision: AgentDecision = serde_json::from_value(serde_json::json!({
+            "action":"mcp_tool", "input":{"server":"feedback-server","tool":"render","arguments":{}}
+        }))
+        .unwrap();
+        let mut config = MintConfig::default();
+        config.extra.insert("mcpServers".into(),serde_json::json!({"feedback-server":{"command":"python3","args":["-u","-c",generic_server("render",serde_json::json!({}))]}}));
+        let out = execute_tool_outcome(
+            Path::new("."),
+            &config,
+            &decision,
+            "feedback",
+            &mut |_| {
+                Ok(ApprovalOutcome::Intercepted(
+                    "Use a different device".into(),
+                ))
+            },
+            &mut |_| {},
+            "not-executed",
+        )
+        .await
+        .unwrap();
+        assert!(out.text.contains("Use a different device"));
+        assert!(out.text.contains("no command was executed"));
+        assert_eq!(
+            out.status,
+            crate::integrations::mcp_result::ToolStatus::Failed
+        );
+    }
+
+    #[tokio::test]
+    async fn text_only_model_keeps_artifacts_without_receiving_image_blocks() {
+        use base64::Engine as _;
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(1, 1)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes.into_inner());
+        let response =
+            serde_json::json!({"content":[{"type":"image","mimeType":"image/png","data":encoded}]})
+                .to_string();
+        let script = generic_server("preview", serde_json::from_str(&response).unwrap());
+        let server = format!("text-model-{}", uuid::Uuid::new_v4());
+        let mut cfg = MintConfig::default();
+        cfg.extra.insert(
+            "mcpServers".into(),
+            serde_json::json!({server.clone():{"command":"python3","args":["-u","-c",script]}}),
+        );
+        cfg.extra.insert(
+            "allowedMcpTools".into(),
+            serde_json::json!({server.clone():["preview"]}),
+        );
+        cfg.extra.insert("mcpImageInput".into(), Value::Bool(false));
+        let decision:AgentDecision=serde_json::from_value(serde_json::json!({"action":"mcp_tool","input":{"server":server,"tool":"preview","arguments":{}}})).unwrap();
+        let out = execute_tool_outcome(
+            Path::new("."),
+            &cfg,
+            &decision,
+            "text-only",
+            &mut |_| Ok(ApprovalOutcome::Denied),
+            &mut |_| {},
+            "preview",
+        )
+        .await
+        .unwrap();
+        assert!(out.images.is_empty());
+        assert_eq!(out.artifacts.len(), 1);
+        assert!(out.text.contains("do not claim visual inspection"));
+        crate::mcp::close_mcp_session(&server);
+        remove_test_artifacts(&out.artifacts);
+    }
+
+    #[test]
+    fn multiple_images_attach_to_the_correct_native_tool_result() {
+        let images = std::collections::HashMap::from([(
+            "call-2".to_string(),
+            vec![
+                "data:image/png;base64,first".into(),
+                "data:image/png;base64,second".into(),
+            ],
+        )]);
+        let results = vec![
+            (
+                "call-1".into(),
+                "mcp_tool".into(),
+                Value::Null,
+                "one".into(),
+            )
+                .into(),
+            (
+                "call-2".into(),
+                "mcp_tool".into(),
+                Value::Null,
+                "two".into(),
+            )
+                .into(),
+        ];
+        let mut messages = Vec::new();
+        append_native_tool_results(&mut messages, "", &results, &Default::default(), &images);
+        assert!(
+            matches!(&messages[1].content[1],ContentBlock::ToolResult {tool_use_id,..} if tool_use_id=="call-2")
+        );
+        assert!(
+            matches!(&messages[1].content[2],ContentBlock::Image {data_uri} if data_uri.ends_with("first"))
+        );
+        assert!(
+            matches!(&messages[1].content[3],ContentBlock::Image {data_uri} if data_uri.ends_with("second"))
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_images_do_not_enter_the_text_observation() {
+        let server = format!("image-{}", uuid::Uuid::new_v4());
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(1, 1)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        let png = BASE64_STANDARD.encode(bytes.into_inner());
+        let result = serde_json::json!({"content":[{"type":"text","text":"preview"},{"type":"image","mimeType":"image/png","data":png}]}).to_string();
+        let script = generic_server("preview", serde_json::from_str(&result).unwrap());
+        let mut config = MintConfig::default();
+        config.extra.insert(
+            "mcpServers".into(),
+            serde_json::json!({server.clone():{"command":"python3","args":["-u","-c",script]}}),
+        );
+        let decision: AgentDecision = serde_json::from_value(serde_json::json!({"action":"mcp_tool","input":{"server":server,"tool":"preview","arguments":{}}})).unwrap();
+        let mut events = Vec::new();
+        let out = execute_tool_outcome(
+            Path::new("."),
+            &config,
+            &decision,
+            "image-test",
+            &mut |_| Ok(ApprovalOutcome::Approved),
+            &mut |event| events.push(event),
+            "image-invocation",
+        )
+        .await
+        .unwrap();
+        assert!(
+            !out.text.contains(&png),
+            "binary data must be removed from the model's text observation"
+        );
+        assert_eq!(
+            out.status,
+            crate::integrations::mcp_result::ToolStatus::Success
+        );
+        assert_eq!(out.images.len(), 1);
+        assert_eq!(out.artifacts[0].call_id, "image-invocation");
+        assert!(out.text.contains("preview"));
+        assert!(!serde_json::to_string(&events).unwrap().contains(&png));
+        assert!(
+            !crate::mcp::is_mcp_tool_allowed(&config, &server, "preview"),
+            "one-call approval must not persist a grant"
+        );
+        crate::mcp::close_mcp_session(&server);
+        remove_test_artifacts(&out.artifacts);
+    }
+
+    fn remove_test_artifacts(artifacts: &[crate::integrations::mcp_result::McpArtifact]) {
+        let directory = crate::integrations::mcp_result::artifact_directory().unwrap();
+        for artifact in artifacts {
+            std::fs::remove_file(directory.join(&artifact.id)).unwrap();
+            std::fs::remove_file(directory.join(format!("{}.json", artifact.id))).unwrap();
+        }
+    }
+
+    // A transport-successful tool failure must not become a successful agent step.
+    #[tokio::test]
+    async fn mcp_tool_failure_is_visible_to_the_agent() {
+        let server = format!("outcome-{}", uuid::Uuid::new_v4());
+        let mut config = MintConfig::default();
+        config.extra.insert("mcpServers".into(),serde_json::json!({server.clone():{"command":"python3","args":["-u","-c",generic_server("render",serde_json::json!({"isError":true,"content":[{"type":"text","text":"render failed"}]}))]}}));
+        config.extra.insert(
+            "allowedMcpTools".into(),
+            serde_json::json!({server.clone():["render"]}),
+        );
+        let decision: AgentDecision = serde_json::from_value(serde_json::json!({
+            "thought":"render", "action":"mcp_tool", "input":{"server":server,"tool":"render","arguments":{}}
+        })).unwrap();
+        let result = execute_tool(
+            Path::new("."),
+            &config,
+            &decision,
+            "outcome-test",
+            &mut |_| Ok(ApprovalOutcome::Denied),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+        assert!(
+            result.starts_with("Error:"),
+            "tool failure must reach the model as a failure: {result}"
+        );
+        assert!(result.contains("render failed"));
+        crate::mcp::close_mcp_session(&server);
     }
 }

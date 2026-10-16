@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useMemo, type MouseEvent as ReactMouseEvent, type DragEvent as ReactDragEvent } from 'react'
+import { Check, ChevronDown, Folder, FolderInput, FolderMinus, Pencil, Plus, Trash2 } from 'lucide-react'
 import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon, renderScheduledTasksSvgIcon, renderLinkedFoldersSvgIcon } from '../constants/plugins'
 import { useAuthUser } from './AuthGate'
 import { runtimePlatform } from '../platform'
 
-export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'veo' | 'skills' | 'mcp' | 'plugins' | 'cron' | 'link' | 'code'
+export type DashboardView = 'chat' | 'pictures' | 'workspace' | 'imagine' | 'veo' | 'skills' | 'mcp' | 'plugins' | 'cron' | 'link' | 'code'
 
 interface ChatSessionItem {
   id: string
@@ -40,20 +41,6 @@ interface DashboardSidebarProps {
    * difference between the two, not something to unify.
    */
   promoteMediaStudios?: boolean
-  /** Desktop only — the inline Live2D companion character doesn't exist on web. */
-  modelVisible?: boolean
-  expressionIndex?: number
-  accessoryIndex?: number
-  expressions?: string[]
-  accessories?: string[]
-  interactionEnabled?: boolean
-  showInteractionGuide?: boolean
-  onToggleModel?: () => void
-  onSetExpressionIndex?: (index: number) => void
-  onSetAccessoryIndex?: (index: number) => void
-  onSetInteractionEnabled?: (enabled: boolean) => void
-  onSetShowInteractionGuide?: (visible: boolean) => void
-  onShowToast?: (message: string) => void
   activeWorkspacePath?: string
   recentWorkspacePaths?: string[]
   onBrowseFolder?: () => Promise<string | null>
@@ -64,16 +51,9 @@ interface DashboardSidebarProps {
 export default function DashboardSidebar({
   view,
   sidebarCollapsed,
-  modelVisible,
   sending,
   chatSessions,
   activeConversationId,
-  expressionIndex = 0,
-  accessoryIndex = 0,
-  expressions = [],
-  accessories = [],
-  interactionEnabled,
-  showInteractionGuide,
   onToggleSidebar,
   onSidebarResize,
   onSidebarResizeEnd,
@@ -82,12 +62,6 @@ export default function DashboardSidebar({
   onDeleteConversation,
   onRenameConversation,
   onSetView,
-  onToggleModel,
-  onSetExpressionIndex,
-  onSetAccessoryIndex,
-  onSetInteractionEnabled,
-  onSetShowInteractionGuide,
-  onShowToast,
   isSearchOpen,
   onSetSearchOpen,
   showWorkspaceTab,
@@ -191,18 +165,6 @@ export default function DashboardSidebar({
     }
     setEditingSessionId(null)
   }
-  const toggleInteractionGuide = () => {
-    const next = !showInteractionGuide
-    onSetShowInteractionGuide?.(next)
-    onShowToast?.(next ? 'Show interaction zones ⊹' : 'Hide interaction zones ⊹')
-  }
-
-  const toggleInteraction = () => {
-    const next = !interactionEnabled
-    onSetInteractionEnabled?.(next)
-    onShowToast?.(next ? 'Enable model interaction ⦸' : 'Disable model interaction ⦸')
-  }
-
   const conversationSessions = chatSessions.filter((session) => session.kind !== 'cli' && !session.id.startsWith('cli') && session.id !== 'conversation-default')
   const cliSessions = chatSessions.filter((session) => session.kind === 'cli' || session.id.startsWith('cli'))
 
@@ -512,15 +474,13 @@ export default function DashboardSidebar({
         <span>Chat</span>
       </button>
 
-      <button className={`sidebar-top-action ${view === 'pictures' ? 'is-active' : ''}`} onClick={() => onSetView('pictures')} title="Pictures">
+      <button className={`sidebar-top-action ${view === 'pictures' ? 'is-active' : ''}`} onClick={() => onSetView('pictures')} title="Library">
         <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <circle cx="8.5" cy="8.5" r="1.5"></circle>
-            <polyline points="21 15 16 10 5 21"></polyline>
+            <path d="M4 4v16M8 8v12M12 6v14M16 6l4 14"></path>
           </svg>
         </span>
-        <span>Pictures</span>
+        <span>Library</span>
       </button>
       {promoteMediaStudios && (
         <>
@@ -560,18 +520,6 @@ export default function DashboardSidebar({
           <span>Workspace</span>
         </button>
       )}
-      {onToggleModel && (
-        <button className={`sidebar-top-action ${modelVisible ? 'is-active' : ''}`} onClick={onToggleModel} title="Live2D model">
-          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-              <circle cx="12" cy="7" r="4"></circle>
-            </svg>
-          </span>
-          <span>Live2D model</span>
-        </button>
-      )}
-
       <div className="sidebar-more-container" ref={moreContainerRef}>
         <button className={`sidebar-top-action ${isMoreOpen || (!promoteMediaStudios && (view === 'imagine' || view === 'veo')) || view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)} title="More" aria-expanded={isMoreOpen} aria-controls="sidebar-more-menu">
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
@@ -630,66 +578,6 @@ export default function DashboardSidebar({
         )}
       </div>
 
-
-      {modelVisible && (
-        <div className="sidebar-model-controls">
-          <button
-            className="change-expression-btn"
-            onClick={() => {
-              const next = (expressionIndex + 1) % expressions.length
-              onSetExpressionIndex?.(next)
-              onSetAccessoryIndex?.(0)
-              onShowToast?.(`Expression: ${expressions[next]}`)
-            }}
-          >
-            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
-                <line x1="9" y1="9" x2="9.01" y2="9"></line>
-                <line x1="15" y1="9" x2="15.01" y2="9"></line>
-              </svg>
-            </span>
-            <span>Expression</span>
-          </button>
-          <button
-            className="accessory-cycle-btn"
-            onClick={() => {
-              const next = (accessoryIndex + 1) % accessories.length
-              onSetAccessoryIndex?.(next)
-              onSetExpressionIndex?.(0)
-              onShowToast?.(`Accessory: ${accessories[next]}`)
-            }}
-          >
-            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 0 8c2 0 4-1.33 6-4Zm0 0c2 2.67 4 4 6 4a4 4 0 1 0 0-8c-2 0-4 1.33-6 4Z"></path>
-              </svg>
-            </span>
-            <span>Accessory</span>
-          </button>
-          <button className={`toggle-interaction-btn ${interactionEnabled ? 'active' : ''}`} onClick={toggleInteraction}>
-            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v5m-4 0V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v7m-4 0V5a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v9M4 22V13a3 3 0 0 1 6 0v0M4 22h14a2 2 0 0 0 2-2V11a2 2 0 0 0-2-2h-2"></path>
-              </svg>
-            </span>
-            <span className="mint-status-label">Interact</span>
-          </button>
-          <button className={`interaction-guide-btn ${showInteractionGuide ? 'active' : ''}`} onClick={toggleInteractionGuide}>
-            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="22" y1="12" x2="18" y2="12"></line>
-                <line x1="6" y1="12" x2="2" y2="12"></line>
-                <line x1="12" y1="6" x2="12" y2="2"></line>
-                <line x1="12" y1="22" x2="12" y2="18"></line>
-              </svg>
-            </span>
-            <span>Areas</span>
-          </button>
-        </div>
-      )}
 
       {sidebarCollapsed ? (
         <div className="sidebar-collapsed-sessions">
@@ -901,8 +789,8 @@ export default function DashboardSidebar({
                     </div>
                     {projectMenu?.projectId === group.id && (
                       <div className="sidebar-project-menu-popover" role="menu" style={{ top: projectMenu.top, left: projectMenu.left }} onClick={(e) => e.stopPropagation()}>
-                        {onNewChatInProject && <button type="button" role="menuitem" onClick={() => { setCollapsedProjects((prev) => ({ ...prev, [group.id]: false })); onNewChatInProject(group.id); setProjectMenu(null) }}>＋ <span>New chat in project</span></button>}
-                        <button type="button" role="menuitem" className="is-destructive" onClick={() => removeProjectFromSidebar(group.id)}>⌫ <span>Remove from sidebar</span></button>
+                        {onNewChatInProject && <button type="button" role="menuitem" onClick={() => { setCollapsedProjects((prev) => ({ ...prev, [group.id]: false })); onNewChatInProject(group.id); setProjectMenu(null) }}><Plus className="sidebar-menu-icon" size={14} aria-hidden="true" /><span>New chat in project</span></button>}
+                        <button type="button" role="menuitem" className="is-destructive" onClick={() => removeProjectFromSidebar(group.id)}><FolderMinus className="sidebar-menu-icon" size={14} aria-hidden="true" /><span>Remove from sidebar</span></button>
                       </div>
                     )}
                     {!isCollapsed && (
@@ -1033,9 +921,8 @@ export default function DashboardSidebar({
                             className="sidebar-show-more-btn"
                             onClick={() => toggleShowMore(group.id)}
                           >
-                            {isExpanded
-                              ? 'Show less ⌃'
-                              : `Show more (${group.sessions.length - maxVisible}) ⌄`}
+                            <span>{isExpanded ? 'Show less' : `Show more (${group.sessions.length - maxVisible})`}</span>
+                            <ChevronDown className={isExpanded ? 'is-expanded' : ''} size={13} aria-hidden="true" />
                           </button>
                         )}
                       </div>
@@ -1275,9 +1162,9 @@ export default function DashboardSidebar({
                   }}
                   title={p.path}
                 >
-                  <span className="sidebar-move-item-icon">📁</span>
+                  <span className="sidebar-move-item-icon"><Folder size={14} aria-hidden="true" /></span>
                   <span className="sidebar-move-item-name">{p.name}</span>
-                  {isCurrent && <span className="sidebar-move-item-check">✓</span>}
+                  {isCurrent && <span className="sidebar-move-item-check"><Check size={14} aria-hidden="true" /></span>}
                 </button>
               )
             })}
@@ -1300,7 +1187,7 @@ export default function DashboardSidebar({
               </svg>
             </span>
             <span className="sidebar-move-item-name">Recents (No project)</span>
-            {!moveMenu.currentWorkspacePath && <span className="sidebar-move-item-check">✓</span>}
+            {!moveMenu.currentWorkspacePath && <span className="sidebar-move-item-check"><Check size={14} aria-hidden="true" /></span>}
           </button>
 
           {onBrowseFolder && (
@@ -1331,9 +1218,9 @@ export default function DashboardSidebar({
         const session = conversationSessions.find((item) => item.id === conversationMenu.sessionId)
         if (!session) return null
         return <div className="sidebar-conversation-menu-popover" role="menu" style={{ top: conversationMenu.top, left: conversationMenu.left }} onClick={(event) => event.stopPropagation()}>
-          <button type="button" role="menuitem" onClick={() => { setEditingSessionId(session.id); setEditTitleValue(session.title || ''); setConversationMenu(null) }}>✎ <span>Rename</span></button>
-          {onUpdateSessionWorkspace && <button type="button" role="menuitem" onClick={(event) => { setConversationMenu(null); openMoveMenu(event as any, session) }}>↗ <span>Move to project</span></button>}
-          <button type="button" role="menuitem" className="is-destructive" onClick={() => { onDeleteConversation(session.id); setConversationMenu(null) }}>⌫ <span>Delete conversation</span></button>
+          <button type="button" role="menuitem" onClick={() => { setEditingSessionId(session.id); setEditTitleValue(session.title || ''); setConversationMenu(null) }}><Pencil className="sidebar-menu-icon" size={14} aria-hidden="true" /><span>Rename</span></button>
+          {onUpdateSessionWorkspace && <button type="button" role="menuitem" onClick={(event) => { setConversationMenu(null); openMoveMenu(event as any, session) }}><FolderInput className="sidebar-menu-icon" size={14} aria-hidden="true" /><span>Move to project</span></button>}
+          <button type="button" role="menuitem" className="is-destructive" onClick={() => { onDeleteConversation(session.id); setConversationMenu(null) }}><Trash2 className="sidebar-menu-icon" size={14} aria-hidden="true" /><span>Delete conversation</span></button>
         </div>
       })()}
     </aside>

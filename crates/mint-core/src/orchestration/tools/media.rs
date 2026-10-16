@@ -10,7 +10,7 @@ pub(in crate::orchestration) async fn execute(
     input: &AgentInput,
     _root: &Path,
     config: &MintConfig,
-    _chat_id: &str,
+    chat_id: &str,
     _approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
 ) -> Result<String, OrchestrationError> {
     match action {
@@ -263,49 +263,34 @@ pub(in crate::orchestration) async fn execute(
                 num_images: Some(1),
                 ..Default::default()
             };
-            let res = crate::image_gen::generate_images(config, &req)
+            let res = crate::image_workflow::generate_and_save_images(config, &req)
                 .await
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            let data_uris: Vec<String> = res.images.iter().map(|i| i.data_uri.clone()).collect();
-            if let Ok(saved) = crate::pictures::save_chat_images(
-                data_uris,
-                Some(res.provider.clone()),
-                Some(prompt_text.to_string()),
-            ) {
-                if !saved.is_empty() {
-                    let saved_path = saved[0].path.display().to_string();
-                    let json_payload = serde_json::json!({
-                        "prompt": prompt_text,
-                        "model": res.model,
-                        "provider": res.provider,
-                        "images": saved.iter()
-                            .map(|s| serde_json::json!({ "url": format!("/api/pictures/{}", s.filename) }))
+            crate::library::LibraryStore::open_default()
+                .and_then(|store| {
+                    store.link_generated(
+                        &res.images
+                            .iter()
+                            .map(|image| image.id.clone())
                             .collect::<Vec<_>>(),
-                    });
-                    let json_str = serde_json::to_string_pretty(&json_payload).unwrap_or_default();
-                    let data = format!(
-                        "Image generated successfully with model `{}` ({}). Saved to: {}\n\n```image_gen_json\n{}\n```\n\nNote: Image generation succeeded. In your finish summary, you MUST include the exact ```image_gen_json ... ``` code block from above in your response so the user sees the generated image card.",
-                        res.model, res.provider, saved_path, json_str
-                    );
-                    return Ok(data);
-                }
-            }
-            if let Some(first) = res.images.first() {
-                let json_payload = serde_json::json!({
-                    "prompt": prompt_text,
-                    "model": res.model,
-                    "provider": res.provider,
-                    "images": [{ "url": first.data_uri }],
-                });
-                let json_str = serde_json::to_string_pretty(&json_payload).unwrap_or_default();
-                let data = format!(
-                    "Image generated successfully with model `{}` ({}).\n\n```image_gen_json\n{}\n```\n\nNote: Image generation succeeded. In your finish summary, you MUST include the exact ```image_gen_json ... ``` code block from above in your response so the user sees the generated image card.",
-                    res.model, res.provider, json_str
-                );
-                Ok(data)
-            } else {
-                Ok("No image returned from provider".to_string())
-            }
+                        chat_id,
+                    )
+                })
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            let saved_path = res.images[0].path.display().to_string();
+            let json_payload = serde_json::json!({
+                "prompt": res.prompt,
+                "model": res.model,
+                "provider": res.provider,
+                "images": res.images.iter()
+                    .map(|s| serde_json::json!({ "url": format!("/api/pictures/{}", s.filename) }))
+                    .collect::<Vec<_>>(),
+            });
+            let json_str = serde_json::to_string_pretty(&json_payload).unwrap_or_default();
+            Ok(format!(
+                "Image generated successfully with model `{}` ({}). Saved to: {}\n\n```image_gen_json\n{}\n```\n\nNote: Image generation succeeded. In your finish summary, you MUST include the exact ```image_gen_json ... ``` code block from above in your response so the user sees the generated image card.",
+                res.model, res.provider, saved_path, json_str
+            ))
         }
         "generate_video" | "veo.generate" | "video_generate" => {
             let prompt_text = if !input.prompt.trim().is_empty() {
@@ -333,6 +318,17 @@ pub(in crate::orchestration) async fn execute(
             };
             let res = crate::video_gen::generate_video(config, &req)
                 .await
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            crate::library::LibraryStore::open_default()
+                .and_then(|store| {
+                    store.link_generated(
+                        &res.videos
+                            .iter()
+                            .map(|video| video.id.clone())
+                            .collect::<Vec<_>>(),
+                        chat_id,
+                    )
+                })
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
             if let Some(first) = res.videos.first() {
                 let vid_md = format!(

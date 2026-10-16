@@ -1,5 +1,7 @@
 [
+  { "token": "/mint-web", "usage": "", "description": "Start Mint Web in a background terminal; stop it when Mint closes", "category": "system", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/help", "usage": "", "description": "Show this help", "category": "system", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/mods", "usage": "[list|source|validate|test|enable|disable|export|import|hot-reload]", "description": "Manage workspace mods, tests and live UI panels", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/theme", "usage": "", "description": "Choose terminal theme with a live preview", "category": "system", "surfaces": ["cli"] },
   { "token": "/init", "usage": "", "description": "Scan the codebase and write an AGENTS.md (build/test commands, architecture, conventions)", "category": "system", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/fast", "usage": "[on|off]", "description": "Toggle fast mode (hide thinking traces)", "category": "system", "surfaces": ["cli", "web", "desktop"] },
@@ -54,13 +56,14 @@
   { "token": "/search-provider", "usage": "[name]", "description": "List web search providers or switch default provider", "category": "models", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/bg", "usage": "<query>", "description": "Run a query in the background, non-blocking", "category": "tools", "surfaces": ["cli"] },
   { "token": "/jobs", "usage": "[show|cancel <id>]", "description": "List, inspect, or cancel background jobs", "category": "tools", "surfaces": ["cli"] },
-  { "token": "/shells", "usage": "", "description": "List, inspect, or kill background shell jobs run_shell started", "category": "tools", "surfaces": ["cli"] },
+  { "token": "/preview", "usage": "<relative HTML, Markdown, or image path>", "description": "Serve workspace HTML, Markdown, or images locally and return its browser URL", "category": "tools", "surfaces": ["cli", "desktop", "web"] },
+  { "token": "/shells", "usage": "[all|show <id>|stop <id>|kill <id>]", "description": "List background terminals, view output, or stop a job", "category": "tools", "surfaces": ["cli", "desktop", "web"] },
   { "token": "/mcp", "usage": "", "description": "List configured MCP servers", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp add", "usage": "<name> <command> [args...]", "description": "Add an MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp remove", "usage": "<name>", "description": "Remove an MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp enable", "usage": "<name>", "description": "Re-enable a disabled MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp disable", "usage": "<name>", "description": "Turn an MCP server off without removing it", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
-  { "token": "/mcp edit", "usage": "<name> command|args|icon <value>", "description": "Change one field of a configured MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/mcp edit", "usage": "<name> command|args|icon|timeout <value>", "description": "Change one field of a configured MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp allow", "usage": "<server> <tool>", "description": "Allow an MCP tool", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp disallow", "usage": "<server> <tool>", "description": "Remove a tool from a server's allowlist (* clears it)", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp reauth", "usage": "<server>", "description": "Re-run a server's OAuth login (e.g. expired token)", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
@@ -77,5 +80,7 @@
   { "token": "/multi-agent", "usage": "[on|off]", "description": "Show or toggle Multi-Agent Collaboration system", "category": "system", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/avatar", "usage": "[web|desktop|status|off]", "description": "Connect agent activity to Project Avatar (real-time 3D avatar)", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/rewind", "usage": "[step]", "description": "Rewind workspace to a previous git checkpoint snapshot", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/history", "usage": "", "description": "Show saved workspace file actions and backups", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/undo", "usage": "", "description": "Undo the latest workspace file action, with conflict checks", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/palette", "usage": "", "description": "Open interactive command palette and action menu", "category": "system", "surfaces": ["cli", "web", "desktop"] }
 ]

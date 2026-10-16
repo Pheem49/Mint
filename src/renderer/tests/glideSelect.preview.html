@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mint GlideSelect — Audio settings</title></head>
+<body><div id="root"></div><script type="module">
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import AudioTab from '../shared/components/Settings/AudioTab';
+import {DEFAULT_CONFIG} from '../shared/constants/config';
+import '../shared/theme/tokens.css';
+import '../src-web/css/settings/base.css';
+import '../shared/css/settings/general.css';
+import '../src-web/css/settings/mobile.css';
+function App(){
+ const [config,setConfig]=React.useState({...DEFAULT_CONFIG,voiceMode:'geminiLive'});
+ return React.createElement('main',{className:'settings-container',style:{overflow:'auto',height:'100vh',padding:'24px',background:'#18181b'}},
+  React.createElement('div',{className:'settings-content',style:{maxWidth:900,margin:'0 auto',height:'auto',overflow:'visible'}},React.createElement(AudioTab,{config,apiKey:'',updateField:(field,value)=>setConfig(c=>({...c,[field]:value}))})));
+}
+createRoot(document.getElementById('root')).render(React.createElement(App));
+setTimeout(()=>{
+ const trigger=document.querySelector('[role="combobox"][aria-label="Live voice"]');
+ if(!trigger)return;
+ trigger.scrollIntoView({block:'center'});
+ trigger.dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:1,bubbles:true}));
+ setTimeout(()=>{
+  const row=document.querySelector('.glide-select__option[data-index="2"]');
+  row?.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'}));
+ },300);
+},800);
+</script></body></html>

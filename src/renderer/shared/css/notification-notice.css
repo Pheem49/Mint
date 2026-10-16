@@ -1,0 +1,28 @@
+.mint-notification-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  margin: 8px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #303036);
+  border-radius: 12px;
+  background: var(--bg-overlay, #18181b);
+  color: var(--text-main, #f4f4f5);
+  overflow-wrap: anywhere;
+  -webkit-app-region: no-drag;
+}
+.mint-notification-notice > span { flex: 1; min-width: 0; }
+.mint-notification-notice[data-kind="warning"] { border-color: #b88737; }
+.mint-notification-notice button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--border, #303036);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.mint-notification-notice button:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.mint-notification-notice button:focus-visible { outline: 2px solid var(--accent, #10b981); outline-offset: 2px; }

@@ -760,6 +760,58 @@ mod tests {
     use std::process::{Child, Command, Stdio};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    #[tokio::test]
+    async fn browser_session_prevents_duplicate_external_url_launches() {
+        run_session(async {
+            SESSION.with(|s| s.try_lock().unwrap().used = true);
+            let config = MintConfig::default();
+            for background in [false, true] {
+                let mut requested_approval = false;
+                let result = crate::orchestration::execute_tool_from_json(
+                    std::path::Path::new("/tmp"),
+                    &config,
+                    "run_shell",
+                    json!({"command":"xdg-open 'https://example.com'", "background":background}),
+                    "browser-test",
+                    &mut |_| {
+                        requested_approval = true;
+                        Ok(crate::orchestration::ApprovalOutcome::Denied)
+                    },
+                )
+                .await;
+                assert!(result.unwrap_err().to_string().contains("browser_open"));
+                assert!(
+                    !requested_approval,
+                    "duplicate launch must stop before approval or spawn"
+                );
+            }
+            let result = crate::orchestration::execute_tool_from_json(
+                std::path::Path::new("/tmp"),
+                &config,
+                "verify",
+                json!({"commands":["xdg-open https://example.com"]}),
+                "browser-test",
+                &mut |_| panic!("verification must not launch another browser"),
+            )
+            .await;
+            assert!(result.unwrap_err().to_string().contains("browser_open"));
+
+            // Opening local documents still follows the normal approval path.
+            let result = crate::orchestration::execute_tool_from_json(
+                std::path::Path::new("/tmp"),
+                &config,
+                "run_shell",
+                json!({"command":"xdg-open /tmp/report.pdf"}),
+                "browser-test",
+                &mut |_| Ok(crate::orchestration::ApprovalOutcome::Denied),
+            )
+            .await
+            .unwrap();
+            assert!(result.contains("User denied shell command"));
+        })
+        .await;
+    }
+
     #[test]
     fn composing_browser_actions_keeps_the_caller_future_small() {
         let config = MintConfig::default();

@@ -25,8 +25,6 @@ interface Window {
     saveSettings: (config: any) => Promise<any>;
     onSettingsChanged: (callback: (data: any) => void) => void;
     startVision: () => Promise<any>;
-    onVisionReady: (callback: (data: string) => void) => void;
-    captureSilentScreen: () => Promise<string | null>;
     getSmartContext: () => Promise<any>;
     onProactiveSuggestion: (callback: (data: any) => void) => void;
     onProactiveNotification: (callback: (data: any) => void) => void;
@@ -35,7 +33,7 @@ interface Window {
     executeProactiveAction: (action: any) => Promise<any>;
     executeApprovedAction: (action: any) => Promise<any>;
     onSpotlightToChat: (callback: (query: string) => void) => void;
-    notifyAiResponse: (preview: string) => void;
+    notifyAiResponse: (preview: string, chatId?: string) => Promise<void>;
     clearAiNotifications: () => void;
     getTtsUrls: (text: string) => Promise<Array<{ shortText: string; url: string }>>;
     setAiState: (state: string) => void;
@@ -59,15 +57,6 @@ interface Window {
     resize: (width: number, height: number) => void;
     getSettings: () => Promise<any>;
     onSettingsChanged: (callback: (config: any) => void) => void;
-  };
-  screenPickerApi: {
-    onScreenshot: (callback: (data: string) => void) => void;
-    sendSelection: (base64Image: string) => void;
-    startContinuousTranslation: (rect: any) => void;
-    stopContinuousTranslation: () => void;
-    onTranslationResult: (callback: (text: string) => void) => void;
-    closePicker: () => void;
-    setOverlayInteractable: (isInteractable: boolean) => void;
   };
   widgetAPI: {
     onStateChange: (callback: (state: any) => void) => void;

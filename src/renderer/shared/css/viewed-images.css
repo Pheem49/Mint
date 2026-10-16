@@ -1,0 +1,15 @@
+.viewed-images { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px; max-width: 680px; margin: 12px 0; }
+.viewed-image { min-width: 0; margin: 0; }
+.viewed-image:only-child { max-width: 420px; }
+.viewed-image-button { display: block; width: 100%; padding: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg-surface-soft); cursor: zoom-in; }
+.viewed-image-button img { display: block; width: 100%; height: 260px; object-fit: contain; }
+.viewed-image figcaption { margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
+.viewed-image-error { margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-muted); font-size: 13px; }
+.viewed-image-dialog { box-sizing: border-box; width: fit-content; max-width: 96vw; max-height: 94dvh; padding: 12px; overflow: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-overlay); color: var(--text-main); }
+.viewed-image-dialog::backdrop { background: rgba(0, 0, 0, .75); }
+.viewed-image-dialog header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; font-size: 13px; }
+.viewed-image-dialog header span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.viewed-image-dialog button { display: grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface-soft); color: var(--text-main); cursor: pointer; }
+.viewed-image-dialog > img { display: block; max-width: 100%; max-height: calc(94dvh - 86px); object-fit: contain; }
+.viewed-image-button:focus-visible, .viewed-image-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 480px) { .viewed-image-button img { height: 220px; } }

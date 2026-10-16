@@ -67,13 +67,11 @@ export const McpToolAllowlist: React.FC<McpToolAllowlistProps> = ({
 
   return (
     <div style={{ marginTop: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+      <div className="mcp-allowlist-heading">
         <span className="management-label" style={{ margin: 0 }}>
           Allowed tools
         </span>
-        <label
-          style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', fontSize: '0.85rem', cursor: 'pointer', userSelect: 'none' }}
-        >
+        <label className="mcp-allowlist-toggle">
           <input
             type="checkbox"
             className="mint-custom-checkbox"

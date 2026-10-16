@@ -1,3 +1,4 @@
+import SelectField from './SelectField'
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import '../css/veo-studio.css'
 import { getActiveModel, setActiveModel, subscribeModelChange } from '../utils/modelManager'
@@ -276,12 +277,12 @@ export default function VeoStudioPanel({ view, onSendToChat }: VeoStudioPanelPro
                 <label className="veo-studio-label" htmlFor="veo-studio-provider" style={{ display: 'flex', alignItems: 'center', width: '100%', height: '18px' }}>
                   <span>Provider</span>
                 </label>
-                <select
+                <SelectField aria-label="Provider"
                   id="veo-studio-provider"
                   className="veo-studio-textarea"
-                  style={{ padding: '8px 10px', height: '38px', cursor: 'pointer' }}
+
                   value={selectedProvider}
-                  onChange={(e) => handleProviderChange(e.target.value)}
+                  onValueChange={(nextValue) => handleProviderChange(nextValue)}
                   disabled={generating}
                 >
                   {providers.available.map((prov) => (
@@ -289,25 +290,25 @@ export default function VeoStudioPanel({ view, onSendToChat }: VeoStudioPanelPro
                       {providerLabel(prov).replace(/^[^a-zA-Z0-9]+/, '')}
                     </option>
                   ))}
-                </select>
+                </SelectField>
               </div>
 
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <label className="veo-studio-label" htmlFor="veo-studio-model" style={{ display: 'flex', alignItems: 'center', height: '18px' }}>
                   Model
                 </label>
-                <select
+                <SelectField aria-label="Model"
                   id="veo-studio-model"
                   className="veo-studio-textarea"
-                  style={{ padding: '8px 10px', height: '38px', cursor: 'pointer' }}
+
                   value={selectedModel}
-                  onChange={(e) => handleModelChange(e.target.value)}
+                  onValueChange={(nextValue) => handleModelChange(nextValue)}
                   disabled={generating}
                 >
                   {modelOptions.map(({ value, label }) => (
                     <option key={value} value={value}>{label}</option>
                   ))}
-                </select>
+                </SelectField>
               </div>
             </div>
 

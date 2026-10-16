@@ -22,6 +22,8 @@
     "noFallthroughCasesInSwitch": true,
 
     "paths": {
+      "@/components/ui/*": ["./src/renderer/shared/components/ui/*"],
+      "@/lib/utils": ["./src/renderer/shared/lib/utils"],
       "@/*": ["./src/renderer/src/*", "./src/renderer/src-web/*"],
       "@shared/*": ["./src/renderer/shared/*"]
     }

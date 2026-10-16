@@ -44,6 +44,23 @@ jobs:
       - name: Typecheck UI
         run: npm run typecheck
 
+      - name: Check Companion UI
+        run: |
+          npm run typecheck:companion
+          npm run test:companion
+          npm run build:ui --workspace @mint/companion
+
+      - name: Test launchers, npm package, and main UI styles
+        run: |
+          npm run test:launchers
+          npm run test:styles
+
+      - name: Test main interface navigation and behavior
+        run: npm run test:interfaces
+
+      - name: Build desktop UI
+        run: npm run build:desktop:ui
+
       - name: Build web UI
         run: npm run build:web
 
@@ -54,7 +71,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --no-deps
 
       - name: Run Rust tests
-        run: cargo test -p mint-core -p mint-cli
+        run: cargo test -p mint-core -p mint-cli -p mint-companion-protocol -p mint-companion
 
       - name: Build release binaries
         # `cargo test`/`cargo check` above don't catch every link-time issue —
@@ -67,3 +84,6 @@ jobs:
 
       - name: Audit dependencies
         run: npm audit --audit-level=high
+
+      - name: Build Companion native binary
+        run: cargo build -p mint-companion --locked

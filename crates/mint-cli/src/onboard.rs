@@ -46,17 +46,6 @@ async fn fetch_video_models_with_notice(
     models
 }
 
-// ── Realtime Live Model (Gemini Live voice) ─────────────────────────────────
-// Note: gemini-3.1-flash-live-preview requires requesting allowlist access from Google
-// before it works; gemini-2.5-flash-native-audio-preview-12-2025 needs no such request as
-// of writing, so it's listed first and used as the default. gemini-3.1-flash-tts-preview is
-// deliberately NOT offered here — it's a generateContent-only TTS model, not a Live/
-// BidiGenerateContent model, and will never work with this feature.
-const GEMINI_LIVE_MODEL_PRESETS: &[&str] = &[
-    "gemini-2.5-flash-native-audio-preview-12-2025",
-    "gemini-3.1-flash-live-preview",
-];
-
 async fn fetch_models_with_notice(config: &mint_core::MintConfig, provider: &str) -> Vec<String> {
     print!("\x1b[90mFetching available {provider} models...\x1b[0m\r");
     let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -66,29 +55,14 @@ async fn fetch_models_with_notice(config: &mint_core::MintConfig, provider: &str
     models
 }
 
-/// Fetch Gemini Live–capable models (BidiGenerateContent / native-audio) with a
-/// short spinner. Falls back to `GEMINI_LIVE_MODEL_PRESETS` on any error so the
-/// UI is never empty.
-async fn fetch_live_models_with_notice(api_key: &str) -> Vec<String> {
+/// Fetch Gemini Live model choices while displaying the CLI progress notice.
+async fn fetch_live_models_with_notice(config: &mint_core::MintConfig) -> Vec<String> {
     print!("\x1b[90mFetching available Gemini Live models...\x1b[0m\r");
     let _ = std::io::Write::flush(&mut std::io::stdout());
-    let live = mint_core::slash::model_fetcher::fetch_gemini_live_models(api_key).await;
+    let models = mint_core::model_catalog::live_models(config, "").await;
     print!("\r\x1b[2K");
     let _ = std::io::Write::flush(&mut std::io::stdout());
-
-    if live.is_empty() {
-        // Fallback: static presets.
-        static_model_options(GEMINI_LIVE_MODEL_PRESETS)
-    } else {
-        // Merge: live first, then any presets not already present.
-        let mut merged = live;
-        for p in GEMINI_LIVE_MODEL_PRESETS {
-            if !merged.iter().any(|m| m == p) {
-                merged.push(p.to_string());
-            }
-        }
-        merged
-    }
+    models
 }
 
 pub async fn run() -> Result<()> {
@@ -1112,7 +1086,7 @@ pub async fn run() -> Result<()> {
             .unwrap_or("gemini-2.5-flash-native-audio-preview-12-2025")
             .to_string();
         // Fetch live-capable models dynamically; fallback to presets if offline/no key.
-        let live_model_options = fetch_live_models_with_notice(&config.api_key).await;
+        let live_model_options = fetch_live_models_with_notice(&config).await;
         let selected_live_model = prompt_select_or_custom(
             "Realtime Live Model",
             live_model_options,

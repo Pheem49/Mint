@@ -86,8 +86,8 @@ export default function AutomationTab({
           </div>
           <div className="toggle-row">
             <div>
-              <label>Write a skill after finishing a hard task</label>
-              <p className="hint">Saves a reusable skill after a multi-step task, so it won't have to re-derive the solution next time.</p>
+              <label>Suggest a skill after finishing a hard task</label>
+              <p className="hint">Proposes reusable instructions after a multi-step task. Review and approve each change before it is saved.</p>
             </div>
             <label className="settings-toggle-switch">
               <input

@@ -1,0 +1,22 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Mod input synchronization</title></head><body><div id="root"></div><pre id="result">RUNNING</pre><script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { ModUi } from '../shared/components/ModUi';
+const root = createRoot(document.getElementById('root'));
+const submitted = [];
+const render = value => root.render(React.createElement(ModUi, { node: { type: 'input', label: 'Draft', action: 'save', value }, onAction: (action, value) => submitted.push([action, value]) }));
+const pause = () => new Promise(resolve => setTimeout(resolve, 70));
+const check = (ok, message) => { if (!ok) throw Error(message); };
+const input = () => document.querySelector('input');
+const submit = () => input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+const edit = value => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input(), value); input().dispatchEvent(new Event('input', { bubbles: true })); };
+try {
+  render('existing'); await pause(); submit();
+  check(submitted[0]?.[1] === 'existing', 'Initial value was not submitted');
+  edit('editing'); await pause(); render('existing'); await pause();
+  check(input().value === 'editing', 'Polling discarded unsent edits');
+  render('UPDATED'); await pause(); submit();
+  check(input().value === 'UPDATED' && submitted[1]?.[1] === 'UPDATED', 'Authoritative value did not replace the edited draft');
+  document.getElementById('result').textContent = 'PASS: initial value, stable polling edits and updated mod value submission';
+} catch (error) { document.getElementById('result').textContent = 'FAIL: ' + error.message; }
+</script></body></html>

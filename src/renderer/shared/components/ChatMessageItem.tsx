@@ -1,13 +1,19 @@
 import React, { useMemo } from 'react'
-import { renderFormattedMessage, renderCopyIcon, renderSpeakerIcon } from '../utils/markdown'
+import { renderCopyIcon, renderSpeakerIcon } from '../utils/markdown'
 import { fallbackNotice } from '../utils/providers'
 import WeatherCard from './WeatherCard'
 import StockCard from './StockCard'
 import CalculationCard from './CalculationCard'
 import ImageSearchCard from './ImageSearchCard'
 import ImageGenCard from './ImageGenCard'
+import McpToolResults from './McpToolResults'
+import ViewedImages from './ViewedImages'
 import { parseUtcDate } from '../utils/ui'
 import { parseWebSearchSources } from '../utils/agentActivity'
+import { EMPTY_AGENT_PROGRESS } from '../agentProgress'
+import { FormattedMessage } from './FormattedMessage'
+import { ProgressActivity } from './ProgressActivity'
+import SourcesBlock from './SourcesBlock'
 
 export interface ChatMessageItemProps {
   interaction: any
@@ -22,9 +28,10 @@ export interface ChatMessageItemProps {
   onThinkingExpandedChange: (key: string, expanded: boolean) => void
   handleCopyMessage: (id: string | number, text: string) => void
   speak: (text: string) => void
-  renderCompletedActivity: (interaction: any) => React.ReactNode
+  toggleActivity: (id: string) => void
+  showAllFileChanges?: Record<string, boolean>
+  workspacePath?: string
   renderFileChanges: (interaction: any) => React.ReactNode
-  renderWebSearchSources: (interaction: any) => React.ReactNode
 }
 
 const ChatMessageItem = React.memo(
@@ -42,23 +49,22 @@ const ChatMessageItem = React.memo(
       onThinkingExpandedChange,
       handleCopyMessage,
       speak,
-      renderCompletedActivity,
+      toggleActivity,
       renderFileChanges,
-      renderWebSearchSources,
     } = props
 
     const isSystemEvent = interaction.provider === 'system' && interaction.model === 'provider_change'
 
     const memoizedUserContent = useMemo(() => {
       if (!interaction.userText) return null
-      return renderFormattedMessage(interaction.userText)
+      return <FormattedMessage text={interaction.userText} />
     }, [interaction.userText])
 
-    const progress = agentActivitySnapshots[String(interaction.id)] ?? interaction.agentActivity ?? []
+    const progress = agentActivitySnapshots[String(interaction.id)] ?? interaction.agentActivity ?? EMPTY_AGENT_PROGRESS
     const webSources = useMemo(() => parseWebSearchSources(progress), [progress])
     const memoizedAiContent = useMemo(() => {
       if (!interaction.aiText) return null
-      return renderFormattedMessage(interaction.aiText, webSources)
+      return <FormattedMessage text={interaction.aiText} sources={webSources} />
     }, [interaction.aiText, webSources])
 
     if (isSystemEvent) {
@@ -208,13 +214,16 @@ const ChatMessageItem = React.memo(
         )}
         <div className="message ai-message">
           <div className="bubble-wrapper">
-            {interaction.status === 'completed' && renderCompletedActivity(interaction)}
+            {interaction.status === 'completed' && <ProgressActivity progress={progress} id={String(interaction.id)}
+              historical isOpen={Boolean(openActivityIds?.[String(interaction.id)])} onToggle={toggleActivity} />}
             {interaction.status === 'completed' && renderFileChanges(interaction)}
             <div className="message-bubble">
               {interaction.status === 'queued' && <span>Queued for this session…</span>}
               {interaction.status === 'running' && <span>Mint is responding…</span>}
               {interaction.status === 'failed' && <span>This turn failed. Send the prompt again to retry.</span>}
               {interaction.status === 'interrupted' && <span>This turn was interrupted. Send the prompt again to retry.</span>}
+              <McpToolResults progress={progress} running={interaction.status === 'running'} interrupted={interaction.status === 'interrupted'} />
+              <ViewedImages progress={progress} />
               {fallbackWeatherData && <WeatherCard data={fallbackWeatherData} />}
               {fallbackStockData && <StockCard data={fallbackStockData} />}
               {fallbackCalcData && <CalculationCard data={fallbackCalcData} />}
@@ -222,7 +231,7 @@ const ChatMessageItem = React.memo(
               {fallbackImageGenData && <ImageGenCard data={fallbackImageGenData} />}
               {memoizedAiContent}
             </div>
-            {renderWebSearchSources(interaction)}
+            {webSources.length > 0 && <SourcesBlock sources={webSources} />}
             <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {interaction.status === 'completed' && <span className="provider-model-chip" data-provider={(interaction.provider || '').toLowerCase()} title={`${interaction.provider} • ${interaction.model}`}>
                 <span className="provider-chip-dot" aria-hidden="true" />
@@ -257,9 +266,14 @@ const ChatMessageItem = React.memo(
     )
   },
   (prevProps, nextProps) => {
+    if (prevProps.onEditMessage !== nextProps.onEditMessage
+      || prevProps.onThinkingExpandedChange !== nextProps.onThinkingExpandedChange
+      || prevProps.handleCopyMessage !== nextProps.handleCopyMessage
+      || prevProps.speak !== nextProps.speak
+      || prevProps.toggleActivity !== nextProps.toggleActivity) return false
     const p = prevProps.interaction
     const n = nextProps.interaction
-    if (p.id !== n.id || p.aiText !== n.aiText || p.userText !== n.userText || p.createdAt !== n.createdAt || p.status !== n.status || p.agentActivity !== n.agentActivity) {
+    if (p.id !== n.id || p.aiText !== n.aiText || p.userText !== n.userText || p.createdAt !== n.createdAt || p.status !== n.status || p.agentActivity !== n.agentActivity || p.provider !== n.provider || p.model !== n.model || p.fallbackProvider !== n.fallbackProvider || p.fallbackReason !== n.fallbackReason || p.chatId !== n.chatId) {
       return false
     }
 
@@ -287,13 +301,19 @@ const ChatMessageItem = React.memo(
     const nextOpenActivity = nextProps.openActivityIds?.[String(n.id)] ?? false
     if (prevOpenActivity !== nextOpenActivity) return false
 
-    const prevOpenReview = prevProps.openReviewIds?.[String(p.id)] ?? false
-    const nextOpenReview = nextProps.openReviewIds?.[String(n.id)] ?? false
+    const prevOpenReview = prevProps.openReviewIds?.[String(p.id)] ?? true
+    const nextOpenReview = nextProps.openReviewIds?.[String(n.id)] ?? true
     if (prevOpenReview !== nextOpenReview) return false
 
-    const prevOpenFileDiffs = prevProps.openFileDiffs
-    const nextOpenFileDiffs = nextProps.openFileDiffs
-    if (prevOpenFileDiffs !== nextOpenFileDiffs) return false
+    if (prevProps.workspacePath !== nextProps.workspacePath) return false
+    if (Boolean(prevProps.showAllFileChanges?.[String(p.id)]) !== Boolean(nextProps.showAllFileChanges?.[String(n.id)])) return false
+    if (prevProps.openFileDiffs !== nextProps.openFileDiffs) {
+      const prefix = `${p.id}-`
+      const keys = new Set([...Object.keys(prevProps.openFileDiffs ?? {}), ...Object.keys(nextProps.openFileDiffs ?? {})])
+      for (const key of keys) {
+        if (key.startsWith(prefix) && Boolean(prevProps.openFileDiffs?.[key]) !== Boolean(nextProps.openFileDiffs?.[key])) return false
+      }
+    }
 
     const prevSnap = prevProps.agentActivitySnapshots[String(p.id)]
     const nextSnap = nextProps.agentActivitySnapshots[String(n.id)]

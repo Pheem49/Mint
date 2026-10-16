@@ -83,11 +83,11 @@
     display: none;
   }
 
-  :root.mint-keyboard-open .assistant-workspace.model-hidden .conversation-panel.is-empty .input-area {
+  :root.mint-keyboard-open .assistant-workspace.chat-only .conversation-panel.is-empty .input-area {
     margin: auto 0 0;
   }
 
-  :root.mint-keyboard-open .assistant-workspace.model-hidden .input-area {
+  :root.mint-keyboard-open .assistant-workspace.chat-only .input-area {
     padding-bottom: 6px;
   }
 
@@ -246,7 +246,7 @@
     flex: 1 1 auto;
   }
 
-  .assistant-workspace.model-hidden .chat-panel-split-wrapper.no-preview .conversation-panel {
+  .assistant-workspace.chat-only .chat-panel-split-wrapper.no-preview .conversation-panel {
     height: 100%;
     min-height: 0;
     flex: 1 1 auto;
@@ -274,13 +274,13 @@
     min-height: 44px;
   }
 
-  .assistant-workspace.model-hidden .chat-container {
+  .assistant-workspace.chat-only .chat-container {
     min-height: 0;
     padding: calc(64px + env(safe-area-inset-top)) 12px 12px;
     -webkit-overflow-scrolling: touch;
   }
 
-  .assistant-workspace.model-hidden .input-area {
+  .assistant-workspace.chat-only .input-area {
     min-width: 0;
     margin: 0;
     padding: 8px 10px calc(6px + env(safe-area-inset-bottom));
@@ -288,7 +288,7 @@
     border-top: 1px solid var(--border);
   }
 
-  .assistant-workspace.model-hidden .conversation-panel.is-empty .input-area {
+  .assistant-workspace.chat-only .conversation-panel.is-empty .input-area {
     margin: auto 0 0;
     transform: none;
   }
@@ -313,7 +313,6 @@
   }
 
   #send-btn,
-  #mic-btn,
   #chat-tool-btn,
   #screen-capture-btn,
   #chat-form.has-live-btn #gemini-live-btn {
@@ -465,7 +464,7 @@
     border-right: 1px solid var(--border-default);
   }
 
-  .assistant-workspace.model-hidden .input-area {
+  .assistant-workspace.chat-only .input-area {
     background: var(--mobile-chrome-bg);
     backdrop-filter: var(--mobile-chrome-filter);
     -webkit-backdrop-filter: var(--mobile-chrome-filter);
@@ -551,12 +550,16 @@
   }
 }
 
-.model-spotlight-mobile-tabs {
-  display: none;
-}
-
 /* Composer controls use separate rows so the model name never competes with icons. */
 @media (max-width: 760px) {
+  #chat-form .voice-pill.composer-voice-pill { grid-row: 4; }
+  #chat-form:not(:has(.mint-attachment)) .voice-pill.composer-voice-pill { grid-row: 3; }
+  :root #chat-form:has(.voice-pill.composer-voice-pill[data-state='listening']) {
+    grid-template-columns: 40px 40px minmax(0, 1fr) 118px 40px;
+  }
+  :root #chat-form.has-live-btn:has(.voice-pill.composer-voice-pill[data-state='listening']) {
+    grid-template-columns: 40px 40px minmax(0, 1fr) 118px 40px 40px;
+  }
   #chat-form {
     grid-template-rows: auto minmax(48px, auto) 40px 40px;
     column-gap: 6px;
@@ -597,7 +600,6 @@
 
   #chat-form .chat-tool-menu-wrap,
   #chat-form #screen-capture-btn,
-  #chat-form #mic-btn,
   #chat-form #send-btn,
   #chat-form.has-live-btn #gemini-live-btn {
     grid-row: 4;
@@ -605,7 +607,6 @@
 
   #chat-form:not(:has(.mint-attachment)) .chat-tool-menu-wrap,
   #chat-form:not(:has(.mint-attachment)) #screen-capture-btn,
-  #chat-form:not(:has(.mint-attachment)) #mic-btn,
   #chat-form:not(:has(.mint-attachment)) #send-btn,
   #chat-form.has-live-btn:not(:has(.mint-attachment)) #gemini-live-btn {
     grid-row: 3;

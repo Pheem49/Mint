@@ -102,6 +102,11 @@ pub enum Command {
         #[arg(long, default_value = "cli")]
         chat_id: String,
     },
+    /// Show persistent workspace file history, or undo its latest action.
+    History {
+        #[arg(long)]
+        undo: bool,
+    },
     /// Inspect and manage Git branches in the current workspace.
     Git {
         #[command(subcommand)]
@@ -143,6 +148,13 @@ pub enum Command {
     Link {
         #[command(subcommand)]
         command: LinkCommand,
+    },
+    /// Manage workspace mods. Use list, enable, disable, validate, test, usage, source, logs, export or import.
+    Mods {
+        #[arg(long, default_value = "cli")]
+        chat: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Manage PreToolUse/PostToolUse hooks.
     Hooks {
@@ -289,6 +301,37 @@ pub async fn dispatch(cmd: Command, config: &mut MintConfig, cli: &crate::Cli) -
         Command::Agent { task } => agent::handle_agent(task).await,
         Command::Eval { suite, limit } => eval::handle_eval(suite, limit, config).await,
         Command::Rewind { step, chat_id } => agent::handle_rewind(step, chat_id),
+        Command::History { undo } => {
+            let capability = if undo {
+                mint_core::Capability::Write
+            } else {
+                mint_core::Capability::Read
+            };
+            let root =
+                mint_core::assert_path_capability(&std::env::current_dir()?, capability, config)?;
+            if undo {
+                let entry = mint_core::system::workspace_history::undo(&root, None)
+                    .map_err(anyhow::Error::msg)?;
+                println!(
+                    "{}",
+                    entry
+                        .map(|entry| entry.label)
+                        .unwrap_or_else(|| "There is no workspace action to undo.".into())
+                );
+            } else {
+                let entries = mint_core::system::workspace_history::list(&root)
+                    .map_err(anyhow::Error::msg)?;
+                for entry in entries.iter().take(20) {
+                    println!("{}", entry.label);
+                }
+                if entries.is_empty() {
+                    println!("No workspace file history yet.");
+                } else {
+                    println!("\nRun 'mint history --undo' to undo the latest action.");
+                }
+            }
+            Ok(())
+        }
         Command::Git { command } => git::handle_git(command),
         Command::Resume { id } => {
             mint_core::channels::start_channels();
@@ -336,6 +379,7 @@ pub async fn dispatch(cmd: Command, config: &mut MintConfig, cli: &crate::Cli) -
 
         Command::Mcp { command } => integrations::handle_mcp(command).await,
         Command::Link { command } => integrations::handle_link(command),
+        Command::Mods { chat, args } => crate::mods_cli::run(&chat, &args).await,
         Command::Hooks { command } => integrations::handle_hooks(command),
         Command::Gmail { command } => integrations::handle_gmail(command).await,
         Command::Plugins { command } => integrations::handle_plugins(command).await,

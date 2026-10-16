@@ -1,3 +1,4 @@
+import SelectField from './SelectField'
 import React, { useState, useEffect } from 'react'
 import '../css/management-views.css'
 import { renderMcpSvgIcon, renderMcpHubSvgIcon } from '../constants/plugins'
@@ -305,7 +306,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="mcp-management-actions">
           <button
             type="button"
             className="management-action-btn"
@@ -333,7 +334,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
 
       {/* Search Input */}
       <div className="management-control-bar">
-        <div className="management-search-wrapper" style={{ maxWidth: '400px' }}>
+        <div className="management-search-wrapper mcp-search-wrapper">
           <input
             type="text"
             className="management-search-input"
@@ -356,9 +357,18 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
         </div>
       </div>
 
+      <label className="mcp-image-input-setting">
+        <input
+          type="checkbox"
+          checked={config.mcpImageInput !== false}
+          onChange={(e) => updateField('mcpImageInput', e.target.checked)}
+        />
+        <span>Let the model inspect MCP images <span className="mcp-image-input-hint">(disable for models without image input)</span></span>
+      </label>
+
       {/* Installed */}
       {installedMcpItems.length > 0 && (
-        <div className="management-installed-section">
+        <div className="management-installed-section mcp-installed-section">
           <h2 className="management-section-title">Installed</h2>
           <div className="management-installed-row">
             {installedMcpItems.map((item) => (
@@ -493,6 +503,15 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                     <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--interactive-fg)', textTransform: 'none', letterSpacing: '0.5px', margin: '0 0 12px' }}>
                       Server Config
                     </h4>
+                    <label className="management-form-group" style={{ marginBottom: 12 }}>
+                      Tool timeout (seconds)
+                      <input className="management-input-field mcp-timeout-input" type="number" min={1} max={3600} defaultValue={srvConfig.timeoutSecs ?? 300}
+                        key={item.name} onBlur={(e) => {
+                          const value = Number(e.currentTarget.value)
+                          if (Number.isInteger(value) && value >= 1 && value <= 3600) handleUpdateMcpServerField(item.name, 'timeoutSecs', value)
+                          else e.currentTarget.value = String(srvConfig.timeoutSecs ?? 300)
+                        }} />
+                    </label>
                     {srvConfig.url ? (
                       <div style={{ display: 'grid', gap: '12px' }}>
                         <div className="management-form-group">
@@ -688,20 +707,20 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                       </div>
                       <div className="management-form-group">
                         <label className="management-label">Authentication</label>
-                        <select
+                        <SelectField aria-label="Authentication"
                           className="management-input-field"
                           value={authType}
-                          onChange={(e) => {
-                            setAuthType(e.target.value as any)
+                          onValueChange={(nextValue) => {
+                            setAuthType(nextValue as any)
                             setTestStatus('idle')
                             setTestMessage('')
                           }}
-                          style={{ cursor: 'pointer' }}
+
                         >
                           <option value="none">None (Public)</option>
                           <option value="bearer">Bearer token</option>
                           <option value="custom">Custom headers (JSON)</option>
-                        </select>
+                        </SelectField>
                       </div>
                     </div>
 

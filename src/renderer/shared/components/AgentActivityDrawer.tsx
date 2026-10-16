@@ -4,6 +4,7 @@
  * Shared by both Desktop and Web ChatPanel — do NOT duplicate this.
  */
 import React, { useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 import type { AgentProgress, ActivePlan, RunTelemetrySummary } from '../types'
 import type { AgentActivityView } from '../utils/agentActivity'
 import { AgentActivityTable } from './AgentActivityTable'
@@ -165,7 +166,7 @@ export function AgentActivityDrawer({
           onClick={onToggle}
         >
           <span>{displaySummary}</span>
-          <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
+          <ChevronDown size={13} className={`agent-activity-toggle-chevron${isOpen ? ' is-open' : ''}`} aria-hidden="true" />
         </button>
         {isOpen && (
           <div className="agent-activity-card agent-activity-card-history">
@@ -189,7 +190,7 @@ export function AgentActivityDrawer({
             >
               {pendingApproval ? 'Waiting for approval' : latestRunSummary ? 'Completed' : 'Working'}
             </span>
-            <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
+            <ChevronDown size={13} className={`agent-activity-toggle-chevron${isOpen ? ' is-open' : ''}`} aria-hidden="true" />
           </div>
         </div>
         {isOpen && (

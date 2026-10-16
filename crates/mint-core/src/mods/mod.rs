@@ -1,0 +1,569 @@
+mod manager;
+mod session;
+pub use session::{Viewport, current_usage, session_snapshot, set_hot_reload, update_viewport};
+mod telemetry;
+pub use telemetry::UsageTracker;
+mod slash;
+pub use slash::slash;
+mod operations;
+pub use manager::*;
+pub use mint_mod_runtime::worker_main;
+pub use operations::{Operation, operate, operate_async};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn discovery_finds_workspace_source_without_activation() {
+        let root =
+            std::env::temp_dir().join(format!("mint-mod-discovery-{}", uuid::Uuid::new_v4()));
+        let dir = root.join("mint-mods/meter");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("manifest.json"),
+            r#"{"id":"meter","name":"Meter","version":"1","sdkVersion":1,"entry":"main.ts"}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("main.ts"), "export function register(mint) {}").unwrap();
+        let mods = discover(&root).unwrap();
+        assert_eq!(mods.len(), 1);
+        assert_eq!(mods[0]["id"], "meter");
+        assert_eq!(mods[0]["enabled"], false);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use serde_json::{Value, json};
+    struct Workspace(std::path::PathBuf);
+    impl Workspace {
+        fn new() -> Self {
+            let p = std::env::temp_dir().join(format!("mint-mods-test-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&p).unwrap();
+            Self(p)
+        }
+    }
+    impl Drop for Workspace {
+        fn drop(&mut self) {
+            close_chat(&self.0, "a");
+            close_chat(&self.0, "b");
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn source(code: &str, permissions: Vec<&str>) -> Source {
+        serde_json::from_value(json!({"manifest":{"id":"counter","name":"Counter","version":"1","sdkVersion":1,"entry":"main.ts","permissions":permissions},"source":code,"readme":"Example"})).unwrap()
+    }
+    const COUNTER: &str = r#"export function register(mint) {
+        function render(){mint.ui.set('side_panel',{type:'text',text:String(mint.state.get('count')||0)});}
+        mint.commands.register('bump',()=>{mint.state.set('count',(mint.state.get('count')||0)+1);render();});render();
+    }"#;
+    fn record(root: &std::path::Path, chat: &str) -> Value {
+        list(root, chat).unwrap().remove(0)
+    }
+    fn picker(w: &Workspace, chat: &str, surface: &str, input: &str) -> Value {
+        let mut config = crate::MintConfig {
+            allowed_read_paths: vec![w.0.clone()],
+            allowed_write_paths: vec![w.0.clone()],
+            ..Default::default()
+        };
+        serde_json::to_value(crate::slash::execute(
+            &crate::slash::SlashRequest {
+                input: input.into(),
+                cwd: Some(w.0.to_string_lossy().into_owned()),
+                surface: Some(surface.into()),
+                chat_id: Some(chat.into()),
+            },
+            &mut config,
+        ))
+        .unwrap()
+    }
+    fn choose(response: &Value, label: &str) -> String {
+        let option = response["options"]
+            .as_array()
+            .unwrap_or_else(|| panic!("Expected choices: {response}"))
+            .iter()
+            .find(|option| option["label"].as_str().unwrap().starts_with(label))
+            .unwrap_or_else(|| panic!("Missing choice {label}: {response}"));
+        format!(
+            "{} {}",
+            response["command"].as_str().unwrap(),
+            option["value"].as_str().unwrap()
+        )
+    }
+    #[test]
+    fn mods_picker_counts_and_toggles_the_selected_mod_on_every_surface() {
+        let w = Workspace::new();
+        publish(&w.0, &source(COUNTER, vec![]), None).unwrap();
+        let mut second = source(COUNTER, vec![]);
+        second.manifest.id = "second".into();
+        second.manifest.name = "Second".into();
+        publish(&w.0, &second, None).unwrap();
+        for surface in ["cli", "desktop", "web"] {
+            let chat = format!("picker-{surface}");
+            let menu = picker(&w, &chat, surface, "/mods");
+            assert_eq!(menu["kind"], "needs_choice", "{menu}");
+            assert!(
+                menu["title"]
+                    .as_str()
+                    .unwrap()
+                    .contains("2 mods · 0 active")
+            );
+            assert_eq!(menu["options"].as_array().unwrap().len(), 2);
+            let detail = picker(&w, &chat, surface, &choose(&menu, "Counter"));
+            let enabled = picker(&w, &chat, surface, &choose(&detail, "Enable"));
+            assert_eq!(enabled["kind"], "message", "{enabled}");
+            assert!(
+                enabled["markdown"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Enabled counter for this chat")
+            );
+            let scoped = crate::scoped_chat_id(&chat, Some(&w.0.to_string_lossy()));
+            let records = list(&w.0, &scoped).unwrap();
+            assert_eq!(records[0]["enabled"], true);
+            assert_eq!(records[1]["enabled"], false);
+            assert_eq!(record(&w.0, "other-chat")["enabled"], false);
+            let menu = picker(&w, &chat, surface, "/mods");
+            assert!(
+                menu["title"]
+                    .as_str()
+                    .unwrap()
+                    .contains("2 mods · 1 active")
+            );
+            let detail = picker(&w, &chat, surface, &choose(&menu, "Counter"));
+            let disabled = picker(&w, &chat, surface, &choose(&detail, "Disable"));
+            assert_eq!(disabled["kind"], "message");
+            assert!(
+                disabled["markdown"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Disabled counter for this chat")
+            );
+            assert_eq!(record(&w.0, &scoped)["enabled"], false);
+            close_chat(&w.0, &scoped);
+        }
+    }
+    #[test]
+    fn mods_picker_requires_review_and_rejects_changed_permission_source() {
+        let w = Workspace::new();
+        let original = source(COUNTER, vec!["workspace.read"]);
+        publish(&w.0, &original, None).unwrap();
+        let detail = picker(&w, "a", "cli", "/mods manage counter");
+        let review = picker(&w, "a", "cli", &choose(&detail, "Enable"));
+        assert_eq!(review["kind"], "needs_choice");
+        assert!(review["title"].as_str().unwrap().contains("workspace.read"));
+        let scoped = crate::scoped_chat_id("a", Some(&w.0.to_string_lossy()));
+        assert_eq!(record(&w.0, &scoped)["enabled"], false);
+        let approve = choose(&review, "Approve");
+        std::fs::write(
+            w.0.join(".mint-mods/counter/main.ts"),
+            format!("{COUNTER}\n// changed"),
+        )
+        .unwrap();
+        let rejected = picker(&w, "a", "cli", &approve);
+        assert_eq!(rejected["kind"], "message");
+        assert!(
+            rejected["markdown"]
+                .as_str()
+                .unwrap()
+                .contains("changed after review")
+        );
+        assert_eq!(record(&w.0, &scoped)["enabled"], false);
+        let detail = picker(&w, "a", "cli", "/mods manage counter");
+        let review = picker(&w, "a", "cli", &choose(&detail, "Enable"));
+        let approved = picker(&w, "a", "cli", &choose(&review, "Approve"));
+        assert_eq!(approved["kind"], "message");
+        assert_eq!(record(&w.0, &scoped)["enabled"], true);
+        close_chat(&w.0, &scoped);
+    }
+    #[test]
+    fn workspace_reenable_clears_only_the_current_chats_disable_override() {
+        let w = Workspace::new();
+        publish(&w.0, &source(COUNTER, vec![]), None).unwrap();
+        enable(&w.0, "a", "counter", "workspace", false).unwrap();
+        disable(&w.0, "a", "counter").unwrap();
+        disable(&w.0, "b", "counter").unwrap();
+        enable(&w.0, "a", "counter", "workspace", false).unwrap();
+        assert_eq!(record(&w.0, "a")["enabled"], true);
+        assert_eq!(record(&w.0, "b")["enabled"], false);
+    }
+    #[test]
+    fn hot_reload_preserves_state_and_changes_only_the_opted_in_chat() {
+        let w = Workspace::new();
+        let s = source(COUNTER, vec![]);
+        publish(&w.0, &s, None).unwrap();
+        enable(&w.0, "a", "counter", "workspace", false).unwrap();
+        command(&w.0, "a", "counter", "bump", "").unwrap();
+        let old = record(&w.0, "a")["instanceId"].clone();
+        record(&w.0, "b");
+        set_hot_reload(&w.0, "a", true).unwrap();
+        std::fs::write(
+            w.0.join(".mint-mods/counter/main.ts"),
+            COUNTER.replace(
+                "String(mint.state.get('count')||0)",
+                "'Reloaded '+String(mint.state.get('count')||0)",
+            ),
+        )
+        .unwrap();
+        let current = record(&w.0, "a");
+        assert_eq!(
+            current["snapshot"]["ui"]["side_panel"]["text"],
+            "Reloaded 1"
+        );
+        assert_ne!(current["instanceId"], old);
+        assert_eq!(
+            record(&w.0, "b")["snapshot"]["ui"]["side_panel"]["text"],
+            "0"
+        );
+        assert!(
+            action(
+                &w.0,
+                "a",
+                "counter",
+                old.as_str().unwrap(),
+                "bump",
+                Value::Null
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn invalid_hot_reload_keeps_the_active_worker_and_privileges_require_review() {
+        let w = Workspace::new();
+        let s = source(COUNTER, vec![]);
+        publish(&w.0, &s, None).unwrap();
+        enable(&w.0, "a", "counter", "chat", false).unwrap();
+        set_hot_reload(&w.0, "a", true).unwrap();
+        std::fs::write(
+            w.0.join(".mint-mods/counter/main.ts"),
+            "export function register(mint){throw Error('Bad revision');}",
+        )
+        .unwrap();
+        let m = record(&w.0, "a");
+        assert!(m["reloadError"].as_str().is_some());
+        assert!(m["error"].is_null());
+        command(&w.0, "a", "counter", "bump", "").unwrap();
+        assert_eq!(
+            record(&w.0, "a")["snapshot"]["ui"]["side_panel"]["text"],
+            "1"
+        );
+        std::fs::write(w.0.join(".mint-mods/counter/main.ts"), COUNTER).unwrap();
+        assert!(record(&w.0, "a")["reloadError"].is_null());
+        std::fs::write(
+            w.0.join(".mint-mods/counter/main.ts"),
+            "export function register(mint){throw Error('Bad revision');}",
+        )
+        .unwrap();
+        assert!(record(&w.0, "a")["reloadError"].as_str().is_some());
+        let privileged = source(COUNTER, vec!["workspace.read"]);
+        publish(
+            &w.0,
+            &privileged,
+            Some(&load_source(&w.0, "counter").unwrap().hash()),
+        )
+        .unwrap();
+        let m = record(&w.0, "a");
+        assert_eq!(m["activeHash"], s.hash());
+        assert!(m["reloadError"].as_str().unwrap().contains("review"));
+    }
+    #[test]
+    fn sdk_getters_read_latest_usage_and_resize_redraws_without_a_turn() {
+        let w = Workspace::new();
+        event(
+            &w.0,
+            "a",
+            "usage_update",
+            json!({"context":{"tokens":36100}}),
+            None,
+        )
+        .unwrap();
+        let s = source(
+            "export function register(mint){function draw(){mint.ui.set('above_composer',{type:'text',text:mint.session.usage().context.tokens+' / '+mint.ui.viewport().columns});}draw();mint.on('ui_resize',draw);}",
+            vec![],
+        );
+        publish(&w.0, &s, None).unwrap();
+        enable(&w.0, "a", "counter", "chat", false).unwrap();
+        update_viewport(
+            &w.0,
+            "a",
+            Viewport {
+                surface: Some("terminal".into()),
+                columns: Some(80),
+                rows: Some(30),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            record(&w.0, "a")["snapshot"]["ui"]["above_composer"]["text"],
+            "36100 / 80"
+        );
+        assert!(current_usage(&w.0, "b")["context"]["tokens"].is_null());
+        close_chat(&w.0, "a");
+        assert_eq!(current_usage(&w.0, "a")["context"]["tokens"], 36100);
+        assert_eq!(session_snapshot(&w.0, "a").unwrap()["hotReload"], false);
+    }
+    #[test]
+    fn activation_state_and_disk_changes_are_separate_per_chat() {
+        let w = Workspace::new();
+        let s = source(COUNTER, vec![]);
+        publish(&w.0, &s, None).unwrap();
+        assert_eq!(record(&w.0, "a")["enabled"], false);
+        enable(&w.0, "a", "counter", "chat", false).unwrap();
+        let before = record(&w.0, "a");
+        let instance = before["instanceId"].as_str().unwrap();
+        action(&w.0, "a", "counter", instance, "bump", Value::Null).unwrap();
+        assert_eq!(
+            record(&w.0, "a")["snapshot"]["ui"]["side_panel"]["text"],
+            "1"
+        );
+        assert_eq!(record(&w.0, "b")["enabled"], false);
+        enable(&w.0, "b", "counter", "chat", false).unwrap();
+        assert_eq!(
+            record(&w.0, "b")["snapshot"]["ui"]["side_panel"]["text"],
+            "0"
+        );
+        assert_eq!(record(&w.0, "a")["enabled"], true);
+        close_chat(&w.0, "a");
+        assert_eq!(
+            record(&w.0, "a")["snapshot"]["ui"]["side_panel"]["text"],
+            "1"
+        );
+        assert!(action(&w.0, "a", "counter", instance, "bump", Value::Null).is_err());
+        std::fs::write(w.0.join(".mint-mods/counter/main.ts"),"export function register(mint) {mint.ui.set('side_panel',{type:'text',text:'changed'});}").unwrap();
+        assert_eq!(record(&w.0, "a")["changed"], true);
+        assert_eq!(
+            record(&w.0, "a")["snapshot"]["ui"]["side_panel"]["text"],
+            "1"
+        );
+    }
+    #[test]
+    fn permissions_are_reapproved_for_changed_content_and_failed_hooks_stay_closed() {
+        let w = Workspace::new();
+        let s = source(COUNTER, vec!["workspace.read"]);
+        publish(&w.0, &s, None).unwrap();
+        assert!(enable(&w.0, "a", "counter", "chat", false).is_err());
+        enable(&w.0, "a", "counter", "chat", true).unwrap();
+        let failing = source(
+            "export function register(mint){mint.on('pre_tool_use',()=>{while(true){}});}",
+            vec![],
+        );
+        publish(&w.0, &failing, Some(&s.hash())).unwrap();
+        enable(&w.0, "a", "counter", "chat", false).unwrap();
+        assert!(
+            event(
+                &w.0,
+                "a",
+                "pre_tool_use",
+                json!({"action":"read_file"}),
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            event(
+                &w.0,
+                "a",
+                "pre_tool_use",
+                json!({"action":"read_file"}),
+                None
+            )
+            .is_err()
+        );
+        disable(&w.0, "a", "counter").unwrap();
+        assert!(
+            event(
+                &w.0,
+                "a",
+                "pre_tool_use",
+                json!({"action":"read_file"}),
+                None
+            )
+            .is_ok()
+        );
+    }
+    #[test]
+    fn publishing_checks_disk_hash_and_rollback_restores_source() {
+        let w = Workspace::new();
+        let s = source(COUNTER, vec![]);
+        let hash = publish(&w.0, &s, None).unwrap();
+        let changed = source("export function register(mint) {}", vec![]);
+        assert!(publish(&w.0, &changed, Some("wrong")).is_err());
+        assert_eq!(load_source(&w.0, "counter").unwrap().source, COUNTER);
+        let next = publish(&w.0, &changed, Some(&hash)).unwrap();
+        rollback(&w.0, "counter", &hash, &next).unwrap();
+        assert_eq!(load_source(&w.0, "counter").unwrap().source, COUNTER);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn disabled_source_discovery_cannot_block_agent_tools() {
+        let w = Workspace::new();
+        std::os::unix::fs::symlink("/tmp", w.0.join("mint-mods")).unwrap();
+        assert!(
+            event(
+                &w.0,
+                "a",
+                "pre_tool_use",
+                json!({"action":"read_file"}),
+                None
+            )
+            .is_ok()
+        );
+    }
+    #[test]
+    fn shutdown_releases_chat_instances_and_saves_session_end_state() {
+        let w = Workspace::new();
+        let chat = uuid::Uuid::new_v4().to_string();
+        let s = source(
+            "export function register(mint){mint.on('session_end',()=>mint.state.set('closed',true));mint.ui.set('side_panel',{type:'text',text:String(mint.state.get('closed')||false)});}",
+            vec![],
+        );
+        publish(&w.0, &s, None).unwrap();
+        enable(&w.0, &chat, "counter", "chat", false).unwrap();
+        let old = record(&w.0, &chat)["instanceId"].clone();
+        shutdown_chat(&chat);
+        let reopened = record(&w.0, &chat);
+        assert_ne!(reopened["instanceId"], old);
+        assert_eq!(reopened["snapshot"]["ui"]["side_panel"]["text"], "true");
+        close_chat(&w.0, &chat);
+    }
+    #[test]
+    fn pre_tool_hooks_cannot_bypass_sdk_to_enqueue_tools() {
+        let w = Workspace::new();
+        let s = source(
+            r#"export function register(mint){mint.on('pre_tool_use',()=>{__host(JSON.stringify({kind:'tool',action:'read_file',input:{path:'README.md'}}));});}"#,
+            vec!["tools.request"],
+        );
+        publish(&w.0, &s, None).unwrap();
+        enable(&w.0, "a", "counter", "chat", true).unwrap();
+        event(
+            &w.0,
+            "a",
+            "pre_tool_use",
+            json!({"action":"read_file"}),
+            None,
+        )
+        .unwrap();
+        assert!(pending_requests(&w.0, "a").unwrap().is_empty());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_sources_and_workspace_escape_are_rejected() {
+        let w = Workspace::new();
+        let s = source(COUNTER, vec![]);
+        publish(&w.0, &s, None).unwrap();
+        let entry = w.0.join(".mint-mods/counter/main.ts");
+        std::fs::remove_file(&entry).unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", &entry).unwrap();
+        assert!(load_source(&w.0, "counter").is_err());
+    }
+}
+
+#[cfg(test)]
+mod directory_tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    struct Workspace(PathBuf);
+    impl Workspace {
+        fn new() -> Self {
+            let root =
+                std::env::temp_dir().join(format!("mint-mod-directory-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            Self(root)
+        }
+    }
+    impl Drop for Workspace {
+        fn drop(&mut self) {
+            close_chat(&self.0, "transition");
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn fixture(root: &Path, base: &str, id: &str, name: &str) -> Source {
+        let source: Source = serde_json::from_value(serde_json::json!({
+            "manifest":{"id":id,"name":name,"version":"1","sdkVersion":1,"entry":"main.ts","permissions":[]},
+            "source":"export function register(mint){mint.commands.register('bump',()=>mint.state.set('count',(mint.state.get('count')||0)+1));}",
+            "readme":"Transition fixture"
+        })).unwrap();
+        let dir = root.join(base).join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_vec(&source.manifest).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(dir.join("main.ts"), &source.source).unwrap();
+        source
+    }
+    #[test]
+    fn new_publications_use_hidden_directory_even_with_legacy_mods() {
+        let w = Workspace::new();
+        fixture(&w.0, "mint-mods", "old", "Old");
+        let draft: Source = serde_json::from_value(serde_json::json!({
+            "manifest":{"id":"new","name":"New","version":"1","sdkVersion":1,"entry":"main.ts"},
+            "source":"export function register(mint) {}"
+        }))
+        .unwrap();
+        publish(&w.0, &draft, None).unwrap();
+        assert!(w.0.join(".mint-mods/new/main.ts").is_file());
+        assert!(!w.0.join("mint-mods/new").exists());
+        assert!(w.0.join("mint-mods/old/main.ts").is_file());
+    }
+    #[test]
+    fn discovery_merges_directories_with_hidden_id_precedence() {
+        let w = Workspace::new();
+        fixture(&w.0, "mint-mods", "shared", "Legacy");
+        fixture(&w.0, "mint-mods", "old", "Old");
+        fixture(&w.0, ".mint-mods", "shared", "Hidden");
+        fixture(&w.0, ".mint-mods", "new", "New");
+        let mods = discover(&w.0).unwrap();
+        let names: Vec<_> = mods.iter().map(|m| m["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["New", "Old", "Hidden"]);
+        assert_eq!(load_source(&w.0, "shared").unwrap().manifest.name, "Hidden");
+    }
+    #[test]
+    fn invalid_hidden_copy_does_not_fall_back_to_legacy_source() {
+        let w = Workspace::new();
+        fixture(&w.0, "mint-mods", "shared", "Legacy");
+        let dir = w.0.join(".mint-mods/shared");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), "invalid").unwrap();
+        assert!(load_source(&w.0, "shared").is_err());
+        assert!(shareable_source(&w.0, "shared").is_err());
+        let mods = discover(&w.0).unwrap();
+        assert_eq!(mods.len(), 1);
+        assert!(mods[0]["error"].as_str().is_some());
+    }
+    #[test]
+    fn legacy_edit_rollback_and_directory_move_preserve_chat_state() {
+        let w = Workspace::new();
+        let original = fixture(&w.0, "mint-mods", "counter", "Legacy counter");
+        enable(&w.0, "transition", "counter", "chat", false).unwrap();
+        command(&w.0, "transition", "counter", "bump", "").unwrap();
+        let mut changed = original.clone();
+        changed.source.push_str("\n// edited");
+        let next = publish(&w.0, &changed, Some(&original.hash())).unwrap();
+        assert!(w.0.join("mint-mods/counter/main.ts").is_file());
+        assert!(!w.0.join(".mint-mods/counter").exists());
+        rollback(&w.0, "counter", &original.hash(), &next).unwrap();
+        close_chat(&w.0, "transition");
+        std::fs::rename(w.0.join("mint-mods"), w.0.join(".mint-mods")).unwrap();
+        let mods = list(&w.0, "transition").unwrap();
+        assert_eq!(mods[0]["enabled"], true);
+        assert_eq!(mods[0]["snapshot"]["state"]["count"], 1);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn hidden_symlinks_cannot_redirect_publication_or_expose_legacy_fallback() {
+        let w = Workspace::new();
+        let outside = Workspace::new();
+        let s = fixture(&w.0, "mint-mods", "counter", "Legacy");
+        std::os::unix::fs::symlink(&outside.0, w.0.join(".mint-mods")).unwrap();
+        assert!(load_source(&w.0, "counter").is_err());
+        assert!(publish(&w.0, &s, Some(&s.hash())).is_err());
+        assert!(discover(&w.0).is_err());
+        assert!(!outside.0.join("counter").exists());
+    }
+}

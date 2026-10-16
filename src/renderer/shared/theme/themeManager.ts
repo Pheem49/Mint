@@ -1,3 +1,5 @@
+import '../css/effects.css'
+import { initializeEffectVisibility } from '../utils/effectVisibility'
 /**
  * shared/theme/themeManager.ts
  * Centralized theme controller and runtime state manager.
@@ -47,7 +49,9 @@ export const applyTheme = (cfg: any): void => {
   if (typeof document === 'undefined') return
 
   const rawTheme = cfg.theme || 'dark'
-  const surfaceStyle = cfg.surfaceStyle || (cfg.glassBlur === 'none' ? 'opaque' : 'glass')
+  // Match Settings: disabling glass also disables translucent surfaces, even
+  // when an older configuration still contains surfaceStyle: 'glass'.
+  const surfaceStyle = cfg.glassBlur === 'none' ? 'opaque' : (cfg.surfaceStyle || 'glass')
   const accentColor = cfg.accentColor || '#10b981'
   const rgb = hexToRgb(accentColor)
   const contrastText = getContrastText(accentColor)
@@ -71,6 +75,9 @@ export const applyTheme = (cfg: any): void => {
     systemThemeListener = null
     systemThemeMediaQuery = null
   }
+
+  initializeEffectVisibility()
+  document.documentElement.setAttribute('data-reduced-effects', String(cfg.reducedEffects === true))
 
   // Set DOM data attributes
   document.documentElement.setAttribute('data-theme', effectiveTheme)
@@ -118,9 +125,15 @@ export const applyTheme = (cfg: any): void => {
     }
     if (cfg.customPanelBg) {
       const pRgb = hexToRgb(cfg.customPanelBg)
-      document.documentElement.style.setProperty('--bg-surface', `rgba(${pRgb.r}, ${pRgb.g}, ${pRgb.b}, 0.75)`)
-      document.documentElement.style.setProperty('--panel-bg', `rgba(${pRgb.r}, ${pRgb.g}, ${pRgb.b}, 0.75)`)
-      document.documentElement.style.setProperty('--surface-bg', `rgba(${pRgb.r}, ${pRgb.g}, ${pRgb.b}, 0.62)`)
+      const panelSurface = surfaceStyle === 'opaque'
+        ? cfg.customPanelBg
+        : `rgba(${pRgb.r}, ${pRgb.g}, ${pRgb.b}, 0.75)`
+      const raisedSurface = surfaceStyle === 'opaque'
+        ? cfg.customPanelBg
+        : `rgba(${pRgb.r}, ${pRgb.g}, ${pRgb.b}, 0.62)`
+      document.documentElement.style.setProperty('--bg-surface', panelSurface)
+      document.documentElement.style.setProperty('--panel-bg', panelSurface)
+      document.documentElement.style.setProperty('--surface-bg', raisedSurface)
     }
     return
   }

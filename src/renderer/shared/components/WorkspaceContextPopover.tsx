@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { FileCode2, FolderOpen, GitBranch, RefreshCw, Terminal } from 'lucide-react'
 import { workspacePlatform } from '../platform'
-import type { FileChange, GitBranchInfo } from '../types'
+import type { AgentProgress, FileChange, GitBranchInfo } from '../types'
+import { useSessionSources } from '../utils/useSessionSources'
+import SessionSources from './SessionSources'
 
 interface WorkspaceContextPopoverProps {
   workspacePath: string
   terminalCount: number
-  sourceNames: string[]
+  chatId: string
+  liveProgress: AgentProgress[]
   recentChanges: FileChange[]
   onOpenWorkspace: () => void
   onOpenReview: (changes: FileChange[]) => void
@@ -20,7 +24,8 @@ function workspaceLabel(path: string) {
 export default function WorkspaceContextPopover({
   workspacePath,
   terminalCount,
-  sourceNames,
+  chatId,
+  liveProgress,
   recentChanges,
   onOpenWorkspace,
   onOpenReview,
@@ -30,6 +35,7 @@ export default function WorkspaceContextPopover({
   const [gitInfo, setGitInfo] = useState<GitBranchInfo | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const { sources, loading: sourceLoading, error: sourceError, retry: retrySources } = useSessionSources(chatId, liveProgress, open)
 
   const refresh = useCallback(async () => {
     if (!workspacePath.trim()) {
@@ -73,7 +79,6 @@ export default function WorkspaceContextPopover({
   const additions = recentChanges.reduce((total, change) => total + Math.max(0, change.additions || 0), 0)
   const deletions = recentChanges.reduce((total, change) => total + Math.max(0, change.deletions || 0), 0)
   const hasReview = recentChanges.length > 0
-  const uniqueSources = [...new Set(sourceNames.filter(Boolean))]
 
   return (
     <div className="workspace-context" ref={rootRef}>
@@ -91,41 +96,41 @@ export default function WorkspaceContextPopover({
       {open && (
         <section className="workspace-context-popover" role="dialog" aria-label="Workspace context">
           <header className="workspace-context-heading">
-            <span>Workspace context</span>
+            <span className="workspace-context-heading-title"><FolderOpen size={16} aria-hidden="true" /> Workspace context</span>
             <button type="button" onClick={handleRefresh} disabled={isRefreshing} title="Refresh workspace status" aria-label="Refresh workspace status">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 2 5.5"/><path d="M20 4v7h-7"/></svg>
+              <RefreshCw className={isRefreshing ? 'is-refreshing' : ''} size={15} aria-hidden="true" />
             </button>
           </header>
 
           <button type="button" className="workspace-context-row" onClick={() => { onOpenWorkspace(); setOpen(false) }}>
-            <span className="workspace-context-icon">▰</span>
+            <span className="workspace-context-icon"><FolderOpen size={16} aria-hidden="true" /></span>
             <span className="workspace-context-copy"><strong>{workspaceLabel(workspacePath)}</strong><small title={workspacePath}>{workspacePath || 'Choose a project folder'}</small></span>
             <span className="workspace-context-action">Open</span>
           </button>
 
           <div className="workspace-context-row is-static">
-            <span className="workspace-context-icon">⌘</span>
+            <span className="workspace-context-icon"><GitBranch size={16} aria-hidden="true" /></span>
             <span className="workspace-context-copy"><strong>{gitInfo?.isRepository ? (gitInfo.currentBranch || gitInfo.detachedHead || 'Detached HEAD') : 'No Git repository'}</strong><small>{gitInfo?.isRepository ? (gitInfo.isDirty ? 'Working tree has changes' : 'Working tree is clean') : 'Git status is unavailable'}</small></span>
             {gitInfo?.isRepository && <span className={`workspace-context-status${gitInfo.isDirty ? ' is-dirty' : ''}`}>{gitInfo.isDirty ? 'Changed' : 'Clean'}</span>}
           </div>
 
           <button type="button" className="workspace-context-row" disabled={!hasReview} onClick={() => { onOpenReview(recentChanges); setOpen(false) }}>
-            <span className="workspace-context-icon">▣</span>
+            <span className="workspace-context-icon"><FileCode2 size={16} aria-hidden="true" /></span>
             <span className="workspace-context-copy"><strong>Recent agent changes</strong><small>{hasReview ? `${recentChanges.length} file${recentChanges.length === 1 ? '' : 's'} changed in this run` : 'No changes in the current run'}</small></span>
             {hasReview && <span className="workspace-context-diff"><b>+{additions}</b><i>-{deletions}</i></span>}
           </button>
 
           <div className="workspace-context-row is-static">
-            <span className="workspace-context-icon">›_</span>
+            <span className="workspace-context-icon"><Terminal size={16} aria-hidden="true" /></span>
             <span className="workspace-context-copy"><strong>Terminal</strong><small>{terminalCount === 0 ? 'No terminal tabs open' : `${terminalCount} tab${terminalCount === 1 ? '' : 's'} open`}</small></span>
             <span className="workspace-context-status">{terminalCount}</span>
           </div>
 
-          <div className="workspace-context-sources">
-            <div className="workspace-context-sources-heading"><span>Sources</span><span>{uniqueSources.length}</span></div>
-            {uniqueSources.length === 0 ? <p>No files attached to this message.</p> : uniqueSources.slice(0, 3).map((name) => <p key={name} title={name}>▣ {name}</p>)}
-            {uniqueSources.length > 3 && <p className="workspace-context-more">+{uniqueSources.length - 3} more sources</p>}
-          </div>
+          <SessionSources key={chatId} sources={sources} loading={sourceLoading} error={sourceError} onRetry={retrySources} onOpenLibrary={url => {
+            window.history.pushState({}, '', url)
+            window.dispatchEvent(new PopStateEvent('popstate'))
+            setOpen(false)
+          }} />
         </section>
       )}
     </div>

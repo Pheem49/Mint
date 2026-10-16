@@ -23,6 +23,7 @@ export function useSpeechToText({
   const [voiceAwaitingResponse, setVoiceAwaitingResponse] = useState(false)
 
   const recognitionRef = useRef<any>(null)
+  const resolveStartRef = useRef<((started: boolean) => void) | null>(null)
   const silenceTimerRef = useRef<number | null>(null)
   const restartTimerRef = useRef<number | null>(null)
 
@@ -75,8 +76,25 @@ export function useSpeechToText({
     clearRestartTimer()
     clearSilenceTimer()
     recognitionRef.current?.stop()
-    recognitionRef.current = null
     setIsRecording(false)
+    setVoiceMode(false)
+  }
+
+  const cancelRecognition = () => {
+    clearRestartTimer()
+    clearSilenceTimer()
+    const recognition = recognitionRef.current
+    recognitionRef.current = null
+    resolveStartRef.current?.(false)
+    resolveStartRef.current = null
+    if (recognition) {
+      recognition.onstart = recognition.onresult = recognition.onend = recognition.onerror = null
+      try { recognition.abort() } catch {}
+    }
+    voiceModeRef.current = false
+    setVoiceMode(false)
+    setIsRecording(false)
+    setVoiceTranscript('')
   }
 
   const scheduleVoiceListen = (delayMs = 350) => {
@@ -88,18 +106,19 @@ export function useSpeechToText({
     }, delayMs)
   }
 
-  const startRecognition = (autoSend: boolean) => {
-    if (recognitionRef.current || sendingRef.current || voiceAwaitingResponseRef.current || isSpeakingRef.current) return
+  const startRecognition = (autoSend = false): Promise<boolean> => {
+    if (recognitionRef.current || sendingRef.current || voiceAwaitingResponseRef.current || isSpeakingRef.current) return Promise.resolve(false)
 
     const SpeechRecognitionApi = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SpeechRecognitionApi) {
-      alert('Speech-to-text (Speech Recognition) is not supported in this browser/WebView. Please use Google Chrome or Microsoft Edge to enable voice conversation.')
+      setVoiceTranscript('Speech recognition is unavailable in this browser. Use Chrome or Edge.')
       voiceModeRef.current = false
-      setVoiceMode(false)
-      return
+      setVoiceMode(true)
+      return Promise.resolve(false)
     }
 
     let accumulatedTranscript = ''
+    const started = new Promise<boolean>(resolve => { resolveStartRef.current = resolve })
     clearSilenceTimer()
 
     try {
@@ -118,9 +137,14 @@ export function useSpeechToText({
       }
 
       recognition.onstart = () => {
+        if (recognitionRef.current !== recognition) return
         setIsRecording(true)
+        setVoiceMode(true)
+        resolveStartRef.current?.(true)
+        resolveStartRef.current = null
       }
       recognition.onresult = (event: any) => {
+        if (recognitionRef.current !== recognition) return
         let interimText = ''
         let finalText = ''
         for (let index = event.resultIndex; index < event.results.length; index += 1) {
@@ -141,12 +165,21 @@ export function useSpeechToText({
         }
       }
       recognition.onerror = (event: any) => {
-        console.error('Speech recognition error', event)
+        if (recognitionRef.current !== recognition) return
+        resolveStartRef.current?.(false)
+        resolveStartRef.current = null
+        setVoiceTranscript(event.error === 'not-allowed' ? 'Microphone permission denied' : `Speech recognition error: ${event.error}`)
+        voiceModeRef.current = false
+        setVoiceMode(false)
         setIsRecording(false)
         clearSilenceTimer()
       }
       recognition.onend = () => {
+        if (recognitionRef.current !== recognition) return
+        resolveStartRef.current?.(false)
+        resolveStartRef.current = null
         recognitionRef.current = null
+        if (!autoSend) { voiceModeRef.current = false; setVoiceMode(false) }
         setIsRecording(false)
         clearSilenceTimer()
         const finalText = accumulatedTranscript.trim()
@@ -170,17 +203,21 @@ export function useSpeechToText({
       }
       recognitionRef.current = recognition
       recognition.start()
+      return started
     } catch (error) {
-      console.error('Failed to start speech recognition', error)
+      resolveStartRef.current?.(false)
+      resolveStartRef.current = null
+      setVoiceTranscript(error instanceof Error ? error.message : String(error))
       recognitionRef.current = null
       setIsRecording(false)
       clearSilenceTimer()
+      return Promise.resolve(false)
     }
   }
 
   // Auto-listen trigger
   useEffect(() => {
-    if (!voiceMode || sending || voiceAwaitingResponse || isSpeaking || isRecording) return
+    if (!voiceMode || sending || voiceAwaitingResponse || isSpeaking || isRecording || recognitionRef.current) return
     scheduleVoiceListen()
   }, [voiceMode, sending, voiceAwaitingResponse, isSpeaking, isRecording])
 
@@ -189,9 +226,13 @@ export function useSpeechToText({
     return () => {
       clearRestartTimer()
       clearSilenceTimer()
+      resolveStartRef.current?.(false)
+      resolveStartRef.current = null
       if (recognitionRef.current) {
         try {
-          recognitionRef.current.stop()
+          const recognition = recognitionRef.current
+          recognition.onstart = recognition.onresult = recognition.onend = recognition.onerror = null
+          recognition.abort()
         } catch (e) {
           // ignore
         }
@@ -210,6 +251,7 @@ export function useSpeechToText({
     voiceModeRef,
     startRecognition,
     stopRecognition,
+    cancelRecognition,
     scheduleVoiceListen,
     clearRestartTimer
   }

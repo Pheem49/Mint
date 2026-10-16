@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Subcommand;
 use mint_core::{
-    CHAT_CLI_ID, ChatRequest, ImageGenRequest, MintConfig, TaskStore, generate_images, load_config,
+    CHAT_CLI_ID, ChatRequest, ImageGenRequest, MintConfig, TaskStore, load_config,
     orchestrate_chat_with_fallback, save_config,
 };
 
@@ -237,13 +237,9 @@ pub(crate) async fn launch_mint_target(target: String, dev: bool) -> Result<()> 
             } else {
                 "dev:web"
             };
-            std::process::Command::new("npm")
-                .current_dir(&project_root)
-                .args(["run", web_cmd])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
+            let frontend = mint_core::bg_shell::start_web_frontend(&project_root, &config, web_cmd)
                 .map_err(|e| anyhow::anyhow!("Failed to launch web app: {e}"))?;
+            mint_core::bg_shell::watch_web_owner();
 
             println!("\n{MINT}✔ Mint Web is running!{RESET}\n");
             println!("    {BLUE}Web UI:{RESET}     {MINT}http://localhost:9000{RESET}");
@@ -260,7 +256,20 @@ pub(crate) async fn launch_mint_target(target: String, dev: bool) -> Result<()> 
             println!("{DIM}(API Requests & Error logs will be displayed below){RESET}\n");
 
             println!("{DIM}Press Ctrl+C to stop{RESET}\n");
-            mint_core::start_api_server(3000).await?;
+            tokio::select! {
+                result = mint_core::start_api_server(3000) => result?,
+                result = async {
+                    loop {
+                        let job = mint_core::bg_shell::snapshot(&frontend.id)?;
+                        if !matches!(job.status, mint_core::bg_shell::JobStatus::Running | mint_core::bg_shell::JobStatus::Stopping) {
+                            anyhow::bail!("Mint Web frontend stopped ({:?}):\n{}\n{}", job.status, job.stdout, job.stderr);
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                    #[allow(unreachable_code)]
+                    Ok::<(), anyhow::Error>(())
+                } => result?,
+            }
         }
         _ => {}
     }
@@ -584,28 +593,49 @@ pub async fn handle_chat(
         .await?;
     } else {
         let image_data_uri = image_path.map(image::load_image_as_data_uri).transpose()?;
-        let (response, _) = orchestrate_chat_with_fallback(
+        let name = image_path
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned());
+        let receipt = image::prepare_attachments(
             config,
-            &ChatRequest {
-                message: message.clone(),
-                system_instruction: system,
-                chat_id: Some(CHAT_CLI_ID.to_owned()),
-                image_data_uri: image_data_uri.clone(),
-                audio_data_uri: None,
-                video_data_uri: None,
-                document_attachment: None,
-                workspace_path: Some(std::env::current_dir()?.to_string_lossy().into_owned()),
-                agent_id: None,
-                plan_mode: false,
-                pinned_mcp_server: None,
-                messages: None,
-                tools: None,
-                temperature: config.temperature,
-                ..Default::default()
-            },
+            CHAT_CLI_ID,
+            &message,
+            image_data_uri.as_deref(),
+            None,
+            name.as_deref(),
         )
         .await?;
-        image::save_sent_image_after_send(image_data_uri.as_deref(), &message, None);
+        let (response, _) = mint_core::with_turn_start_listener(
+            CHAT_CLI_ID.to_owned(),
+            move |id| {
+                if let Some(receipt) = &receipt
+                    && let Err(error) = receipt.bind(id)
+                {
+                    eprintln!("Library reference: {error}")
+                }
+            },
+            orchestrate_chat_with_fallback(
+                config,
+                &ChatRequest {
+                    message: message.clone(),
+                    system_instruction: system,
+                    chat_id: Some(CHAT_CLI_ID.to_owned()),
+                    image_data_uri: image_data_uri.clone(),
+                    audio_data_uri: None,
+                    video_data_uri: None,
+                    document_attachment: None,
+                    workspace_path: Some(std::env::current_dir()?.to_string_lossy().into_owned()),
+                    agent_id: None,
+                    plan_mode: false,
+                    pinned_mcp_server: None,
+                    messages: None,
+                    tools: None,
+                    temperature: config.temperature,
+                    ..Default::default()
+                },
+            ),
+        )
+        .await?;
         println!("{}", response.text);
     }
     Ok(())
@@ -643,39 +673,23 @@ pub async fn handle_imagine(
         mask_data_uri: None,
         mode: None,
     };
-    match generate_images(&config, &request).await {
+    match mint_core::image_workflow::generate_and_save_images(&config, &request).await {
         Ok(result) => {
             spinner.finish_and_clear();
             eprintln!("{MINT}✦ Generated {} image(s){RESET}", result.images.len());
-            let data_uris: Vec<String> = result
-                .images
-                .iter()
-                .map(|img| img.data_uri.clone())
-                .collect();
-            match mint_core::save_chat_images(
-                data_uris,
-                Some(result.provider.clone()),
-                Some(prompt.clone()),
-            ) {
-                Ok(saved) => {
-                    for entry in &saved {
-                        println!("{MINT}✓{RESET} Saved: {}", entry.path.display());
-                    }
-                    if let (Some(out_path), Some(first)) = (&output, saved.first()) {
-                        match std::fs::copy(&first.path, out_path) {
-                            Ok(_) => println!("{MINT}✓{RESET} Copied to: {}", out_path.display()),
-                            Err(e) => eprintln!(
-                                "{WARN}Warning: could not copy to output path: {e}{RESET}"
-                            ),
-                        }
-                    }
-                    if let Some(desc) = &result.description
-                        && !desc.is_empty()
-                    {
-                        println!("\n{DIM}{desc}{RESET}");
-                    }
+            for entry in &result.images {
+                println!("{MINT}✓{RESET} Saved: {}", entry.path.display());
+            }
+            if let (Some(out_path), Some(first)) = (&output, result.images.first()) {
+                match std::fs::copy(&first.path, out_path) {
+                    Ok(_) => println!("{MINT}✓{RESET} Copied to: {}", out_path.display()),
+                    Err(e) => eprintln!("{WARN}Warning: could not copy to output path: {e}{RESET}"),
                 }
-                Err(e) => eprintln!("{ERROR}Failed to save images: {e}{RESET}"),
+            }
+            if let Some(desc) = &result.description
+                && !desc.is_empty()
+            {
+                println!("\n{DIM}{desc}{RESET}");
             }
         }
         Err(e) => {

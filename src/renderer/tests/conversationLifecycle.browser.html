@@ -1,0 +1,70 @@
+<!-- Browser regression: real shared React hook, isolated transport and draft keys. -->
+<!doctype html><html><body><div id="root"></div><pre id="result">RUNNING</pre>
+<script type="module">
+import React, { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { useConversationCoordinator } from '/shared/conversation/useConversationCoordinator.ts';
+const prefix = 'mint:lifecycle-browser-test:';
+const workspaceKey = prefix + 'workspace';
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+async function until(check) {
+  for (let i = 0; i < 200; i++) { if (check()) return; await sleep(50); }
+  throw new Error('Timed out waiting for React/persistence');
+}
+let current, actions, reply, callbacks, errors = [];
+const transport = {
+  getConversationSnapshot: async () => ({ interactions: [], cursor: 0, hasOlder: false }),
+  getConversationChanges: async () => ({ changes: [], cursor: 0, hasMore: false }),
+  listChatSessions: async () => [], cancelChatMessage: async () => {}, clearChatHistory: async () => 0,
+  saveInteractionAgentActivity: async () => {}, submitToolApproval: async () => {},
+  streamChatMessage: (...args) => { callbacks = args; return new Promise(resolve => reply = resolve); },
+};
+function Harness() {
+  const result = useConversationCoordinator({ message: 'draft A', workspacePath: '/A' }, {
+    conversationId: 'A', draftKeyPrefix: prefix, workspaceStorageKey: workspaceKey,
+    historyVisible: false, onError: error => errors.push(error),
+  }, transport);
+  current = result.conversation; actions = result.actions;
+  return React.createElement('div', null,
+    React.createElement('span', {id:'active'}, current.conversationId),
+    React.createElement('textarea', {id:'composer', value:current.message, onChange:event=>actions.compose(event.target.value)}),
+    React.createElement('span', {id:'sending'}, String(current.sending)),
+    React.createElement('span', {id:'approval'}, current.pendingApprovals[current.conversationId]?.token ?? 'none'));
+}
+const root = createRoot(document.getElementById('root'));
+try {
+  root.render(React.createElement(StrictMode, null, React.createElement(Harness)));
+  await until(() => localStorage.getItem(prefix+'A') === 'draft A');
+  assert(localStorage.getItem(prefix+'A') === 'draft A', 'initial draft is persisted under A');
+  actions.activate('B', 'draft B');
+  await until(() => document.querySelector('#active')?.textContent === 'B' && localStorage.getItem(prefix+'B') === 'draft B');
+  assert(document.querySelector('#active').textContent === 'B', 'shared hook displays the selected conversation');
+  assert(document.querySelector('#composer').value === 'draft B', 'selected draft appears without an intermediate stale A state');
+  assert(localStorage.getItem(prefix+'A') === 'draft A', 'switching never writes the B draft to A');
+  assert(localStorage.getItem(prefix+'B') === 'draft B', 'selected draft is persisted under B');
+  actions.selectWorkspace('/B');
+  const run = actions.sendPrompt('work', {clearComposer:true});
+  await until(() => document.querySelector('#sending')?.textContent === 'true');
+  callbacks[13]({token:'approve-B', approval:{RunShell:{command:'pwd'}}});
+  await until(() => document.querySelector('#approval')?.textContent === 'approve-B');
+  assert(document.querySelector('#sending').textContent === 'true', 'React observes run startup through the lifecycle interface');
+  assert(document.querySelector('#approval').textContent === 'approve-B', 'React observes pending approval');
+  await actions.resolveApproval(true);
+  reply({provider:'system', model:'test', text:'done'});
+  await run;
+  await until(() => document.querySelector('#sending')?.textContent === 'false' && localStorage.getItem(prefix+'B') === null);
+  assert(document.querySelector('#sending').textContent === 'false', 'React observes run completion');
+  assert(document.querySelector('#approval').textContent === 'none', 'resolved approval is removed');
+  assert(localStorage.getItem(prefix+'B') === null, 'clearing composer removes only B draft');
+  assert(localStorage.getItem(workspaceKey) === '/B', 'workspace persistence follows lifecycle state');
+  assert(errors.length === 0, 'no lifecycle errors in StrictMode');
+  root.unmount();
+  document.getElementById('result').textContent = 'PASS: StrictMode subscription, conversation drafts, workspace persistence, run and approval rendering';
+} catch(error) {
+  root.unmount();
+  document.getElementById('result').textContent = 'FAIL: '+error.stack;
+} finally {
+  for (const key of [prefix+'A', prefix+'B', workspaceKey]) localStorage.removeItem(key);
+}
+</script></body></html>

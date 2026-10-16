@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+
+import { normalizeWorkspacePath, workspacePaths } from '../utils/workspaces'
+import './workspace-selector.css'
 
 interface WorkspaceSelectorProps {
+  placement?: 'above' | 'below'
   currentPath: string
   recentPaths: string[]
   onSelectWorkspace: (path?: string) => void
@@ -10,7 +14,8 @@ function workspaceLabel(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() || path
 }
 
-export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWorkspace }: WorkspaceSelectorProps) {
+export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWorkspace, placement = 'above' }: WorkspaceSelectorProps) {
+  const menuId = useId()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
@@ -19,12 +24,12 @@ export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWo
 
   const visiblePaths = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
-    return recentPaths.filter((path) => {
+    return workspacePaths(recentPaths, currentPath).filter((path) => {
       if (!normalizedQuery) return true
       return path.toLocaleLowerCase().includes(normalizedQuery)
         || workspaceLabel(path).toLocaleLowerCase().includes(normalizedQuery)
     })
-  }, [query, recentPaths])
+  }, [query, recentPaths, currentPath])
 
   useEffect(() => {
     if (!open) return
@@ -55,7 +60,7 @@ export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWo
   }
 
   return (
-    <div className={`workspace-selector ${currentPath ? 'has-workspace' : 'needs-workspace'}`} ref={rootRef}>
+    <div className={`workspace-selector ${currentPath ? 'has-workspace' : 'needs-workspace'} opens-${placement}`} ref={rootRef}>
       <button
         ref={triggerRef}
         type="button"
@@ -67,7 +72,7 @@ export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWo
         aria-label={`${currentPath ? 'Change' : 'Choose'} workspace: ${currentPath ? workspaceLabel(currentPath) : 'Select Project'}`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-controls="workspace-select-menu"
+        aria-controls={menuId}
         title={currentPath || 'Choose a workspace folder'}
       >
         <span className="workspace-select-icon" aria-hidden="true">
@@ -84,7 +89,7 @@ export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWo
       </button>
 
       {open && (
-        <div className="workspace-select-menu" id="workspace-select-menu" role="dialog" aria-label="Choose workspace">
+        <div className="workspace-select-menu" id={menuId} role="dialog" aria-label="Choose workspace">
           <label className="workspace-select-search">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
               <circle cx="11" cy="11" r="7" />
@@ -102,7 +107,7 @@ export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWo
 
           <div className="workspace-select-list" role="group" aria-label="Recent workspaces">
             {visiblePaths.length > 0 ? visiblePaths.map((path) => {
-              const isCurrent = path === currentPath
+              const isCurrent = path === normalizeWorkspacePath(currentPath)
               return (
                 <button
                   key={path}

@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Context compaction status</title></head><body style="background:#111;color:#eee;font-family:system-ui"><div id="root"></div><pre id="result">RUNNING</pre><script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { ContextCompactionStatus } from '../shared/components/ContextCompactionStatus';
+import '../shared/css/thinking-status.css';
+document.documentElement.style.setProperty('--text-main','#eeeeee');
+document.documentElement.style.setProperty('--text-muted','#71717a');
+document.documentElement.style.setProperty('--text-soft','#a1a1aa');
+createRoot(document.getElementById('root')).render(React.createElement(ContextCompactionStatus));
+setTimeout(() => {
+ const label=document.querySelector('.thinking-status-label');
+ const meta=document.querySelector('.thinking-status-meta');
+ const style=getComputedStyle(label);
+ const ok=document.body.textContent.includes('Summarizing earlier steps to continue working') && /[2-9]s/.test(meta.textContent) && style.backgroundImage.includes('linear-gradient') && style.animationName==='thinkingStatusSweep';
+ document.getElementById('result').textContent=ok?'PASS: timer, message and gradient':'FAIL: '+meta.textContent+' '+style.backgroundImage+' '+style.animationName;
+},2800);
+</script></body></html>

@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::search::text_embedding::{encode_embedding, fact_embedding_backend};
+mod sources;
+pub use sources::{ConversationSources, SessionAttachment, SourceAttachment};
 
 pub const CHAT_CLI_ID: &str = "cli";
 pub const DEFAULT_CONVERSATION_ID: &str = "conversation-default";
@@ -51,6 +53,8 @@ pub fn subagent_name(chat_id: &str) -> Option<&str> {
 
 #[derive(Debug, Error)]
 pub enum MemoryError {
+    #[error("library error: {0}")]
+    Library(String),
     #[error("unable to determine the user config directory")]
     ConfigDirectoryUnavailable,
     #[error("unable to create database directory {path}: {source}")]
@@ -595,6 +599,7 @@ impl MemoryStore {
             "DELETE FROM chat_sessions
              WHERE id != ?1
                AND id != ?2
+               AND kind = 'conversation'
                AND id NOT LIKE 'cron::%'
                AND (SELECT COUNT(*) FROM interaction_memories WHERE interaction_memories.chat_id = chat_sessions.id) = 0",
             params![DEFAULT_CONVERSATION_ID, CHAT_CLI_ID],
@@ -750,6 +755,14 @@ impl MemoryStore {
     pub fn clear_interactions_for_chat(&self, chat_id: &str) -> Result<usize, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
         let connection = self.connection()?;
+        connection.execute(
+            "DELETE FROM library_references WHERE chat_id = ?1",
+            params![chat_id],
+        )?;
+        connection.execute(
+            "DELETE FROM session_skill_reads WHERE chat_id = ?1",
+            params![chat_id],
+        )?;
         Ok(connection.execute(
             "DELETE FROM interaction_memories WHERE chat_id = ?1",
             params![chat_id],
@@ -763,6 +776,14 @@ impl MemoryStore {
         }
         let connection = self.connection()?;
         let transaction = connection.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM library_references WHERE chat_id = ?1",
+            params![chat_id],
+        )?;
+        transaction.execute(
+            "DELETE FROM session_skill_reads WHERE chat_id = ?1",
+            params![chat_id],
+        )?;
         transaction.execute(
             "DELETE FROM interaction_memories WHERE chat_id = ?1",
             params![chat_id],
@@ -894,6 +915,14 @@ impl MemoryStore {
         )?)
     }
 
+    /// Source lookup for edit policy without loading every skill's full body.
+    pub(crate) fn learned_skill_sources(&self) -> Result<Vec<String>, MemoryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare("SELECT source_path FROM learned_skills")?;
+        let rows = statement.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     pub fn learned_skills(&self, limit: usize) -> Result<Vec<LearnedSkill>, MemoryError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
@@ -902,6 +931,37 @@ impl MemoryStore {
         )?;
         let rows = statement.query_map(params![limit as i64], learned_skill_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// A receipt contains the exact bytes returned by a successful full skill read.
+    /// It is not a claim that the model still has those bytes in its context.
+    pub fn record_skill_read(
+        &self,
+        chat_id: &str,
+        path: &str,
+        content: &str,
+    ) -> Result<(), MemoryError> {
+        self.connection()?.execute(
+            "INSERT INTO session_skill_reads (chat_id, path, content) VALUES (?1, ?2, ?3)
+             ON CONFLICT(chat_id, path) DO UPDATE SET content = excluded.content",
+            params![normalized_chat_id(chat_id), path, content],
+        )?;
+        Ok(())
+    }
+
+    pub fn skill_read_content(
+        &self,
+        chat_id: &str,
+        path: &str,
+    ) -> Result<Option<String>, MemoryError> {
+        Ok(self
+            .connection()?
+            .query_row(
+                "SELECT content FROM session_skill_reads WHERE chat_id = ?1 AND path = ?2",
+                params![normalized_chat_id(chat_id), path],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
 
     pub fn delete_learned_skill(&self, identifier: &str) -> Result<usize, MemoryError> {
@@ -1115,7 +1175,11 @@ impl MemoryStore {
         )?)
     }
 
-    fn connection(&self) -> Result<Connection, MemoryError> {
+    pub(crate) fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    pub(crate) fn connection(&self) -> Result<Connection, MemoryError> {
         if let Some(directory) = self.path.parent() {
             std::fs::create_dir_all(directory).map_err(|source| MemoryError::CreateDirectory {
                 path: directory.to_path_buf(),
@@ -1135,24 +1199,22 @@ impl MemoryStore {
             std::sync::Mutex<std::collections::HashSet<PathBuf>>,
         > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
 
-        let needs_init = {
-            let mut set = INITIALIZED_DATABASES.lock().unwrap();
-            set.insert(self.path.clone())
-        };
-
-        if needs_init {
+        // Publish readiness only after initialization succeeds. Companion and API
+        // reads may open the same database concurrently during startup.
+        let mut initialized = INITIALIZED_DATABASES
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !initialized.contains(&self.path) {
             initialize(
                 &connection,
                 memory_path().is_ok_and(|default_path| default_path == self.path),
             )?;
-            // This database holds OAuth tokens (see `oauth::save_oauth_tokens`,
-            // stored in `user_profile`) alongside chat history — restrict it
-            // to owner-only rather than leaving it at default (typically
-            // world-readable) permissions. `needs_init` already gates this to
-            // once per path per process, and any pre-existing database from
-            // before this fix gets tightened the same way on its first open.
+            // OAuth tokens live beside chat history; restrict the file once per
+            // path per process, including databases created by older versions.
             restrict_to_owner(&self.path);
+            initialized.insert(self.path.clone());
         }
+        drop(initialized);
         Ok(connection)
     }
 }
@@ -1312,6 +1374,16 @@ fn initialize(
            chat_id TEXT NOT NULL,
            interaction_id INTEGER NOT NULL
          );
+         CREATE TABLE IF NOT EXISTS conversation_source_attachments (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           interaction_id INTEGER NOT NULL,
+           metadata TEXT NOT NULL,
+           UNIQUE(interaction_id, metadata)
+         );
+         CREATE TRIGGER IF NOT EXISTS trg_interaction_sources_delete
+         AFTER DELETE ON interaction_memories BEGIN
+           DELETE FROM conversation_source_attachments WHERE interaction_id = OLD.id;
+         END;
          CREATE INDEX IF NOT EXISTS idx_conversation_changes_chat_sequence
            ON conversation_changes(chat_id, sequence);
           CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -1331,6 +1403,12 @@ fn initialize(
            content TEXT NOT NULL,
            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+         );
+         CREATE TABLE IF NOT EXISTS session_skill_reads (
+           chat_id TEXT NOT NULL,
+           path TEXT NOT NULL,
+           content TEXT NOT NULL,
+           PRIMARY KEY(chat_id, path)
          );
          CREATE TABLE IF NOT EXISTS workspace_sessions (
            workspace_path TEXT PRIMARY KEY,
@@ -1384,6 +1462,7 @@ fn initialize(
            VALUES (new.id, new.user_text, new.ai_text);
          END;",
     )?;
+    crate::library::initialize(connection)?;
     ensure_column(
         connection,
         "interaction_memories",
@@ -1746,6 +1825,37 @@ fn ensure_chat_session_row(connection: &Connection, chat_id: &str) -> Result<(),
 
 #[cfg(test)]
 mod conversation_sync_tests {
+    #[test]
+    fn concurrent_first_reads_wait_for_database_schema_initialization() {
+        use std::sync::{Arc, Barrier};
+        for _ in 0..3 {
+            let root =
+                std::env::temp_dir().join(format!("mint-schema-ordering-{}", uuid::Uuid::new_v4()));
+            let store = super::MemoryStore::open(root.join("memory.sqlite"));
+            let barrier = Arc::new(Barrier::new(16));
+            let results = std::thread::scope(|scope| {
+                let handles: Vec<_> = (0..16)
+                    .map(|_| {
+                        let barrier = Arc::clone(&barrier);
+                        let store = store.clone();
+                        scope.spawn(move || {
+                            barrier.wait();
+                            store.learned_skills(100)
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|handle| handle.join().unwrap())
+                    .collect::<Vec<_>>()
+            });
+            let _ = std::fs::remove_dir_all(root);
+            for result in results {
+                assert!(result.is_ok(), "concurrent inventory read: {result:?}");
+            }
+        }
+    }
+
     use super::*;
 
     fn store() -> MemoryStore {
@@ -1753,6 +1863,30 @@ mod conversation_sync_tests {
             "mint-conversation-sync-{}.sqlite",
             uuid::Uuid::new_v4()
         )))
+    }
+
+    #[test]
+    fn listing_sessions_removes_empty_project_chat_placeholders() {
+        let memory = store();
+        memory
+            .set_chat_session_workspace("conversation-empty", Some("/projects/demo"))
+            .unwrap();
+        memory
+            .start_turn("conversation-used", "first message")
+            .unwrap();
+
+        let sessions = memory.list_chat_sessions().unwrap();
+
+        assert!(
+            !sessions
+                .iter()
+                .any(|session| session.id == "conversation-empty")
+        );
+        assert!(
+            sessions
+                .iter()
+                .any(|session| session.id == "conversation-used")
+        );
     }
 
     #[test]

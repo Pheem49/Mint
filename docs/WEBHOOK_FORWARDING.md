@@ -31,8 +31,13 @@ By convention the registered paths are:
 - LINE: `https://<your-tunnel>/callback`
 - WhatsApp: `https://<your-tunnel>/` (root)
 
-The LINE listener only checks the HTTP method, not the path, so any path under the tunnel
-works — but pick one and keep it consistent with what you enter in the provider console.
+LINE accepts `POST /callback`. WhatsApp accepts `POST /` or `POST /webhook`, with
+verification GETs on the same paths. When a webhook's configured interface and port are
+covered by the API listener, the callback shares that listener; otherwise Mint binds a
+separate webhook listener. Desktop's default LINE callback shares its API on port 3000.
+Each bridge runs once per process, including when startup is requested again. Shared
+callbacks still accept only the configured webhook interface, even if the API listener
+binds all interfaces.
 
 **Keep the default `127.0.0.1` bind.** Only change `*WebhookHost` to `0.0.0.0` if the
 tunnel agent runs on a different host than Mint and you have another network control (a
@@ -43,19 +48,19 @@ running on the same machine connects to `127.0.0.1` and needs no bind change.
 
 ## Signature verification — keep it on
 
-Both listeners verify the provider's request signature when the corresponding secret is
-configured, and this is the only thing stopping a third party who discovers your tunnel
-URL from injecting messages.
+The shared core verifies provider signatures over the exact request-body bytes before
+parsing JSON. Signature authentication applies to callbacks independently of `apiAuthToken`;
+ordinary API routes retain their API-token check.
 
 - **LINE** — set `lineChannelSecret`. Each `POST` is checked with
   HMAC-SHA256 (base64) over the raw body against the `X-Line-Signature` header; a mismatch
-  gets `401` and the event is dropped. If `lineChannelSecret` is empty, **all** requests
-  are accepted — don't run it that way on a public tunnel.
+  gets `401` and the event is dropped. A missing secret or signature also gets `401`.
 - **WhatsApp** — set `whatsappAppSecret`. Each `POST` is checked with
   HMAC-SHA256 (hex) over the raw body against `X-Hub-Signature-256` (`sha256=` prefix
   stripped); a mismatch gets `401`. The `GET` verification handshake separately requires
   `hub.verify_token` to equal your configured `whatsappVerifyToken` (which must also match
-  what you type into Meta's subscription form), otherwise it returns `403`.
+  what you type into Meta's subscription form) and `hub.mode=subscribe`, otherwise it
+  returns `403`. When the app secret is configured, a missing signature also gets `401`.
 
 Owner locking applies on top of signature checks: the first sender a bridge ever hears
 from is claimed as its owner and every other sender is ignored. To hand a bridge to a
@@ -162,12 +167,15 @@ buffering tuning is needed.
 ## Running on a VPS
 
 `mint gateway start` runs the same `start_channels()` path headless, so LINE and WhatsApp
-work there identically. See [Running Mint 24/7 on a VPS](../README.md#running-mint-247-on-a-vps-headless-gateway).
+work there identically. See [Running Mint 24/7 on a VPS](GATEWAY.md#running-mint-247-on-a-vps-headless-gateway).
 Keep the tunnel/proxy in front of `3000`/`3001`; do **not** publish those ports directly,
 and keep `lineChannelSecret` / `whatsappAppSecret` set so unsigned requests are rejected.
 
-The separate local API server (`--api-port`) is a different concern — gate that with
-`apiAuthToken`, an SSH tunnel, or Tailscale as described in the README's Safety section.
+The local API server (`--api-port`) may share a webhook port. Gate its ordinary API routes
+with `apiAuthToken`, an SSH tunnel, or Tailscale as described in the README's Safety section.
+Webhook deliveries receive a prompt HTTP acknowledgement before agent generation. Owner
+checks run before agent or provider sends, and bridge acknowledgement messages obey
+`enableBridgeAckNotification` / `bridgeAckMessage` on CLI, Desktop and Web.
 
 ---
 

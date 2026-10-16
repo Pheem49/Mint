@@ -137,14 +137,9 @@ pub struct MintConfig {
     pub disabled_tools: Vec<String>,
     pub agents: Vec<AgentConfig>,
     pub enable_agent_collaboration: bool,
-    /// When true, a background reflection call runs after a task finishes and may
-    /// write a new `.agents/skills/<slug>/SKILL.md` file — or refine an existing
-    /// one, bumping its `revisions` count — if the task looks like a non-trivial,
-    /// reusable problem. On by default (`/skill off` or the Settings toggle turns
-    /// it off): it does cost an extra LLM call and write a file without
-    /// interactive approval each time `looks_skill_worthy` fires, but that's the
-    /// self-improving-over-time behavior this exists for. See
-    /// [`crate::orchestration::spawn_auto_skill_write`].
+    /// When true, reflection after a reusable task proposes a new or refined
+    /// workspace skill. Every proposal needs interactive approval before saving.
+    /// Off by default; `/autoskill on` enables proposals, not unattended writes.
     pub auto_skill_writing: bool,
     /// When true, each turn runs a full-text search over the current
     /// conversation's older messages and injects the few most relevant to the
@@ -156,7 +151,7 @@ pub struct MintConfig {
     /// carries something worth remembering (`looks_fact_worthy`) extracts durable
     /// facts/preferences the user stated and writes them into the long-term
     /// `facts` table, so they ride every future turn. On by default (`/autofacts
-    /// off` disables it): like `auto_skill_writing` it costs an extra LLM call on
+    /// off` disables it): it costs an extra LLM call on
     /// each qualifying turn, without interactive approval — that's the
     /// self-evolving-memory behavior it exists for. See
     /// [`crate::orchestration::spawn_auto_memory_update`].
@@ -439,7 +434,7 @@ impl Default for MintConfig {
             disabled_tools: Vec::new(),
             agents: default_agents(),
             enable_agent_collaboration: false,
-            auto_skill_writing: true,
+            auto_skill_writing: false,
             memory_recall: true,
             auto_fact_extraction: true,
             semantic_fact_recall: true,

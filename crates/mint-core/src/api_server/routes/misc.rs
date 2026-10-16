@@ -3,6 +3,20 @@ use tokio::net::TcpStream;
 
 use super::super::*;
 
+struct MediaModelQuery {
+    provider: String,
+    api_key: String,
+}
+
+impl MediaModelQuery {
+    fn parse(query: &str) -> Self {
+        Self {
+            provider: query_param(query, "provider").unwrap_or_default(),
+            api_key: query_param(query, "apiKey").unwrap_or_default(),
+        }
+    }
+}
+
 pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStream) {
     let RequestCtx {
         method,
@@ -15,6 +29,71 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
         auth_label: _auth_label,
     } = ctx;
     match (method, route) {
+        ("GET", "/api/workspace-history") => {
+            let root = query_param(query, "root")
+                .map(|value| percent_decode(&value))
+                .unwrap_or_default();
+            let result = (|| -> Result<_, String> {
+                if root.trim().is_empty() {
+                    return Err("Workspace root is required".into());
+                }
+                let config = load_config().map_err(|e| e.to_string())?;
+                let root = crate::assert_path_capability(
+                    std::path::Path::new(&root),
+                    crate::Capability::Read,
+                    &config,
+                )
+                .map_err(|e| e.to_string())?;
+                crate::system::workspace_history::list(&root)
+            })();
+            match result {
+                Ok(entries) => {
+                    send_json_response(socket, "200 OK", &json!(entries).to_string()).await
+                }
+                Err(message) => {
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        &json!({ "message": message }).to_string(),
+                    )
+                    .await
+                }
+            }
+        }
+        ("POST", "/api/workspace-history/undo") => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct UndoWorkspaceRequest {
+                root: String,
+                revision: u64,
+                expected_id: Option<String>,
+            }
+            let result = (|| -> Result<_, String> {
+                let request: UndoWorkspaceRequest =
+                    serde_json::from_str(body).map_err(|e| e.to_string())?;
+                let config = load_config().map_err(|e| e.to_string())?;
+                let root = crate::assert_path_capability(
+                    std::path::Path::new(&request.root),
+                    crate::Capability::Write,
+                    &config,
+                )
+                .map_err(|e| e.to_string())?;
+                crate::workspace::undo_last(&root, request.revision, request.expected_id.as_deref())
+            })();
+            match result {
+                Ok(snapshot) => {
+                    send_json_response(socket, "200 OK", &json!(snapshot).to_string()).await
+                }
+                Err(message) => {
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        &json!({ "message": message }).to_string(),
+                    )
+                    .await
+                }
+            }
+        }
         ("POST", "/api/active-model") => {
             #[derive(Deserialize)]
             struct ActiveModelReq {
@@ -435,26 +514,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
         }
 
         ("GET", "/api/live-models") => {
-            // Query param: apiKey=<gemini_key>
-            // Returns models that support Gemini Live (BidiGenerateContent / native-audio).
-            // Falls back to the static GEMINI_LIVE_MODELS preset list so the UI is never empty.
-            let api_key = query
-                .split('&')
-                .find_map(|kv| kv.strip_prefix("apiKey="))
-                .map(|v| percent_decode(v))
-                .unwrap_or_default();
-
-            let dynamic = crate::slash::model_fetcher::fetch_gemini_live_models(&api_key).await;
-
-            let models = if !dynamic.is_empty() {
-                dynamic
-            } else {
-                // Static preset fallback — always two well-known live models.
-                vec![
-                    "gemini-2.5-flash-native-audio-preview-12-2025".to_string(),
-                    "gemini-3.1-flash-live-preview".to_string(),
-                ]
-            };
+            let MediaModelQuery { api_key, .. } = MediaModelQuery::parse(query);
+            let config = load_config().unwrap_or_default();
+            let models = crate::model_catalog::live_models(&config, &api_key).await;
 
             send_json_response(
                 socket,
@@ -465,52 +527,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
         }
 
         ("GET", "/api/image-models") => {
-            // Query params: provider=<id>&apiKey=<key>
-            let provider = query
-                .split('&')
-                .find_map(|kv| kv.strip_prefix("provider="))
-                .map(|v| percent_decode(v))
-                .unwrap_or_default();
-            let mut api_key = query
-                .split('&')
-                .find_map(|kv| kv.strip_prefix("apiKey="))
-                .map(|v| percent_decode(v))
-                .unwrap_or_default();
-
-            let cfg_opt = load_config().ok();
-            if api_key.trim().is_empty() {
-                if let Some(ref cfg) = cfg_opt {
-                    api_key = match provider.to_lowercase().as_str() {
-                        "nanobanana" | "gemini" | "google" => cfg.api_key.clone(),
-                        "dalle" | "openai" => cfg.openai_api_key.clone(),
-                        "stability" => cfg.stability_api_key.clone(),
-                        "ideogram" => cfg.ideogram_api_key.clone(),
-                        "replicate" => cfg.replicate_api_key.clone(),
-                        "bfl" | "flux" => cfg.bfl_api_key.clone(),
-                        _ => String::new(),
-                    };
-                }
-            }
-
-            let dynamic =
-                crate::media::image_model_fetcher::fetch_image_provider_models(&provider, &api_key)
-                    .await;
-
-            let models = if !dynamic.is_empty() {
-                dynamic
-            } else {
-                match cfg_opt {
-                    Some(ref cfg) => {
-                        crate::media::image_models::image_model_options_for_provider(cfg, &provider)
-                    }
-                    None => match load_config() {
-                        Ok(cfg) => crate::media::image_models::image_model_options_for_provider(
-                            &cfg, &provider,
-                        ),
-                        Err(_) => Vec::new(),
-                    },
-                }
-            };
+            let MediaModelQuery { provider, api_key } = MediaModelQuery::parse(query);
+            let config = load_config().unwrap_or_default();
+            let models = crate::model_catalog::image_models(&config, &provider, &api_key).await;
 
             send_json_response(
                 socket,
@@ -521,47 +540,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
         }
 
         ("GET", "/api/video-models") => {
-            // Query params: provider=<id>&apiKey=<key>
-            let provider = query
-                .split('&')
-                .find_map(|kv| kv.strip_prefix("provider="))
-                .map(|v| percent_decode(v))
-                .unwrap_or_default();
-            let mut api_key = query
-                .split('&')
-                .find_map(|kv| kv.strip_prefix("apiKey="))
-                .map(|v| percent_decode(v))
-                .unwrap_or_default();
-
-            let cfg_opt = load_config().ok();
-            if api_key.trim().is_empty() {
-                if let Some(ref cfg) = cfg_opt {
-                    api_key = match provider.to_lowercase().as_str() {
-                        "veo" | "gemini" | "google" => cfg.api_key.clone(),
-                        _ => String::new(),
-                    };
-                }
-            }
-
-            let dynamic =
-                crate::media::video_model_fetcher::fetch_video_provider_models(&provider, &api_key)
-                    .await;
-
-            let models = if !dynamic.is_empty() {
-                dynamic
-            } else {
-                match cfg_opt {
-                    Some(ref cfg) => {
-                        crate::media::video_models::video_model_options_for_provider(cfg, &provider)
-                    }
-                    None => match load_config() {
-                        Ok(cfg) => crate::media::video_models::video_model_options_for_provider(
-                            &cfg, &provider,
-                        ),
-                        Err(_) => Vec::new(),
-                    },
-                }
-            };
+            let MediaModelQuery { provider, api_key } = MediaModelQuery::parse(query);
+            let config = load_config().unwrap_or_default();
+            let models = crate::model_catalog::video_models(&config, &provider, &api_key).await;
 
             send_json_response(
                 socket,
@@ -574,5 +555,21 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
         _ => unreachable!(
             "api_server routed an unhandled route into routes::misc::execute: {method} {route}"
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn review_model_query_preserves_literal_plus_percent_and_utf8() {
+        let mut url = reqwest::Url::parse("http://localhost/api/image-models").unwrap();
+        url.query_pairs_mut()
+            .append_pair("provider", "OpEnAi")
+            .append_pair("apiKey", "key+part%2Fก");
+        let options = MediaModelQuery::parse(url.query().unwrap());
+        assert_eq!(options.provider, "OpEnAi");
+        assert_eq!(options.api_key, "key+part%2Fก");
     }
 }

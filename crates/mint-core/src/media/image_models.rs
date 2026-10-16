@@ -72,37 +72,13 @@ pub fn image_model_options_for_provider(_config: &MintConfig, provider: &str) ->
     .collect()
 }
 
-/// Tries the provider's live API first to fetch available image models,
-/// falling back to static presets on network error, timeout, or missing key.
+/// Discovers models with saved credentials and appends missing static presets.
+/// The shared catalog owns credential selection and fallback behavior.
 pub async fn image_model_options_for_provider_async(
     config: &MintConfig,
     provider: &str,
 ) -> Vec<String> {
-    use super::image_model_fetcher;
-
-    let lower = provider.trim().to_lowercase();
-    let api_key = match lower.as_str() {
-        "nanobanana" | "gemini" | "google" => &config.api_key,
-        "dalle" | "openai" => &config.openai_api_key,
-        "stability" => &config.stability_api_key,
-        "ideogram" => &config.ideogram_api_key,
-        "replicate" => &config.replicate_api_key,
-        "bfl" | "flux" => &config.bfl_api_key,
-        _ => return image_model_options_for_provider(config, provider),
-    };
-
-    let dynamic = image_model_fetcher::fetch_image_provider_models(&lower, api_key).await;
-    if !dynamic.is_empty() {
-        let mut merged = dynamic;
-        for preset in image_model_options_for_provider(config, provider) {
-            if !merged.contains(&preset) {
-                merged.push(preset);
-            }
-        }
-        merged
-    } else {
-        image_model_options_for_provider(config, provider)
-    }
+    super::model_catalog::image_models(config, provider, "").await
 }
 
 /// Get the active model for an image provider from config.

@@ -9,10 +9,19 @@ cargo test -p mint-core -p mint-cli -p mint-desktop
 cargo check -p mint-desktop
 ```
 
+## Desktop commands
+
+- `npm start`: ตรวจ Rust/UI และ build แบบเร็วก่อนเปิดเมื่อโค้ดเปลี่ยน; ถ้า build ไม่ผ่านจะหยุด
+- `npm run dev`: เปิด Desktop สำหรับพัฒนา พร้อม UI hot reload
+- `npm run build:desktop`: build ตัวเต็มโดยไม่เปิดแอป
+- `npm run package`: build ตัวเต็มและสร้างแพ็กเกจติดตั้ง
+
+คำสั่งเดิมยังเป็น compatibility aliases; ขั้นตอน UI แยกไว้ให้ Tauri เรียกภายใน
+
 ## 📦 ข้อ 2 Build Desktop Bundles
 
 ```bash
-npm run tauri:build
+npm run package
 ```
 
 Tauri writes platform bundles under `target/release/bundle/`.
@@ -27,8 +36,8 @@ That footer stays until Windows/macOS code signing lands.
 Pushing a semver tag starts the release workflow:
 
 ```bash
-git tag v1.15.0
-git push origin v1.15.0
+git tag v1.16.0
+git push origin v1.16.0
 ```
 
 The workflow runs one job per platform on GitHub Actions and publishes their
@@ -57,6 +66,21 @@ artifacts to the same tagged GitHub Release. Desktop bundles are renamed to
   toolchain needed to run it: download, `chmod +x`, and run. The macOS binary
   is ad-hoc signed / not notarized, so clear its quarantine flag after
   download: `xattr -d com.apple.quarantine ./mint-cli_macos_arm64`.
+
+Development checkouts read `Release_Note.md` at runtime from the checkout used
+for the build. Editing it does not invalidate the CLI/Desktop development build.
+Rust keeps a fallback snapshot in `OUT_DIR`, rather than including the source
+Markdown directly. Missing, unreadable or empty live notes use that snapshot.
+
+Shipping builds set `MINT_BUNDLE_RELEASE_NOTES=1` to track and embed the latest
+notes and disable live checkout reads. The release workflow sets this for all
+platforms, and `npm run package` sets it automatically for Desktop packages.
+For a manual standalone CLI release from a checkout, run
+`MINT_BUNDLE_RELEASE_NOTES=1 cargo build --release -p mint-cli` on Linux/macOS
+(or set the environment variable before running Cargo on Windows). Source
+packages without `.git`, including npm installs, bundle notes automatically.
+Packaged Desktop builds do not validate the development launcher cache; the next
+development start builds its own live-notes variant.
 
 The same workflow can be started manually from the Actions tab with
 `workflow_dispatch`; manual runs upload workflow artifacts but only tag-triggered
@@ -89,3 +113,7 @@ To publish the repository package to the npm registry as a public scoped package
 
 
 
+
+## Mint Companion
+
+The optional character app is a separate npm workspace and Cargo binary in the same repo. Run `npm run dev:companion`, `npm run build:companion`, or `npm run package:companion -- --bundles deb|nsis|dmg` (choose one bundle type for your OS). Its UI builds to `out/companion`; the binary is `target/release/mint-companion`. Release jobs collect main Mint artifacts before building Companion, then attach `mint-companion_linux_x86_64.deb`, the Linux portable `.tar.gz`, `mint-companion_windows_x64.exe`, and `mint-companion_macos_arm64.dmg`. Both apps share the repo version but have independent application identifiers and installers. See `docs/MINT_COMPANION.md` for transport and manual GUI checks.

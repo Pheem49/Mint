@@ -8,6 +8,8 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from 'react'
+import { Terminal, Brain, Folder, Wrench, BookOpen, AtSign } from 'lucide-react'
+import '../css/slash-suggestions.css'
 import { SLASH_COMMANDS, type SlashCommand } from '../constants/slashCommands'
 import { catalogPlatform } from '../platform'
 import type { LearnedSkill } from '../types'
@@ -96,8 +98,19 @@ const SlashSuggestions = forwardRef<SlashSuggestionsHandle, Props>(function Slas
   const slashMatches = useMemo(() => {
     if (mode !== 'slash') return [] as SlashCommand[]
     const q = raw.toLowerCase()
-    const hits = SLASH_COMMANDS.filter((c) => c.command.toLowerCase().startsWith(q))
-    return CATEGORY_ORDER.flatMap((cat) => hits.filter((h) => (h.category ?? 'tools') === cat))
+    const typingArguments = SLASH_COMMANDS.some((c) => q.startsWith(c.command.toLowerCase() + ' '))
+    const words = q.slice(1).trim().split(/\s+/).filter(Boolean)
+    const hits = SLASH_COMMANDS.filter((c) =>
+      c.command.toLowerCase().startsWith(q) ||
+      (!typingArguments && !/\s/.test(q) && words.every((word) => `${c.command} ${c.description}`.toLowerCase().includes(word))),
+    )
+    const byCategory = (commands: SlashCommand[]) => CATEGORY_ORDER.flatMap((cat) =>
+      commands.filter((command) => (command.category ?? 'tools') === cat),
+    )
+    return [
+      ...byCategory(hits.filter((command) => command.command.toLowerCase().startsWith(q))),
+      ...byCategory(hits.filter((command) => !command.command.toLowerCase().startsWith(q))),
+    ]
   }, [mode, raw])
 
   // The command whose arguments are being typed (raw is past its token) — used
@@ -207,6 +220,16 @@ const SlashSuggestions = forwardRef<SlashSuggestionsHandle, Props>(function Slas
         return true
       }
       if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && !event.nativeEvent.isComposing) {
+        // A complete slash command is an invocation, not an autocomplete
+        // candidate. Let Enter reach the composer submit handler so commands
+        // such as `/models` can open their interactive picker on the first keypress.
+        if (
+          event.key === 'Enter' &&
+          mode === 'slash' &&
+          flat.some((item) => (item as SlashCommand).command.toLowerCase() === raw.trim().toLowerCase())
+        ) {
+          return false
+        }
         const item = flat[selIndex] ?? flat[0]
         if (!item) return false
         pick(item)
@@ -248,18 +271,22 @@ const SlashSuggestions = forwardRef<SlashSuggestionsHandle, Props>(function Slas
       aria-selected={idx === selIndex}
       data-idx={idx}
       className={`slash-suggestion-item ${idx === selIndex ? 'active' : ''}`}
-      onMouseDown={(e) => {
-        e.preventDefault()
-        pick(item)
-      }}
+      title={[name, usage, desc].filter(Boolean).join(" · ")}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => pick(item)}
       onPointerMove={() => setSelIndex(idx)}
     >
+      <span className="slash-cmd-icon" aria-hidden="true">
+        {mode === 'skill' ? <BookOpen size={15} /> : mode === 'at' ? <AtSign size={15} /> :
+          (item as SlashCommand).category === 'models' ? <Brain size={15} /> :
+          (item as SlashCommand).category === 'workspace' ? <Folder size={15} /> :
+          (item as SlashCommand).category === 'tools' ? <Wrench size={15} /> : <Terminal size={15} />}
+      </span>
       <span className="slash-cmd-name">{name}</span>
-      {badge && <span className="skill-badge">{badge}</span>}
       <span className="slash-cmd-body">
         <span className="slash-cmd-desc">{desc}</span>
-        {usage && <span className="slash-cmd-usage">{usage}</span>}
       </span>
+      {badge && <span className="skill-badge">{badge}</span>}
     </button>
   )
 
@@ -269,10 +296,10 @@ const SlashSuggestions = forwardRef<SlashSuggestionsHandle, Props>(function Slas
         {mode === 'slash' ? 'Slash Commands' : mode === 'skill' ? 'Learned Skills' : 'Context Mentions'}
         <span className="slash-suggestions-count">{headerLabel}</span>
       </div>
-      <div className="slash-suggestions-list" ref={listRef} role="listbox">
+      <div className="slash-suggestions-list" ref={listRef} role="listbox" aria-label={mode === 'slash' ? 'Slash commands' : mode === 'skill' ? 'Skills' : 'Context mentions'}>
         {mode === 'slash' &&
           (flat.length > 0
-            ? CATEGORY_ORDER.map((cat) => {
+            ? [...new Set(slashMatches.map((match) => match.category ?? 'tools'))].map((cat) => {
                 const items = slashMatches.filter((m) => (m.category ?? 'tools') === cat)
                 if (!items.length) return null
                 return (
@@ -311,6 +338,7 @@ const SlashSuggestions = forwardRef<SlashSuggestionsHandle, Props>(function Slas
             row(item, idx, item.label, item.desc, item.kind === 'plugin' ? '[Plugin]' : '[Context]'),
           )}
       </div>
+      <div className="slash-suggestions-hint">↑↓ select · Tab complete · Enter send · Esc close</div>
     </div>
   )
 })

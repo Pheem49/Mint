@@ -46,6 +46,9 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "stock",
     "calculation",
     "memory_recall",
+    "mod_help",
+    "mod_list",
+    "mod_validate",
     "git_status",
     "git_diff",
     "git_log",
@@ -102,6 +105,10 @@ pub(crate) fn base_allowed_actions() -> Vec<&'static str> {
         "stock",
         "calculation",
         "memory_recall",
+        "mod_help",
+        "mod_list",
+        "mod_validate",
+        "mod_publish",
         "git_status",
         "git_diff",
         "git_log",
@@ -185,6 +192,7 @@ pub fn build_system_prompt(
     let actions_str = allowed_actions.join("|");
 
     let mut input_formats = Vec::new();
+    input_formats.push("- mod_help / mod_list: {}. mod_validate / mod_publish: {\"arguments\":{\"manifest\":{...},\"source\":\"export function register(mint) {...}\",\"readme\":\"...\",\"expectedHash\":\"existing hash when replacing\"}}.");
     if allowed_actions.contains(&"list_files") {
         input_formats.push(
             "- list_files: {\"path\":\".\",\"limit\":100} (workspace path, ~/path, or allowed user folder like Downloads)",
@@ -451,6 +459,9 @@ pub fn build_system_prompt(
     let input_formats_str = input_formats.join("\n");
 
     let mut rules = Vec::new();
+    if allowed_actions.contains(&"mod_help") {
+        rules.push("MINT MODS: When asked to create or change a mod, call mod_help and mod_list first. Use the guide to draft the single-file source directly in mod_validate tool arguments, with at most one short progress sentence. Choose reasonable implementation defaults and proceed to validation. After validation succeeds, call mod_publish in execution mode if available; use expectedHash when replacing source. Creation is complete only after the publication result confirms the path in workspace/.mint-mods/<id>/ and activation state. In plan mode, present the draft/plan for approval. Follow the guide's bounded validation retries and report actual diagnostics if blocked.");
+    }
     if plan_mode {
         rules.push(
             "0p. PLAN MODE IS ACTIVE: you may only investigate (read files, search, inspect diagnostics, etc.). Mutating tools such as write_file, apply_patch, and most run_shell/mcp_tool/run_plugin calls are unavailable and will be blocked. Once you have a clear implementation plan, call exit_plan_mode with the full plan; the user will approve or reject it. Do not attempt to edit files or run mutating commands before that approval.",
@@ -492,6 +503,7 @@ pub fn build_system_prompt(
         || allowed_actions.contains(&"apply_patch")
     {
         rules.push("4. Shell commands and file edits require user approval. Mint handles approval after you request the tool.");
+        rules.push("4a. SKILL CHANGES: Create or edit reusable skills only when the user asks for that work. Otherwise complete the current task and suggest the skill in your summary. Use write_file or apply_patch for skill files so Mint can show the concrete diff and request approval for each change. A general file or session permission does not authorize changing persistent skill instructions. After approval, report the saved skill path and what changed.");
     }
     if allowed_actions.contains(&"run_shell") {
         rules.push("5. Shell commands are classified as readOnly, test, network, or mutating. Only policy-allowed modes may run after approval. Never request destructive commands such as rm -rf, git reset --hard, git checkout --, or git clean -f.");
@@ -521,7 +533,7 @@ pub fn build_system_prompt(
         rules.push("7v. A Project Avatar is connected. Call avatar_signal when your reply carries an emotional beat the automatic tool-based reactions can't express — greeting, joking, apologizing, thinking something over. Don't call it for routine tool-driven turns (shell, browser, image/video generation); those already react on their own.");
     }
     if allowed_actions.contains(&"browser_open") {
-        rules.push("7a. Use browser_open to navigate the virtual browser to a URL.");
+        rules.push("7a. Use browser_open to open websites in the automation browser. Inspect the returned page observation, then use browser_observe/browser_read to read the page or browser_screenshot for visual inspection; verify the requested URL/content with browser_wait before finishing. A successful browser_open already opens the website for the user: do not also launch it through run_shell, xdg-open, open, Start-Process, or another browser. Keep website navigation and interaction in the automation browser. If the user explicitly requests an external browser, use that route instead of first opening the website in automation. If automation is unavailable or blocked, report that and ask the user before switching browsers.");
     }
     if allowed_actions.contains(&"browser_click") {
         rules.push("7b. Use browser_click to click elements. Selector can be: CSS selector (button.class, #id, [attr=val]), text=ExactText to find by visible text, contains=PartialText for partial match, or xpath=//expr for XPath. Prefer text= or contains= when the element has visible text but no unique CSS class.");
@@ -588,11 +600,14 @@ For every JSON-backed card, ensure all properties stay inside their intended obj
 - Feature showcases: use fenced ```ui-card with JSON array:\n```ui-card\n[{\"title\": \"...\", \"subtitle\": \"...\", \"icon\": \"file-text\", \"badge\": \"...\", \"details\": {\"Key\": \"Value\"}}]\n```\n\
 - UI Prototypes: use fenced ```ui-mockup with JSON object:\n```ui-mockup\n{\"title\": \"...\", \"subtitle\": \"...\", \"dropzoneText\": \"...\", \"metrics\": {...}}\n```\n\
 - Key insights / alerts: use GitHub callouts (> [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING]). Always converse naturally and smoothly; never prefix conversational phrases or greetings with artificial status tags or badge pills. Always put opening and closing ``` fences on their own separate lines.");
-    if native {
+    if allowed_actions.contains(&"browser_open") {
+        rules.push("12. Shell commands may open local files/folders or launch apps when requested. For websites, follow rule 7a and verify the automation browser's observed page; a shell launch is not evidence that a browser task is complete.");
+    } else if native {
         rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the finish tool immediately.");
     } else {
         rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately.");
     }
+    rules.push("12a. Development servers and watchers must use run_shell with background: true so the tool returns a job_id immediately. For Python use python3 -u -m http.server <port>. Inspect shell_output and verify an HTTP response before claiming a server is ready; a job_id alone only proves it started. Keep existing background jobs alive when finishing a response or cancelling AI work, unless the user asks to stop them. Use kill_shell to stop only the requested job.");
     let mature_rule = format!("13. {}", persona::MATURE_CONTENT_POLICY);
     rules.push(&mature_rule);
 

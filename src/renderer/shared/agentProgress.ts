@@ -6,6 +6,9 @@
 import type { AgentProgress, InteractionMemory, DiffHunk, FileChange } from './types'
 export type { AgentProgress, InteractionMemory }
 
+export const EMPTY_AGENT_PROGRESS: AgentProgress[] = []
+const fileChangesCache = new WeakMap<AgentProgress[], { length: number; changes: FileChange[] }>()
+
 export function isInternalCot(text: string): boolean {
   const trimmed = text.trim()
   if (trimmed.startsWith('<think>') || trimmed.includes('</think>')) {
@@ -62,6 +65,8 @@ export function trimAgentProgress(progress: AgentProgress[], maxNonThought = 20)
   )
   return progress.filter(
     (event) =>
+      event.type === 'ToolArtifacts' || event.type === 'DeviceState' || event.type === 'ToolDiscovery' ||
+      ((event.type === 'ToolStart' || event.type === 'ToolEnd') && ['mcp_tool', 'view_image'].includes(event.data.action)) ||
       event.type === 'Thought' ||
       event.type === 'ThinkingDelta' ||
       event.type === 'ExtendedThinking' ||
@@ -74,6 +79,19 @@ export function reduceLiveAgentProgress(
   current: AgentProgress[],
   event: AgentProgress,
 ): AgentProgress[] {
+  if (event.type === 'DeviceState' && event.data.update.state !== 'accepted') {
+    const index = current.findIndex(item => item.type === 'DeviceState' && item.data.callId === event.data.callId && item.data.update.state !== 'accepted')
+    if (index >= 0) { const next=current.slice(); next[index]=event; return next }
+  }
+  if (event.type === 'ToolDiscovery') {
+    const index=current.findIndex(item=>item.type==='ToolDiscovery' && item.data.server===event.data.server && item.data.tool===event.data.tool)
+    if(index>=0) {const next=current.slice(); next[index]=event;return next}
+  }
+  if (event.type === 'ToolProgress') {
+    const index = current.findIndex(item => item.type === 'ToolProgress' && item.data.callId === event.data.callId)
+    if (index >= 0) { const next = current.slice(); next[index] = event; return next }
+  }
+
   if (event.type === 'ThinkingDelta') {
     const index = current.findIndex(
       (item) => item.type === 'ThinkingDelta' && item.data.id === event.data.id,
@@ -122,7 +140,14 @@ export function compactAgentProgressForPersistence(progress: AgentProgress[]): A
   )
   const result: AgentProgress[] = []
   const interrupted = new Map<string, Extract<AgentProgress, { type: 'ThinkingDelta' }>>()
+  const latestProgress = new Map<string, AgentProgress>()
   for (const event of progress) {
+    if (event.type === 'ToolProgress') latestProgress.set(event.data.callId, event)
+    if (event.type === 'DeviceState' && event.data.update.state !== 'accepted') latestProgress.set(`device:${event.data.callId}`,event)
+  }
+  for (const event of progress) {
+    if (event.type === 'ToolProgress' && latestProgress.get(event.data.callId) !== event) continue
+    if(event.type==='DeviceState' && event.data.update.state!=='accepted' && latestProgress.get(`device:${event.data.callId}`)!==event) continue
     if (event.type === 'ThinkingDelta') {
       if (!completedIds.has(event.data.id)) {
         const previous = interrupted.get(event.data.id)
@@ -178,6 +203,14 @@ export function parseAgentActivity(value: unknown): AgentProgress[] | undefined 
 }
 
 export function parseFileChangesFromProgress(progress: AgentProgress[]): FileChange[] {
+  const cached = fileChangesCache.get(progress)
+  if (cached?.length === progress.length) return cached.changes
+  const changes = deriveFileChangesFromProgress(progress)
+  fileChangesCache.set(progress, { length: progress.length, changes })
+  return changes
+}
+
+function deriveFileChangesFromProgress(progress: AgentProgress[]): FileChange[] {
   const changes = new Map<string, FileChange>()
   let activeEdit: { action: string; path: string; created: boolean; additions: number; deletions: number; hunks: DiffHunk[] } | null = null
 

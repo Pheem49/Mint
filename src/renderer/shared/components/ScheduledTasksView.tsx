@@ -1,3 +1,4 @@
+import SelectField from './SelectField'
 import React, { useState, useEffect, useMemo } from 'react'
 import { DateTime } from 'luxon'
 import { renderScheduledTasksSvgIcon, renderTaskLogoIcon } from '../constants/plugins'
@@ -465,17 +466,17 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
                   <div className="management-form-group">
                     <label className="management-label">When to run</label>
                     <div className="schedule-inline-row">
-                      <select
+                      <SelectField fullWidth={false} aria-label="When to run"
                         className="management-input-field schedule-repeat-select"
                         value={repeatMode}
-                        onChange={(e) => setRepeatMode(e.target.value as typeof repeatMode)}
+                        onValueChange={(nextValue) => setRepeatMode(nextValue as typeof repeatMode)}
                       >
                         <option value="daily">Daily</option>
                         <option value="weekly">Weekly</option>
                         <option value="monthly">Monthly</option>
                         <option value="once">One-time</option>
                         <option value="custom">Custom (cron)</option>
-                      </select>
+                      </SelectField>
 
                       {repeatMode === 'weekly' && (
                         <>
@@ -534,17 +535,17 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
                           onChange={(e) => setTimeOfDay(e.target.value)}
                           required
                         />
-                        <select
+                        <SelectField fullWidth={false} aria-label="Time zone"
                           className="management-input-field schedule-timezone-select"
                           value={taskTimezone}
-                          onChange={(e) => setTaskTimezone(e.target.value)}
+                          onValueChange={(nextValue) => setTaskTimezone(nextValue)}
                         >
                           {timezoneOptions.map((tz) => (
                             <option key={tz} value={tz}>
                               {tz}
                             </option>
                           ))}
-                        </select>
+                        </SelectField>
                       </div>
                     )}
                   </div>

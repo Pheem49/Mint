@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body><div id="root"></div><pre id="result" style="position:fixed;top:0;left:0;z-index:500;font-size:12px">RUNNING</pre>
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { BackgroundTerminals } from '/shared/components/BackgroundTerminals.tsx';
+import { installRendererPlatform } from '/shared/platform.ts';
+const web = location.search.includes('web');
+const compact = location.search.includes('compact');
+for (const file of ['index.css','css/dashboard.css', ...(web ? ['css/mobile.css'] : [])]) {
+  const link=document.createElement('link'); link.rel='stylesheet'; link.href=`/${web?'src-web':'src'}/${file}`; document.head.append(link);
+}
+const makeJob = (id,workspacePath) => ({id,workspacePath,cwd:workspacePath,command:id==='bg-first'?'python3 -m http.server 8000':'npm run dev',chatId:'chat',pid:1,status:'running',exitCode:null,error:null,startedAt:Date.now(),endedAt:null,elapsedSeconds:12,serverUrl:null});
+const initialJobs=[makeJob('bg-first','/Demo'),makeJob('bg-second','/Demo'),makeJob('bg-other','/Other')];
+let jobs=[], disconnected=false, stopCalls=[], outputCalls=0;
+installRendererPlatform(new Proxy({
+  isTauriRuntime:()=>!web,
+  listBackgroundJobs:async(workspace)=>{if(disconnected)throw new Error('offline');return jobs.filter(j=>!workspace||j.workspacePath===workspace).map(j=>({...j}));},
+  getBackgroundJob:async(id)=>{outputCalls++;if(disconnected)throw new Error('offline');const job=jobs.find(j=>j.id===id);return {...job,stdout:'hello\n'+'line\n'.repeat(100),stderr:'',truncated:true};},
+  stopBackgroundJob:async(id)=>{stopCalls.push(id);jobs=jobs.map(j=>j.id===id?{...j,status:'stopping'}:j);return jobs.find(j=>j.id===id);},
+},{get:(target,key)=>target[key]||(()=>{})}));
+const root=createRoot(document.getElementById('root'));
+function render(workspace='/Demo') { root.render(React.createElement('div',{className:'input-area',style:{position:'fixed',bottom:16,left:16,right:compact?'auto':16,width:compact?320:undefined,padding:8}},React.createElement('div',{className:'smart-context-bar'},React.createElement('button',null,'Agent mode'),React.createElement('button',null,'Plan mode'),React.createElement(BackgroundTerminals,{workspacePath:workspace})),React.createElement('textarea',{id:'composer',style:{width:'100%',height:80},'aria-label':'Chat message'}),React.createElement('button',{id:'send'},'Send'))); }
+render();
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function waitFor(test) {const deadline=Date.now()+5000;while(!test()){if(Date.now()>deadline)throw new Error('timed out');await sleep(25);}}
+const results=[];
+const check=(condition,label)=>{if(!condition)throw new Error(label);results.push(label);};
+const trigger=()=>document.querySelector('.background-terminal-trigger');
+try {
+  await waitFor(()=>trigger()?.textContent.trim()==='▸ Terminals ▾');
+  check(true,'zero jobs keeps Terminals accessible');
+  jobs=[initialJobs[0]];
+  await waitFor(()=>trigger()?.textContent.includes('1 background terminal'));
+  check(true,'one running job uses singular count');
+  jobs=initialJobs;
+  await waitFor(()=>trigger()?.textContent.includes('2 background terminals'));
+  check(true,'workspace count excludes other workspace');
+  trigger().click(); await waitFor(()=>document.querySelector('.background-terminal-panel'));
+  check(document.querySelectorAll('.background-terminal-job').length===2,'panel lists workspace jobs');
+  const input=document.getElementById('composer'), bounds=input.getBoundingClientRect();
+  check(document.elementFromPoint(bounds.left+20,bounds.top+20)===input,'composer remains clickable with panel open');
+  const panel=document.querySelector('.background-terminal-panel').getBoundingClientRect();
+  check(panel.left>=0&&panel.right<=innerWidth&&panel.top>=0&&panel.bottom<=bounds.top,'panel fits viewport above composer');
+  check(panel.left>=bounds.left-1&&panel.right<=bounds.right+1,'panel fits the composer column');
+  document.querySelector('.background-terminal-filter input').click(); await sleep(25);
+  check(document.querySelectorAll('.background-terminal-job').length===3,'all workspaces exposes other job');
+  const view=[...document.querySelectorAll('button')].find(b=>b.textContent==='View output');view.click();
+  await waitFor(()=>document.querySelector('.background-terminal-log pre'));
+  check(document.querySelector('.background-terminal-output').textContent.includes('Older output was truncated.'),'output shows truncation');
+  check(outputCalls>0,'output uses snapshot API');
+  const follow=document.querySelector('.background-terminal-output input');
+  document.querySelector('.background-terminal-log').dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));await sleep(25);
+  check(!follow.checked,'scrolling up pauses follow');
+  const stop=document.querySelector('.background-terminal-stop');stop.click();
+  await waitFor(()=>stopCalls.length===1);
+  check(stopCalls.length===1,'stop targets one job');
+  jobs=jobs.map(j=>j.id==='bg-first'?{...j,status:'completed',exitCode:0,endedAt:Date.now()}:j);
+  await waitFor(()=>trigger()?.textContent.includes('1 background terminal'));
+  check(true,'completed job reduces active count');
+  jobs=jobs.map(j=>({...j,status:'completed',exitCode:0,endedAt:Date.now()}));
+  await waitFor(()=>trigger().textContent.trim()==='▸ Terminals ▾');
+  check(document.querySelectorAll('.background-terminal-job').length===3,'finished output remains accessible');
+  await waitFor(()=>document.querySelector('[role=status]'));
+  check(document.querySelector('[role=status]').textContent.includes('completed'),'completion notice is nonblocking');
+  disconnected=true;await waitFor(()=>trigger().textContent.includes('Status unavailable'));
+  check(document.querySelectorAll('.background-terminal-job').length===3,'connection loss keeps last known list');
+  disconnected=false;await waitFor(()=>trigger().textContent.includes('Terminals'));
+  document.querySelector('.background-terminal-panel').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await sleep(25);
+  check(!document.querySelector('.background-terminal-panel')&&document.activeElement===trigger(),'Escape closes panel and restores focus');
+  render('/Other');await sleep(50);trigger().click();await sleep(50);
+  check(document.querySelectorAll('.background-terminal-job').length===1,'workspace switch changes list without stopping jobs');
+  check(stopCalls.length===1,'switching workspace does not stop jobs');
+  document.documentElement.dataset.theme='light';await sleep(50);
+  const color=getComputedStyle(document.querySelector('.background-terminal-panel')).backgroundColor;
+  check(color==='rgb(255, 255, 255)','panel follows light theme');
+  document.getElementById('result').textContent='PASS '+results.length+'\n'+results.join('\n');
+  document.documentElement.dataset.result='pass';
+} catch(error) {document.getElementById('result').textContent='FAIL '+error.message+'\n'+results.join('\n');document.documentElement.dataset.result='fail';}
+</script></body></html>

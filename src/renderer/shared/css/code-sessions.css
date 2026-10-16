@@ -173,6 +173,33 @@
 }
 
 /* Sessions List (Linear-like Structured Rows) */
+.code-header-controls {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.code-header-controls .workspace-selector {
+  max-width: 100%;
+}
+
+.code-header-controls .workspace-select-btn {
+  min-height: 36px;
+}
+
+.code-show-all-btn {
+  margin-bottom: 16px;
+  min-height: 36px;
+}
+
+.code-show-all-btn:focus-visible {
+  outline: 2px solid var(--interactive-fg, #a1a1aa);
+  outline-offset: 2px;
+}
+
 .code-sessions-list {
   display: flex;
   flex-direction: column;

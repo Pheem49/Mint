@@ -1,10 +1,122 @@
 /* desktop: sidebar-workspace.css — split from styles.css, rules kept in original order */
 
-.toggle-model-btn,
-.change-expression-btn,
-.accessory-cycle-btn,
-.toggle-interaction-btn,
-.interaction-guide-btn,
+.workspace-file-menu {
+  position: fixed;
+  z-index: 10000;
+  width: 184px;
+  padding: 4px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-surface-raised, #202126);
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, .3));
+  -webkit-app-region: no-drag;
+}
+
+.workspace-file-menu button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm, 5px);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: .8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-file-menu button:not(:disabled):hover,
+.workspace-file-menu button:not(:disabled):focus-visible {
+  background: var(--bg-surface-hover);
+}
+
+.workspace-file-menu button:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+.workspace-file-menu button.is-danger {
+  color: var(--status-error);
+}
+
+.workspace-file-menu button.is-danger:not(:disabled):hover,
+.workspace-file-menu button.is-danger:not(:disabled):focus-visible {
+  background: color-mix(in srgb, var(--status-error) 12%, transparent);
+}
+
+.workspace-file-menu button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.workspace-undo-bar {
+  margin: 12px 8px;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-surface-raised);
+  color: var(--text-primary);
+  font-size: .78rem;
+  overflow-wrap: anywhere;
+}
+.workspace-undo-bar > span { display: block; margin-bottom: 6px; }
+.workspace-undo-bar button {
+  border: 0;
+  border-radius: var(--radius-sm, 5px);
+  padding: 6px 8px;
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workspace-undo-bar button:disabled { opacity: .5; cursor: default; }
+.workspace-undo-bar details { margin-top: 8px; color: var(--text-muted); }
+.workspace-undo-bar summary { cursor: pointer; }
+.workspace-undo-bar ol { padding-left: 18px; }
+.workspace-undo-bar li { margin: 6px 0; }
+.workspace-history-error { padding: 10px; color: var(--color-danger, #f87171); font-size: .8rem; }
+.workspace-file-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, .45);
+}
+.workspace-file-dialog {
+  width: min(420px, 100%);
+  padding: 20px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-surface-raised, #202126);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+}
+.workspace-file-dialog h3 { margin: 0 0 16px; overflow-wrap: anywhere; }
+.workspace-file-dialog label { display: grid; gap: 8px; font-size: .85rem; }
+.workspace-file-dialog input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm, 5px);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font: inherit;
+  box-sizing: border-box;
+}
+.workspace-file-dialog p { color: var(--color-danger, #f87171); font-size: .8rem; }
+.workspace-file-dialog > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.workspace-file-dialog button {
+  padding: 7px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm, 5px);
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
 .clear-btn,
 .settings-btn {
   -webkit-app-region: no-drag;
@@ -26,31 +138,9 @@
   white-space: nowrap;
   transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
 }
-
-.toggle-model-btn svg,
-.change-expression-btn svg,
-.accessory-cycle-btn svg,
-.toggle-interaction-btn svg,
-.interaction-guide-btn svg,
 .clear-btn svg,
 .settings-btn svg {
   flex: 0 0 auto;
-}
-
-.change-expression-btn:hover {
-  background: color-mix(in srgb, var(--flavor-amber) 15%, transparent);
-  border-color: color-mix(in srgb, var(--flavor-amber) 20%, transparent);
-  color: var(--flavor-amber);
-}
-
-.toggle-interaction-btn .interaction-off-mark {
-  opacity: 0;
-}
-
-.interaction-guide-btn:hover {
-  background: color-mix(in srgb, var(--flavor-cyan) 14%, transparent);
-  border-color: color-mix(in srgb, var(--flavor-cyan) 20%, transparent);
-  color: var(--flavor-cyan);
 }
 
 .clear-btn:hover {
@@ -379,56 +469,12 @@
   white-space: nowrap;
 }
 
-
 .sidebar-top-action {
   margin-bottom: 4px;
 }
 
 .sidebar-top-action:last-of-type {
   margin-bottom: 12px;
-}
-
-.sidebar-model-controls {
-  display: grid;
-  width: 100%;
-  align-items: stretch;
-  justify-items: stretch;
-  justify-content: stretch;
-  gap: 2px;
-  padding: 10px 0 18px;
-  border-top: 1px solid var(--border-subtle);
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: 6px;
-}
-
-.workspace-sidebar .toggle-model-btn,
-.workspace-sidebar .change-expression-btn,
-.workspace-sidebar .accessory-cycle-btn,
-.workspace-sidebar .toggle-interaction-btn,
-.workspace-sidebar .interaction-guide-btn {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  height: 32px;
-  justify-content: flex-start;
-  padding: 0 10px;
-  color: var(--text-soft);
-  font-weight: 400;
-  gap: 9px;
-}
-
-.workspace-sidebar .toggle-model-btn:hover,
-.workspace-sidebar .toggle-model-btn.active,
-.workspace-sidebar .change-expression-btn:hover,
-.workspace-sidebar .accessory-cycle-btn:hover,
-.workspace-sidebar .accessory-cycle-btn.active,
-.workspace-sidebar .toggle-interaction-btn:hover,
-.workspace-sidebar .toggle-interaction-btn.active,
-.workspace-sidebar .interaction-guide-btn:hover,
-.workspace-sidebar .interaction-guide-btn.active {
-  background: var(--surface-strong);
-  border-color: transparent;
-  color: var(--text-main);
 }
 
 .sidebar-section {
@@ -633,6 +679,7 @@
 .sidebar-conversation-menu-popover button:hover { background: var(--bg-surface-hover); }
 .sidebar-conversation-menu-popover button.is-destructive { color: var(--color-danger, #f87171); }
 .sidebar-conversation-menu-popover button span { flex: 1; }
+.workspace-sidebar .sidebar-menu-icon { flex: 0 0 14px; }
 @media (pointer: coarse) { .sidebar-conversation-menu-trigger { opacity: 1; } }
 
 .sidebar-chat-rename-input {
@@ -657,17 +704,11 @@
 .sidebar-chat-item.active:hover .mint-status-pill {
   display: none;
 }
-
 .app-body.sidebar-collapsed .sidebar-new-chat,
 .app-body.sidebar-collapsed .sidebar-top-action,
 .app-body.sidebar-collapsed .sidebar-settings,
 .app-body.sidebar-collapsed .sidebar-bottom-actions .clear-btn,
 .app-body.sidebar-collapsed .sidebar-bottom-actions .settings-btn,
-.app-body.sidebar-collapsed .workspace-sidebar .toggle-model-btn,
-.app-body.sidebar-collapsed .workspace-sidebar .change-expression-btn,
-.app-body.sidebar-collapsed .workspace-sidebar .accessory-cycle-btn,
-.app-body.sidebar-collapsed .workspace-sidebar .toggle-interaction-btn,
-.app-body.sidebar-collapsed .workspace-sidebar .interaction-guide-btn,
 .app-body.sidebar-collapsed .sidebar-project {
   width: 40px;
   height: 34px;
@@ -1352,23 +1393,6 @@
     height: 34px;
   }
 
-  .toggle-model-btn,
-  .change-expression-btn,
-.accessory-cycle-btn,
-  .toggle-interaction-btn,
-  .interaction-guide-btn {
-    width: 34px;
-    padding: 0;
-  }
-
-  .toggle-model-btn span,
-  .change-expression-btn span,
-.accessory-cycle-btn span,
-  .toggle-interaction-btn span,
-  .interaction-guide-btn span {
-    display: none;
-  }
-
   .sidebar-toggle {
     display: none;
   }
@@ -1627,6 +1651,9 @@
 }
 
 .sidebar-show-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: transparent;
   border: none;
   color: var(--text-muted);
@@ -1638,6 +1665,8 @@
   margin-top: 2px;
   transition: color 0.15s ease, background 0.15s ease;
 }
+.sidebar-show-more-btn svg { flex: 0 0 auto; transition: transform 0.15s ease; }
+.sidebar-show-more-btn svg.is-expanded { transform: rotate(180deg); }
 
 .sidebar-show-more-btn:hover {
   color: var(--text-secondary);
@@ -1732,6 +1761,8 @@
 }
 
 .sidebar-move-item-check {
+  display: inline-flex;
+  align-items: center;
   margin-left: auto;
   font-size: 0.85rem;
   color: var(--flavor-teal, #2dd4bf);
@@ -1743,3 +1774,29 @@
   background: var(--border-subtle, rgba(255, 255, 255, 0.08));
   margin: 4px 2px;
 }
+
+/* The resize target stays inside the panel so its overflow cannot clip it. */
+.workspace-pane-resizer {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 8px;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.workspace-pane-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 8px 3px;
+  border-radius: 2px;
+  background: var(--border-default);
+  transition: background 0.15s ease;
+}
+.workspace-pane-resizer:hover::after,
+.workspace-pane-resizer:focus-visible::after,
+.is-workspace-resizing .workspace-pane-resizer::after { background: var(--border-focus); }
+.workspace-pane-resizer:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.workspace-pane-resizer[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .workspace-pane-resizer::after { transition: none; } }
+@media (forced-colors: active) { .workspace-pane-resizer::after { background: Highlight; } }

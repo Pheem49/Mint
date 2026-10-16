@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
 
 export default defineConfig({
@@ -24,9 +25,11 @@ export default defineConfig({
       ]
     }
   },
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
+      '@/components/ui': resolve(__dirname, 'src/renderer/shared/components/ui'),
+      '@/lib/utils': resolve(__dirname, 'src/renderer/shared/lib/utils'),
       '@': resolve(__dirname, 'src/renderer/src'),
       '@shared': resolve(__dirname, 'src/renderer/shared')
     }

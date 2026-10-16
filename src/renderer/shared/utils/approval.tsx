@@ -13,6 +13,12 @@ export interface ApprovalDetails {
   isDangerous: boolean
 }
 
+// Skill changes require a decision for this proposal, including in sessions
+// where ordinary tool requests have already been allowed.
+export function requiresExplicitApproval(approval: Record<string, unknown> | undefined): boolean {
+  return !!approval?.SkillWrite
+}
+
 function parseDiffStats(diffText?: string): string {
   if (!diffText) return ''
   let additions = 0
@@ -44,6 +50,7 @@ export function renderApprovalDetails(approval: any): ApprovalDetails {
     const { server, tool, arguments: args } = approval.McpTool
     return { title: `Run MCP Tool: ${server}/${tool}`, body: typeof args === 'string' ? args : JSON.stringify(args, null, 2), reason: 'Running external MCP tool.', isDangerous: false }
   }
+  if (approval.SkillWrite) return { title: 'Save Skill', body: `Path: ${approval.SkillWrite.path}`, reason: 'This changes instructions used in future tasks. Review the proposed changes before saving.', isDangerous: false }
   if (approval.UserApproval) return { title: approval.UserApproval.title, body: approval.UserApproval.prompt, reason: 'The agent requested explicit approval.', isDangerous: false }
   if (approval.AskUser) {
     const hasOptions = Array.isArray(approval.AskUser.options) && approval.AskUser.options.length > 0

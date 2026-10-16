@@ -1,0 +1,7 @@
+.tools-panel-toggle { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; min-height: 32px; padding: 5px 9px; border: 1px solid var(--border); border-radius: var(--radius-xs, 6px); background: var(--surface-bg); color: var(--text-main); font: inherit; font-size: 12px; cursor: pointer; }
+.tools-panel-toggle > svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+.tools-panel-toggle:hover, .tools-panel-toggle.is-open { background: var(--surface-strong); color: var(--accent); }
+.tools-panel-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tools-task-count { display: inline-grid; place-items: center; flex-shrink: 0; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: var(--accent-subtle, var(--surface-strong)); color: var(--accent); font-size: 10px; font-weight: 650; line-height: 1; font-variant-numeric: tabular-nums; }
+.mint-titlebar-icon-button.tools-panel-toggle { width: auto; min-width: 32px; }
+.mint-titlebar-icon-button .tools-toggle-label { display: none; }

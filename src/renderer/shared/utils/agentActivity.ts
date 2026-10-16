@@ -5,6 +5,7 @@
  */
 import type { AgentProgress } from '../types'
 import { isInternalCot } from '../agentProgress'
+import { viewedImageDataUri } from './viewedImages'
 
 export interface AgentActivity {
   label: string
@@ -12,6 +13,7 @@ export interface AgentActivity {
   kind: 'file' | 'folder' | 'search' | 'terminal' | 'tool' | 'calc'
   state: 'active' | 'done' | 'error' | 'retry'
   action?: string
+  callId?: string
   /** Raw ToolEnd output text, shown when the row is expanded in the UI. */
   result?: string
 }
@@ -131,7 +133,8 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
 
   return {
     // Raw tool/action identifier, matching how the CLI labels activity (e.g. "[web_search]").
-    label: action,
+    label: action === 'read_file' && activityDetail(input, 'skill_name')
+      ? `Reading skill: ${activityDetail(input, 'skill_name')}` : action,
     target: formatActivityTarget(target),
     kind: activityKind(action, target),
     state: 'active',
@@ -250,6 +253,16 @@ function finalizeGroup(group: AgentActivityGroup): AgentActivityGroup {
 }
 
 export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
+  const cached = activityCache.get(progress)
+  if (cached?.length === progress.length) return cached.view
+  const view = deriveActivitiesFrom(progress)
+  activityCache.set(progress, { length: progress.length, view })
+  return view
+}
+
+const activityCache = new WeakMap<AgentProgress[], { length: number; view: AgentActivityView }>()
+
+function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
   const activities: AgentActivity[] = []
   const timeline: TimelineItem[] = []
   let currentGroup: AgentActivityGroup | null = null
@@ -269,7 +282,15 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
   for (const event of progress) {
     if (event.type === 'ToolStart') {
       const item = describeTool(event.data.action, event.data.input)
+      item.callId = event.data.callId
       activities.push(item)
+
+      // Keep each skill's lifecycle visible instead of hiding it in a files group.
+      if (event.data.action === 'read_file' && activityDetail(event.data.input, 'skill_name')) {
+        flushGroup()
+        timeline.push({ id: `skill-${nextId++}`, kind: 'activity', activity: item })
+        continue
+      }
 
       const actionKey = item.action || item.label
       if (!currentGroup || currentGroup.action !== actionKey) {
@@ -292,10 +313,23 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
         }
       }
     } else if (event.type === 'ToolEnd') {
+      const finished = describeTool(event.data.action, event.data.input)
       for (let index = activities.length - 1; index >= 0; index -= 1) {
         if (activities[index].state !== 'active') continue
-        activities[index].state = event.data.result.startsWith('Error:') ? 'error' : 'done'
-        activities[index].result = event.data.result
+        if (event.data.callId && activities[index].callId !== event.data.callId) continue
+        if (activities[index].action !== finished.action || activities[index].target !== finished.target) continue
+        activities[index].state = event.data.status ? (event.data.status === 'success' ? 'done' : 'error') : /^(Error:|Blocked|User denied)/.test(event.data.result) ? 'error' : 'done'
+        const viewedImage = event.data.action === 'view_image' ? viewedImageDataUri(event.data.result) : null
+        activities[index].result = viewedImage ? event.data.result.replace(viewedImage, '[Image displayed below]') : event.data.result
+        if (event.data.action === 'read_file') {
+          const loaded = event.data.result.match(/^\[Loaded skill: ([^\n]+)\]\n/)
+          if (loaded) activities[index].label = `Loaded skill: ${loaded[1]}`
+          else if (activities[index].label.startsWith('Reading skill:')) {
+            activities[index].label = activities[index].state === 'error'
+              ? activities[index].label.replace('Reading skill:', 'Failed to read skill:')
+              : activities[index].label.replace('Reading skill:', 'Read skill preview:')
+          }
+        }
         if (activities[index].action === 'ask_user' && event.data.result.startsWith('User answered:')) {
           const answer = event.data.result.replace('User answered:', '').trim()
           activities[index].target = `(Answered: "${answer}") ${activities[index].target}`
@@ -308,6 +342,11 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
         const hasError = currentGroup.items.some((it) => it.state === 'error')
         const hasRetry = currentGroup.items.some((it) => it.state === 'retry')
         currentGroup.state = hasActive ? 'active' : hasDone ? 'done' : hasRetry ? 'retry' : hasError ? 'error' : 'done'
+      }
+    } else if (event.type === 'ContextCompaction') {
+      if (event.data.status !== 'started') {
+        flushGroup()
+        timeline.push({ id: `context-${nextId++}`, kind: 'thought', thought: event.data.subagent ? `[${event.data.subagent}] ${event.data.message}` : event.data.message })
       }
     } else if (event.type === 'Thought') {
       const text = event.data?.thought?.trim()

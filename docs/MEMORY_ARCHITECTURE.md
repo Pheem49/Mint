@@ -209,7 +209,7 @@ flowchart TD
 
 ---
 
-## 4. Automatic background writers
+## 4. Automatic persistence and skill proposals
 
 After a turn returns, `spawn_auto_memory_update` fires a detached `tokio` task
 (it never blocks or fails the reply). It runs up to two LLM passes:
@@ -263,11 +263,17 @@ Toggle: `/autofacts [on|off]`.
 
 ### 4.3 Skill writing — `auto_write_skill`
 
-Gated by `config.auto_skill_writing` (default on) and `looks_skill_worthy` (the
+Gated by `config.auto_skill_writing` (default off) and `looks_skill_worthy` (the
 task took ≥3 steps and did real work — edits, shell, browser, subagent). Asks a
 model whether the finished task generalizes into a reusable skill, and if so
-writes / refines `<workspace>/.agents/skills/<slug>/SKILL.md` with a bumped
-`revisions:` count. Toggle: `/autoskill [on|off]`.
+proposes a diff for `<workspace>/.agents/skills/<slug>/SKILL.md` with a bumped
+`revisions:` count. The proposal stays in memory until the user approves it
+through `AgentApproval::SkillWrite`; denial, interception or cancellation saves
+nothing. Approved writes use the normal capability, history and stale-file
+checks. CLI/TUI, Desktop and Web request approval for each skill change even
+when ordinary file/session permissions are allowed. This also protects source
+files registered through `/learn` outside the skill directories, including their
+recreation after deletion. Unattended cron runs deny these requests. Toggle: `/autoskill [on|off]` (enables suggestions).
 
 ### 4.4 Linked-folder notes — `spawn_linked_folder_note`
 
@@ -365,7 +371,7 @@ Anthropic, model-string-keyed for OpenAI, `ollama_num_ctx` for Ollama, etc.
 | `memory_recall` | `true` | `/autorecall [on\|off]` | FTS5 recall injection each turn |
 | `auto_fact_extraction` | `true` | `/autofacts [on\|off]` | Background fact extraction into `facts` |
 | `semantic_fact_recall` | `true` | `/factrecall [on\|off]` | Relevance-rank facts (vs newest-first) when they overflow the budget |
-| `auto_skill_writing` | `true` | `/autoskill [on\|off]` | Background `SKILL.md` writing |
+| `auto_skill_writing` | `false` | `/autoskill [on\|off]` | Skill proposals requiring user approval |
 
 Manual memory commands:
 
@@ -404,7 +410,8 @@ arm (`dispatcher_tokens_are_documented` guards this).
    `looks_skill_worthy` are keyword/step-count filters that keep the extra LLM
    passes off the turns that don't need them.
 6. **Fire-and-forget writes.** No background memory task can slow down or fail a
-   user-visible reply.
+   user-visible reply. Skill proposals run within the turn and wait for user
+   approval; they are not background writes.
 7. **Provenance.** Facts carry `source_chat_id` / `source_interaction_id` /
    `agent_id`; notes cross-link by id; skills carry a `revisions:` count.
 8. **One embedding, in the same file.** Fact relevance ranking is brute-force

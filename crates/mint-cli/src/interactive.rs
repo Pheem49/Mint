@@ -18,9 +18,12 @@ mod picker;
 mod resume_picker;
 mod slash_commands;
 mod thought_viewer;
+mod tool_activity;
 
 pub(crate) use chat_tui::TuiHandle;
 pub(crate) use chat_tui::restore_terminal;
+#[cfg(test)]
+pub(crate) use chat_tui::{ChatTui, ChatViewState};
 pub use command_ui::*;
 pub use commands::*;
 pub use confirm::*;
@@ -94,6 +97,7 @@ async fn run_interactive_agent_turn(
         plan_mode: session.plan_mode,
         queueing: true,
         pinned_mcp_server,
+        image_name: None,
         chat_id: Some(session.chat_id.clone()),
         tui: None,
     };
@@ -443,16 +447,7 @@ pub async fn run_interactive_chat_with_session(
         }
     }
 
-    let mut printed_update = false;
-    if let Some((current, latest)) = crate::updater::get_cached_update_notice() {
-        if let Some((_, _, handle)) = tui.as_mut() {
-            handle.push_notice(crate::updater::format_tui_update_notice(&current, &latest));
-        } else {
-            crate::updater::print_update_notice(&current, &latest);
-        }
-        printed_update = true;
-    }
-
+    let mut startup_update = crate::updater::get_cached_update_notice();
     let mut update_handle = if crate::updater::should_check_for_update() {
         Some(tokio::task::spawn_blocking(
             crate::updater::check_for_update_quietly,
@@ -460,6 +455,53 @@ pub async fn run_interactive_chat_with_session(
     } else {
         None
     };
+
+    // Offer the menu only at startup. A slow registry must not interrupt a
+    // conversation later; its result will use the passive notice below.
+    if startup_update.is_none()
+        && let (Some((terminal, state, handle)), Some(check)) =
+            (tui.as_mut(), update_handle.as_mut())
+    {
+        handle.set_status(vec!["Checking for updates…".into()]);
+        if let Ok(state) = state.lock() {
+            terminal.draw_state(&state)?;
+        }
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), check).await;
+        handle.clear_status();
+        if let Ok(result) = result {
+            startup_update = result.ok().flatten();
+            update_handle = None;
+        }
+    }
+
+    let mut printed_update = false;
+    if let Some((current, latest)) = startup_update {
+        if let Some((terminal, _, handle)) = tui.as_mut() {
+            match terminal.prompt_update(handle, &current, &latest)? {
+                Some(0) => {
+                    terminal.suspend();
+                    match crate::updater::run(false, false, true) {
+                        Ok(()) => return Ok(()),
+                        Err(error) => {
+                            terminal.resume()?;
+                            handle.push_notice(format!(
+                                "Update failed: {error}. Run `mint update --approve` to retry."
+                            ));
+                        }
+                    }
+                }
+                Some(2) => {
+                    if let Err(error) = crate::updater::skip_version(&latest) {
+                        handle.push_notice(format!("Could not save skipped version: {error}"));
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            crate::updater::print_update_notice(&current, &latest);
+        }
+        printed_update = true;
+    }
 
     // Follow-up messages typed while an agent turn is still running (into the
     // queueing box `agent::run_code_agent_with_options` keeps on screen) come
@@ -670,13 +712,13 @@ pub async fn run_interactive_chat_with_session(
 
                     let task_with_skill = format!(
                         "=== ACTIVATED SKILL: {} ===\n\
-                         {}\n\
+                         Description: {}\nPath: {}\nRead this skill file through read_file before using it.\n\
                          ===========================\n\n\
                          Task: {}",
-                        skill.name, skill.content, final_task
+                        skill.name, description, skill.source_path, final_task
                     );
 
-                    ui.push_notice(format!("Skill({}) loaded", skill.name));
+                    ui.push_notice(format!("Selected skill: {}", skill.name));
                     drop(ui);
 
                     match run_interactive_agent_turn(
@@ -811,33 +853,15 @@ pub fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Re
     Ok(())
 }
 pub fn load_all_available_skills(current_dir: &Path) -> Vec<mint_core::LearnedSkill> {
-    let mut skills = match MemoryStore::open_default() {
-        Ok(m) => m.learned_skills(100).unwrap_or_default(),
-        Err(_) => Vec::new(),
-    };
-
-    if let Some(home) = dirs::home_dir() {
-        let global_agents_path = home.join(".gemini").join("config").join("AGENTS.md");
-        mint_core::skills::load_agent_rules_file(&global_agents_path, &mut skills);
-
-        let global_skills_path = home.join(".config").join("mint").join("mint-skills");
-        mint_core::skills::load_skills_from_dir(&global_skills_path, &mut skills);
-    }
-    let workspace_agents_path1 = current_dir.join(".agents").join("AGENTS.md");
-    mint_core::skills::load_agent_rules_file(&workspace_agents_path1, &mut skills);
-    let workspace_agents_path2 = current_dir.join("AGENTS.md");
-    mint_core::skills::load_agent_rules_file(&workspace_agents_path2, &mut skills);
-
-    let workspace_skills_path1 = current_dir.join(".agents").join("skills");
-    mint_core::skills::load_skills_from_dir(&workspace_skills_path1, &mut skills);
-    let workspace_skills_path2 = current_dir.join("skills");
-    mint_core::skills::load_skills_from_dir(&workspace_skills_path2, &mut skills);
-
-    let mut unique_skills = std::collections::BTreeMap::new();
-    for skill in skills {
-        unique_skills.insert(skill.name.clone(), skill);
-    }
-    unique_skills.into_values().collect()
+    MemoryStore::open_default()
+        .ok()
+        .and_then(|memory| {
+            mint_core::skill_inventory::list_available_skills(&memory, Some(current_dir)).ok()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| entry.skill)
+        .collect()
 }
 
 #[cfg(test)]

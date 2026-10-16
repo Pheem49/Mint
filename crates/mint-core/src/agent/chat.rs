@@ -343,6 +343,43 @@ const MAX_DOCUMENT_CONTEXT_CHARS: usize = 400_000;
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl ChatRequest {
+    pub(crate) fn with_stored_document_context(
+        &self,
+        _config: &crate::MintConfig,
+        path: &std::path::Path,
+    ) -> Result<ChatRequest, String> {
+        let Some(document) = &self.document_attachment else {
+            return Ok(self.clone());
+        };
+        let extracted =
+            crate::knowledge::extract_managed_document_text(path).map_err(|e| e.to_string())?;
+        self.with_document_text(document, extracted)
+    }
+    fn with_document_text(
+        &self,
+        document: &DocumentAttachment,
+        extracted: String,
+    ) -> Result<ChatRequest, String> {
+        let mut context: String = extracted.chars().take(MAX_DOCUMENT_CONTEXT_CHARS).collect();
+        if extracted.chars().count() > MAX_DOCUMENT_CONTEXT_CHARS {
+            context.push_str("\n\n[Document text truncated because it is long.]");
+        }
+
+        let filename = document.filename.trim();
+        let filename = if filename.is_empty() {
+            "attached document"
+        } else {
+            filename
+        };
+
+        let mut enriched = self.clone();
+        enriched.document_attachment = None;
+        enriched.message = format!(
+            "{}\n\nAttached document: {filename}\nUse the extracted document text below when answering. If the user asks for a summary, summarize this document.\n\n--- Extracted document text ---\n{context}\n--- End extracted document text ---",
+            self.message
+        );
+        Ok(enriched)
+    }
     pub fn with_document_context(&self, config: &crate::MintConfig) -> Result<ChatRequest, String> {
         let Some(document) = &self.document_attachment else {
             return Ok(self.clone());
@@ -404,25 +441,7 @@ impl ChatRequest {
         let _ = std::fs::remove_file(&path);
         let extracted = extracted?;
 
-        let mut context: String = extracted.chars().take(MAX_DOCUMENT_CONTEXT_CHARS).collect();
-        if extracted.chars().count() > MAX_DOCUMENT_CONTEXT_CHARS {
-            context.push_str("\n\n[Document text truncated because it is long.]");
-        }
-
-        let filename = document.filename.trim();
-        let filename = if filename.is_empty() {
-            "attached document"
-        } else {
-            filename
-        };
-
-        let mut enriched = self.clone();
-        enriched.document_attachment = None;
-        enriched.message = format!(
-            "{}\n\nAttached document: {filename}\nUse the extracted document text below when answering. If the user asks for a summary, summarize this document.\n\n--- Extracted document text ---\n{context}\n--- End extracted document text ---",
-            self.message
-        );
-        Ok(enriched)
+        self.with_document_text(document, extracted)
     }
 }
 
@@ -970,6 +989,15 @@ async fn send_openai_style_request(
     Ok(response.json().await?)
 }
 
+// Preserve malformed arguments so the executor can reject them. Replacing them
+// with {} would silently turn a requested directory into the workspace root.
+fn decode_tool_arguments(arguments: &Value) -> Value {
+    match arguments.as_str() {
+        Some(raw) => serde_json::from_str(raw).unwrap_or_else(|_| arguments.clone()),
+        None => arguments.clone(),
+    }
+}
+
 /// Parses an OpenAI Chat Completions-shaped response (`choices[0].message`),
 /// extracting both plain text and any native `tool_calls`. Shared by OpenAI,
 /// custom OpenAI-compatible providers, and (for its response shape only) reused
@@ -999,10 +1027,7 @@ fn parse_openai_style_reply(model: String, response: &Value) -> Result<ProviderR
                 .iter()
                 .filter_map(|call| {
                     let name = call["function"]["name"].as_str()?.to_string();
-                    let input = call["function"]["arguments"]
-                        .as_str()
-                        .and_then(|raw| serde_json::from_str(raw).ok())
-                        .unwrap_or_else(|| json!({}));
+                    let input = decode_tool_arguments(&call["function"]["arguments"]);
                     Some(ToolCall {
                         id: call["id"].as_str().unwrap_or_default().to_string(),
                         name,
@@ -1064,11 +1089,10 @@ async fn call_ollama(
     let native = request.messages.is_some()
         && config.tool_calling_mode() == crate::config::ToolCallingMode::Native;
     let mut body = if native {
-        let messages = request.messages.as_deref().unwrap_or(&[]);
         let mut payload = json!({
             "model": model,
             "stream": false,
-            "messages": ollama_native_messages(messages),
+            "messages": ollama_request_messages(request),
         });
         if let Some(tools) = &request.tools {
             payload["tools"] = json!(
@@ -1127,6 +1151,19 @@ async fn call_ollama(
 /// Unlike OpenAI, Ollama expects tool-call `arguments` as a JSON object (not a
 /// stringified JSON blob) and doesn't require a `tool_call_id` on tool-result
 /// messages.
+fn ollama_request_messages(request: &ChatRequest) -> Vec<Value> {
+    let history = request.messages.as_deref().unwrap_or(&[]);
+    let mut result = ollama_native_messages(history);
+    if !request.system_instruction.is_empty() && !history.iter().any(|m| m.role == ChatRole::System)
+    {
+        result.insert(
+            0,
+            json!({"role":"system","content":request.system_instruction}),
+        );
+    }
+    result
+}
+
 fn ollama_native_messages(messages: &[ChatMessage]) -> Vec<Value> {
     let mut result = Vec::new();
     for message in messages {
@@ -1228,11 +1265,7 @@ fn parse_ollama_reply(model: String, response: &Value) -> Result<ProviderReply, 
                 .filter_map(|(index, call)| {
                     let name = call["function"]["name"].as_str()?.to_string();
                     let arguments = &call["function"]["arguments"];
-                    let input = if let Some(raw) = arguments.as_str() {
-                        serde_json::from_str(raw).unwrap_or_else(|_| json!({}))
-                    } else {
-                        arguments.clone()
-                    };
+                    let input = decode_tool_arguments(arguments);
                     let id = call["id"]
                         .as_str()
                         .map(str::to_owned)
@@ -1498,6 +1531,19 @@ fn anthropic_content_block(block: &ContentBlock) -> Result<Value, ChatError> {
 /// `tool_use` content blocks (Anthropic may return a `tool_use` block before,
 /// after, or interleaved with text — unlike the old code, this does not assume
 /// the first block is text).
+// Anthropic reports uncached, cache-read and cache-created input separately.
+fn anthropic_input_tokens(usage: &Value) -> Option<u32> {
+    [
+        "input_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    ]
+    .into_iter()
+    .filter_map(|key| usage[key].as_u64())
+    .reduce(u64::saturating_add)
+    .map(|n| n.min(u32::MAX as u64) as u32)
+}
+
 fn parse_anthropic_reply(model: String, response: &Value) -> Result<ProviderReply, ChatError> {
     let blocks = response["content"].as_array().cloned().unwrap_or_default();
     let mut text = String::new();
@@ -1544,7 +1590,7 @@ fn parse_anthropic_reply(model: String, response: &Value) -> Result<ProviderRepl
                 thought: Some(th.clone()),
                 tool_calls: None,
                 stop_reason: response["stop_reason"].as_str().map(str::to_owned),
-                input_tokens: response["usage"]["input_tokens"].as_u64().map(|n| n as u32),
+                input_tokens: anthropic_input_tokens(&response["usage"]),
                 output_tokens: response["usage"]["output_tokens"]
                     .as_u64()
                     .map(|n| n as u32),
@@ -1558,7 +1604,7 @@ fn parse_anthropic_reply(model: String, response: &Value) -> Result<ProviderRepl
         thought,
         tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
         stop_reason: response["stop_reason"].as_str().map(str::to_owned),
-        input_tokens: response["usage"]["input_tokens"].as_u64().map(|n| n as u32),
+        input_tokens: anthropic_input_tokens(&response["usage"]),
         output_tokens: response["usage"]["output_tokens"]
             .as_u64()
             .map(|n| n as u32),
@@ -1692,7 +1738,7 @@ fn ollama_stream_payload(
         let mut value = json!({
             "model": model,
             "stream": true,
-            "messages": ollama_native_messages(request.messages.as_deref().unwrap_or(&[])),
+            "messages": ollama_request_messages(request),
         });
         if let Some(tools) = &request.tools {
             value["tools"] = json!(
@@ -2137,9 +2183,7 @@ impl StreamReplyAccumulator {
     {
         match value["type"].as_str() {
             Some("message_start") => {
-                self.input_tokens = value["message"]["usage"]["input_tokens"]
-                    .as_u64()
-                    .map(|n| n as u32);
+                self.input_tokens = anthropic_input_tokens(&value["message"]["usage"]);
             }
             Some("content_block_start") => {
                 let block_index = value["index"].as_u64().unwrap_or(0) as usize;
@@ -2214,9 +2258,9 @@ impl StreamReplyAccumulator {
             .into_iter()
             .filter(|tool| !tool.name.is_empty())
             .map(|tool| {
-                let input = tool.input.unwrap_or_else(|| {
-                    serde_json::from_str(&tool.arguments).unwrap_or_else(|_| json!({}))
-                });
+                let input = tool
+                    .input
+                    .unwrap_or_else(|| decode_tool_arguments(&Value::String(tool.arguments)));
                 ToolCall {
                     id: tool.id,
                     name: tool.name,
@@ -2996,6 +3040,38 @@ mod tests {
     }
 
     #[test]
+    fn malformed_tool_arguments_survive_provider_parsing_for_rejection() {
+        let malformed = r#"{"path":"~/Downloads/YOUTUBE_DL""#;
+        let function = json!({"name": "list_files", "arguments": malformed});
+        let openai = parse_openai_style_reply(
+            "test".into(),
+            &json!({
+                "choices": [{"message": {"tool_calls": [{"id": "call_1", "function": function}]}}]
+            }),
+        )
+        .unwrap();
+        let ollama = parse_ollama_reply(
+            "test".into(),
+            &json!({
+                "message": {"tool_calls": [{"function": function}]}
+            }),
+        )
+        .unwrap();
+        let mut accumulator = StreamReplyAccumulator::default();
+        accumulator.consume_openai(&json!({
+            "choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_1", "function": function}]}}]
+        }), &mut |_| {});
+        let streamed = accumulator.finish("test".into()).unwrap();
+        for reply in [openai, ollama, streamed] {
+            let calls = reply.tool_calls.unwrap();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].input, Value::String(malformed.into()));
+        }
+        assert_eq!(decode_tool_arguments(&json!("{}")), json!({}));
+        assert_eq!(decode_tool_arguments(&Value::Null), Value::Null);
+    }
+
+    #[test]
     fn accumulates_openai_reasoning_tools_and_usage() {
         let mut accumulator = StreamReplyAccumulator::default();
         let mut events = Vec::new();
@@ -3166,6 +3242,32 @@ mod tests {
         assert_eq!(payload["system"][0]["type"], "text");
         assert_eq!(payload["system"][0]["text"], "You are Mint.");
         assert_eq!(payload["system"][0]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn review_anthropic_tool_results_preserve_failure_and_success_flags() {
+        for (text, is_error) in [
+            ("User denied MCP tool call", true),
+            ("MCP call was not approved; user feedback", true),
+            ("Error: literal diagnostic label", false),
+        ] {
+            let request = native_request(
+                vec![ChatMessage {
+                    role: ChatRole::Tool,
+                    content: vec![ContentBlock::ToolResult {
+                        tool_use_id: "mcp-call".into(),
+                        content: text.into(),
+                        is_error,
+                    }],
+                }],
+                None,
+            );
+            let payload =
+                anthropic_chat_payload(&MintConfig::default(), "claude-x", &request, false)
+                    .unwrap();
+            assert_eq!(payload["messages"][0]["content"][0]["is_error"], is_error);
+            assert_eq!(payload["messages"][0]["content"][0]["content"], text);
+        }
     }
 
     #[test]
@@ -3757,6 +3859,32 @@ mod tests {
             (ollama.input_tokens, ollama.output_tokens),
             (Some(80), Some(40))
         );
+    }
+    #[test]
+    fn anthropic_cached_prompt_tokens_count_toward_context_in_json_and_streams() {
+        let usage = json!({"input_tokens":100,"cache_read_input_tokens":98_000,"cache_creation_input_tokens":1_000,"output_tokens":400,"cache_creation":{"ephemeral_5m_input_tokens":1_000}});
+        let reply = parse_anthropic_reply(
+            "claude-test".into(),
+            &json!({"content":[{"type":"text","text":"Ready"}],"usage":usage}),
+        )
+        .unwrap();
+        assert_eq!(reply.input_tokens, Some(99_100));
+        let mut stream = StreamReplyAccumulator::default();
+        stream.consume_anthropic(
+            &json!({"type":"message_start","message":{"usage":usage}}),
+            &mut |_| {},
+        );
+        stream.consume_anthropic(
+            &json!({"type":"content_block_delta","delta":{"type":"text_delta","text":"Ready"}}),
+            &mut |_| {},
+        );
+        stream.consume_anthropic(
+            &json!({"type":"message_delta","usage":{"output_tokens":400}}),
+            &mut |_| {},
+        );
+        let reply = stream.finish("claude-test".into()).unwrap();
+        assert_eq!(reply.input_tokens, Some(99_100));
+        assert_eq!(reply.output_tokens, Some(400));
     }
 
     #[test]

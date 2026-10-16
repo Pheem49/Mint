@@ -4,7 +4,7 @@
 //! surface: the Rust CLI (`crates/mint-cli/src/interactive/`), this engine, and
 //! the Web/Desktop renderer (`src/renderer/shared/constants/slashCommands.ts`,
 //! which imports the same JSON). Each entry's `surfaces` array says which UIs
-//! list it — CLI-only commands (`/bg`, `/jobs`, `/shells`, `/exit`, `/plan`, and
+//! list it — CLI-only commands (`/bg`, `/jobs`, `/exit`, `/plan`, and
 //! the `Ctrl+V` / `↑ / ↓` help rows) carry just `["cli"]`.
 
 #[derive(serde::Deserialize)]

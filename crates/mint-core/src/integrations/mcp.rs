@@ -17,6 +17,16 @@ use thiserror::Error;
 
 use crate::{ConfigError, MintConfig, load_config, save_config};
 
+#[path = "mcp_calls.rs"]
+mod calls;
+#[path = "mcp_catalog.rs"]
+pub mod catalog;
+#[path = "mcp_device.rs"]
+pub mod device;
+use calls::PROGRESS_SUBSCRIBERS;
+pub(crate) use calls::call_mcp_tool_reviewed;
+pub use calls::{McpProgress, call_mcp_tool_async, cancel_mcp_calls};
+
 const MCP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Extended per-request timeout used only while a session is mid-OAuth (its
@@ -55,6 +65,10 @@ fn block_on_mcp<F: std::future::Future<Output = T> + Send + 'static, T: Send + '
 /// constraint of one stdio pipe pair per child process.
 static SESSIONS: LazyLock<Mutex<HashMap<String, Arc<Mutex<McpSession>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+// Startup can involve a slow initialize/OAuth exchange. Serialize only callers
+// starting the same server, never unrelated sessions.
+static SESSION_STARTS: LazyLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct McpServer {
@@ -78,6 +92,12 @@ pub struct McpServer {
     pub headers: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport: Option<String>,
+    #[serde(
+        default,
+        rename = "timeoutSecs",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub timeout_secs: Option<u64>,
 }
 
 impl McpServer {
@@ -128,20 +148,76 @@ pub enum McpError {
     Write(std::io::Error),
     #[error("MCP server response timed out")]
     Timeout,
+    #[error("Stopped waiting for MCP; cancellation requested. Remote completion is unconfirmed")]
+    Cancelled,
+    #[error(
+        "Stopped waiting for MCP; cancellation could not be delivered. Remote completion is unconfirmed"
+    )]
+    CancelledUndelivered,
+    #[error(
+        "MCP server response timed out; cancellation could not be delivered. Remote completion is unconfirmed"
+    )]
+    TimeoutUndelivered,
+    #[error("invalid MCP timeout: expected 1–3600 seconds")]
+    InvalidTimeout,
     #[error("MCP tool call failed: {0}")]
     Tool(Value),
+    #[error("MCP preflight failed; no tool was executed: {0}")]
+    Preflight(String),
 }
 
 pub fn configured_mcp_servers(
     config: &MintConfig,
 ) -> Result<BTreeMap<String, McpServer>, McpError> {
-    Ok(config
+    let servers: BTreeMap<String, McpServer> = config
         .extra
         .get("mcpServers")
         .cloned()
         .map(serde_json::from_value)
         .transpose()?
-        .unwrap_or_default())
+        .unwrap_or_default();
+    if servers
+        .values()
+        .any(|s| s.timeout_secs.is_some_and(|t| !(1..=3600).contains(&t)))
+    {
+        return Err(McpError::InvalidTimeout);
+    }
+    Ok(servers)
+}
+
+pub fn set_mcp_timeout(name: &str, timeout_secs: u64) -> Result<bool, McpError> {
+    let mut config = load_config()?;
+    let changed = set_server_timeout_in(&mut config, name, timeout_secs)?;
+    if changed {
+        save_config(&config)?;
+    }
+    Ok(changed)
+}
+
+pub fn parse_mcp_timeout(value: &str) -> Result<u64, McpError> {
+    value
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|v| (1..=3600).contains(v))
+        .ok_or(McpError::InvalidTimeout)
+}
+
+pub fn set_server_timeout_in(
+    config: &mut MintConfig,
+    name: &str,
+    timeout_secs: u64,
+) -> Result<bool, McpError> {
+    if !(1..=3600).contains(&timeout_secs) {
+        return Err(McpError::InvalidTimeout);
+    }
+    let mut servers = configured_mcp_servers(config)?;
+    let Some(server) = servers.get_mut(name) else {
+        return Ok(false);
+    };
+    server.timeout_secs = Some(timeout_secs);
+    write_servers(config, servers)?;
+    Ok(true)
 }
 
 pub fn list_mcp_servers() -> Result<BTreeMap<String, McpServer>, McpError> {
@@ -249,6 +325,7 @@ pub fn add_mcp_server(
             url: None,
             headers: None,
             transport: None,
+            timeout_secs: None,
         },
     )?;
     Ok(save_config(&config)?)
@@ -272,6 +349,7 @@ pub fn add_remote_mcp_server(
             url: Some(url.to_string()),
             headers,
             transport: Some("sse".to_string()),
+            timeout_secs: None,
         },
     )?;
     Ok(save_config(&config)?)
@@ -331,11 +409,11 @@ pub fn call_mcp_tool(
             tool: tool_name.into(),
         });
     }
-    with_session(config, server_name, |session| {
-        session.request(
-            "tools/call",
-            json!({ "name": tool_name, "arguments": arguments }),
-        )
+    let config = config.clone();
+    let server_name = server_name.to_owned();
+    let tool_name = tool_name.to_owned();
+    block_on_mcp(async move {
+        call_mcp_tool_async(&config, &server_name, &tool_name, arguments, "", |_| {}).await
     })
 }
 
@@ -383,8 +461,10 @@ pub fn get_server_prompt(
 /// server's session since the last call — e.g. `notifications/tools/list_changed`.
 /// Returns an empty `Vec` if there's no live session for `server_name`.
 pub fn drain_mcp_notifications(server_name: &str) -> Vec<Value> {
-    let sessions = SESSIONS.lock().unwrap();
-    match sessions.get(server_name) {
+    // Never keep the registry locked while waiting for a session: raw
+    // requests can hold that session while a checked writer needs the registry.
+    let session = SESSIONS.lock().unwrap().get(server_name).cloned();
+    match session {
         Some(session) => session
             .lock()
             .unwrap()
@@ -478,15 +558,23 @@ fn stream_and_watch_for_oauth_url(pipe: impl std::io::Read) {
 
 /// Closes and removes one server's persistent session, if one is running.
 pub fn close_mcp_session(server_name: &str) {
-    if let Some(session) = SESSIONS.lock().unwrap().remove(server_name) {
+    // Release the registry before taking a session lock. Dispatch checks the
+    // registry while holding stdin; legacy resource reads can hold both locks.
+    let session = SESSIONS.lock().unwrap().remove(server_name);
+    if let Some(session) = session {
         session.lock().unwrap().close();
     }
 }
 
 /// Closes and removes every server's persistent session.
 pub fn close_all_mcp_sessions() {
-    let mut sessions = SESSIONS.lock().unwrap();
-    for (_, session) in sessions.drain() {
+    let sessions = SESSIONS
+        .lock()
+        .unwrap()
+        .drain()
+        .map(|(_, s)| s)
+        .collect::<Vec<_>>();
+    for session in sessions {
         session.lock().unwrap().close();
     }
 }
@@ -734,10 +822,17 @@ pub fn expand_registry_entry(
         url: None,
         headers: None,
         transport: None,
+        timeout_secs: None,
     }
 }
 
 fn find_url(line: &str) -> Option<String> {
+    if serde_json::from_str::<Value>(line)
+        .ok()
+        .is_some_and(|value| value.get("result").is_some() && value.get("id").is_some())
+    {
+        return None;
+    }
     let start_idx = line.find("http://").or_else(|| line.find("https://"))?;
     let rest = &line[start_idx..];
     let end_idx = rest
@@ -804,8 +899,12 @@ fn open_url_in_browser(url: &str) -> std::io::Result<()> {
 }
 
 pub fn list_server_tools(config: &MintConfig, server_name: &str) -> Result<Value, McpError> {
-    with_session(config, server_name, |session| {
-        session.request("tools/list", json!({}))
+    let config = config.clone();
+    let server = server_name.to_owned();
+    block_on_mcp(async move {
+        calls::McpScope::new("")
+            .run(catalog::list_tools(&config, &server, ""), MCP_TIMEOUT)
+            .await
     })
 }
 
@@ -833,7 +932,9 @@ pub fn mcp_server_tool_names(server_name: &str) -> Result<Vec<String>, McpError>
 /// each incoming line to whichever in-flight request it answers.
 struct McpStdioSession {
     process: Child,
-    stdin: ChildStdin,
+    stdin: Arc<Mutex<ChildStdin>>,
+    connected: Arc<AtomicBool>,
+    catalog_generation: Arc<AtomicU64>,
     next_id: AtomicU64,
     pending: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>,
     /// Server-initiated messages (a `method` but no `id`), e.g.
@@ -858,6 +959,7 @@ struct McpRemoteSession {
     pending: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>,
     notifications: Arc<Mutex<VecDeque<Value>>>,
     is_active: Arc<AtomicBool>,
+    catalog_generation: Arc<AtomicU64>,
     server_info: Option<Value>,
     abort_handle: Option<tokio::task::AbortHandle>,
 }
@@ -893,7 +995,7 @@ impl McpRemoteSession {
             .ok_or_else(|| McpError::Remote("missing remote URL".into()))?
             .to_string();
 
-        let mut client_builder = reqwest::Client::builder().timeout(Duration::from_secs(60));
+        let mut client_builder = reqwest::Client::builder().connect_timeout(MCP_TIMEOUT);
         let mut header_map = reqwest::header::HeaderMap::new();
         let headers = server.headers.clone().unwrap_or_default();
         for (k, v) in &headers {
@@ -914,6 +1016,7 @@ impl McpRemoteSession {
             Arc::new(Mutex::new(HashMap::new()));
         let notifications: Arc<Mutex<VecDeque<Value>>> = Arc::new(Mutex::new(VecDeque::new()));
         let is_active = Arc::new(AtomicBool::new(true));
+        let catalog_generation = Arc::new(AtomicU64::new(0));
 
         let sse_url = url.clone();
         let sse_client = client.clone();
@@ -926,22 +1029,28 @@ impl McpRemoteSession {
         let notify_endpoint_tx = Arc::new(Mutex::new(Some(notify_endpoint_tx)));
 
         let connect_res = block_on_mcp(async move {
-            sse_client
-                .get(&sse_url)
-                .header(reqwest::header::ACCEPT, "text/event-stream")
-                .send()
-                .await
+            tokio::time::timeout(
+                MCP_TIMEOUT,
+                sse_client
+                    .get(&sse_url)
+                    .header(reqwest::header::ACCEPT, "text/event-stream")
+                    .send(),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok)
         });
 
         let mut abort_handle = None;
 
-        if let Ok(resp) = connect_res {
+        if let Some(resp) = connect_res {
             if resp.status().is_success() {
                 let base_url = url.clone();
                 let post_ep = Arc::clone(&sse_post_endpoint);
                 let reader_pending = Arc::clone(&sse_pending);
                 let reader_notifications = Arc::clone(&sse_notifications);
                 let stream_active = Arc::clone(&sse_is_active);
+                let reader_generation = Arc::clone(&catalog_generation);
                 let ep_tx = Arc::clone(&notify_endpoint_tx);
 
                 let handle = MCP_ASYNC_RUNTIME.spawn(async move {
@@ -984,7 +1093,8 @@ impl McpRemoteSession {
                                                 }
                                             }
                                             McpLine::Notification(notification) => {
-                                                buffer_notification(
+                                                dispatch_notification(
+                                                    &reader_generation,
                                                     &reader_notifications,
                                                     notification,
                                                 );
@@ -1019,6 +1129,7 @@ impl McpRemoteSession {
             pending,
             notifications,
             is_active,
+            catalog_generation,
             server_info: None,
             abort_handle,
         };
@@ -1063,7 +1174,7 @@ impl McpRemoteSession {
         let headers = self.headers.clone();
 
         let _ = block_on_mcp(async move {
-            let mut req = client.post(&post_url).json(&payload);
+            let mut req = client.post(&post_url).timeout(MCP_TIMEOUT).json(&payload);
             for (k, v) in &headers {
                 req = req.header(k, v);
             }
@@ -1094,7 +1205,7 @@ impl McpRemoteSession {
         let headers = self.headers.clone();
 
         let post_result = block_on_mcp(async move {
-            let mut req = client.post(&post_url).json(&payload);
+            let mut req = client.post(&post_url).timeout(MCP_TIMEOUT).json(&payload);
             for (k, v) in &headers {
                 req = req.header(k, v);
             }
@@ -1119,10 +1230,7 @@ impl McpRemoteSession {
         let body_text = block_on_mcp(async move { response.text().await.unwrap_or_default() });
         if !body_text.trim().is_empty() {
             if let Ok(val) = serde_json::from_str::<Value>(&body_text) {
-                if val.get("id").and_then(Value::as_u64) == Some(id)
-                    || val.get("result").is_some()
-                    || val.get("error").is_some()
-                {
+                if val.get("id").and_then(Value::as_u64) == Some(id) {
                     self.pending.lock().unwrap().remove(&id);
                     if let Some(err) = val.get("error") {
                         return Err(McpError::Tool(err.clone()));
@@ -1170,7 +1278,26 @@ fn classify_mcp_line(value: &Value) -> McpLine {
 /// Appends a server notification, evicting the oldest so the queue never grows
 /// past `MAX_BUFFERED_NOTIFICATIONS`. Free function so the eviction is testable
 /// without a live subprocess.
+fn dispatch_notification(
+    generation: &AtomicU64,
+    queue: &Mutex<VecDeque<Value>>,
+    notification: Value,
+) {
+    if notification["method"] == "notifications/tools/list_changed" {
+        generation.fetch_add(1, Ordering::AcqRel);
+    }
+    buffer_notification(queue, notification);
+}
+
 fn buffer_notification(queue: &Mutex<VecDeque<Value>>, notification: Value) {
+    if notification.get("method").and_then(Value::as_str) == Some("notifications/progress")
+        && let Some(token) = notification
+            .pointer("/params/progressToken")
+            .and_then(Value::as_str)
+        && let Some(sender) = PROGRESS_SUBSCRIBERS.lock().unwrap().get(token)
+    {
+        let _ = sender.try_send(notification.clone());
+    }
     let mut queue = queue.lock().unwrap();
     while queue.len() >= MAX_BUFFERED_NOTIFICATIONS {
         queue.pop_front();
@@ -1221,6 +1348,10 @@ impl McpStdioSession {
         let reader_pending = Arc::clone(&pending);
         let reader_notifications = Arc::clone(&notifications);
         let reader_oauth = Arc::clone(&oauth_pending);
+        let connected = Arc::new(AtomicBool::new(true));
+        let reader_connected = Arc::clone(&connected);
+        let catalog_generation = Arc::new(AtomicU64::new(0));
+        let reader_generation = Arc::clone(&catalog_generation);
         std::thread::spawn(move || {
             // Isolates a panic in the read loop (e.g. a poisoned `pending`/
             // `notifications` lock from some other unrelated failure) so it's
@@ -1248,12 +1379,17 @@ impl McpStdioSession {
                             }
                         }
                         McpLine::Notification(notification) => {
-                            buffer_notification(&reader_notifications, notification);
+                            dispatch_notification(
+                                &reader_generation,
+                                &reader_notifications,
+                                notification,
+                            );
                         }
                         McpLine::Other => {}
                     }
                 }
             }));
+            reader_connected.store(false, Ordering::Release);
             if let Err(payload) = result {
                 let message = crate::channels::panic_payload_message(&payload);
                 eprintln!("[mint] MCP stdout reader thread panicked: {message}");
@@ -1262,7 +1398,9 @@ impl McpStdioSession {
 
         let mut session = McpStdioSession {
             process,
-            stdin,
+            stdin: Arc::new(Mutex::new(stdin)),
+            connected,
+            catalog_generation,
             next_id: AtomicU64::new(2), // 1 is reserved for `initialize` below.
             pending,
             notifications,
@@ -1302,8 +1440,9 @@ impl McpStdioSession {
     }
 
     fn write(&mut self, message: &Value) -> Result<(), McpError> {
-        writeln!(self.stdin, "{message}").map_err(McpError::Write)?;
-        self.stdin.flush().map_err(McpError::Write)
+        let mut stdin = self.stdin.lock().unwrap();
+        writeln!(stdin, "{message}").map_err(McpError::Write)?;
+        stdin.flush().map_err(McpError::Write)
     }
 
     fn request(&mut self, method: &str, params: Value) -> Result<Value, McpError> {
@@ -1346,6 +1485,46 @@ enum McpSessionBackend {
 struct McpSession {
     backend: McpSessionBackend,
     notifications: Arc<Mutex<VecDeque<Value>>>,
+    config_key: String,
+    catalog: Arc<tokio::sync::Mutex<Option<catalog::Catalog>>>,
+}
+
+/// Pins both discovery and dispatch to one live catalog generation.
+#[derive(Clone)]
+pub(crate) struct SessionBinding {
+    server: String,
+    session: Arc<Mutex<McpSession>>,
+    generation: u64,
+    generation_counter: Arc<AtomicU64>,
+}
+impl SessionBinding {
+    pub(crate) fn check(&self) -> Result<(), McpError> {
+        self.check_fast()?;
+        let mut session = self.session.lock().unwrap();
+        if !session.is_alive() {
+            return Err(McpError::Preflight(
+                "Session disconnected; rediscover tools before dispatch".into(),
+            ));
+        }
+        Ok(())
+    }
+    fn check_fast(&self) -> Result<(), McpError> {
+        let registered = SESSIONS.lock().unwrap().get(&self.server).cloned();
+        if !registered.is_some_and(|s| Arc::ptr_eq(&s, &self.session)) {
+            return Err(McpError::Preflight(
+                "Session was replaced; rediscover tools before dispatch".into(),
+            ));
+        }
+        if self.generation_counter.load(Ordering::Acquire) != self.generation {
+            return Err(McpError::Preflight(
+                "Session or catalog changed; rediscover tools before dispatch".into(),
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn same_session(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.session, &other.session) && self.generation == other.generation
+    }
 }
 
 impl McpSession {
@@ -1428,6 +1607,7 @@ pub fn test_remote_mcp_connection(
         url: Some(url.to_string()),
         headers,
         transport: Some("sse".to_string()),
+        timeout_secs: None,
     };
 
     let mut session = McpRemoteSession::start(&server)?;
@@ -1468,21 +1648,41 @@ fn get_or_start_session(
         .get(server_name)
         .ok_or_else(|| McpError::MissingServer(server_name.into()))?;
 
-    let mut sessions = SESSIONS.lock().unwrap();
+    let config_key = serde_json::to_string(&json!([
+        server.command,
+        server.args,
+        server.env,
+        server.url,
+        server.headers,
+        server.transport
+    ]))
+    .unwrap();
+    let start_lock = SESSION_STARTS
+        .lock()
+        .unwrap()
+        .entry(server_name.into())
+        .or_default()
+        .clone();
+    let _starting = start_lock.lock().unwrap();
 
     if server.disabled {
         // Turned off in Settings after a session was already running — kill it
         // so a stale process doesn't linger past the toggle.
-        if let Some(session) = sessions.remove(server_name) {
+        let session = SESSIONS.lock().unwrap().remove(server_name);
+        if let Some(session) = session {
             session.lock().unwrap().close();
         }
         return Err(McpError::Disabled(server_name.into()));
     }
 
-    if let Some(session) = sessions.get(server_name) {
-        if session.lock().unwrap().is_alive() {
-            return Ok(Arc::clone(session));
+    let existing = SESSIONS.lock().unwrap().get(server_name).cloned();
+    if let Some(session) = existing {
+        let mut current = session.lock().unwrap();
+        if current.config_key == config_key && current.is_alive() {
+            drop(current);
+            return Ok(session);
         }
+        current.close();
     }
 
     let session = if server.is_remote() {
@@ -1491,6 +1691,8 @@ fn get_or_start_session(
         Arc::new(Mutex::new(McpSession {
             backend: McpSessionBackend::Remote(remote),
             notifications,
+            config_key,
+            catalog: Arc::new(tokio::sync::Mutex::new(None)),
         }))
     } else {
         let stdio = McpStdioSession::start(server)?;
@@ -1498,9 +1700,14 @@ fn get_or_start_session(
         Arc::new(Mutex::new(McpSession {
             backend: McpSessionBackend::Stdio(stdio),
             notifications,
+            config_key,
+            catalog: Arc::new(tokio::sync::Mutex::new(None)),
         }))
     };
-    sessions.insert(server_name.to_string(), Arc::clone(&session));
+    SESSIONS
+        .lock()
+        .unwrap()
+        .insert(server_name.to_string(), Arc::clone(&session));
     Ok(session)
 }
 
@@ -1520,6 +1727,83 @@ fn with_session<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn invalid_device_arguments_are_blocked_before_tools_call() {
+        let marker =
+            std::env::temp_dir().join(format!("mint-invalid-call-{}", uuid::Uuid::new_v4()));
+        let name = format!("validation-{}", uuid::Uuid::new_v4());
+        let script = format!(
+            r#"
+import sys,json
+for line in sys.stdin:
+ r=json.loads(line); m=r.get('method')
+ if m=='initialize': result={{}}
+ elif m=='tools/list': result={{'tools':[{{'name':'set_speed','description':'Set RPM','inputSchema':{{'type':'object','properties':{{'rpm':{{'type':'integer','minimum':0,'maximum':3000}}}},'required':['rpm'],'additionalProperties':False}}}}]}}
+ elif m=='tools/call':
+  open({:?},'w').close();result={{'content':[{{'type':'text','text':'accepted'}}]}}
+ else: continue
+ print(json.dumps({{'jsonrpc':'2.0','id':r['id'],'result':result}}),flush=True)
+"#,
+            marker.to_string_lossy()
+        );
+        let mut config = MintConfig::default();
+        config.extra.insert(
+            "mcpServers".into(),
+            json!({name.clone():{"command":"python3","args":["-u","-c",script]}}),
+        );
+        config
+            .extra
+            .insert("allowedMcpTools".into(), json!({name.clone():["*"]}));
+        let result = call_mcp_tool(&config, &name, "set_speed", json!({"rpm":"fast"}));
+        close_mcp_session(&name);
+        let executed = marker.exists();
+        if executed {
+            std::fs::remove_file(marker).unwrap();
+        }
+        assert!(
+            result.is_err(),
+            "invalid arguments must fail locally: {result:?}"
+        );
+        assert!(!executed, "invalid arguments reached the device");
+    }
+
+    #[test]
+    fn server_timeout_survives_config_round_trip() {
+        let server: McpServer =
+            serde_json::from_value(json!({"command":"node","timeoutSecs":75})).unwrap();
+        assert_eq!(serde_json::to_value(server).unwrap()["timeoutSecs"], 75);
+    }
+
+    #[test]
+    fn rejects_timeouts_outside_the_supported_range() {
+        for value in [0, 3601] {
+            let mut cfg = MintConfig::default();
+            cfg.extra.insert(
+                "mcpServers".into(),
+                json!({"server":{"command":"node","timeoutSecs":value}}),
+            );
+            assert!(matches!(
+                configured_mcp_servers(&cfg),
+                Err(McpError::InvalidTimeout)
+            ));
+        }
+    }
+
+    #[test]
+    fn result_links_do_not_trigger_the_oauth_browser_watcher() {
+        assert_eq!(
+            find_url(
+                r#"{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"resource_link","uri":"https://example.test/authors/model"}]}}"#
+            ),
+            None
+        );
+        assert_eq!(
+            find_url("Authorize at https://example.test/oauth"),
+            Some("https://example.test/oauth".into())
+        );
+    }
 
     #[test]
     fn rejects_environment_without_equals_separator() {
@@ -1571,23 +1855,23 @@ mod tests {
     /// reply, matching real JSON-RPC notification semantics.
     fn mock_echo_server() -> McpServer {
         McpServer {
-            command: "sh".into(),
-            args: vec![
-                "-c".into(),
-                r#"while IFS= read -r line; do
-                    id=$(printf '%s' "$line" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
-                    if [ -n "$id" ]; then
-                        printf '{"jsonrpc":"2.0","id":%s,"result":{"echo":true}}\n' "$id"
-                    fi
-                done"#
-                    .into(),
-            ],
+            command: "python3".into(),
+            args:vec!["-u".into(),"-c".into(),r#"
+import sys,json
+for line in sys.stdin:
+ r=json.loads(line)
+ if 'id' not in r: continue
+ if r.get('method')=='tools/list': result={'tools':[{'name':n,'inputSchema':{'type':'object'}} for n in ['anything','x','ping','one','two']]}
+ else: result={'echo':True}
+ print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
+"#.into()],
             env: BTreeMap::new(),
             icon: None,
             disabled: false,
             url: None,
             headers: None,
             transport: None,
+            timeout_secs: None,
         }
     }
 
@@ -1600,6 +1884,66 @@ mod tests {
             .extra
             .insert("allowedMcpTools".into(), json!({ name: ["*"] }));
         config
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn review_notification_drain_does_not_block_unrelated_tool_calls() {
+        let blocked_name = format!("drain-blocked-{}", uuid::Uuid::new_v4());
+        let healthy_name = format!("drain-healthy-{}", uuid::Uuid::new_v4());
+        let blocked_config = config_with_mock_echo_server(&blocked_name);
+        let healthy_config = config_with_mock_echo_server(&healthy_name);
+        let blocked = get_or_start_session(&blocked_config, &blocked_name).unwrap();
+        call_mcp_tool(&healthy_config, &healthy_name, "ping", json!({})).unwrap();
+
+        let notification = json!({"jsonrpc":"2.0","method":"notifications/tools/list_changed"});
+        // A raw resource/prompt request keeps this mutex while awaiting its
+        // response. Hold it here so the scheduling does not depend on a server.
+        let session = blocked.lock().unwrap();
+        session
+            .notifications
+            .lock()
+            .unwrap()
+            .push_back(notification.clone());
+        let completed = std::thread::scope(|threads| {
+            let started = Arc::new(std::sync::Barrier::new(2));
+            let ready = Arc::clone(&started);
+            let drain_name = &blocked_name;
+            let drain = threads.spawn(move || {
+                ready.wait();
+                drain_mcp_notifications(drain_name)
+            });
+            started.wait();
+            // Let the drainer reach the contended session. Old code keeps the
+            // registry locked there; fixed code releases it immediately.
+            let deadline = std::time::Instant::now() + Duration::from_millis(100);
+            while std::time::Instant::now() < deadline {
+                if SESSIONS.try_lock().is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let (tx, rx) = mpsc::channel();
+            let healthy_config = &healthy_config;
+            let healthy_name = &healthy_name;
+            threads.spawn(move || {
+                let result = call_mcp_tool(healthy_config, healthy_name, "ping", json!({}));
+                let _ = tx.send(result);
+            });
+            let completed = rx.recv_timeout(Duration::from_secs(2));
+            // Always unblock and join both workers before asserting, even on
+            // the regression path, so this test cannot deadlock the test suite.
+            drop(session);
+            assert_eq!(drain.join().unwrap(), vec![notification]);
+            completed
+        });
+        close_mcp_session(&blocked_name);
+        close_mcp_session(&healthy_name);
+        assert!(
+            completed.is_ok_and(|result| result.is_ok()),
+            "notification drain blocked an unrelated server's tool call"
+        );
+        assert!(drain_mcp_notifications(&blocked_name).is_empty());
     }
 
     #[test]
@@ -1875,6 +2219,7 @@ mod tests {
             url: Some("https://example.com/sse".into()),
             headers: Some(headers.clone()),
             transport: Some("sse".into()),
+            timeout_secs: None,
         };
 
         assert!(remote.is_remote());
@@ -1904,6 +2249,7 @@ mod tests {
             url: None,
             headers: None,
             transport: None,
+            timeout_secs: None,
         };
         assert!(!stdio.is_remote());
         assert_eq!(stdio.remote_url(), None);
@@ -1927,6 +2273,7 @@ mod tests {
                 url: Some("https://docs.example.com/mcp".into()),
                 headers: Some(headers),
                 transport: Some("sse".into()),
+                timeout_secs: None,
             },
         )
         .expect("upserts remote mcp server");

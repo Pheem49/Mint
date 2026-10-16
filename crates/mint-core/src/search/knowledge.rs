@@ -225,6 +225,12 @@ impl KnowledgeStore {
 
 pub fn extract_document_text(path: &Path, config: &MintConfig) -> Result<String, KnowledgeError> {
     let path = assert_path_capability(path, Capability::Read, config)?;
+    extract_managed_document_text(&path)
+}
+
+// Only Library may bypass workspace policy after validating a managed original.
+pub(crate) fn extract_managed_document_text(path: &Path) -> Result<String, KnowledgeError> {
+    let path = path.to_path_buf();
     let metadata = fs::metadata(&path).map_err(|source| KnowledgeError::Read {
         path: path.clone(),
         source,
@@ -245,7 +251,7 @@ pub fn extract_document_text(path: &Path, config: &MintConfig) -> Result<String,
     Ok(content)
 }
 
-fn supported(path: &Path) -> bool {
+pub(crate) fn supported(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| {

@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What Mint is
 
 A local-first AI assistant with **one Rust core, three surfaces**: a terminal CLI, a Tauri v2
-desktop app (with a Live2D companion), and a web UI. The same chat/memory/agent/tools/safety
+desktop app and a web UI, plus an optional separate Mint Companion Live2D app. The same chat/memory/agent/tools/safety
 logic backs all three, plus messaging bridges (Telegram, Discord, Slack, LINE, WhatsApp,
 Signal, Gmail) that share the CLI's conversation.
 
@@ -46,8 +46,15 @@ debuginfo.
   `pub use group::member;` pattern when adding a module.
 - **`crates/mint-cli`** — the `mint` binary. `main.rs` is the clap command tree; interactive
   chat + slash handling under `src/interactive/`.
+- **`apps/mint-companion`** — optional Tauri/React character app; it connects to running Mint processes through `mint-companion-protocol`, without linking `mint-core`. For Companion transport, lifecycle, packaging, or GUI changes, read `docs/MINT_COMPANION.md`.
+- **`crates/mint-companion-protocol`** — shared local wire types; changes also invalidate CLI/Desktop launcher build caches.
 - **`src-tauri`** — the `mint-desktop` binary (lib crate `mint_desktop_lib`). Tauri IPC
   commands, tray, global shortcuts, screen capture, proactive suggestions, headless task queue.
+  `src/lib.rs` exposes the entrypoint and existing public state types. `src/app/` owns
+  startup/shutdown, command registration, tray and shortcuts. `src/commands/` groups
+  domain IPC adapters; `src/native/` owns platform IO and native window/terminal state;
+  `src/background/` owns Desktop background loops. Keep command names, payloads and
+  event names stable when moving code, and keep domain behavior in `mint-core`.
 - **`src/renderer`** — React 19 + TS + Vite frontend:
   - `src/` → desktop UI (Vite alias `@`, `vite.config.ts`, base `./`)
   - `src-web/` → web UI (Vite alias `@`, `vite.config.web.ts`, base `/`, SPA fallback to
@@ -76,6 +83,29 @@ only there**, never hard-code a command list elsewhere. Shared behavior is in
 CLI `interactive/slash_commands.rs` and web `api_server/routes/slash.rs`, each with its own
 fallback for surface-specific commands.
 
+**Media model choices.** `mint_core::model_catalog` (`media/model_catalog.rs`) owns
+image/video/Gemini Live credential selection, discovery and preset merging for CLI/TUI,
+Desktop IPC and HTTP. A nonblank key override wins; otherwise use the saved provider
+key. Discovered models come first, then missing presets. The image/video async helpers
+delegate to this catalog; low-level fetchers retain provider IO, parsing, timeout and
+cache. Keep adapters free of their own credential lookup or fallback lists. HTTP can
+serve presets with default configuration if loading saved configuration fails.
+
+**Learned skills.** `agent/skill_inventory.rs::list_available_skills` owns database,
+global and selected-workspace discovery, location metadata and name deduplication.
+Workspace entries override global entries, which override database entries; root rules
+and `skills/` override their `.agents/` counterparts in pickers. Agent context retains
+all mandatory rule files by canonical source path while optional skills use this precedence.
+Agent context and skill reads,
+Full-Screen TUI pickers, CLI `/learn`, Desktop IPC and HTTP all consume this inventory.
+HTTP callers pass `workspacePath` for the workspace currently selected in the UI.
+
+**Image persistence.** `media/image_workflow.rs::generate_and_save_images` owns generation,
+data validation and saving to Pictures. It returns persisted entries with the actual
+provider/model/prompt; generation and save failures propagate. CLI/TUI agent tools,
+Desktop IPC and HTTP use this workflow. Adapters retain display formatting, HTTP picture
+URLs and optional CLI output copies.
+
 **Memory.** SQLite at `~/.config/mint/mint-knowledge.sqlite`, opened by `MemoryStore`
 (`agent/memory.rs`). One conversation is shared across CLI + bridges, keyed by
 `CHAT_CLI_ID` / `DEFAULT_CONVERSATION_ID` — it must **never** be keyed by anything a user can
@@ -87,12 +117,21 @@ Full design: `docs/MEMORY_ARCHITECTURE.md` — it's all in-repo, no external mem
 **Config & safety.** `MintConfig` (`system/config.rs`) ← `mint-config.json` (git-ignored) +
 `.env`. `agent/safety.rs` holds capability/permission tiers and shell-command
 classification; risky actions and file writes require explicit user approval. Pending
-approvals: `PENDING_APPROVALS` in `lib.rs` for web, `ApprovalsState` in `src-tauri/src/lib.rs`
-for desktop — keep the two resolution paths in sync.
+approvals use `orchestration/approvals.rs::ApprovalRegistry` for token ownership, delivery,
+cancellable waits and answer resolution. Web owns `PENDING_APPROVALS`; Desktop owns
+`ApprovalsState` and emits through `src-tauri/src/commands/approvals.rs` for chat and voice. Explicitly
+blank answers decline. Keep platform adapters on this shared lifecycle.
 
-**Bridges & gateway.** `integrations/channels.rs::start_channels` runs all messaging bridges;
-`mint gateway start|install` runs them headless as a systemd service with a
-`GET /api/gateway/health` endpoint.
+**Bridges & gateway.** `integrations/channels.rs::start_channels` starts one owned loop per
+bridge; cancellation releases that ownership. `integrations/webhooks.rs` owns LINE and
+WhatsApp listeners, raw-body signature verification, owner checks and acknowledgement
+messages. The API serving future registers its bound address before starting bridges,
+so matching callbacks share its listener while other webhook ports bind separately.
+Shared callbacks check each connection's destination against the configured webhook host,
+including when the API binds a wildcard address.
+Provider signatures authenticate callbacks; ordinary API routes still require the API
+token. Desktop starts these through its embedded API, with bridge/cron fallback on bind
+failure. `mint gateway start|install` runs them headless with `GET /api/gateway/health`.
 
 ## Release
 

@@ -1,0 +1,77 @@
+/* Mods lives in Tools; above-composer bands keep their chat placement. */
+.mint-mods { position: relative; min-height: 1px; color: var(--text-main); }
+.mods-panel button, .mod-band button { font: inherit; cursor: pointer; }
+.mods-panel { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: var(--panel-bg, #171719); font-size: 12px; }
+.mods-panel-header { display: flex; align-items: center; gap: 10px; padding: 14px 16px 13px; border-bottom: 1px solid var(--border); }
+.mods-panel-icon { display: grid; flex: 0 0 36px; width: 36px; height: 36px; place-items: center; border: 1px solid var(--accent-border, var(--border)); border-radius: 11px; background: var(--accent-subtle, var(--surface-strong)); color: var(--accent); }
+.mods-panel-title { flex: 1; min-width: 0; }
+.mods-panel-title strong { font-size: 14px; font-weight: 650; }
+.mods-panel-title p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; }
+.mods-panel nav { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.mods-panel nav button { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text-muted); }
+.mods-panel nav button[aria-pressed=true] { border-color: var(--accent-border, var(--accent)); background: var(--accent-subtle, var(--surface-strong)); color: var(--text-main); font-weight: 600; }
+.mod-content { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px 16px; }
+.mods-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 14px; }
+.mods-toolbar label { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-muted); white-space: nowrap; }
+.mods-panel select, .mod-input input { min-height: 34px; max-width: 100%; padding: 5px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-strong); color: var(--text-main); font: inherit; }
+.mods-toolbar select { min-width: 126px; color: var(--text-main); }
+.mods-panel button, .mod-band button { min-height: 32px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-bg); color: var(--text-main); }
+.mods-panel button:hover:not(:disabled) { border-color: var(--border-strong, var(--accent)); background: var(--bg-surface-hover, var(--surface-strong)); }
+.mods-panel .mods-import { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 6px 10px; white-space: nowrap; }
+.mods-empty { display: grid; justify-items: center; gap: 7px; padding: 28px 18px; border: 1px dashed var(--border); border-radius: 11px; background: var(--bg-surface-soft, transparent); color: var(--text-muted); text-align: center; }
+.mods-empty svg { color: var(--accent); }
+.mods-empty strong { color: var(--text-main); font-size: 13px; }
+.mods-empty p { max-width: 30ch; margin: 0; line-height: 1.5; }
+.mod-entry { display: grid; gap: 9px; min-width: 0; margin-bottom: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-surface-soft, var(--surface-bg)); }
+.mod-entry-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.mod-entry-heading > div { display: grid; gap: 3px; min-width: 0; }
+.mod-entry-heading strong { overflow-wrap: anywhere; font-size: 13px; font-weight: 650; }
+.mod-entry-heading small, .mod-hint { color: var(--text-muted); font-size: 11px; line-height: 1.45; }
+.mod-entry .mod-hint { margin: 0; overflow-wrap: anywhere; }
+.mod-status { flex: 0 0 auto; padding: 3px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); font-size: 10px; font-weight: 600; line-height: 1.2; }
+.mod-status.is-active { border-color: var(--accent-border, var(--accent)); background: var(--accent-subtle, transparent); color: var(--accent); }
+.mod-status.is-error { border-color: var(--status-error, var(--danger)); color: var(--status-error, var(--danger)); }
+.mod-entry-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 3px; }
+.mods-panel .mod-primary-action { min-height: 34px; padding: 6px 13px; border-color: var(--accent); background: var(--accent); color: var(--accent-contrast, #fff); font-weight: 650; }
+.mods-panel .mod-primary-action:hover:not(:disabled) { border-color: var(--accent-hover, var(--accent)); background: var(--accent-hover, var(--accent)); }
+.mods-panel .mod-primary-action.is-disable { border-color: var(--border); background: var(--surface-bg); color: var(--text-main); }
+.mods-panel .mod-primary-action.is-disable:hover:not(:disabled) { border-color: var(--border-strong, var(--accent)); background: var(--bg-surface-hover, var(--surface-strong)); }
+.mod-entry-more { margin-left: auto; }
+.mod-entry-more[open] { flex-basis: 100%; }
+.mod-entry-more > summary, .mod-session-settings > summary { display: flex; align-items: center; justify-content: flex-end; gap: 5px; width: fit-content; min-height: 32px; margin-left: auto; padding: 5px 0; color: var(--text-muted); cursor: pointer; list-style: none; }
+.mod-entry-more > summary::-webkit-details-marker, .mod-session-settings > summary::-webkit-details-marker { display: none; }
+.mod-entry-more[open] > summary svg, .mod-session-settings[open] > summary svg { transform: rotate(180deg); }
+.mod-entry-more .mod-actions { justify-content: flex-end; margin: 7px 0; }
+.mod-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mod-actions button, .mod-session-controls button { min-height: 32px; padding: 6px 10px; }
+.mod-session-settings { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
+.mod-session-settings > summary { justify-content: flex-start; width: 100%; margin: 0; }
+.mod-session-settings[open] .mod-session-controls { margin: 8px 0 0; }
+.mod-session-controls { margin: 0; }
+.mod-session-controls .mod-hint { margin: 7px 0 0; }
+.mod-session-controls button[aria-pressed=true] { border-color: var(--accent-border, var(--accent)); background: var(--accent-subtle, var(--surface-strong)); }
+.mods-panel details details { margin-top: 9px; }
+.mods-panel pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.5; }
+.mod-error { margin: 0; padding: 8px 10px; border: 1px solid var(--status-error, var(--danger)); border-radius: 8px; color: var(--status-error, var(--danger)); font-size: 11px; overflow-wrap: anywhere; }
+.mods-panel button:disabled { opacity: .5; cursor: not-allowed; }
+.mods-panel button:focus-visible, .mods-panel summary:focus-visible, .mods-panel select:focus-visible { outline: 2px solid var(--border-focus, var(--accent)); outline-offset: 2px; }
+@media (max-width: 360px) { .mods-toolbar { align-items: stretch; flex-direction: column; } .mods-toolbar label { justify-content: space-between; } }
+@media (forced-colors: active) { .mod-status, .mod-entry, .mods-empty { border-color: CanvasText; } .mods-panel .mod-primary-action { color: ButtonText; } }
+
+.mod-stack { display: flex; flex-direction: column; gap: 8px; }
+.mod-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.mod-band { padding: 8px 12px; margin-bottom: 6px; border-left: 2px solid var(--accent, #7edbb5); background: var(--surface-strong); font-size: 13px; }
+.mod-badge { font-size: 12px; color: var(--text-muted); }
+.mod-input, .mod-progress, .mod-revisions { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.mod-progress progress { width: 100%; }
+.mod-table-scroll { overflow-x: auto; }
+.mod-table-scroll table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mod-table-scroll th, .mod-table-scroll td { text-align: left; padding: 7px; border-bottom: 1px solid var(--border); }
+.mod-stack-row { flex-direction: row; flex-wrap: nowrap; align-items: center; overflow-x: auto; }
+.mod-stack-row > * { flex-shrink: 0; white-space: pre; }
+.mint-mods .mod-color-default { color: var(--text-main); }
+.mint-mods .mod-color-yellow { color: #e5b94e; }
+.mint-mods .mod-color-cyan { color: #48c9d4; }
+.mint-mods .mod-color-blue { color: #7baaff; }
+.mint-mods .mod-color-magenta { color: #d994ed; }
+.mint-mods .mod-color-red { color: #ff9595; }

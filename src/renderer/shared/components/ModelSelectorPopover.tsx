@@ -516,7 +516,15 @@ export default function ModelSelectorPopover({
 
   // Keyboard navigation
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!isOpen) return
+    if (!isOpen || e.nativeEvent.isComposing) return
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      setIsOpen(false)
+      triggerRef.current?.focus()
+      return
+    }
+    // Let tabs and thinking controls keep their own keyboard behavior.
+    if (mobilePane !== 'models' || e.target instanceof HTMLButtonElement) return
 
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -536,11 +544,8 @@ export default function ModelSelectorPopover({
       if (item) {
         onSelect(item.providerId, item.model)
         setIsOpen(false)
+        triggerRef.current?.focus()
       }
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      setIsOpen(false)
-      triggerRef.current?.focus()
     }
   }
 
@@ -645,6 +650,7 @@ export default function ModelSelectorPopover({
                 ref={searchInputRef}
                 type="text"
                 className="model-spotlight-input"
+                aria-label="Search models"
                 placeholder="Search models..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -716,7 +722,8 @@ export default function ModelSelectorPopover({
                                   onClick={() => {
                                     setInspectedItem({ providerId: group.providerId, model: m })
                                     onSelect(group.providerId, m)
-                                    if (window.matchMedia('(max-width: 760px)').matches) setMobilePane('options')
+                                    setIsOpen(false)
+                                    triggerRef.current?.focus()
                                   }}
                                   onMouseEnter={() => {
                                     setHighlightedIndex(currentIndex)
@@ -870,7 +877,7 @@ export default function ModelSelectorPopover({
                 </div>
 
                 {!inspectedThinking.supported && (
-                  <div className="model-unsupported-note" style={{ color: inspectedThinking.enabled ? 'var(--accent, #10b981)' : undefined }}>
+                  <div className="model-unsupported-note" style={{ color: inspectedThinking.enabled ? 'var(--interactive-fg)' : undefined }}>
                     {inspectedThinking.enabled
                       ? 'Thinking enabled (force toggle)'
                       : 'Not flagged as reasoning model by default (toggle to force enable)'}

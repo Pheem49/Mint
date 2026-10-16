@@ -7,6 +7,7 @@ pub mod chat;
 pub mod code_tools;
 pub mod memory;
 pub mod safety;
+pub mod skill_inventory;
 pub mod skills;
 pub mod subagents;
 pub mod tasks;

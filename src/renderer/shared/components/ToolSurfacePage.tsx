@@ -6,11 +6,13 @@ import { ArtifactPreviewPanel } from './ArtifactPreviewPanel'
 import CodeReviewPage from './CodeReviewPage'
 import TerminalDock from './TerminalDock'
 import type { FileChange } from '../types'
+import { ListTodo, Puzzle } from 'lucide-react'
 
 export type ToolSurface =
   | { id: string; kind: 'preview'; title: string; artifact: ArtifactFile }
   | { id: string; kind: 'review'; title: string; reviewTitle: string; changes: FileChange[] }
   | { id: string; kind: 'terminal'; title: string }
+  | { id: string; kind: 'mods' | 'background'; title: string }
 
 interface Props {
   surfaces: ToolSurface[]
@@ -31,10 +33,18 @@ interface Props {
   onOpenFiles: () => void
   onOpenSideChat?: () => void
   onClosePanel: () => void
+  desktopTools?: boolean
+  backgroundTaskCount?: number
+  onOpenMods: () => void
+  onOpenBackgroundTasks: () => void
+  onModsPanelTarget: (target: HTMLDivElement | null) => void
+  onBackgroundPanelTarget: (target: HTMLDivElement | null) => void
 }
 
 
 function surfaceIcon(kind: ToolSurface['kind']) {
+  if (kind === 'mods') return <Puzzle size={13} aria-hidden="true" />
+  if (kind === 'background') return <ListTodo size={13} aria-hidden="true" />
   if (kind === 'terminal') {
     return (
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ verticalAlign: '-1px' }}>
@@ -80,11 +90,34 @@ export default function ToolSurfacePage({
   onOpenFiles,
   onOpenSideChat,
   onClosePanel,
+  desktopTools = true,
+  backgroundTaskCount = 0,
+  onOpenMods,
+  onOpenBackgroundTasks,
+  onModsPanelTarget,
+  onBackgroundPanelTarget,
 }: Props) {
   const active = surfaces.find((surface) => surface.id === activeSurfaceId) ?? surfaces[0] ?? null
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [tabMenuState, setTabMenuState] = useState<{ id: string; x: number; y: number } | null>(null)
   const [isMaximized, setIsMaximized] = useState(false)
+  const panelRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    panelRef.current?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"], [role="menuitem"]')?.focus()
+  }, [active?.id])
+
+  useEffect(() => {
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || !panelRef.current?.contains(event.target as Node)) return
+      event.preventDefault()
+      if (switcherOpen) { setSwitcherOpen(false); newTabWrapRef.current?.querySelector<HTMLButtonElement>('.tool-surface-dropdown-btn')?.focus() }
+      else if (tabMenuState) setTabMenuState(null)
+      else onClosePanel()
+    }
+    document.addEventListener('keydown', dismiss)
+    return () => document.removeEventListener('keydown', dismiss)
+  }, [onClosePanel, switcherOpen, tabMenuState])
 
   const [isEntering, setIsEntering] = useState(true)
   const [isResizing, setIsResizing] = useState(false)
@@ -193,10 +226,14 @@ export default function ToolSurfacePage({
   )
 
   const launcherItems = [
+    { label: 'Mods', title: 'Workspace mods', shortcut: '', icon: <Puzzle />, className: 'is-mods', action: onOpenMods },
+    { label: 'Background tasks', title: 'Background tasks', shortcut: '', icon: <ListTodo />, className: 'is-background', action: onOpenBackgroundTasks },
+    ...(desktopTools ? [
     { label: 'Review', title: 'Review changes', shortcut: 'Ctrl+Shift+G', icon: <IconReview />, className: 'is-review', action: onOpenReview },
-    { label: 'Terminal', title: 'Integrated terminal', shortcut: 'Ctrl`', icon: <IconTerminal />, className: 'is-terminal', action: onOpenTerminal },
+    { label: 'Terminal', title: 'Integrated terminal', shortcut: 'Ctrl + `', icon: <IconTerminal />, className: 'is-terminal', action: onOpenTerminal },
     { label: 'Browser', title: 'Browser (Co-browsing with AI)', shortcut: 'Ctrl+T', icon: <IconBrowser />, className: 'is-browser', action: onOpenBrowser },
     { label: 'Workspace', title: 'Workspace files', shortcut: 'Ctrl+P', icon: <IconFiles />, className: 'is-files', action: onOpenFiles },
+    ] : []),
   ]
 
   const renderLauncher = (className = '') => (
@@ -204,7 +241,9 @@ export default function ToolSurfacePage({
       {launcherItems.map((item) => (
         <button type="button" role="menuitem" className="tool-surface-launcher-item" key={item.label} title={item.title} onClick={() => { item.action(); setSwitcherOpen(false) }}>
           <span className={`tool-surface-menu-icon ${item.className}`} aria-hidden="true">{item.icon}</span>
-          <span>{item.label}</span><kbd>{item.shortcut}</kbd>
+          <span className="tool-surface-menu-copy"><span className="tool-surface-menu-label">{item.label}</span></span>
+          {item.className === 'is-background' && backgroundTaskCount > 0 && <span className="tools-task-count" aria-label={`${backgroundTaskCount} active background tasks`}>{backgroundTaskCount}</span>}
+          {item.shortcut && <kbd>{item.shortcut}</kbd>}
         </button>
       ))}
     </div>
@@ -218,7 +257,7 @@ export default function ToolSurfacePage({
       const next = !open
       if (next && newTabWrapRef.current) {
         const rect = newTabWrapRef.current.getBoundingClientRect()
-        setMenuAlignRight(window.innerWidth - rect.left < 210)
+        setMenuAlignRight(window.innerWidth - rect.left < 260)
       }
       return next
     })
@@ -296,6 +335,10 @@ export default function ToolSurfacePage({
   }
 
   const handleAddNewTab = () => {
+    if (active?.kind === 'mods' || active?.kind === 'background') {
+      toggleSwitcher()
+      return
+    }
     if (active?.kind === 'review') {
       onOpenReview()
     } else if (active?.kind === 'preview') {
@@ -305,7 +348,7 @@ export default function ToolSurfacePage({
     }
   }
 
-  const newTabTooltip = active?.kind === 'review'
+  const newTabTooltip = active?.kind === 'mods' || active?.kind === 'background' ? 'Open a tool' : active?.kind === 'review'
     ? 'New Review Tab'
     : active?.kind === 'preview'
     ? 'Duplicate Preview Tab'
@@ -313,9 +356,10 @@ export default function ToolSurfacePage({
 
   return (
     <section
+      ref={panelRef}
       className={`tool-surface-page ${isEntering ? 'is-entering' : ''} ${isMaximized ? 'is-maximized' : ''} ${isResizing ? 'is-resizing' : ''}`}
       onAnimationEnd={() => setIsEntering(false)}
-      aria-label="Open tools"
+      aria-label="Tools"
     >
       {!isMaximized && (
         <div
@@ -416,6 +460,7 @@ export default function ToolSurfacePage({
               onClick={(e) => { e.stopPropagation(); toggleSwitcher() }}
               title="Switch tool or open page"
               aria-label="Switch tool"
+              aria-haspopup="menu"
               aria-expanded={switcherOpen}
             >
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -425,8 +470,9 @@ export default function ToolSurfacePage({
             {switcherOpen && (
               <div
                 className={`tool-surface-switch-menu ${menuAlignRight ? 'is-align-right' : ''}`}
-                role="menu"
+                aria-label="Tool menu"
               >
+                <div className="tool-surface-menu-heading">OPEN TOOL</div>
                 {renderLauncher('is-switch-menu')}
               </div>
             )}
@@ -437,8 +483,8 @@ export default function ToolSurfacePage({
                 type="button"
                 className={`tool-surface-action-btn ${isMaximized ? 'is-active' : ''}`}
                 onClick={() => setIsMaximized((prev) => !prev)}
-                title={isMaximized ? 'Restore side split' : 'Maximize terminal (⤢)'}
-                aria-label={isMaximized ? 'Restore side split' : 'Maximize terminal'}
+                title={isMaximized ? 'Restore side split' : 'Maximize tools (⤢)'}
+                aria-label={isMaximized ? 'Restore side split' : 'Maximize tools'}
               >
                 {isMaximized ? (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -474,9 +520,9 @@ export default function ToolSurfacePage({
               }}
               role="menu"
             >
-              <button type="button" role="menuitem" onClick={() => { onDuplicate(tabMenuState.id); setTabMenuState(null) }}>
+              {surfaces.find(surface => surface.id === tabMenuState.id)?.kind !== 'mods' && surfaces.find(surface => surface.id === tabMenuState.id)?.kind !== 'background' && <button type="button" role="menuitem" onClick={() => { onDuplicate(tabMenuState.id); setTabMenuState(null) }}>
                 Duplicate tab
-              </button>
+              </button>}
               <button type="button" role="menuitem" onClick={() => { onRename(tabMenuState.id); setTabMenuState(null) }}>
                 Rename tab
               </button>
@@ -493,7 +539,9 @@ export default function ToolSurfacePage({
 
       <div className={`tool-surface-content${active ? '' : ' is-launcher'}`}>
         {!active && renderLauncher()}
-        {active?.kind === 'preview' && <ArtifactPreviewPanel artifact={active.artifact} onClose={() => active && onClose(active.id)} workspacePath={workspacePath || undefined} />}
+        {active?.kind === 'mods' && <div key="mods" className="tool-surface-panel-host" ref={onModsPanelTarget} />}
+        {active?.kind === 'background' && <div key="background" className="tool-surface-panel-host" ref={onBackgroundPanelTarget} />}
+        {active?.kind === 'preview' && <ArtifactPreviewPanel key={active.id} artifact={active.artifact} onClose={() => active && onClose(active.id)} workspacePath={workspacePath || undefined} />}
         {active?.kind === 'review' && (
           <CodeReviewPage
             title={active.reviewTitle}

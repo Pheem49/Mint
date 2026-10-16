@@ -4,7 +4,7 @@
 // Web Speech API implementation instead — see @/voiceInput in ChatPanel.tsx.
 import { useNativeVoiceInput } from '../shared/utils/useNativeVoiceInput'
 import type { SpeechToTextOptions } from '../shared/utils/speech'
-import { startMicRecording, stopMicRecordingAndTranscribe } from './tauri'
+import { startMicRecording, stopMicRecordingAndTranscribe, cancelMicRecording } from './tauri'
 
 export type VoiceInputOptions = SpeechToTextOptions
 
@@ -13,5 +13,6 @@ export function useVoiceInput(options: VoiceInputOptions) {
     onSendVoiceMessage: options.onSendVoiceMessage,
     startRecording: startMicRecording,
     stopRecordingAndTranscribe: stopMicRecordingAndTranscribe,
+    cancelRecording: cancelMicRecording,
   })
 }

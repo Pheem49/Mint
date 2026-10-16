@@ -226,6 +226,8 @@ pub(super) fn print_table_block(table_lines: &[String], is_first: &mut bool) {
 pub(super) struct LiveStatus {
     pub(super) tui: Option<crate::interactive::TuiHandle>,
     pub(super) thinking: Option<String>,
+    pub(super) compaction_started: Option<Instant>,
+    pub(super) compaction_scopes: std::collections::BTreeMap<String, usize>,
     /// Context-window usage (0-100) as of the last completed step —
     /// mirrored here (not just built into `thinking`'s label text) so the
     /// 150ms elapsed-time ticker in `run_code_agent_with_options` can keep
@@ -537,8 +539,43 @@ pub(super) fn strip_ansi_escapes(s: &str) -> String {
     result
 }
 
+pub(super) fn compaction_label(elapsed: Duration) -> String {
+    format!(
+        "Compacting context · {}s • Esc to interrupt",
+        elapsed.as_secs()
+    )
+}
+
+pub(super) fn update_context_compaction(
+    status: &mut LiveStatus,
+    phase: &str,
+    scope: Option<&str>,
+    now: Instant,
+) {
+    let key = scope.unwrap_or("").to_owned();
+    if phase == "started" {
+        *status.compaction_scopes.entry(key).or_default() += 1;
+        status.compaction_started.get_or_insert(now);
+    } else {
+        if let Some(count) = status.compaction_scopes.get_mut(&key) {
+            *count -= 1;
+            if *count == 0 {
+                status.compaction_scopes.remove(&key);
+            }
+        }
+        if status.compaction_scopes.is_empty() {
+            status.compaction_started = None;
+        }
+    }
+    status.waiting_for_network = None;
+}
+
 pub(super) fn apply_wave_effect(text: &str, tick: usize) -> String {
-    let (label, metadata) = if let Some(idx) = text.rfind(" • Esc to interrupt)") {
+    let (label, metadata) = if text.starts_with("Compacting context")
+        && let Some(idx) = text.find(" · ")
+    {
+        (&text[..idx], &text[idx..])
+    } else if let Some(idx) = text.rfind(" • Esc to interrupt)") {
         if let Some(open_paren_idx) = text[..idx].rfind('(') {
             (&text[..open_paren_idx], &text[open_paren_idx..])
         } else {
@@ -677,19 +714,17 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
     status.spinner_tick += 1;
 
     lines.extend(plan_lines(&status.plan_steps, true, tick));
-    lines.extend(activity_block_lines(
-        &status.tasks[tasks_start..],
-        &status.activities[activities_start..],
-        &status.explored[explored_start..],
-        true,
-        tick,
-        status.active_tool_started,
-        // The full-screen TUI shows only the last eight live rows. A shell
-        // output preview can otherwise push the activity header and command
-        // labels out of view while the model is composing its next answer.
-        // Keep the preview in `status.tasks` for the committed transcript.
-        status.tui.is_none(),
-    ));
+    if status.tui.is_none() {
+        lines.extend(activity_block_lines(
+            &status.tasks[tasks_start..],
+            &status.activities[activities_start..],
+            &status.explored[explored_start..],
+            true,
+            tick,
+            status.active_tool_started,
+            true,
+        ));
+    }
     // Built here (not inline below) so both destinations for it — the old
     // trailing-line spot in `lines`, and the queue box's own pinned row —
     // share one animation. When the queue box is about to be drawn, it's
@@ -701,26 +736,6 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
     // that — same information, anchored to the thing it describes instead
     // of to whatever happened to print last.
     let thinking_display = status.thinking.as_ref().map(|thinking| {
-        // Moon phases, forced to *text* presentation via `\u{FE0E}` so they
-        // stay single-column-width instead of the wide (2-column) emoji
-        // glyph — deliberate, even though it means some terminal fonts only
-        // ship one fallback glyph for all 8 text-style variants and the
-        // spin won't visibly animate there. Width consistency was chosen
-        // over guaranteed animation; swap to a plain-text spinner (e.g.
-        // Braille patterns) instead of dropping this selector if that
-        // trade-off ever needs to flip back.
-        let frames = &[
-            "🌑\u{FE0E}",
-            "🌒\u{FE0E}",
-            "🌓\u{FE0E}",
-            "🌔\u{FE0E}",
-            "🌕\u{FE0E}",
-            "🌖\u{FE0E}",
-            "🌗\u{FE0E}",
-            "🌘\u{FE0E}",
-        ];
-        let frame = frames[status.spinner_tick % frames.len()];
-
         let dots_frames = &["", ".", "..", "..."];
         let dots = dots_frames[(status.spinner_tick / 2) % dots_frames.len()];
 
@@ -735,11 +750,15 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
 
         let waved_thinking = apply_wave_effect(&custom_thinking, status.spinner_tick);
 
-        format!("{MINT}{frame}{RESET} {waved_thinking}")
+        // A single-column text star matches the GUI and joins the TUI glow.
+        format!("{MINT}✦{RESET} {waved_thinking}")
     });
     let queue_box_will_show = status.queue_enabled && status.accepting_input;
     if !queue_box_will_show && let Some(display) = &thinking_display {
         lines.push(format!("  {display}"));
+    }
+    if status.compaction_started.is_some() {
+        lines.push("    Summarizing earlier steps to continue working".into());
     }
     // The queueing follow-up box (see `AgentOptions::queueing`) is appended
     // after everything above, so it's always the bottom-most thing in the
@@ -888,6 +907,12 @@ pub(super) fn commit_activity_snapshot_if_idle(
 }
 
 pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
+    if status.tui.is_some() {
+        status.committed_explored = status.explored.len();
+        status.committed_activities = status.activities.len();
+        status.committed_tasks = status.tasks.len();
+        return false;
+    }
     let explored_start = status.committed_explored.min(status.explored.len());
     let activities_start = status.committed_activities.min(status.activities.len());
     let tasks_start = status.committed_tasks.min(status.tasks.len());
@@ -990,6 +1015,51 @@ pub(super) fn is_internal_cot(text: &str) -> bool {
     mint_core::orchestration::is_internal_cot(text)
 }
 
+pub(super) fn print_extended_thinking(
+    status: &mut LiveStatus,
+    thought: &str,
+    elapsed: Duration,
+    stream_id: Option<&str>,
+) {
+    if let Some(tui) = &status.tui {
+        crate::interactive::finish_thought(
+            stream_id,
+            thought,
+            &crate::interactive::format_thought_elapsed(elapsed),
+        );
+        tui.finish_thought(stream_id, thought, elapsed);
+    } else {
+        print_timeline_note(status, thought, elapsed, stream_id);
+    }
+}
+
+#[cfg(test)]
+mod tui_thought_progress_tests {
+    use super::*;
+
+    #[test]
+    fn short_extended_thinking_collapses_in_tui_instead_of_printing_raw_text() {
+        let state = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::interactive::ChatViewState::default(),
+        ));
+        let tui = crate::interactive::ChatTui::handle(state.clone());
+        tui.append_thought_delta("one", "Checking", Duration::from_millis(1200));
+        let mut status = LiveStatus {
+            tui: Some(tui),
+            ..Default::default()
+        };
+        print_extended_thinking(
+            &mut status,
+            "Checking files",
+            Duration::from_millis(1900),
+            Some("one"),
+        );
+        let state = state.lock().unwrap();
+        assert_eq!(state.transcript.len(), 1);
+        assert_eq!(state.transcript[0].text, "Thought · 1.9s (Ctrl+T to view)");
+    }
+}
+
 pub(super) fn print_timeline_note(
     status: &mut LiveStatus,
     thought: &str,
@@ -1004,6 +1074,10 @@ pub(super) fn print_timeline_note(
     crate::interactive::finish_thought(stream_id, thought, &elapsed_str);
 
     if is_internal_cot(thought) {
+        if let Some(tui) = &status.tui {
+            tui.finish_thought(stream_id, thought, elapsed);
+            return;
+        }
         let summary = format!(
             "{muted}  • Thought for {elapsed_str}{reset} {muted}(Ctrl+T to view){reset}",
             muted = crate::terminal_theme::ANSI_MUTED,
@@ -1494,10 +1568,13 @@ pub(super) fn skill_names_from_memory_recall(result: &str) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn skill_card(skill_name: &str) -> TaskEntry {
-    TaskEntry {
-        label: format!("Skill({skill_name})"),
-        output: vec!["Successfully loaded skill".to_string()],
+pub(super) fn skill_read_label(skill_name: &str, result: &str) -> String {
+    if result.starts_with(&format!("[Loaded skill: {skill_name}]\n")) {
+        format!("Loaded skill: {skill_name}")
+    } else if result.starts_with("Error:") || result.starts_with("Blocked") {
+        format!("Failed to read skill: {skill_name}")
+    } else {
+        format!("Read skill preview: {skill_name}")
     }
 }
 
@@ -1745,5 +1822,76 @@ mod ramp_estimate_tests {
         assert_eq!(ramp_estimate(5000, ESTIMATE_RAMP_SECS), 5000);
         // Long after the ramp — still holds, doesn't keep climbing or wrap.
         assert_eq!(ramp_estimate(5000, 60.0), 5000);
+    }
+}
+
+#[cfg(test)]
+mod context_compaction_status_tests {
+    use super::*;
+    #[test]
+    fn compaction_lifecycle_keeps_its_timer_until_success_or_failure() {
+        let now = Instant::now();
+        let mut status = LiveStatus::default();
+        update_context_compaction(&mut status, "started", None, now);
+        assert_eq!(status.compaction_started, Some(now));
+        assert_eq!(
+            compaction_label(Duration::from_secs(12)),
+            "Compacting context · 12s • Esc to interrupt"
+        );
+        for phase in ["completed", "failed"] {
+            update_context_compaction(&mut status, phase, None, now);
+            assert!(status.compaction_started.is_none());
+            update_context_compaction(&mut status, "started", None, now);
+        }
+    }
+    #[test]
+    fn compaction_gradient_moves_while_timer_and_cancel_hint_stay_plain() {
+        let label = compaction_label(Duration::from_secs(12));
+        let first = apply_wave_effect(&label, 0);
+        let next = apply_wave_effect(&label, 12);
+        assert_ne!(first, next);
+        assert!(strip_ansi_escapes(&first).ends_with(" · 12s • Esc to interrupt"));
+        assert!(strip_ansi_escapes(&next).ends_with(" · 12s • Esc to interrupt"));
+        assert_eq!(
+            first.split_once(" · ").unwrap().1,
+            next.split_once(" · ").unwrap().1
+        );
+    }
+}
+
+#[cfg(test)]
+mod parallel_compaction_tests {
+    use super::*;
+    #[test]
+    fn one_child_finishing_does_not_clear_another_child_timer() {
+        let mut status = LiveStatus::default();
+        let now = Instant::now();
+        update_context_compaction(&mut status, "started", Some("A"), now);
+        update_context_compaction(
+            &mut status,
+            "started",
+            Some("B"),
+            now + Duration::from_secs(2),
+        );
+        update_context_compaction(&mut status, "completed", Some("A"), now);
+        assert_eq!(status.compaction_started, Some(now));
+        update_context_compaction(&mut status, "failed", Some("B"), now);
+        assert!(status.compaction_started.is_none());
+    }
+}
+
+#[cfg(test)]
+mod repeated_name_compaction_tests {
+    use super::*;
+    #[test]
+    fn repeated_child_name_keeps_timer_until_both_finish() {
+        let mut status = LiveStatus::default();
+        let now = Instant::now();
+        update_context_compaction(&mut status, "started", Some("reviewer"), now);
+        update_context_compaction(&mut status, "started", Some("reviewer"), now);
+        update_context_compaction(&mut status, "completed", Some("reviewer"), now);
+        assert_eq!(status.compaction_started, Some(now));
+        update_context_compaction(&mut status, "failed", Some("reviewer"), now);
+        assert!(status.compaction_started.is_none());
     }
 }

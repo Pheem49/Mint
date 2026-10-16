@@ -10,3 +10,5 @@ pub(super) mod plugins_mcp;
 pub(super) mod project;
 pub(super) mod shell;
 pub(super) mod web;
+
+pub(super) mod mods;

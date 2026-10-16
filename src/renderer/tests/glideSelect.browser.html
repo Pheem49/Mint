@@ -1,0 +1,71 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mint GlideSelect interaction checks</title></head>
+<body style="margin:24px;background:#18181b;color:#f5f5f5;font-family:system-ui"><h1>Mint dropdowns</h1><div id="root"></div><pre id="result">RUNNING</pre>
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+const results=[];
+const wait=(ms=60)=>new Promise(resolve=>setTimeout(resolve,ms));
+const assert=(ok,message)=>{if(!ok)throw new Error(message);results.push(message)};
+try {
+ const {default:SelectField}=await import('../shared/components/SelectField');
+ const {default:GlideSelect}=await import('../shared/components/GlideSelect');
+ const picks=[];
+ function Fixture(){
+  const [value,setValue]=React.useState('png');
+  return React.createElement('div',{style:{display:'flex',gap:16,flexWrap:'wrap'}},
+   React.createElement('label',null,'Export format ',React.createElement(SelectField,{value,onValueChange:v=>{picks.push(v);setValue(v)},'aria-label':'Export format'},
+    React.createElement('option',{value:'png'},'PNG'),React.createElement('option',{value:'jpg'},'JPG'),React.createElement('option',{value:'webp'},'WebP'))),
+   React.createElement(GlideSelect,{options:[{value:'fast',label:'Fast',tag:'Low latency'},{value:'deep',label:'Deep',tag:'Reasoning'}],defaultValue:'deep',ariaLabel:'Reasoning effort'}),
+   React.createElement(SelectField,{value:'2',disabled:true,'aria-label':'Disabled checkpoint'},React.createElement('option',{value:2},'Step 2')),
+   React.createElement(GlideSelect,{options:[],ariaLabel:'Empty options'}),
+   React.createElement(GlideSelect,{options:Array.from({length:40},(_,i)=>({value:String(i),label:`Model ${i}`})),defaultValue:'0',ariaLabel:'Long list'}),
+   React.createElement('div',{style:{position:'fixed',right:8,bottom:8,width:100,overflow:'hidden'}},React.createElement(GlideSelect,{options:['One','Two','Three'],ariaLabel:'Edge menu'})));
+ }
+ createRoot(document.getElementById('root')).render(React.createElement(Fixture));
+ await wait(200);
+ const trigger=label=>document.querySelector(`[role="combobox"][aria-label="${label}"]`);
+ const key=(el,key)=>el.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true}));
+ const open=async el=>{el.dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:1,bubbles:true}));await wait()};
+ const t=trigger('Export format');
+ assert(t.textContent.includes('PNG'),'controlled initial value preserved');
+ await open(t);
+ assert(t.getAttribute('aria-expanded')==='true','pointer opens menu');
+ const listId=t.getAttribute('aria-controls');const list=document.getElementById(listId);
+ const box=list.getBoundingClientRect();
+ // The first pixels of the second row must select the second row, not the previous row.
+ list.dispatchEvent(new PointerEvent('pointerdown',{clientY:box.top+32,clientX:box.left+10,pointerId:7,bubbles:true}));
+ list.dispatchEvent(new PointerEvent('pointerup',{clientY:box.top+32,clientX:box.left+10,pointerId:7,bubbles:true}));
+ await wait();
+ assert(t.textContent.includes('JPG')&&picks.join(',')==='jpg','pointer selects correct row at its top edge');
+ assert(document.activeElement===t,'focus returns to trigger after selection');
+ await open(t);key(t,'Home');await wait();key(t,'Enter');await wait();
+ assert(t.textContent.includes('PNG'),'Home and Enter select first option');
+ await open(t);key(t,'w');await wait();key(t,'Enter');await wait();
+ assert(t.textContent.includes('WebP'),'typeahead selects matching option');
+ const count=picks.length;await open(t);key(t,'Enter');await wait();
+ assert(picks.length===count,'reselecting current value does not call onChange');
+ await open(t);key(t,'ArrowUp');await wait();key(t,'Escape');await wait();
+ assert(t.textContent.includes('WebP')&&t.getAttribute('aria-expanded')==='false','Escape cancels without changing value');
+ await open(t);key(t,'Tab');await wait();assert(t.getAttribute('aria-expanded')==='false','Tab dismisses list');
+ await open(t);document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));await wait(180);
+ assert(t.getAttribute('aria-expanded')==='false'&&!document.getElementById(listId),'outside pointer dismisses and removes closing menu');
+ assert(trigger('Disabled checkpoint').disabled&&trigger('Disabled checkpoint').textContent.includes('Step 2'),'disabled numeric checkpoint remains selected');
+ assert(trigger('Empty options').disabled,'empty list is safely disabled');
+ const long=trigger('Long list');await open(long);key(long,'End');await wait();
+ const longList=document.getElementById(long.getAttribute('aria-controls'));const last=longList.querySelector('[data-index="39"]');
+ const lr=longList.getBoundingClientRect(),rr=last.getBoundingClientRect();
+ assert(longList.scrollHeight>longList.clientHeight&&rr.top>=lr.top&&rr.bottom<=lr.bottom+1,'long list scrolls active keyboard option into view');
+ key(long,'Escape');await wait();
+ const effort=trigger('Reasoning effort');await open(effort);
+ assert(document.querySelector('.glide-select__tag')?.textContent==='Low latency','option tags render');
+ const rows=document.querySelectorAll('.glide-select__option');rows[0].dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'}));await wait();const pill=document.querySelector('.glide-select__pill');
+ assert(getComputedStyle(pill).transitionDuration.includes('0.22s'),'authored glide duration is 220ms');
+ key(effort,'Escape');await wait();
+ const edge=trigger('Edge menu');await open(edge);
+ const edgeMenu=document.querySelector('.glide-select__menu');const er=edgeMenu.getBoundingClientRect();
+ assert(edgeMenu.dataset.side==='top'&&er.left>=0&&er.right<=window.innerWidth&&er.bottom<=window.innerHeight,'edge menu flips, fits viewport, and escapes clipping parent');
+ key(edge,'Escape');await wait();
+ document.getElementById('result').textContent='PASS\n'+results.join('\n');
+} catch(error){document.getElementById('result').textContent='FAIL: '+error.message+'\n'+results.join('\n');console.error(error)}
+</script></body></html>
