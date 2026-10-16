@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ChevronDown, Terminal, Trash2, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { Trash2, X } from 'lucide-react'
 import { backgroundPlatform, runtimePlatform } from '../platform'
 import type { BackgroundJob, BackgroundJobOutput } from '../types'
 import './background-terminals.css'
@@ -8,11 +9,12 @@ const active = (job: BackgroundJob) => job.status === 'running' || job.status ==
 const elapsed = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`
 const workspaceName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() || path
 
-export function BackgroundTerminals({ workspacePath }: { workspacePath?: string | null }) {
+export function BackgroundTerminals({ workspacePath, panelTarget, onCountChange }: {
+  workspacePath?: string | null; panelTarget: HTMLElement | null; onCountChange: (count: number) => void
+}) {
   const [jobs, setJobs] = useState<BackgroundJob[]>([])
   const [scope, setScope] = useState<{ workspace: string | null | undefined; ids: Set<string> }>({ workspace: undefined, ids: new Set() })
-  const [open, setOpen] = useState(false)
-  const [panelSize, setPanelSize] = useState({ width: 480, height: 600 })
+  const open = Boolean(panelTarget)
   const [all, setAll] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [output, setOutput] = useState<BackgroundJobOutput | null>(null)
@@ -22,9 +24,6 @@ export function BackgroundTerminals({ workspacePath }: { workspacePath?: string 
   const [notice, setNotice] = useState('')
   const [follow, setFollow] = useState(true)
   const [pending, setPending] = useState<Set<string>>(new Set())
-  const wrapper = useRef<HTMLDivElement>(null)
-  const trigger = useRef<HTMLButtonElement>(null)
-  const closeButton = useRef<HTMLButtonElement>(null)
   const log = useRef<HTMLDivElement>(null)
   const statuses = useRef(new Map<string, string>())
 
@@ -93,38 +92,11 @@ export function BackgroundTerminals({ workspacePath }: { workspacePath?: string 
     setSelected(null)
     setAll(false)
   }, [workspacePath])
-  useEffect(() => {
-    if (!open) return
-    closeButton.current?.focus()
-    const outside = (event: PointerEvent) => {
-      if (!wrapper.current?.contains(event.target as Node)) setOpen(false)
-    }
-    document.addEventListener('pointerdown', outside)
-    return () => document.removeEventListener('pointerdown', outside)
-  }, [open])
-
-  useLayoutEffect(() => {
-    if (!open) return
-    const composer = wrapper.current?.closest('.input-area') || wrapper.current?.parentElement
-    const measure = () => {
-      const rect = trigger.current?.getBoundingClientRect()
-      if (!rect) return
-      const width = Math.max(1, Math.min(480, (composer?.getBoundingClientRect().width || window.innerWidth) - 32, window.innerWidth - 32))
-      const height = Math.max(0, Math.min(600, window.innerHeight * .65, rect.top - 12))
-      setPanelSize(previous => previous.width === width && previous.height === height ? previous : { width, height })
-    }
-    measure()
-    const observer = new ResizeObserver(measure)
-    if (composer) observer.observe(composer)
-    if (wrapper.current) observer.observe(wrapper.current)
-    window.addEventListener('resize', measure)
-    return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
-  }, [open])
 
   const current = jobs.filter(job => scope.workspace === workspacePath && scope.ids.has(job.id))
   const count = current.filter(active).length
+  useEffect(() => { onCountChange(count) }, [count, onCountChange])
   const visible = all ? jobs : current
-  const close = () => { setOpen(false); trigger.current?.focus() }
   const openServer = async (url: string) => {
     setActionError('')
     try {
@@ -161,33 +133,24 @@ export function BackgroundTerminals({ workspacePath }: { workspacePath?: string 
   }
   const canOpen = Boolean(runtimePlatform.isTauriRuntime()) || ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
 
-  return <div className="background-terminals" ref={wrapper} onKeyDown={event => {
-    if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); close() }
-  }}>
-    <button type="button" className={`background-terminal-trigger ${count ? 'has-active' : ''}`} ref={trigger}
-      aria-expanded={open} aria-controls="background-terminal-panel" onClick={() => setOpen(previous => !previous)}>
-      <Terminal className="background-terminal-trigger-icon" size={14} aria-hidden="true" />
-      <span>{error ? 'Status unavailable' : loading ? 'Terminals…' : 'Terminals'}</span>
-      {count > 0 && <span className="background-terminal-count" aria-label={`${count} active background terminals`}>{count}</span>}
-      <ChevronDown className={`background-terminal-chevron ${open ? 'is-open' : ''}`} size={13} aria-hidden="true" />
-    </button>
-    {notice && <span className="background-terminal-notice" role="status">{notice}</span>}
-    {open && <section id="background-terminal-panel" className="background-terminal-panel" aria-label="Background terminals" style={{ width: panelSize.width, maxHeight: panelSize.height }}>
+  return <>
+    {notice && <span className="background-task-announcement" role="status">{notice}</span>}
+    {panelTarget && createPortal(<section className="background-terminals background-terminal-panel" aria-label="Background tasks">
       <header className="background-terminal-panel-header">
         <span className="background-terminal-heading-icon" aria-hidden="true">›_</span>
         <span className="background-terminal-panel-title">
-          <strong>Background terminals</strong>
+          <strong>Background tasks</strong>
           <small>{all ? 'All workspaces' : workspaceName(workspacePath || '') || 'No workspace'}</small>
         </span>
-        <button ref={closeButton} type="button" onClick={close} aria-label="Close background terminals">×</button>
       </header>
+      {notice && <p>{notice}</p>}
       <label className="background-terminal-filter"><input type="checkbox" checked={all} onChange={event => { setAll(event.target.checked); setSelected(null) }} /> All workspaces</label>
       {error && <p role="status" className="background-terminal-error">{error}</p>}
       {actionError && <p role="alert" className="background-terminal-error">{actionError}</p>}
       <div className="background-terminal-list">
         {!visible.length && <div className="background-terminal-empty" role="status">
           <span aria-hidden="true">›_</span>
-          <strong>{loading ? 'Loading terminals…' : error ? 'Waiting for connection…' : 'No background terminals'}</strong>
+          <strong>{loading ? 'Loading tasks…' : error ? 'Waiting for connection…' : 'No background tasks'}</strong>
           {!loading && !error && <small>Commands started in the background will appear here.</small>}
         </div>}
         {[...visible].reverse().map(job => <article key={job.id} className="background-terminal-job">
@@ -213,6 +176,6 @@ export function BackgroundTerminals({ workspacePath }: { workspacePath?: string 
           {output ? <><strong>stdout</strong><pre>{output.stdout || '(empty)'}</pre><strong>stderr</strong><pre>{output.stderr || '(empty)'}</pre></> : <p>{actionError ? 'Output unavailable.' : 'Loading output…'}</p>}
         </div>
       </section>}
-    </section>}
-  </div>
+    </section>, panelTarget)}
+  </>
 }

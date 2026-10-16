@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, Puzzle, Upload, X } from 'lucide-react'
+import { ChevronDown, Puzzle, Upload } from 'lucide-react'
 import { modsPlatform, runtimePlatform } from '../platform'
 import type { ModOperation, ModRecord, ModResponse, ModTestReport } from '../mods'
 import { ModUi } from './ModUi'
@@ -8,9 +8,10 @@ import { ModSessionControls, ModTestResults } from './ModSessionControls'
 import { modViewport } from '../utils/modViewport'
 import '../css/mods.css'
 
-export function ModsPanel({ workspacePath, chatId, launcherTarget }: { workspacePath?: string | null; chatId: string; launcherTarget?: HTMLElement | null }) {
+export function ModsPanel({ workspacePath, chatId, panelTarget, onOpen }: { workspacePath?: string | null; chatId: string; panelTarget?: HTMLElement | null; onOpen: () => void }) {
   const [data, setData] = useState<ModResponse>({ mods: [] })
-  const [open, setOpen] = useState(false)
+  const open = Boolean(panelTarget)
+  const onOpenRef = useRef(onOpen); onOpenRef.current = onOpen
   const [tab, setTab] = useState('manage')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -29,7 +30,7 @@ export function ModsPanel({ workspacePath, chatId, launcherTarget }: { workspace
     const current = ++generation.current
     let stopped = false
     let timer: ReturnType<typeof setTimeout>
-    setData({ mods: [] }); setLoading(true); setError(''); setOpen(false); setTab('manage'); seen.current.clear(); setReports({})
+    setData({ mods: [] }); setLoading(Boolean(workspacePath && chatId)); setBusy(false); setError(''); setTab('manage'); seen.current.clear(); setReports({})
     async function refresh() {
       if (!workspacePath || !chatId || stopped) return
       try {
@@ -38,9 +39,9 @@ export function ModsPanel({ workspacePath, chatId, launcherTarget }: { workspace
           setData(value); setLoading(false)
           const fresh = value.mods?.find(m => m.enabled && m.snapshot?.ui.side_panel && !seen.current.has(m.id))
           value.mods?.filter(m => m.enabled).forEach(m => seen.current.add(m.id))
-          if (fresh) { setOpen(true); setTab(fresh.id) }
+          if (fresh) { onOpenRef.current(); setTab(fresh.id) }
         }
-      } catch (e) { if (!stopped && generation.current === current) setError(String(e)) }
+      } catch (e) { if (!stopped && generation.current === current) { setError(String(e)); setLoading(false) } }
       if (!stopped) timer = setTimeout(refresh, 1000)
     }
     void refresh()
@@ -105,28 +106,17 @@ export function ModsPanel({ workspacePath, chatId, launcherTarget }: { workspace
   const sidePanelMods = active.filter(m => m.snapshot?.ui.side_panel)
   const selected = mods.find(m => m.id === tab)
 
-  const launchButton = <button type="button" className="mods-launch" disabled={!workspacePath} onClick={() => setOpen(!open)} aria-expanded={open} title={workspacePath ? 'Workspace mods' : 'Choose a workspace to use mods'}><Puzzle size={14} aria-hidden="true" /><span>Mods</span>{active.length > 0 && <span className="mods-launch-count" aria-label={`${active.length} active mods`}>{active.length}</span>}</button>
-  const panelPosition = launcherTarget ? (() => {
-    const bounds = launcherTarget.getBoundingClientRect()
-    return {
-      top: 'auto',
-      right: Math.max(8, window.innerWidth - bounds.right),
-      bottom: window.innerHeight - bounds.top + 10,
-    }
-  })() : undefined
-
   return <>
     <div className="mint-mods" ref={rootRef}>
       {active.map(mod => mod.snapshot?.ui.above_composer && <section key={mod.id} className="mod-band" aria-label={mod.name}>
         <ModUi node={mod.snapshot.ui.above_composer} onAction={(name, value) => action(mod, name, value)} />
       </section>)}
-      {!launcherTarget && launchButton}
-      {open && createPortal(<aside className="mods-panel mint-mods" aria-label="Workspace mods" style={panelPosition}>
-      <header className="mods-panel-header"><span className="mods-panel-icon" aria-hidden="true"><Puzzle size={18} /></span><div className="mods-panel-title"><strong>Mods</strong><p>{mods.length} installed · {active.length} active</p></div><button type="button" className="mods-close" onClick={() => setOpen(false)} aria-label="Close mods"><X size={17} aria-hidden="true" /></button></header>
+      {panelTarget && createPortal(<aside className="mods-panel mint-mods" aria-label="Workspace mods">
+      <header className="mods-panel-header"><span className="mods-panel-icon" aria-hidden="true"><Puzzle size={18} /></span><div className="mods-panel-title"><strong>Mods</strong><p>{mods.length} installed · {active.length} active</p></div></header>
       {sidePanelMods.length > 0 && <nav aria-label="Mod panels"><button type="button" aria-pressed={tab === 'manage'} onClick={() => setTab('manage')}>Manage</button>{sidePanelMods.map(m => <button key={m.id} type="button" aria-pressed={tab === m.id} onClick={() => setTab(m.id)}>{m.name}</button>)}</nav>}
       {error && <p role="alert" className="mod-error">{error}</p>}
       {selected?.snapshot?.ui.side_panel && tab !== 'manage' ? <section className="mod-content"><ModUi node={selected.snapshot.ui.side_panel} onAction={(name, value) => action(selected, name, value)} /></section> : <div className="mod-content">
-        <div className="mods-toolbar"><label htmlFor="mods-scope">Enable for <select id="mods-scope" value={scope} onChange={e => setScope(e.target.value as typeof scope)}><option value="chat">This chat</option><option value="workspace">This workspace</option><option value="global">All workspaces</option></select></label><button type="button" className="mods-import" disabled={busy} onClick={() => importRef.current?.click()}><Upload size={14} aria-hidden="true" />Import</button></div>
+        <div className="mods-toolbar"><label htmlFor="mods-scope">Enable for <select id="mods-scope" value={scope} onChange={e => setScope(e.target.value as typeof scope)}><option value="chat">This chat</option><option value="workspace">This workspace</option><option value="global">All workspaces</option></select></label><button type="button" className="mods-import" disabled={busy || !workspacePath || !chatId} onClick={() => importRef.current?.click()}><Upload size={14} aria-hidden="true" />Import</button></div>
         <input ref={importRef} type="file" accept=".mintmod" hidden onChange={async e => {
           const file = e.target.files?.[0]; e.target.value = ''; if (!file) return
           if (file.size > 1024 * 1024) { setError('Package exceeds 1 MiB'); return }
@@ -142,7 +132,7 @@ export function ModsPanel({ workspacePath, chatId, launcherTarget }: { workspace
           } catch (e) { if (currentScope.current === `${workspacePath}\0${chatId}`) setError(String(e)) }
         }} />
         {loading && <p role="status" className="mods-empty">Loading mods…</p>}
-        {!loading && !mods.length && <div className="mods-empty"><Puzzle size={22} aria-hidden="true" /><strong>No mods yet</strong><p>Ask Mint to create one, or import a .mintmod package. Imported mods stay off until enabled.</p></div>}
+        {!loading && !mods.length && <div className="mods-empty"><Puzzle size={22} aria-hidden="true" /><strong>{workspacePath ? 'No mods yet' : 'Choose a workspace'}</strong><p>{workspacePath ? 'Ask Mint to create one, or import a .mintmod package. Imported mods stay off until enabled.' : 'Choose a workspace in chat to manage its mods.'}</p></div>}
         {mods.map(mod => <article key={mod.id} className="mod-entry">
           <div className="mod-entry-heading"><div><strong>{mod.name}</strong><small>Version {mod.manifest?.version || 'unknown'}</small></div><span className={`mod-status ${mod.error ? 'is-error' : mod.enabled ? 'is-active' : ''}`}>{mod.error ? 'Error' : mod.enabled ? 'Active' : 'Off'}</span></div>
           {mod.changed && <p className="mod-hint">Source changed · active revision preserved</p>}
@@ -160,8 +150,7 @@ export function ModsPanel({ workspacePath, chatId, launcherTarget }: { workspace
         {data.toolRequests?.map(request => <article className="mod-entry" key={request.id}><strong>{request.modId}: {request.action}</strong><pre>{JSON.stringify(request.input, null, 2)}</pre><button type="button" disabled={busy} onClick={() => { if (window.confirm(`Run ${request.action} requested by ${request.modId}?\n${JSON.stringify(request.input, null, 2)}`)) void operate({ action: 'run_request', command: request.id, grantPermissions: true }) }}>Review & run tool</button></article>)}
         <details className="mod-session-settings"><summary>Session settings <ChevronDown size={13} aria-hidden="true" /></summary><ModSessionControls enabled={data.session?.hotReload ?? false} busy={busy} onToggle={enabled => void operate({ action: 'hot_reload', value: enabled })} /></details>
       </div>}
-      </aside>, document.body)}
+      </aside>, panelTarget)}
     </div>
-    {launcherTarget && createPortal(launchButton, launcherTarget)}
   </>
 }

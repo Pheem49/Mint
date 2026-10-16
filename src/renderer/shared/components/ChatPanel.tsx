@@ -42,7 +42,7 @@ import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../utils/documen
 import ModelSelectorPopover from './ModelSelectorPopover'
 import GitBranchSelector from './GitBranchSelector'
 import WorkspaceSelector from './WorkspaceSelector'
-import { BackgroundTerminals } from './BackgroundTerminals'
+import ToolsPanelToggle from './ToolsPanelToggle'
 import { ModsPanel } from './ModsPanel'
 import CodeReviewPage from './CodeReviewPage'
 import type { ToolSurface } from './ToolSurfacePage'
@@ -172,11 +172,13 @@ export type ConversationActions = Omit<ChatPanelContract, keyof ConversationView
 interface ChatPanelProps {
   conversation: ConversationViewModel
   actions: ConversationActions
+  tools?: { modsPanelTarget: HTMLElement | null; onOpenMods: () => void; onToggle?: () => void; open: boolean; backgroundTaskCount: number }
 }
 
 export default function ChatPanel({
   conversation,
   actions,
+  tools,
 }: ChatPanelProps) {
   const {
   interactions,
@@ -306,7 +308,6 @@ export default function ChatPanel({
   const [reviewPage, setReviewPage] = useState<{ title: string; changes: FileChange[] } | null>(null)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactFile | null>(null)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
-  const [modsLauncherTarget, setModsLauncherTarget] = useState<HTMLDivElement | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
   const toggleActivity = useCallback((id: string) => {
@@ -1644,6 +1645,7 @@ export default function ChatPanel({
             )}
           </div>
           <div className="chat-header-actions">
+            {tools?.onToggle && <ToolsPanelToggle open={tools.open} count={tools.backgroundTaskCount} onToggle={tools.onToggle} />}
             {activeArtifact && (
               <button
                 type="button"
@@ -1747,7 +1749,7 @@ export default function ChatPanel({
       </div>
 
       <div className="input-area">
-        <ModsPanel workspacePath={workspacePath} chatId={chatId} launcherTarget={modsLauncherTarget} />
+        <ModsPanel workspacePath={workspacePath} chatId={chatId} panelTarget={tools?.modsPanelTarget} onOpen={tools?.onOpenMods ?? (() => {})} />
         {composerChanges.length > 0 && (
           <button
             type="button"
@@ -1805,8 +1807,6 @@ export default function ChatPanel({
               <span className="smart-context-copy"><span className="smart-context-title">Plan mode</span></span>
             </label>
           )}
-          <BackgroundTerminals workspacePath={workspacePath} />
-          <div className="mods-launch-slot" ref={setModsLauncherTarget} />
         </div>
         <form
           id="chat-form"

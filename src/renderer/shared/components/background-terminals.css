@@ -1,7 +1,6 @@
 .background-terminals {
   position: relative;
   min-width: 0;
-  margin-left: auto;
 }
 
 .background-terminals button,
@@ -9,61 +8,6 @@
   color: inherit;
   font: inherit;
 }
-
-.background-terminal-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  max-width: 100%;
-  padding: 5px 11px;
-  border: 1px solid var(--border, #343438);
-  border-radius: 10px;
-  background: var(--panel-bg, #171719);
-  color: var(--text-main, #eeeeef);
-  cursor: pointer;
-  font-size: 12px !important;
-  text-align: left;
-  transition: border-color 0.18s ease, background 0.18s ease;
-}
-
-.background-terminal-trigger:hover,
-.background-terminal-trigger[aria-expanded='true'] {
-  border-color: var(--border-strong, var(--accent, #10b981));
-  background: var(--bg-surface-hover, var(--surface-strong, #202024));
-}
-
-.background-terminal-trigger.has-active {
-  color: var(--accent, #10b981);
-}
-
-.background-terminal-trigger-icon {
-  flex: 0 0 auto;
-  opacity: 0.9;
-}
-
-.background-terminal-count {
-  display: inline-grid;
-  min-width: 17px;
-  height: 17px;
-  place-items: center;
-  padding: 0 4px;
-  border: 1px solid color-mix(in srgb, var(--accent, #10b981) 34%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent, #10b981) 12%, transparent);
-  color: var(--accent, #10b981);
-  font-size: 10px;
-  font-weight: 650;
-  line-height: 1;
-}
-
-.background-terminal-chevron {
-  flex: 0 0 auto;
-  color: var(--text-muted, #94a3b8);
-  transition: transform 0.18s ease;
-}
-
-.background-terminal-chevron.is-open { transform: rotate(180deg); }
 
 .background-terminals button:focus-visible,
 .background-terminals a:focus-visible,
@@ -73,30 +17,21 @@
 }
 
 .background-terminal-panel {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 10px);
-  z-index: 30;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: min(480px, calc(100vw - 32px));
-  max-height: min(65vh, 600px);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
   overflow: auto;
   padding: 14px;
-  border: 1px solid var(--border-default, var(--border, #343438));
-  border-radius: 16px;
-  background: var(--bg-overlay, #171719);
+  background: var(--panel-bg, #171719);
   color: var(--text-main, #eeeeef);
-  box-shadow: var(--shadow-lg, 0 18px 48px rgba(0, 0, 0, 0.42));
   font-size: 12px;
-  animation: backgroundTerminalPanelIn 0.16s ease-out;
 }
 
-@keyframes backgroundTerminalPanelIn {
-  from { opacity: 0; transform: translateY(6px) scale(0.99); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
+.background-task-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .background-terminal-panel-header {
   display: flex;
@@ -136,27 +71,6 @@
   color: var(--text-muted, #94a3b8);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.background-terminal-panel-header > button {
-  display: grid;
-  flex: 0 0 32px;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--text-muted, #94a3b8);
-  font-size: 20px;
-  cursor: pointer;
-}
-
-.background-terminal-panel-header > button:hover {
-  border-color: var(--border, #343438);
-  background: var(--bg-surface-soft, rgba(255, 255, 255, 0.05));
-  color: var(--text-main, #fff);
 }
 
 .background-terminal-filter {
@@ -352,25 +266,12 @@
   overflow-wrap: anywhere;
 }
 
-.background-terminal-notice {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  max-width: min(360px, calc(100vw - 32px));
-  padding: 7px 10px;
-  border: 1px solid var(--border, #343438);
-  border-radius: 9px;
-  background: var(--bg-overlay, #171719);
-  color: var(--text-main, #eeeeef);
-  font-size: 11px;
-  overflow-wrap: anywhere;
-}
+
 
 .smart-context-bar { flex-wrap: wrap; }
 
 @media (max-width: 640px) {
   .background-terminals { margin-left: 0; flex-basis: 100%; }
-  .background-terminal-panel { right: auto; left: 0; width: min(440px, calc(100vw - 32px)); }
   .background-terminal-panel-header { gap: 8px; }
 }
 

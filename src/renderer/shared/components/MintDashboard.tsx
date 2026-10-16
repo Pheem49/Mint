@@ -49,6 +49,7 @@ import type { PromptOptions } from '../conversation/lifecycle'
 
 
 import { DEFAULT_CONFIG, migrateFontFamily, migrateTypographyScale } from '../constants/config'
+import { BackgroundTerminals } from './BackgroundTerminals'
 
 const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
 const RECENT_WORKSPACE_PATHS_KEY = 'mint:recent-workspace-paths'
@@ -518,6 +519,9 @@ export default function MintDashboard() {
   const [toolSurfaces, setToolSurfaces] = useState<ToolSurface[]>([])
   const [activeSurfaceId, setActiveSurfaceId] = useState<string | null>(null)
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
+  const [modsPanelTarget, setModsPanelTarget] = useState<HTMLDivElement | null>(null)
+  const [backgroundPanelTarget, setBackgroundPanelTarget] = useState<HTMLDivElement | null>(null)
+  const [backgroundTaskCount, setBackgroundTaskCount] = useState(0)
   const [terminalRightWidth, setTerminalRightWidth] = useState(() => {
     const saved = Number(window.localStorage.getItem('mint:terminal-right-width'))
     return saved >= 280 && saved <= 900 ? saved : 440
@@ -870,7 +874,7 @@ export default function MintDashboard() {
         if (!popup) throw new Error('Allow browser popups, then open the HTML file again.')
         popup.location.replace(preview.url)
       }
-      showToast('HTML preview is running. Use Terminals to view or stop the server.')
+      showToast('HTML preview is running. Open Tools → Background tasks to view or stop the server.')
     } catch (error) {
       popup?.close()
       throw error
@@ -895,6 +899,17 @@ export default function MintDashboard() {
     })
   }
 
+  const openUtilitySurface = (kind: 'mods' | 'background') => {
+    setToolsPanelOpen(true)
+    setToolSurfaces(current => current.some(surface => surface.id === kind) ? current : [...current, { id: kind, kind, title: kind === 'mods' ? 'Mods' : 'Background tasks' }])
+    setActiveSurfaceId(kind)
+  }
+
+  const closeToolsPanel = () => {
+    setToolsPanelOpen(false)
+    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.tools-panel-toggle')?.focus())
+  }
+
   const openNativeBrowser = (url = 'https://www.google.com') => {
     void openMintBrowser(url)
   }
@@ -903,6 +918,7 @@ export default function MintDashboard() {
     setToolSurfaces((current) => {
       const source = current.find((surface) => surface.id === id)
       if (!source) return current
+      if (source.kind === 'mods' || source.kind === 'background') return current
       const duplicateId = `${source.kind}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`
       const duplicate = { ...source, id: duplicateId, title: `${source.title} copy` } as ToolSurface
       setActiveSurfaceId(duplicateId)
@@ -1829,6 +1845,7 @@ export default function MintDashboard() {
           onToggleTerminal={toggleTerminalSurface}
           onOpenBrowser={() => openNativeBrowser()}
           toolsPanelOpen={toolsPanelOpen}
+          backgroundTaskCount={backgroundTaskCount}
           onToggleToolsPanel={() => setToolsPanelOpen((open) => !open)}
           onOpenSettings={() => changeView('settings')}
           onCheckForUpdates={checkForUpdatesFromMenu}
@@ -1961,14 +1978,24 @@ export default function MintDashboard() {
               />
             </Suspense>
           )}
-        <ChatPanel conversation={chatConversation} actions={chatActions} />
+        <ChatPanel conversation={chatConversation} actions={chatActions} tools={{
+          modsPanelTarget, onOpenMods: () => openUtilitySurface('mods'),
+          open: toolsPanelOpen, backgroundTaskCount,
+          onToggle: isDesktopApp ? undefined : () => setToolsPanelOpen(open => !open),
+        }} />
         </main>
-        {isDesktopApp && toolsPanelOpen && (
+        {toolsPanelOpen && (
           <Suspense fallback={<LazyPanelFallback />}>
             <ToolSurfacePage
               surfaces={toolSurfaces}
               activeSurfaceId={activeSurfaceId}
               workspacePath={workspacePath}
+              desktopTools={isDesktopApp}
+              backgroundTaskCount={backgroundTaskCount}
+              onOpenMods={() => openUtilitySurface('mods')}
+              onOpenBackgroundTasks={() => openUtilitySurface('background')}
+              onModsPanelTarget={setModsPanelTarget}
+              onBackgroundPanelTarget={setBackgroundPanelTarget}
               terminalSize={terminalRightWidth}
               onSelect={setActiveSurfaceId}
               onClose={closeToolSurface}
@@ -1985,7 +2012,7 @@ export default function MintDashboard() {
                 changeView('workspace')
               }}
               onOpenSideChat={() => { setActiveSurfaceId(null); setToolsPanelOpen(false) }}
-              onClosePanel={() => setToolsPanelOpen(false)}
+              onClosePanel={closeToolsPanel}
               onResizeTerminal={(size) => {
                 setTerminalRightWidth(size)
                 if (terminalSaveTimeoutRef.current) clearTimeout(terminalSaveTimeoutRef.current)
@@ -2003,6 +2030,7 @@ export default function MintDashboard() {
             />
           </Suspense>
         )}
+        <BackgroundTerminals workspacePath={workspacePath} panelTarget={backgroundPanelTarget} onCountChange={setBackgroundTaskCount} />
         {view === 'skills' && (
           <div className="web-view-scroll" style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
             <Suspense fallback={<LazyPanelFallback />}>

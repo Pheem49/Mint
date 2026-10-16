@@ -32,6 +32,8 @@
 
 ## Desktop and Web
 
+- Moved **Mods** and **Background tasks** from the chat composer into Tools tabs on Desktop and Web, accessible from the launcher and add-tool menu without a duplicate button row below the tabs. Added a Web Tools button and a running-task badge that stays visible while Tools is closed; the Desktop interactive Terminal remains separate. Mod bands and background-job tracking continue while the panel is closed.
+
 - Refined voice recording, Gemini Live calls, notifications, error recovery, theme styling, and accessibility.
 - Added **Reduce effects** and reduced unnecessary rendering work.
 - Improved Saved Pictures browsing and previews, image-search cards, and MCP settings.
