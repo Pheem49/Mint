@@ -102,6 +102,44 @@ pub fn run(check_only: bool, dry_run: bool, approved: bool) -> Result<()> {
     Ok(())
 }
 
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct UpdatePreferences {
+    skipped_version: Option<String>,
+}
+
+fn preferences_path() -> Option<PathBuf> {
+    cache_path().map(|path| path.with_file_name("update-preferences.json"))
+}
+
+fn update_is_visible_at(path: &std::path::Path, latest: &str) -> bool {
+    let preferences: UpdatePreferences = std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    preferences.skipped_version.as_deref() != Some(latest)
+}
+
+fn skip_version_at(path: &std::path::Path, latest: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let preferences = UpdatePreferences {
+        skipped_version: Some(latest.to_owned()),
+    };
+    std::fs::write(path, serde_json::to_vec_pretty(&preferences)?)?;
+    Ok(())
+}
+
+pub fn skip_version(latest: &str) -> Result<()> {
+    let path =
+        preferences_path().ok_or_else(|| anyhow::anyhow!("could not locate update preferences"))?;
+    skip_version_at(&path, latest)
+}
+
+fn update_is_visible(latest: &str) -> bool {
+    preferences_path().is_none_or(|path| update_is_visible_at(&path, latest))
+}
+
 fn npm() -> &'static str {
     if cfg!(target_os = "windows") {
         "npm.cmd"
@@ -156,7 +194,9 @@ pub fn get_cached_update_notice() -> Option<(String, String)> {
     let data = std::fs::read_to_string(path).ok()?;
     let cache: UpdateCache = serde_json::from_str(&data).ok()?;
     let current = env!("CARGO_PKG_VERSION");
-    if compare_versions(current, &cache.latest_version) < 0 {
+    if compare_versions(current, &cache.latest_version) < 0
+        && update_is_visible(&cache.latest_version)
+    {
         Some((current.to_owned(), cache.latest_version))
     } else {
         None
@@ -201,7 +241,7 @@ pub fn check_for_update_quietly() -> Option<(String, String)> {
         return None;
     }
     write_cache(&latest);
-    if compare_versions(current, &latest) < 0 {
+    if compare_versions(current, &latest) < 0 && update_is_visible(&latest) {
         Some((current.to_owned(), latest))
     } else {
         None
@@ -350,6 +390,20 @@ fn compare_versions(left: &str, right: &str) -> i8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skipped_version_survives_reload_but_does_not_hide_next_release() {
+        let path = std::env::temp_dir().join(format!(
+            "mint-update-preferences-{}.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        assert!(update_is_visible_at(&path, "2.0.0"));
+        skip_version_at(&path, "2.0.0").unwrap();
+        assert!(!update_is_visible_at(&path, "2.0.0"));
+        assert!(update_is_visible_at(&path, "2.1.0"));
+        std::fs::remove_file(&path).unwrap();
+    }
 
     #[test]
     fn compares_semantic_versions() {

@@ -9,6 +9,8 @@
 
 ## Terminal and chat
 
+- Added a startup TUI update menu with **Update now**, **Skip** (selected by default), and **Skip until next version**. Skipped versions persist across launches; newer releases still notify. Installation runs the existing approved npm updater outside the TUI and exits on success so Mint can be restarted. Slow background checks keep a passive notice instead of interrupting chat.
+
 - Improved Full-Screen TUI scrolling, drag selection, Back to bottom, multiline input, and long approval previews.
 - Added collapsible long pastes: **F2** opens or folds the full text for editing without losing submitted content.
 - Improved Desktop/Web chat performance, model selection, slash-command navigation, activity summaries, and responsive layouts.

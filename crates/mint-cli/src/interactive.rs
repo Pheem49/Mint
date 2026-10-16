@@ -444,16 +444,7 @@ pub async fn run_interactive_chat_with_session(
         }
     }
 
-    let mut printed_update = false;
-    if let Some((current, latest)) = crate::updater::get_cached_update_notice() {
-        if let Some((_, _, handle)) = tui.as_mut() {
-            handle.push_notice(crate::updater::format_tui_update_notice(&current, &latest));
-        } else {
-            crate::updater::print_update_notice(&current, &latest);
-        }
-        printed_update = true;
-    }
-
+    let mut startup_update = crate::updater::get_cached_update_notice();
     let mut update_handle = if crate::updater::should_check_for_update() {
         Some(tokio::task::spawn_blocking(
             crate::updater::check_for_update_quietly,
@@ -461,6 +452,53 @@ pub async fn run_interactive_chat_with_session(
     } else {
         None
     };
+
+    // Offer the menu only at startup. A slow registry must not interrupt a
+    // conversation later; its result will use the passive notice below.
+    if startup_update.is_none()
+        && let (Some((terminal, state, handle)), Some(check)) =
+            (tui.as_mut(), update_handle.as_mut())
+    {
+        handle.set_status(vec!["Checking for updates…".into()]);
+        if let Ok(state) = state.lock() {
+            terminal.draw_state(&state)?;
+        }
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), check).await;
+        handle.clear_status();
+        if let Ok(result) = result {
+            startup_update = result.ok().flatten();
+            update_handle = None;
+        }
+    }
+
+    let mut printed_update = false;
+    if let Some((current, latest)) = startup_update {
+        if let Some((terminal, _, handle)) = tui.as_mut() {
+            match terminal.prompt_update(handle, &current, &latest)? {
+                Some(0) => {
+                    terminal.suspend();
+                    match crate::updater::run(false, false, true) {
+                        Ok(()) => return Ok(()),
+                        Err(error) => {
+                            terminal.resume()?;
+                            handle.push_notice(format!(
+                                "Update failed: {error}. Run `mint update --approve` to retry."
+                            ));
+                        }
+                    }
+                }
+                Some(2) => {
+                    if let Err(error) = crate::updater::skip_version(&latest) {
+                        handle.push_notice(format!("Could not save skipped version: {error}"));
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            crate::updater::print_update_notice(&current, &latest);
+        }
+        printed_update = true;
+    }
 
     // Follow-up messages typed while an agent turn is still running (into the
     // queueing box `agent::run_code_agent_with_options` keeps on screen) come

@@ -448,6 +448,7 @@ pub(crate) struct DialogState {
     pub input: Option<Vec<char>>,
     pub resume_picker: Option<ResumePickerDialog>,
     pub theme_picker: Option<usize>,
+    pub update_prompt: bool,
     pub reply: mpsc::Sender<DialogAnswer>,
 }
 
@@ -471,6 +472,23 @@ pub(crate) enum DialogAnswer {
 }
 
 impl DialogState {
+    pub fn new_update(current: &str, latest: &str, reply: mpsc::Sender<DialogAnswer>) -> Self {
+        let mut dialog = Self::new_choice(
+            format!("Update available · {current} → {latest}"),
+            "Release notes: https://github.com/Pheem49/Mint/releases/latest",
+            vec![
+                "Update now (runs `mint update --approve`)".into(),
+                "Skip".into(),
+                "Skip until next version".into(),
+            ],
+            None,
+            reply,
+        );
+        dialog.selected = 1;
+        dialog.update_prompt = true;
+        dialog
+    }
+
     pub fn new_choice(
         title: impl Into<String>,
         body: impl Into<String>,
@@ -492,6 +510,7 @@ impl DialogState {
             input: None,
             resume_picker: None,
             theme_picker: None,
+            update_prompt: false,
             reply,
         }
     }
@@ -515,6 +534,7 @@ impl DialogState {
             input: Some(Vec::new()),
             resume_picker: None,
             theme_picker: None,
+            update_prompt: false,
             reply,
         }
     }
@@ -555,6 +575,7 @@ impl DialogState {
                 sort_by_created: false,
             }),
             theme_picker: None,
+            update_prompt: false,
             reply,
         }
     }
@@ -577,6 +598,7 @@ impl DialogState {
             input: None,
             resume_picker: None,
             theme_picker: Some(active.min(2)),
+            update_prompt: false,
             reply,
         }
     }
@@ -790,7 +812,7 @@ impl DialogState {
                 // Numeric shortcuts: 1-9 when filter is empty
                 KeyCode::Char(c @ '1'..='9') if self.filter.is_empty() => {
                     let digit = c.to_digit(10).unwrap() as usize;
-                    if self.select_numeric(digit) && self.checked.is_none() {
+                    if self.select_numeric(digit) && self.checked.is_none() && !self.update_prompt {
                         let filtered = self.filtered_indices();
                         if let Some(&orig_idx) = filtered.get(self.selected) {
                             return Some(DialogAnswer::Choice(orig_idx));
@@ -804,7 +826,7 @@ impl DialogState {
                         .modifiers
                         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
                 {
-                    if self.theme_picker.is_some() {
+                    if self.theme_picker.is_some() || self.update_prompt {
                         return None;
                     }
                     self.filter.push(c);
@@ -2484,7 +2506,7 @@ impl ChatViewState {
                 let mut lines = Vec::new();
                 let filtered = dialog.filtered_indices();
                 let total_options = filtered.len();
-                let monochrome_picker = dialog.title == "Resume Session";
+                let monochrome_picker = dialog.title == "Resume Session" || dialog.update_prompt;
 
                 let title_suffix = if dialog.input.is_none() && !dialog.options.is_empty() {
                     format!(
@@ -2536,7 +2558,9 @@ impl ChatViewState {
                 } else {
                     body.line_count(width)
                 };
-                let hint = if dialog.input.is_some() {
+                let hint = if dialog.update_prompt {
+                    " ↑/↓ navigate · 1-3 choose · Enter continue · Esc skip"
+                } else if dialog.input.is_some() {
                     " Enter submit · Esc cancel"
                 } else if dialog.checked.is_some() {
                     " Space toggle · Enter confirm · 1-9 pick · Type to filter · Esc cancel"
@@ -3848,7 +3872,7 @@ impl ChatTui {
             }
         }
     }
-    fn draw_state(&mut self, state: &ChatViewState) -> Result<()> {
+    pub(super) fn draw_state(&mut self, state: &ChatViewState) -> Result<()> {
         let selection = self.mouse_selection;
         let previous = self.last_frame.as_ref();
         let mut transcript_selection = self.transcript_selection.as_mut();
@@ -4622,6 +4646,27 @@ impl ChatTui {
         if let Ok(mut state) = handle.state.lock() {
             state.dialog = Some(DialogState::new_choice(title, body, options, None, reply));
         }
+        self.wait_for_choice(handle, response)
+    }
+
+    pub fn prompt_update(
+        &mut self,
+        handle: &TuiHandle,
+        current: &str,
+        latest: &str,
+    ) -> Result<Option<usize>> {
+        let (reply, response) = mpsc::channel();
+        if let Ok(mut state) = handle.state.lock() {
+            state.dialog = Some(DialogState::new_update(current, latest, reply));
+        }
+        self.wait_for_choice(handle, response)
+    }
+
+    fn wait_for_choice(
+        &mut self,
+        handle: &TuiHandle,
+        response: mpsc::Receiver<DialogAnswer>,
+    ) -> Result<Option<usize>> {
         loop {
             if let Ok(mut state) = handle.state.lock() {
                 self.scroll_mouse_selection(&mut state);
@@ -5963,6 +6008,47 @@ mod dialog_tests {
             .draw(|frame| button = state.render(frame).back_to_bottom)
             .unwrap();
         assert!(button.is_none());
+    }
+
+    #[test]
+    fn update_dialog_requires_explicit_selection_before_installing() {
+        let (tx, _rx) = mpsc::channel();
+        let mut dialog = DialogState::new_update("1.0.0", "2.0.0", tx);
+        assert_eq!(
+            dialog.handle_key(make_key(KeyCode::Enter)),
+            Some(DialogAnswer::Choice(1))
+        );
+        dialog.handle_key(make_key(KeyCode::Up));
+        assert_eq!(
+            dialog.handle_key(make_key(KeyCode::Enter)),
+            Some(DialogAnswer::Choice(0))
+        );
+        assert_eq!(
+            dialog.handle_key(make_key(KeyCode::Esc)),
+            Some(DialogAnswer::Cancel)
+        );
+    }
+
+    #[test]
+    fn update_dialog_can_skip_version_and_cannot_filter_away_skip() {
+        let (tx, _rx) = mpsc::channel();
+        let mut dialog = DialogState::new_update("1.0.0", "2.0.0", tx);
+        dialog.handle_key(make_key(KeyCode::Char('x')));
+        assert_eq!(
+            dialog.handle_key(make_key(KeyCode::Esc)),
+            Some(DialogAnswer::Cancel)
+        );
+        assert_eq!(dialog.handle_key(make_key(KeyCode::Char('1'))), None);
+        assert_eq!(
+            dialog.handle_key(make_key(KeyCode::Enter)),
+            Some(DialogAnswer::Choice(0))
+        );
+        dialog.handle_key(make_key(KeyCode::Down));
+        dialog.handle_key(make_key(KeyCode::Down));
+        assert_eq!(
+            dialog.handle_key(make_key(KeyCode::Enter)),
+            Some(DialogAnswer::Choice(2))
+        );
     }
 
     #[test]
