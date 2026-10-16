@@ -422,9 +422,60 @@ pub(crate) struct ChatViewState {
     notice: Option<(String, std::time::Instant)>,
     dialog: Option<DialogState>,
     thought_modal: Option<ThoughtModalState>,
+    thoughts: Vec<ThinkingSegment>,
+    tools: Vec<super::tool_activity::ToolActivity>,
+    tool_viewer: Option<usize>,
     watermark_frame: u8,
     watermark_animating: bool,
     pub(crate) theme: crate::terminal_theme::TuiTheme,
+}
+
+#[derive(Debug)]
+struct ThinkingSegment {
+    id: Option<String>,
+    text: String,
+    elapsed: std::time::Duration,
+    elapsed_known: bool,
+    updated_at: Option<std::time::Instant>,
+}
+
+impl ThinkingSegment {
+    fn elapsed_label(&self) -> String {
+        if self.elapsed_known {
+            super::format_thought_elapsed(self.elapsed())
+        } else {
+            "time unavailable".into()
+        }
+    }
+    fn elapsed(&self) -> std::time::Duration {
+        self.elapsed
+            + self
+                .updated_at
+                .map(|time| time.elapsed())
+                .unwrap_or_default()
+    }
+}
+
+// Wrap from the tail so older paragraphs need not be laid out every frame.
+fn thought_tail(text: &str, width: usize, height: usize) -> Vec<String> {
+    let mut rows = Vec::new();
+    for paragraph in text.trim_end_matches('\n').rsplit('\n') {
+        let wrapped = textwrap::wrap(
+            paragraph,
+            textwrap::Options::new(width.max(1)).break_words(true),
+        );
+        for line in wrapped.into_iter().rev() {
+            if rows.len() == height {
+                break;
+            }
+            rows.push(line.into_owned());
+        }
+        if rows.len() == height {
+            break;
+        }
+    }
+    rows.reverse();
+    rows
 }
 
 #[derive(Debug)]
@@ -1088,6 +1139,75 @@ pub(crate) struct TuiHandle {
 }
 
 impl TuiHandle {
+    pub fn tool_progress(&self, progress: &mint_core::AgentProgress) {
+        if let Ok(mut state) = self.state.lock() {
+            state.record_tool_progress(progress);
+        }
+    }
+
+    pub fn reset_thoughts(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.finish_live_thought();
+            state.thought_modal = None;
+        }
+    }
+
+    pub fn append_thought_delta(&self, id: &str, delta: &str, elapsed: std::time::Duration) {
+        if delta.is_empty() {
+            return;
+        }
+        if let Ok(mut state) = self.state.lock() {
+            if let Some(thought) = state.thoughts.last_mut()
+                && thought.id.as_deref() == Some(id)
+                && thought.updated_at.is_some()
+            {
+                thought.text.push_str(delta);
+                thought.elapsed = elapsed.max(thought.elapsed());
+                thought.updated_at = Some(std::time::Instant::now());
+            } else {
+                state.finish_live_thought();
+                state.thoughts.push(ThinkingSegment {
+                    id: Some(id.to_owned()),
+                    text: delta.to_owned(),
+                    elapsed,
+                    elapsed_known: true,
+                    updated_at: Some(std::time::Instant::now()),
+                });
+            }
+            state.refresh_thought_modal();
+        }
+    }
+
+    pub fn finish_thought(&self, id: Option<&str>, text: &str, elapsed: std::time::Duration) {
+        if let Ok(mut state) = self.state.lock() {
+            if let Some(thought) = state.thoughts.last_mut()
+                && thought.updated_at.is_some()
+                && (id.is_none() || thought.id.as_deref() == id)
+            {
+                thought.text = text.to_owned();
+                thought.elapsed = elapsed;
+                thought.updated_at = None;
+            } else if !text.trim().is_empty() {
+                state.finish_live_thought();
+                state.thoughts.push(ThinkingSegment {
+                    id: id.map(str::to_owned),
+                    text: text.to_owned(),
+                    elapsed,
+                    elapsed_known: true,
+                    updated_at: None,
+                });
+            } else {
+                state.finish_live_thought();
+                return;
+            }
+            state.push_notice(format!(
+                "Thought · {} (Ctrl+T to view)",
+                super::format_thought_elapsed(elapsed)
+            ));
+            state.refresh_thought_modal();
+        }
+    }
+
     pub fn set_status(&self, lines: Vec<String>) {
         if let Ok(mut state) = self.state.lock() {
             state.status = lines;
@@ -1199,6 +1319,257 @@ impl TuiHandle {
 }
 
 impl ChatViewState {
+    fn record_tool_progress(&mut self, progress: &mint_core::AgentProgress) -> Option<usize> {
+        use mint_core::AgentProgress;
+        let (call_id, action, input, subagent, end) = match progress {
+            AgentProgress::ToolStart {
+                call_id,
+                action,
+                input,
+                subagent,
+            } => (call_id, action, input, subagent, None),
+            AgentProgress::ToolEnd {
+                call_id,
+                action,
+                input,
+                subagent,
+                result,
+                status,
+                elapsed_ms,
+            } => (
+                call_id,
+                action,
+                input,
+                subagent,
+                Some((result, status, elapsed_ms)),
+            ),
+            _ => return None,
+        };
+        let existing = self.tools.iter().position(|tool| {
+            (end.is_some() || call_id.is_some())
+                && tool.running()
+                && tool.matches(call_id.as_deref(), action, input, subagent.as_deref())
+        });
+        let index = existing.unwrap_or_else(|| {
+            let entry = self.transcript.len();
+            self.transcript
+                .push(TranscriptEntry::new(TranscriptRole::Notice, ""));
+            self.tools.push(super::tool_activity::ToolActivity {
+                entry,
+                call_id: call_id.clone(),
+                action: action.clone(),
+                input: input.clone(),
+                subagent: subagent.clone(),
+                started: std::time::Instant::now(),
+                elapsed: None,
+                result: None,
+                status: None,
+            });
+            self.tools.len() - 1
+        });
+        if let Some((result, status, elapsed_ms)) = end {
+            self.tools[index].finish(result, status.clone());
+            if let Some(elapsed_ms) = elapsed_ms {
+                self.tools[index].elapsed = Some(std::time::Duration::from_millis(*elapsed_ms));
+            }
+        }
+        self.refresh_tool_card(index);
+        if self.tool_viewer == Some(index) {
+            self.refresh_tool_viewer(false);
+        }
+        Some(index)
+    }
+
+    fn refresh_tool_card(&mut self, index: usize) {
+        let tool = &self.tools[index];
+        let lines = tool.lines(80);
+        let plain: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect();
+        if let Some(entry) = self.transcript.get_mut(tool.entry) {
+            *entry = TranscriptEntry {
+                role: TranscriptRole::Notice,
+                text: plain.join("\n"),
+                rendered_lines: lines,
+                plain_lines: plain,
+            };
+        }
+    }
+
+    fn finish_running_tools(&mut self) {
+        for index in 0..self.tools.len() {
+            if self.tools[index].running() {
+                self.tools[index].finish(
+                    "Interrupted before a result was received.",
+                    Some(mint_core::integrations::mcp_result::ToolStatus::Cancelled),
+                );
+                self.refresh_tool_card(index);
+            }
+        }
+        if self.tool_viewer.is_some() {
+            self.refresh_tool_viewer(false);
+        }
+    }
+
+    fn refresh_tool_viewer(&mut self, reset_scroll: bool) {
+        if self
+            .dialog
+            .as_ref()
+            .is_some_and(|dialog| !dialog.title.starts_with("Tool details ·"))
+        {
+            self.tool_viewer = None;
+            return;
+        }
+        let Some(index) = self.tool_viewer else {
+            return;
+        };
+        let Some(tool) = self.tools.get(index) else {
+            return;
+        };
+        let body = tool.details();
+        if let Some(dialog) = self.dialog.as_mut() {
+            dialog.title = format!("Tool details · {}/{}", index + 1, self.tools.len());
+            dialog.body = body;
+            if reset_scroll {
+                dialog.body_scroll = 0;
+            }
+        } else {
+            let (reply, _) = mpsc::channel();
+            self.dialog = Some(DialogState::new_choice(
+                format!("Tool details · {}/{}", index + 1, self.tools.len()),
+                body,
+                vec!["Close".into()],
+                None,
+                reply,
+            ));
+        }
+    }
+
+    fn handle_tool_key(&mut self, key: event::KeyEvent) -> bool {
+        if self
+            .dialog
+            .as_ref()
+            .is_some_and(|dialog| !dialog.title.starts_with("Tool details ·"))
+        {
+            self.tool_viewer = None;
+            return false;
+        }
+        use event::{KeyCode, KeyModifiers};
+        if self.dialog.is_none() {
+            self.tool_viewer = None;
+        }
+        let toggle =
+            key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL);
+        if let Some(index) = self.tool_viewer {
+            if toggle || key.code == KeyCode::Esc {
+                self.tool_viewer = None;
+                self.dialog = None;
+                return true;
+            }
+            if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+                self.tool_viewer = Some(if key.code == KeyCode::Tab {
+                    (index + 1) % self.tools.len()
+                } else {
+                    (index + self.tools.len() - 1) % self.tools.len()
+                });
+                self.refresh_tool_viewer(true);
+                return true;
+            }
+        } else if toggle && self.dialog.is_none() && self.thought_modal.is_none() {
+            if self.tools.is_empty() {
+                self.set_notice("No tool activity recorded yet");
+            } else {
+                self.tool_viewer = Some(self.tools.len() - 1);
+                self.refresh_tool_viewer(true);
+            }
+            return true;
+        }
+        false
+    }
+
+    fn live_thought(&self) -> Option<&ThinkingSegment> {
+        self.thoughts
+            .last()
+            .filter(|thought| thought.updated_at.is_some() && !thought.text.trim().is_empty())
+    }
+
+    fn thought_record(&self) -> Option<ThoughtModalState> {
+        let latest = self.thoughts.last()?;
+        Some(ThoughtModalState {
+            elapsed_str: latest.elapsed_label(),
+            lines: self
+                .thoughts
+                .iter()
+                .map(|thought| thought.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n── Next Step ──────────────────────────\n")
+                .lines()
+                .map(str::to_owned)
+                .collect(),
+            scroll: 0,
+        })
+    }
+
+    fn refresh_thought_modal(&mut self) {
+        if let Some(mut updated) = self.thought_record()
+            && let Some(modal) = self.thought_modal.as_mut()
+        {
+            updated.scroll = modal.scroll;
+            *modal = updated;
+        }
+    }
+
+    fn finish_live_thought(&mut self) {
+        if let Some(thought) = self.thoughts.last_mut()
+            && thought.updated_at.is_some()
+        {
+            thought.elapsed = thought.elapsed();
+            thought.updated_at = None;
+            let elapsed = super::format_thought_elapsed(thought.elapsed);
+            if !thought.text.trim().is_empty() {
+                self.push_notice(format!("Thought · {elapsed} (Ctrl+T to view)"));
+            }
+            self.refresh_thought_modal();
+        }
+    }
+
+    fn handle_thought_key(&mut self, key: event::KeyEvent) -> bool {
+        use event::{KeyCode, KeyModifiers};
+        if let Some(modal) = self.thought_modal.as_mut() {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => self.thought_modal = None,
+                KeyCode::Char('t' | 'c' | 'd') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.thought_modal = None
+                }
+                KeyCode::Up | KeyCode::Char('k') => modal.scroll = modal.scroll.saturating_sub(1),
+                KeyCode::Down | KeyCode::Char('j') => modal.scroll = modal.scroll.saturating_add(1),
+                KeyCode::PageUp => modal.scroll = modal.scroll.saturating_sub(10),
+                KeyCode::PageDown => modal.scroll = modal.scroll.saturating_add(10),
+                KeyCode::Home | KeyCode::Char('g') => modal.scroll = 0,
+                KeyCode::End | KeyCode::Char('G') => modal.scroll = usize::MAX,
+                _ => {}
+            }
+            return true;
+        }
+        if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.thought_modal = self.thought_record();
+            if self.thought_modal.is_none() {
+                self.set_notice("No thought process recorded for this turn");
+            } else {
+                self.selection_mode = false;
+                self.clear_notice();
+            }
+            return true;
+        }
+        false
+    }
+
     pub fn from_session(session: &InteractiveSession) -> Self {
         let mut state = Self {
             model: active_model(&session.config.ai_provider, &session.config).to_owned(),
@@ -1476,21 +1847,96 @@ impl ChatViewState {
         } else {
             self.chat_id = chat_id.to_owned();
             self.transcript.clear();
+            self.tools.clear();
+            if self
+                .dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.title.starts_with("Tool details ·"))
+            {
+                self.dialog = None;
+            }
+            self.thoughts.clear();
+            self.thought_modal = None;
+            self.tool_viewer = None;
             self.last_interaction_id = 0;
             self.sync_cursor = 0;
         }
     }
 
-    fn push_mcp_activity(&mut self, activity: Option<&serde_json::Value>) {
-        if let Some(events) = activity.and_then(serde_json::Value::as_array) {
-            for value in events {
-                if let Ok(event) = serde_json::from_value::<mint_core::AgentProgress>(value.clone())
-                    && let Some(notes) = crate::agent::mcp_progress_notes(&event)
-                {
-                    for note in notes {
-                        self.push_notice(note);
+    fn push_saved_activity(&mut self, activity: Option<&serde_json::Value>, turn_status: &str) {
+        let Some(events) = activity.and_then(serde_json::Value::as_array) else {
+            return;
+        };
+        let first_tool = self.tools.len();
+        for value in events {
+            let Ok(event) = serde_json::from_value::<mint_core::AgentProgress>(value.clone())
+            else {
+                continue;
+            };
+            // In-flight external turns use the shared-sync placeholder until a terminal snapshot arrives.
+            if !matches!(turn_status, "running" | "queued") {
+                match &event {
+                    mint_core::AgentProgress::ToolStart { .. } => {
+                        self.record_tool_progress(&event);
                     }
+                    mint_core::AgentProgress::ToolEnd { .. } => {
+                        if let Some(index) = self.record_tool_progress(&event) {
+                            self.tools[index].elapsed = value["data"]["elapsed_ms"]
+                                .as_u64()
+                                .or_else(|| value["data"]["elapsedMs"].as_u64())
+                                .map(std::time::Duration::from_millis);
+                            self.refresh_tool_card(index);
+                        }
+                    }
+                    mint_core::AgentProgress::ExtendedThinking {
+                        id,
+                        thought,
+                        elapsed_ms,
+                    } if !thought.trim().is_empty() => {
+                        self.thoughts.push(ThinkingSegment {
+                            id: id.clone(),
+                            text: thought.clone(),
+                            elapsed: std::time::Duration::from_millis(elapsed_ms.unwrap_or(0)),
+                            elapsed_known: elapsed_ms.is_some(),
+                            updated_at: None,
+                        });
+                        let elapsed = self.thoughts.last().unwrap().elapsed_label();
+                        self.push_notice(format!("Thought · {elapsed} (Ctrl+T to view)"));
+                    }
+                    mint_core::AgentProgress::Thought { thought } if !thought.trim().is_empty() => {
+                        if mint_core::orchestration::is_internal_cot(thought) {
+                            self.thoughts.push(ThinkingSegment {
+                                id: None,
+                                text: thought.clone(),
+                                elapsed: std::time::Duration::ZERO,
+                                elapsed_known: false,
+                                updated_at: None,
+                            });
+                            self.push_notice("Thought · time unavailable (Ctrl+T to view)");
+                        } else {
+                            self.push_notice(thought.clone());
+                        }
+                    }
+                    mint_core::AgentProgress::RunCompleted { summary } => {
+                        self.push_notice(crate::agent::run_summary_lines(summary).join("\n"));
+                    }
+                    _ => {}
                 }
+            }
+            if let Some(notes) = crate::agent::mcp_progress_notes(&event) {
+                for note in notes {
+                    self.push_notice(note);
+                }
+            }
+        }
+        for index in first_tool..self.tools.len() {
+            if self.tools[index].running() {
+                self.tools[index].finish(
+                    "Interrupted before a result was recorded.",
+                    Some(mint_core::integrations::mcp_result::ToolStatus::Cancelled),
+                );
+                self.tools[index].elapsed = None;
+                self.refresh_tool_card(index);
             }
         }
     }
@@ -1506,6 +1952,17 @@ impl ChatViewState {
         }
         self.chat_id = chat_id.to_owned();
         self.transcript.clear();
+        self.tools.clear();
+        if self
+            .dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.title.starts_with("Tool details ·"))
+        {
+            self.dialog = None;
+        }
+        self.thoughts.clear();
+        self.thought_modal = None;
+        self.tool_viewer = None;
         let scoped = mint_core::scoped_chat_id(chat_id, Some(&workspace.to_string_lossy()));
         self.sync_cursor = memory.latest_conversation_sequence(&scoped).unwrap_or(0);
         if let Ok(rows) = memory.interactions_for_chat(&scoped) {
@@ -1513,7 +1970,7 @@ impl ChatViewState {
             for row in rows {
                 self.transcript
                     .push(TranscriptEntry::new(TranscriptRole::User, row.user_text));
-                self.push_mcp_activity(row.agent_activity.as_ref());
+                self.push_saved_activity(row.agent_activity.as_ref(), &row.status);
                 match row.status.as_str() {
                     "completed" => self
                         .transcript
@@ -1607,7 +2064,7 @@ impl ChatViewState {
                 // Incoming new interaction from an external client (Web/Desktop)
                 self.transcript
                     .push(TranscriptEntry::new(TranscriptRole::User, &row.user_text));
-                self.push_mcp_activity(row.agent_activity.as_ref());
+                self.push_saved_activity(row.agent_activity.as_ref(), &row.status);
                 match row.status.as_str() {
                     "completed" => self.transcript.push(TranscriptEntry::new(
                         TranscriptRole::Assistant,
@@ -1648,7 +2105,7 @@ impl ChatViewState {
                         }
                     }
                     if append {
-                        self.push_mcp_activity(row.agent_activity.as_ref());
+                        self.push_saved_activity(row.agent_activity.as_ref(), &row.status);
                         self.transcript.push(TranscriptEntry::new(
                             TranscriptRole::Assistant,
                             &row.ai_text,
@@ -1678,7 +2135,7 @@ impl ChatViewState {
                         {
                             *last = TranscriptEntry::new(TranscriptRole::Notice, msg);
                             changed = true;
-                            self.push_mcp_activity(row.agent_activity.as_ref());
+                            self.push_saved_activity(row.agent_activity.as_ref(), &row.status);
                         }
                     }
                 }
@@ -1705,6 +2162,17 @@ impl ChatViewState {
     }
     pub fn clear_transcript(&mut self) {
         self.transcript.clear();
+        self.tools.clear();
+        if self
+            .dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.title.starts_with("Tool details ·"))
+        {
+            self.dialog = None;
+        }
+        self.thoughts.clear();
+        self.thought_modal = None;
+        self.tool_viewer = None;
         self.scroll_from_bottom = 0;
         self.selection_mode = false;
     }
@@ -1883,7 +2351,7 @@ impl ChatViewState {
         let selected_start = self.selection_anchor.min(self.selection_head);
         let selected_end = self.selection_anchor.max(self.selection_head);
         let mut line_index = 0usize;
-        for entry in &self.transcript {
+        for (entry_index, entry) in self.transcript.iter().enumerate() {
             let role_header = match entry.role {
                 TranscriptRole::User => None,
                 TranscriptRole::Assistant => Some(("Mint", crate::terminal_theme::ACCENT)),
@@ -1908,13 +2376,19 @@ impl ChatViewState {
                 lines.push(header);
                 line_index += 1;
             }
+            let tool_lines = self
+                .tools
+                .iter()
+                .find(|tool| tool.entry == entry_index)
+                .map(|tool| tool.lines(width));
             let empty_user_line = [Line::default()];
-            let content_lines =
-                if entry.role == TranscriptRole::User && entry.rendered_lines.is_empty() {
-                    &empty_user_line[..]
-                } else {
-                    &entry.rendered_lines
-                };
+            let content_lines = if let Some(lines) = tool_lines.as_ref() {
+                lines.as_slice()
+            } else if entry.role == TranscriptRole::User && entry.rendered_lines.is_empty() {
+                &empty_user_line[..]
+            } else {
+                &entry.rendered_lines
+            };
             for (content_index, content_line) in content_lines.iter().enumerate() {
                 let selected =
                     self.selection_mode && (selected_start..=selected_end).contains(&line_index);
@@ -2032,11 +2506,19 @@ impl ChatViewState {
         } else {
             (suggestions.len().min(5) as u16) + 1
         };
-        let status_height = if self.status.is_empty() {
-            0
-        } else {
-            (self.status.len() as u16).min(8)
-        };
+        let tick = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as usize
+            / 80;
+        let mut status_lines = self.status.clone();
+        // Keep active commands last: the bounded status viewport retains its tail.
+        status_lines.extend(super::tool_activity::running_lines(
+            &self.tools,
+            frame.area().width.saturating_sub(4) as usize,
+            tick,
+        ));
+        let status_height = (status_lines.len() as u16).min(8);
         fn accent_logo_line(text: &str) -> Line<'static> {
             Line::styled(
                 text.to_owned(),
@@ -2202,8 +2684,8 @@ impl ChatViewState {
         };
 
         let thought_height = if self.thought_modal.is_some() {
-            let max_allowed = main_area.height.saturating_sub(9).min(20).max(8);
-            ((main_area.height * 4) / 10).clamp(8, max_allowed)
+            let max_allowed = main_area.height.saturating_sub(9).min(20);
+            ((main_area.height * 4) / 10).max(8).min(max_allowed)
         } else {
             0
         };
@@ -2253,6 +2735,17 @@ impl ChatViewState {
         };
 
         let mut rows = rows.to_vec();
+        let live_height = if self.dialog.is_none()
+            && self.thought_modal.is_none()
+            && self.live_thought().is_some()
+        {
+            6.min(rows[1].height.saturating_sub(3))
+        } else {
+            0
+        };
+        let live_height = if live_height >= 3 { live_height } else { 0 };
+        rows[1].height = rows[1].height.saturating_sub(live_height);
+        let live_thought_area = Rect::new(rows[1].x, rows[1].bottom(), rows[1].width, live_height);
         let band_lines = crate::mods_ui::slot_lines(&self.mods, "above_composer");
         let band_height = (band_lines.len() as u16)
             .min(6)
@@ -2409,6 +2902,28 @@ impl ChatViewState {
         } else {
             None
         };
+        if live_thought_area.height > 0
+            && let Some(thought) = self.live_thought()
+        {
+            let rows = thought_tail(
+                &thought.text,
+                live_thought_area.width.saturating_sub(2) as usize,
+                live_thought_area.height.saturating_sub(2) as usize,
+            );
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(crate::terminal_theme::MUTED))
+                .title(format!(
+                    " Thinking · {} (Ctrl+T to view) ",
+                    super::format_thought_elapsed(thought.elapsed())
+                ));
+            frame.render_widget(
+                Paragraph::new(rows.into_iter().map(Line::raw).collect::<Vec<_>>())
+                    .style(Style::default().fg(crate::terminal_theme::MUTED))
+                    .block(block),
+                live_thought_area,
+            );
+        }
         if status_height > 0 {
             // Derive a tick counter from wall-clock time (ms / 80) so the
             // shimmer animation advances at ~12 fps regardless of the 30 ms
@@ -2419,8 +2934,7 @@ impl ChatViewState {
                 .as_millis() as usize
                 / 80;
 
-            let status_lines: Vec<Line> = self
-                .status
+            let status_lines: Vec<Line> = status_lines
                 .iter()
                 .map(|line| {
                     // Lines with a timing suffix: "Verb (elapsed · …)" —
@@ -2558,7 +3072,9 @@ impl ChatViewState {
                 } else {
                     body.line_count(width)
                 };
-                let hint = if dialog.update_prompt {
+                let hint = if self.tool_viewer.is_some() {
+                    " PgUp/PgDn scroll · Tab next · Ctrl+Y copy all · Esc close"
+                } else if dialog.update_prompt {
                     " ↑/↓ navigate · 1-3 choose · Enter continue · Esc skip"
                 } else if dialog.input.is_some() {
                     " Enter submit · Esc cancel"
@@ -2902,7 +3418,12 @@ impl ChatViewState {
                 .borders(Borders::TOP)
                 .border_style(Style::default().fg(crate::terminal_theme::BLUE))
                 .title(Span::styled(
-                    format!(" Thought Process ({}) ", modal.elapsed_str),
+                    format!(
+                        " Thought Process ({}) ",
+                        self.live_thought()
+                            .map(|thought| super::format_thought_elapsed(thought.elapsed()))
+                            .unwrap_or_else(|| modal.elapsed_str.clone())
+                    ),
                     Style::default()
                         .fg(crate::terminal_theme::BLUE)
                         .add_modifier(Modifier::BOLD),
@@ -4113,6 +4634,32 @@ impl ChatTui {
         true
     }
 
+    fn handle_tool_viewer_key(&mut self, state: &mut ChatViewState, key: event::KeyEvent) -> bool {
+        if key.code == event::KeyCode::Char('y')
+            && key.modifiers.contains(event::KeyModifiers::CONTROL)
+            && let Some(tool) = state.tool_viewer.and_then(|index| state.tools.get(index))
+        {
+            match self.clipboard.copy(&tool.details(), &mut io::stdout()) {
+                Ok(_) => state.set_notice("Tool details copied to clipboard"),
+                Err(error) => state.set_notice(format!("Could not copy tool details: {error}")),
+            }
+            return true;
+        }
+        if state.handle_tool_key(key) {
+            return true;
+        }
+        if state.tool_viewer.is_some() {
+            if let Some(dialog) = state.dialog.as_mut()
+                && dialog.handle_key(key).is_some()
+            {
+                state.dialog = None;
+                state.tool_viewer = None;
+            }
+            return true;
+        }
+        false
+    }
+
     pub fn read_input(
         &mut self,
         shared_state: &Arc<Mutex<ChatViewState>>,
@@ -4287,6 +4834,10 @@ impl ChatTui {
                 event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
                     use event::{KeyCode, KeyModifiers};
 
+                    if self.handle_tool_viewer_key(&mut state, key) {
+                        continue;
+                    }
+
                     let is_ctrl_c = key.code == KeyCode::Char('c')
                         && key.modifiers.contains(KeyModifiers::CONTROL);
                     if is_ctrl_c && self.copy_mouse_selection(&mut state) {
@@ -4382,36 +4933,7 @@ impl ChatTui {
                         }));
                     }
 
-                    if let Some(modal) = state.thought_modal.as_mut() {
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
-                                state.thought_modal = None;
-                            }
-                            KeyCode::Char('t') | KeyCode::Char('c') | KeyCode::Char('d')
-                                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                            {
-                                state.thought_modal = None;
-                            }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                modal.scroll = modal.scroll.saturating_sub(1);
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                modal.scroll = modal.scroll.saturating_add(1);
-                            }
-                            KeyCode::PageUp => {
-                                modal.scroll = modal.scroll.saturating_sub(10);
-                            }
-                            KeyCode::PageDown => {
-                                modal.scroll = modal.scroll.saturating_add(10);
-                            }
-                            KeyCode::Home | KeyCode::Char('g') => {
-                                modal.scroll = 0;
-                            }
-                            KeyCode::End | KeyCode::Char('G') => {
-                                modal.scroll = usize::MAX;
-                            }
-                            _ => {}
-                        }
+                    if state.handle_thought_key(key) {
                         continue;
                     }
 
@@ -4431,25 +4953,6 @@ impl ChatTui {
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
                                 state.selection_mode = false;
-                            }
-                            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                state.selection_mode = false;
-                                if let Some(record) = super::get_last_thought() {
-                                    if !record.thought.trim().is_empty() {
-                                        let lines: Vec<String> = record
-                                            .thought
-                                            .trim()
-                                            .lines()
-                                            .map(str::to_string)
-                                            .collect();
-                                        state.thought_modal = Some(ThoughtModalState {
-                                            elapsed_str: record.elapsed_str,
-                                            lines,
-                                            scroll: 0,
-                                        });
-                                        state.clear_notice();
-                                    }
-                                }
                             }
                             KeyCode::Enter | KeyCode::Char('y') => {
                                 let text = state.selected_text();
@@ -4491,24 +4994,6 @@ impl ChatTui {
                         continue;
                     }
                     match key.code {
-                        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            if let Some(record) = super::get_last_thought() {
-                                if !record.thought.trim().is_empty() {
-                                    let lines: Vec<String> =
-                                        record.thought.trim().lines().map(str::to_string).collect();
-                                    state.thought_modal = Some(ThoughtModalState {
-                                        elapsed_str: record.elapsed_str,
-                                        lines,
-                                        scroll: 0,
-                                    });
-                                    state.clear_notice();
-                                } else {
-                                    state.set_notice("No thought process recorded for this turn");
-                                }
-                            } else {
-                                state.set_notice("No thought process recorded for this turn");
-                            }
-                        }
                         KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             if let Ok(Some(uri)) = crate::image::read_clipboard_image() {
                                 if let Some(current) = pasted_image.as_mut() {
@@ -4829,6 +5314,10 @@ impl ChatTui {
                 self.draw_state(&state)?;
             }
             if task.is_finished() {
+                if let Ok(mut state) = handle.state.lock() {
+                    state.finish_live_thought();
+                    state.finish_running_tools();
+                }
                 return Ok(task.await?);
             }
             if event::poll(std::time::Duration::from_millis(30))? {
@@ -4851,12 +5340,16 @@ impl ChatTui {
                     event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
                         let mut selection_handled = false;
                         if let Ok(mut state) = handle.state.lock() {
-                            if let Some(dialog) = state.dialog.as_mut() {
+                            if self.handle_tool_viewer_key(&mut state, key) {
+                                selection_handled = true;
+                            } else if let Some(dialog) = state.dialog.as_mut() {
                                 if let Some(answer) = dialog.handle_key(key) {
                                     if let Some(dialog) = state.dialog.take() {
                                         let _ = dialog.reply.send(answer);
                                     }
                                 }
+                                selection_handled = true;
+                            } else if state.handle_thought_key(key) {
                                 selection_handled = true;
                             } else if key.code == KeyCode::Char('c')
                                 && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -4952,6 +5445,146 @@ mod dialog_tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
+
+    fn saved_activity_fixture(
+        activity: serde_json::Value,
+        status: &str,
+    ) -> (std::path::PathBuf, mint_core::MemoryStore) {
+        let root = std::env::temp_dir().join(format!(
+            "mint-resume-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let memory = mint_core::MemoryStore::open(root.join("memory.sqlite"));
+        let turn = memory.start_turn("resume-details", "Check files").unwrap();
+        memory.claim_turn("resume-details", turn).unwrap();
+        memory
+            .set_interaction_agent_activity_json(turn, &activity.to_string())
+            .unwrap();
+        if status == "completed" {
+            memory
+                .finish_turn(turn, "Saved answer", "test", "model", None)
+                .unwrap();
+        } else {
+            memory.end_turn(turn, status).unwrap();
+        }
+        (root, memory)
+    }
+
+    #[test]
+    fn resume_restores_tool_results_thoughts_and_run_summary_without_duplicates() {
+        let command = "python3 - <<'EOF'\nprint('complete command')\nEOF";
+        let activity = serde_json::json!([
+            {"type":"ExtendedThinking","data":{"id":"thought-one","thought":"Saved reasoning","elapsed_ms":1900}},
+            {"type":"ToolStart","data":{"callId":"one","action":"run_shell","input":{"command":command}}},
+            {"type":"ToolEnd","data":{"callId":"one","action":"run_shell","input":{"command":command},"result":"exit: 2\nstderr:\nfull saved error", "elapsed_ms":3400}},
+            {"type":"RunCompleted","data":{"summary":{"runId":"r1","task":"Check files","outcome":"FAILED","totalTokens":100,"toolCallsCount":1,"filesChanged":[],"durationSecs":16.2,"toolTimeline":[{"step":1,"action":"run_shell","target":"python3","success":false,"retried":false}],"retriesCount":0}}}
+        ]);
+        let (root, memory) = saved_activity_fixture(activity, "completed");
+        let mut state = ChatViewState::default();
+        for _ in 0..2 {
+            state.reload_transcript_with(&memory, "resume-details", &root);
+            assert_eq!(state.tools.len(), 1);
+            assert_eq!(state.thoughts.len(), 1);
+            let text = state
+                .transcript
+                .iter()
+                .map(|entry| entry.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("Shell failed · 3.4s · exit 2"));
+            assert_eq!(text.matches("Thought · 1.9s").count(), 1);
+            assert!(text.contains("Completed with 1 failure"));
+            assert!(text.contains("16.2s"));
+            assert!(!state.tools[0].running());
+            assert!(state.handle_thought_key(ctrl_t()));
+            assert_eq!(
+                state.thought_modal.as_ref().unwrap().lines,
+                vec!["Saved reasoning"]
+            );
+            state.handle_thought_key(make_key(KeyCode::Esc));
+            let mut open = make_key(KeyCode::Char('o'));
+            open.modifiers = KeyModifiers::CONTROL;
+            assert!(state.handle_tool_key(open));
+            let body = &state.dialog.as_ref().unwrap().body;
+            assert!(body.contains(command));
+            assert!(body.contains("full saved error"));
+            state.handle_tool_key(make_key(KeyCode::Esc));
+        }
+        assert!(!state.refresh_shared_transcript_with(&memory));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resume_switching_sessions_closes_previous_tool_details() {
+        let (root, memory) = saved_activity_fixture(
+            serde_json::json!([
+                {"type":"ToolEnd","data":{"callId":"old","action":"run_shell","input":{"command":"echo previous-session"},"result":"exit: 0"}}
+            ]),
+            "completed",
+        );
+        let mut state = ChatViewState::default();
+        state.reload_transcript_with(&memory, "resume-details", &root);
+        let mut key = make_key(KeyCode::Char('o'));
+        key.modifiers = KeyModifiers::CONTROL;
+        assert!(state.handle_tool_key(key));
+        assert!(state.dialog.is_some());
+        state.reload_transcript_with(&memory, "different-session", &root);
+        assert!(
+            state.dialog.is_none(),
+            "previous session tool details remained open"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resume_legacy_activity_does_not_invent_zero_second_tool_duration() {
+        let (root, memory) = saved_activity_fixture(
+            serde_json::json!([
+                {"type":"ToolStart","data":{"action":"run_shell","input":{"command":"echo legacy"}}},
+                {"type":"ToolEnd","data":{"action":"run_shell","input":{"command":"echo legacy"},"result":"exit: 0\nlegacy output"}}
+            ]),
+            "completed",
+        );
+        let mut state = ChatViewState::default();
+        state.reload_transcript_with(&memory, "resume-details", &root);
+        assert_eq!(state.tools.len(), 1);
+        assert!(state.tools[0].heading().contains("time unavailable"));
+        assert!(!state.tools[0].running());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resume_interrupted_activity_keeps_partial_thought_and_never_restarts_spinner() {
+        let events: Vec<mint_core::AgentProgress> = serde_json::from_value(serde_json::json!([
+            {"type":"ThinkingDelta","data":{"id":"partial","delta":"unfinished ","elapsed_ms":400}},
+            {"type":"ThinkingDelta","data":{"id":"partial","delta":"reasoning","elapsed_ms":700}},
+            {"type":"ToolStart","data":{"callId":"unfinished","action":"run_shell","input":{"command":"sleep 100"}}}
+        ])).unwrap();
+        let activity =
+            serde_json::to_value(mint_core::orchestration::compact_agent_progress(&events))
+                .unwrap();
+        let (root, memory) = saved_activity_fixture(activity, "interrupted");
+        let mut state = ChatViewState::default();
+        state.reload_transcript_with(&memory, "resume-details", &root);
+        assert_eq!(state.tools.len(), 1);
+        assert!(!state.tools[0].running());
+        assert!(state.tools[0].heading().contains("interrupted"));
+        assert!(super::super::tool_activity::running_lines(&state.tools, 80, 0).is_empty());
+        assert!(state.handle_thought_key(ctrl_t()));
+        assert_eq!(
+            state.thought_modal.as_ref().unwrap().lines,
+            vec!["unfinished reasoning"]
+        );
+        state.reload_transcript_with(&memory, "another-session", &root);
+        assert!(state.thoughts.is_empty());
+        assert!(state.tools.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn device_saved_activity_survives_tui_reload_and_external_sync() {
@@ -6008,6 +6641,362 @@ mod dialog_tests {
             .draw(|frame| button = state.render(frame).back_to_bottom)
             .unwrap();
         assert!(button.is_none());
+    }
+
+    fn thought_screen(state: &ChatViewState, width: u16, height: u16) -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .chunks(width as usize)
+            .map(|cells| cells.iter().map(|cell| cell.symbol()).collect())
+            .collect()
+    }
+
+    fn ctrl_t() -> KeyEvent {
+        let mut key = make_key(KeyCode::Char('t'));
+        key.modifiers = KeyModifiers::CONTROL;
+        key
+    }
+
+    fn tool_event(value: serde_json::Value) -> mint_core::AgentProgress {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn running_tool_status_stays_above_composer_with_command_and_spinner() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let tui = ChatTui::handle(state.clone());
+        tui.tool_progress(&tool_event(serde_json::json!({"type":"ToolStart","data":{"callId":"a","action":"run_shell","input":{"command":"sleep 5 # live-command-marker"}}})));
+        {
+            let mut state = state.lock().unwrap();
+            for _ in 0..35 {
+                state.push_notice("older transcript row");
+            }
+            state.scroll_from_bottom = 20;
+            state.status = (0..12).map(|index| format!("Plan row {index}")).collect();
+            let rows = thought_screen(&state, 100, 30);
+            let pinned = rows[22..26].join("\n");
+            assert!(
+                pinned.contains("Running 1 shell command"),
+                "missing active summary: {pinned}"
+            );
+            assert!(
+                pinned.contains("live-command-marker"),
+                "missing running command: {pinned}"
+            );
+            assert!(
+                pinned.chars().any(|ch| "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".contains(ch)),
+                "missing animated spinner: {pinned}"
+            );
+        }
+        tui.tool_progress(&tool_event(serde_json::json!({"type":"ToolEnd","data":{"callId":"a","action":"run_shell","input":{"command":"sleep 5 # live-command-marker"},"result":"exit: 0"}})));
+        let state = state.lock().unwrap();
+        assert!(
+            !thought_screen(&state, 100, 30)[22..26]
+                .join("\n")
+                .contains("live-command-marker")
+        );
+    }
+
+    #[test]
+    fn compact_tools_details_cannot_replace_an_approval_dialog() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let tui = ChatTui::handle(state.clone());
+        tui.tool_progress(&tool_event(serde_json::json!({"type":"ToolStart","data":{"callId":"a","action":"run_shell","input":{"command":"echo hi"}}})));
+        {
+            let mut state = state.lock().unwrap();
+            let mut key = make_key(KeyCode::Char('o'));
+            key.modifiers = KeyModifiers::CONTROL;
+            assert!(state.handle_tool_key(key));
+            let (reply, _) = mpsc::channel();
+            state.dialog = Some(DialogState::new_choice(
+                "Local shell command",
+                "Approval required",
+                vec!["Yes".into(), "No".into()],
+                None,
+                reply,
+            ));
+        }
+        tui.tool_progress(&tool_event(serde_json::json!({"type":"ToolEnd","data":{"callId":"a","action":"run_shell","input":{"command":"echo hi"},"result":"exit: 0"}})));
+        let state = state.lock().unwrap();
+        assert_eq!(state.dialog.as_ref().unwrap().title, "Local shell command");
+        assert!(state.tool_viewer.is_none());
+    }
+
+    #[test]
+    fn identical_legacy_starts_keep_separate_running_cards() {
+        let mut state = ChatViewState::default();
+        let start = tool_event(
+            serde_json::json!({"type":"ToolStart","data":{"action":"read_file","input":{"path":"same"}}}),
+        );
+        state.record_tool_progress(&start);
+        state.record_tool_progress(&start);
+        assert_eq!(state.tools.len(), 2);
+        let end = tool_event(
+            serde_json::json!({"type":"ToolEnd","data":{"action":"read_file","input":{"path":"same"},"result":"contents"}}),
+        );
+        state.record_tool_progress(&end);
+        assert_eq!(state.tools.iter().filter(|tool| tool.running()).count(), 1);
+        state.record_tool_progress(&end);
+        assert_eq!(state.tools.len(), 2);
+        assert!(state.tools.iter().all(|tool| !tool.running()));
+    }
+
+    #[test]
+    fn compact_tools_count_only_running_calls_and_update_existing_card() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let tui = ChatTui::handle(state.clone());
+        for (id, action) in [("a", "run_shell"), ("b", "run_shell"), ("c", "read_file")] {
+            tui.tool_progress(&tool_event(serde_json::json!({"type":"ToolStart","data":{"callId":id,"action":action,"input":{"command":"echo hi"}}})));
+        }
+        assert!(
+            thought_screen(&state.lock().unwrap(), 100, 30)
+                .join("\n")
+                .contains("Running 3 tasks · 2 shell commands · 1 tool")
+        );
+        tui.tool_progress(&tool_event(serde_json::json!({"type":"ToolEnd","data":{"callId":"a","action":"run_shell","input":{"command":"echo hi"},"result":"exit: 0\nstdout:\nhi"}})));
+        let state = state.lock().unwrap();
+        assert_eq!(state.transcript.len(), 3);
+        let screen = thought_screen(&state, 100, 30).join("\n");
+        assert!(screen.contains("Shell completed"));
+        assert!(screen.contains("Running 2 tasks · 1 shell command · 1 tool"));
+        assert!(!screen.contains("stdout:"));
+    }
+
+    #[test]
+    fn compact_tools_hide_multiline_commands_and_keep_full_details_accessible() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let tui = ChatTui::handle(state.clone());
+        let command = format!(
+            "python3 - <<'EOF'\n{}\nEOF",
+            "print('secret-detail')\n".repeat(40)
+        );
+        tui.tool_progress(&tool_event(serde_json::json!({"type":"ToolStart","data":{"callId":"a","action":"run_shell","input":{"command":command}}})));
+        let mut state = state.lock().unwrap();
+        assert!(
+            !thought_screen(&state, 80, 24)
+                .join("\n")
+                .contains("secret-detail")
+        );
+        let mut key = make_key(KeyCode::Char('o'));
+        key.modifiers = KeyModifiers::CONTROL;
+        assert!(state.handle_tool_key(key));
+        assert!(state.dialog.as_ref().unwrap().body.contains(&command));
+        assert!(state.handle_tool_key(make_key(KeyCode::Esc)));
+        assert!(state.dialog.is_none());
+    }
+
+    #[test]
+    fn compact_tools_match_parallel_results_by_id_and_keep_failures_red() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let tui = ChatTui::handle(state.clone());
+        for id in ["a", "b"] {
+            tui.tool_progress(&tool_event(serde_json::json!({"type":"ToolStart","data":{"callId":id,"action":"run_shell","input":{"command":"same-command"}}})));
+        }
+        tui.tool_progress(&tool_event(serde_json::json!({"type":"ToolEnd","data":{"callId":"b","action":"run_shell","input":{"command":"same-command"},"result":"exit: 2\nstderr:\nfull failure"}})));
+        let state = state.lock().unwrap();
+        assert_eq!(state.transcript.len(), 2);
+        assert_eq!(
+            state.transcript[1].rendered_lines[0].style.fg,
+            Some(Color::Red)
+        );
+        assert!(
+            thought_screen(&state, 80, 24)
+                .join("\n")
+                .contains("Running 1 shell command")
+        );
+    }
+
+    #[test]
+    fn live_thought_timer_advances_without_deltas_and_preview_fits_small_terminals() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let handle = ChatTui::handle(state.clone());
+        handle.append_thought_delta("one", "checking code", std::time::Duration::ZERO);
+        let mut state = state.lock().unwrap();
+        state.thoughts.last_mut().unwrap().updated_at =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
+        assert!(
+            thought_screen(&state, 80, 24)
+                .join("\n")
+                .contains("Thinking · 3.0s")
+        );
+        for (width, height) in [(40, 16), (60, 20), (80, 24)] {
+            let rows = thought_screen(&state, width, height);
+            let top = rows
+                .iter()
+                .position(|line| line.trim_start().starts_with('┌'))
+                .unwrap();
+            let bottom = rows
+                .iter()
+                .enumerate()
+                .skip(top + 1)
+                .find(|(_, line)| line.trim_start().starts_with('└'))
+                .unwrap()
+                .0;
+            assert!(bottom - top < 6);
+            assert!(rows.join("\n").contains("checking code"));
+        }
+        assert!(state.handle_thought_key(ctrl_t()));
+        for (width, height) in [(20, 8), (40, 12), (80, 24)] {
+            thought_screen(&state, width, height);
+        }
+    }
+
+    #[test]
+    fn live_thought_history_keeps_steps_once_and_remains_accessible_next_turn() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let handle = ChatTui::handle(state.clone());
+        handle.append_thought_delta("one", "first partial", std::time::Duration::ZERO);
+        handle.finish_thought(
+            Some("one"),
+            "first complete",
+            std::time::Duration::from_secs(1),
+        );
+        handle.append_thought_delta("two", "second partial", std::time::Duration::ZERO);
+        assert!(state.lock().unwrap().handle_thought_key(ctrl_t()));
+        handle.finish_thought(
+            Some("two"),
+            "second complete",
+            std::time::Duration::from_secs(2),
+        );
+        {
+            let state = state.lock().unwrap();
+            let text = state.thought_modal.as_ref().unwrap().lines.join("\n");
+            assert_eq!(text.matches("first complete").count(), 1);
+            assert_eq!(text.matches("second complete").count(), 1);
+            assert!(!text.contains("partial"));
+            assert_eq!(state.transcript.len(), 2);
+        }
+        handle.reset_thoughts();
+        let mut state = state.lock().unwrap();
+        assert!(state.thought_modal.is_none());
+        assert!(state.handle_thought_key(ctrl_t()));
+        assert!(
+            state
+                .thought_modal
+                .as_ref()
+                .unwrap()
+                .lines
+                .join("\n")
+                .contains("first complete")
+        );
+    }
+
+    #[test]
+    fn live_thought_wrapped_tail_preserves_latest_unicode_text() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let handle = ChatTui::handle(state.clone());
+        handle.append_thought_delta(
+            "one",
+            &format!("{}\nlatest ข้อความ 🙂", "older words ".repeat(30)),
+            std::time::Duration::ZERO,
+        );
+        let state = state.lock().unwrap();
+        let screen = thought_screen(&state, 40, 24).join("\n");
+        assert!(screen.contains("latest ข้อความ 🙂"));
+        assert!(!screen.contains("older words older words older words older words"));
+    }
+
+    #[test]
+    fn live_thought_preview_keeps_only_latest_rows_without_appending_transcript() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let handle = ChatTui::handle(state.clone());
+        assert!(
+            !thought_screen(&state.lock().unwrap(), 80, 24)
+                .join("\n")
+                .contains("Thinking ·")
+        );
+        for index in 1..=20 {
+            handle.append_thought_delta(
+                "one",
+                &format!("reasoning row {index:02}\n"),
+                std::time::Duration::from_millis(1200),
+            );
+        }
+        let state = state.lock().unwrap();
+        let rows = thought_screen(&state, 80, 24);
+        let title = rows
+            .iter()
+            .position(|line| line.contains("Thinking · 1.2s"))
+            .expect("live thinking header");
+        let latest = rows
+            .iter()
+            .position(|line| line.contains("reasoning row 20"))
+            .expect("latest streamed row");
+        assert!(latest > title && latest - title < 6);
+        assert!(!rows.join("\n").contains("reasoning row 01"));
+        assert!(state.transcript.is_empty());
+    }
+
+    #[test]
+    fn live_thought_finishes_as_one_collapsed_summary_and_preserves_full_text() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let handle = ChatTui::handle(state.clone());
+        handle.append_thought_delta("one", "partial", std::time::Duration::from_millis(1200));
+        handle.finish_thought(
+            Some("one"),
+            "complete reasoning",
+            std::time::Duration::from_millis(1900),
+        );
+        let mut state = state.lock().unwrap();
+        let rendered = thought_screen(&state, 80, 24).join("\n");
+        assert!(rendered.contains("Thought · 1.9s (Ctrl+T to view)"));
+        assert!(!rendered.contains("Thinking ·"));
+        assert!(!rendered.contains("complete reasoning"));
+        assert_eq!(state.transcript.len(), 1);
+        assert!(state.handle_thought_key(ctrl_t()));
+        assert_eq!(
+            state.thought_modal.as_ref().unwrap().lines,
+            vec!["complete reasoning"]
+        );
+    }
+
+    #[test]
+    fn live_thought_modal_refreshes_deltas_and_closes_without_cancelling_agent() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let handle = ChatTui::handle(state.clone());
+        handle.append_thought_delta("one", "first", std::time::Duration::ZERO);
+        assert!(state.lock().unwrap().handle_thought_key(ctrl_t()));
+        handle.append_thought_delta("one", " second", std::time::Duration::from_secs(1));
+        let mut state = state.lock().unwrap();
+        assert_eq!(
+            state.thought_modal.as_ref().unwrap().lines,
+            vec!["first second"]
+        );
+        assert!(state.handle_thought_key(make_key(KeyCode::Esc)));
+        assert!(state.thought_modal.is_none());
+        assert!(!handle.take_interrupted());
+    }
+
+    #[test]
+    fn live_thought_interruption_preserves_partial_text_and_collapses_preview() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let handle = ChatTui::handle(state.clone());
+        handle.append_thought_delta(
+            "one",
+            "unfinished reasoning",
+            std::time::Duration::from_millis(1900),
+        );
+        let mut state = state.lock().unwrap();
+        state.finish_live_thought();
+        assert!(
+            !thought_screen(&state, 80, 24)
+                .join("\n")
+                .contains("Thinking ·")
+        );
+        assert!(state.handle_thought_key(ctrl_t()));
+        assert_eq!(
+            state.thought_modal.as_ref().unwrap().lines,
+            vec!["unfinished reasoning"]
+        );
+        assert_eq!(state.transcript.len(), 1);
     }
 
     #[test]

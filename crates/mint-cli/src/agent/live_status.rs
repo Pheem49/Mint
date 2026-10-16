@@ -714,19 +714,17 @@ pub(super) fn render_live_status(status: &mut LiveStatus) -> bool {
     status.spinner_tick += 1;
 
     lines.extend(plan_lines(&status.plan_steps, true, tick));
-    lines.extend(activity_block_lines(
-        &status.tasks[tasks_start..],
-        &status.activities[activities_start..],
-        &status.explored[explored_start..],
-        true,
-        tick,
-        status.active_tool_started,
-        // The full-screen TUI shows only the last eight live rows. A shell
-        // output preview can otherwise push the activity header and command
-        // labels out of view while the model is composing its next answer.
-        // Keep the preview in `status.tasks` for the committed transcript.
-        status.tui.is_none(),
-    ));
+    if status.tui.is_none() {
+        lines.extend(activity_block_lines(
+            &status.tasks[tasks_start..],
+            &status.activities[activities_start..],
+            &status.explored[explored_start..],
+            true,
+            tick,
+            status.active_tool_started,
+            true,
+        ));
+    }
     // Built here (not inline below) so both destinations for it — the old
     // trailing-line spot in `lines`, and the queue box's own pinned row —
     // share one animation. When the queue box is about to be drawn, it's
@@ -909,6 +907,12 @@ pub(super) fn commit_activity_snapshot_if_idle(
 }
 
 pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
+    if status.tui.is_some() {
+        status.committed_explored = status.explored.len();
+        status.committed_activities = status.activities.len();
+        status.committed_tasks = status.tasks.len();
+        return false;
+    }
     let explored_start = status.committed_explored.min(status.explored.len());
     let activities_start = status.committed_activities.min(status.activities.len());
     let tasks_start = status.committed_tasks.min(status.tasks.len());
@@ -1011,6 +1015,51 @@ pub(super) fn is_internal_cot(text: &str) -> bool {
     mint_core::orchestration::is_internal_cot(text)
 }
 
+pub(super) fn print_extended_thinking(
+    status: &mut LiveStatus,
+    thought: &str,
+    elapsed: Duration,
+    stream_id: Option<&str>,
+) {
+    if let Some(tui) = &status.tui {
+        crate::interactive::finish_thought(
+            stream_id,
+            thought,
+            &crate::interactive::format_thought_elapsed(elapsed),
+        );
+        tui.finish_thought(stream_id, thought, elapsed);
+    } else {
+        print_timeline_note(status, thought, elapsed, stream_id);
+    }
+}
+
+#[cfg(test)]
+mod tui_thought_progress_tests {
+    use super::*;
+
+    #[test]
+    fn short_extended_thinking_collapses_in_tui_instead_of_printing_raw_text() {
+        let state = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::interactive::ChatViewState::default(),
+        ));
+        let tui = crate::interactive::ChatTui::handle(state.clone());
+        tui.append_thought_delta("one", "Checking", Duration::from_millis(1200));
+        let mut status = LiveStatus {
+            tui: Some(tui),
+            ..Default::default()
+        };
+        print_extended_thinking(
+            &mut status,
+            "Checking files",
+            Duration::from_millis(1900),
+            Some("one"),
+        );
+        let state = state.lock().unwrap();
+        assert_eq!(state.transcript.len(), 1);
+        assert_eq!(state.transcript[0].text, "Thought · 1.9s (Ctrl+T to view)");
+    }
+}
+
 pub(super) fn print_timeline_note(
     status: &mut LiveStatus,
     thought: &str,
@@ -1025,6 +1074,10 @@ pub(super) fn print_timeline_note(
     crate::interactive::finish_thought(stream_id, thought, &elapsed_str);
 
     if is_internal_cot(thought) {
+        if let Some(tui) = &status.tui {
+            tui.finish_thought(stream_id, thought, elapsed);
+            return;
+        }
         let summary = format!(
             "{muted}  • Thought for {elapsed_str}{reset} {muted}(Ctrl+T to view){reset}",
             muted = crate::terminal_theme::ANSI_MUTED,

@@ -15,6 +15,7 @@ pub mod approvals;
 mod mcp_review;
 #[cfg(test)]
 mod mod_authoring_regressions;
+mod progress_clock;
 mod repeated_failures;
 #[cfg(all(test, unix))]
 mod review_regressions;
@@ -854,6 +855,8 @@ pub enum AgentProgress {
         subagent: Option<String>,
     },
     ToolEnd {
+        #[serde(default, alias = "elapsedMs", skip_serializing_if = "Option::is_none")]
+        elapsed_ms: Option<u64>,
         #[serde(default, rename = "callId", skip_serializing_if = "Option::is_none")]
         call_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1744,7 +1747,9 @@ where
                 );
                 result
             };
-            let mut progress = move |event: AgentProgress| {
+            let mut progress_clock = progress_clock::ProgressClock::default();
+            let mut progress = move |mut event: AgentProgress| {
+                progress_clock.stamp(&mut event, Instant::now());
                 crate::companion::progress(&progress_chat_id, companion_turn_id, &event);
                 if let Ok(mut lock) = record_activity.lock() {
                     lock.push(event.clone());
@@ -2157,7 +2162,7 @@ where
                         )?;
                         for ToolResultEntry{action,input,text:error,..} in &errors {
                             progress(AgentProgress::ToolStart { call_id: None, action: action.clone(), input: input.clone(), subagent: None });
-                            progress(AgentProgress::ToolEnd { call_id: None, status: None, action: action.clone(), input: input.clone(), result: error.clone(), subagent: None });
+                            progress(AgentProgress::ToolEnd { elapsed_ms: None, call_id: None, status: None, action: action.clone(), input: input.clone(), result: error.clone(), subagent: None });
                             trajectory.push(format_trajectory_step(step, "", action, error));
                         }
                         step_tool_results.extend(errors);
@@ -2745,7 +2750,7 @@ where
                         });
                     }
                     if run_control::cancelled() {outcome_status = Some(crate::mcp_result::ToolStatus::Cancelled);}
-                    progress(AgentProgress::ToolEnd { call_id: Some(activity_call_id), status: outcome_status,
+                    progress(AgentProgress::ToolEnd { elapsed_ms: None, call_id: Some(activity_call_id), status: outcome_status,
                         action: decision.action.clone(),
                         input: tool_progress_input(&root, &decision),
                         result: result.clone(),
@@ -3133,6 +3138,7 @@ async fn dispatch_one_subagent(
                 subagent: Some(subagent_name.clone()),
             },
             AgentProgress::ToolEnd {
+                elapsed_ms,
                 action,
                 input,
                 result,
@@ -3140,6 +3146,7 @@ async fn dispatch_one_subagent(
                 status,
                 ..
             } => AgentProgress::ToolEnd {
+                elapsed_ms,
                 call_id,
                 status,
                 action,
@@ -3196,17 +3203,9 @@ async fn dispatch_one_subagent(
     outcome
 }
 
-/// Runs a step's `dispatch_subagent` decisions concurrently (see
-/// `decisions_are_parallel_subagent_batch` for when this is used instead of
-/// the normal one-at-a-time loop), capped at `PARALLEL_SUBAGENT_LIMIT` in
-/// flight at once. `progress`/`action_counts`/`trajectory` are only touched
-/// after every future has completed — back in single-threaded code, in the
-/// decisions' original order — so this never needs to share those across
-/// concurrent tasks. `approve` is the one resource genuinely needed *during*
-/// concurrent execution (a subagent's own risky actions still need real user
-/// approval), so it's wrapped in a `std::sync::Mutex` for the batch: each
-/// concurrent subagent gets a small adapter closure over a shared `&Mutex`,
-/// serializing just the moment of invoking it rather than the whole call.
+/// Runs subagent decisions concurrently, capped at `PARALLEL_SUBAGENT_LIMIT`.
+/// Progress and approvals use short Mutex-backed adapters during execution;
+/// action counts and trajectory are updated afterward in decision order.
 #[allow(clippy::too_many_arguments)]
 async fn run_parallel_subagent_batch(
     decisions: &[(String, AgentDecision)],
@@ -3240,6 +3239,16 @@ async fn run_parallel_subagent_batch(
         let approve_mutex = &approve_mutex;
         let progress_mutex = &progress_mutex;
         dispatches.push(async move {
+            let mut progress_adapter = |event: AgentProgress| {
+                let mut guard = progress_mutex.lock().unwrap();
+                (*guard)(event);
+            };
+            progress_adapter(AgentProgress::ToolStart {
+                call_id: Some(call_id.clone()),
+                action: action.clone(),
+                input: input_val.clone(),
+                subagent: None,
+            });
             let result: Result<String, OrchestrationError> = if name.trim().is_empty() {
                 Err(OrchestrationError::Agent("name is required".into()))
             } else if task_text.trim().is_empty() {
@@ -3250,10 +3259,6 @@ async fn run_parallel_subagent_batch(
                         let mut guard = approve_mutex.lock().unwrap();
                         (*guard)(approval)
                     };
-                let mut progress_adapter = |event: AgentProgress| {
-                    let mut guard = progress_mutex.lock().unwrap();
-                    (*guard)(event);
-                };
                 dispatch_one_subagent(
                     root,
                     config,
@@ -3265,8 +3270,27 @@ async fn run_parallel_subagent_batch(
                 )
                 .await
             };
+            let tool_result = match result {
+                Ok(text) => text,
+                Err(error) => format!("Error: {}", error),
+            };
+            progress_adapter(AgentProgress::ToolEnd {
+                elapsed_ms: None,
+                call_id: Some(call_id.clone()),
+                status: None,
+                action: action.clone(),
+                input: input_val.clone(),
+                result: tool_result.clone(),
+                subagent: None,
+            });
             (
-                index, call_id, thought, action, input_val, action_key, result,
+                index,
+                call_id,
+                thought,
+                action,
+                input_val,
+                action_key,
+                tool_result,
             )
         });
     }
@@ -3276,32 +3300,8 @@ async fn run_parallel_subagent_batch(
         .collect::<Vec<_>>()
         .await;
     results.sort_by_key(|(index, ..)| *index);
-    // All `dispatches` futures (the only borrowers of `progress_mutex`) have
-    // finished by now, so this is the sole remaining handle — safe to unwrap
-    // back into a plain `&mut dyn FnMut` for the rest of this function.
-    let progress = progress_mutex.into_inner().unwrap();
-
     let mut step_tool_results = Vec::with_capacity(results.len());
-    for (_, call_id, thought, action, input_val, action_key, result) in results {
-        progress(AgentProgress::ToolStart {
-            call_id: None,
-            action: action.clone(),
-            input: input_val.clone(),
-            subagent: None,
-        });
-        let tool_result = match result {
-            Ok(text) => text,
-            Err(error) => format!("Error: {}", error),
-        };
-        progress(AgentProgress::ToolEnd {
-            call_id: None,
-            status: None,
-            action: action.clone(),
-            input: input_val.clone(),
-            result: tool_result.clone(),
-            subagent: None,
-        });
-
+    for (_, call_id, thought, action, input_val, action_key, tool_result) in results {
         let action_count = {
             let count = action_counts.entry(action_key).or_insert(0);
             *count += 1;
@@ -3376,7 +3376,7 @@ async fn run_parallel_read_only_batch(
 
             {
                 let mut guard = progress_mutex.lock().unwrap();
-                (*guard)(AgentProgress::ToolStart { call_id: None,
+                (*guard)(AgentProgress::ToolStart { call_id: Some(call_id.clone()),
                     action: action.clone(),
                     input: input_val.clone(),
                     subagent: None,
@@ -3451,7 +3451,7 @@ async fn run_parallel_read_only_batch(
 
             {
                 let mut guard = progress_mutex.lock().unwrap();
-                (*guard)(AgentProgress::ToolEnd { call_id: None, status: None,
+                (*guard)(AgentProgress::ToolEnd { elapsed_ms: None, call_id: Some(call_id.clone()), status: None,
                     action: action.clone(),
                     input: input_val.clone(),
                     result: result.clone(),
@@ -4535,6 +4535,7 @@ mod tests {
                 elapsed_ms: Some(200),
             },
             AgentProgress::ToolEnd {
+                elapsed_ms: None,
                 call_id: None,
                 status: None,
                 action: "read_file".into(),
@@ -4592,6 +4593,7 @@ mod tests {
                 subagent: None,
             });
         turn.activity.lock().unwrap().push(AgentProgress::ToolEnd {
+            elapsed_ms: None,
             call_id: None,
             status: None,
             action: "run_shell".into(),

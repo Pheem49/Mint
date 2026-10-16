@@ -343,3 +343,107 @@ for line in sys.stdin:
         "approval raced cancellation and dispatched: {sent}"
     );
 }
+
+#[tokio::test]
+async fn parallel_read_only_progress_keeps_distinct_call_ids() {
+    let root = std::env::temp_dir().join(format!("mint-parallel-review-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("same.txt"), "contents").unwrap();
+    let decisions: Vec<_> = ["read-a", "read-b"]
+        .into_iter()
+        .map(|id| {
+            (
+                id.into(),
+                AgentDecision {
+                    thought: String::new(),
+                    action: "read_file".into(),
+                    input: AgentInput {
+                        path: "same.txt".into(),
+                        ..Default::default()
+                    },
+                },
+            )
+        })
+        .collect();
+    let mut events = Vec::new();
+    run_parallel_read_only_batch(
+        &decisions,
+        1,
+        &root,
+        &MintConfig::default(),
+        "review-ids",
+        &mut |_| Ok(ApprovalOutcome::Approved),
+        &mut |event| events.push(event),
+        &mut BTreeMap::new(),
+        &mut Vec::new(),
+        &mut std::collections::HashMap::new(),
+        &[],
+        None,
+        false,
+    )
+    .await;
+    for id in ["read-a", "read-b"] {
+        assert!(events.iter().any(
+            |e| matches!(e, AgentProgress::ToolStart { call_id: Some(found), .. } if found == id)
+        ));
+        assert!(events.iter().any(
+            |e| matches!(e, AgentProgress::ToolEnd { call_id: Some(found), .. } if found == id)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn parallel_dispatch_shows_parent_calls_before_provider_finishes() {
+    let root = std::env::temp_dir().join(format!("mint-parallel-review-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    // Keep the provider pending: parent tools must already be visible while waiting.
+    let cfg = MintConfig {
+        ai_provider: "ollama".into(),
+        ollama_host: format!("http://{}", listener.local_addr().unwrap()),
+        memory_recall: false,
+        semantic_fact_recall: false,
+        ..Default::default()
+    };
+    let decisions: Vec<_> = ["dispatch-a", "dispatch-b"]
+        .into_iter()
+        .map(|id| {
+            (
+                id.into(),
+                AgentDecision {
+                    thought: String::new(),
+                    action: "dispatch_subagent".into(),
+                    input: AgentInput {
+                        name: "explorer".into(),
+                        instruction: "inspect".into(),
+                        ..Default::default()
+                    },
+                },
+            )
+        })
+        .collect();
+    let mut events = Vec::new();
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        run_parallel_subagent_batch(
+            &decisions,
+            1,
+            &root,
+            &cfg,
+            "review-live-dispatch",
+            &mut |_| Ok(ApprovalOutcome::Approved),
+            &mut |event| events.push(event),
+            &mut BTreeMap::new(),
+            &mut Vec::new(),
+        ),
+    )
+    .await;
+    for id in ["dispatch-a", "dispatch-b"] {
+        assert!(events.iter().any(|e| matches!(e, AgentProgress::ToolStart { call_id: Some(found), .. } if found == id)), "missing live {id}");
+    }
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AgentProgress::ToolEnd { subagent: None, .. }))
+    );
+}

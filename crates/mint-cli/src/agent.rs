@@ -597,6 +597,64 @@ pub(crate) fn publish_mcp_progress(
     true
 }
 
+pub(crate) fn run_summary_lines(
+    summary: &mint_core::orchestration::RunTelemetrySummary,
+) -> Vec<String> {
+    let failed_tools: Vec<_> = summary
+        .tool_timeline
+        .iter()
+        .filter(|record| !record.success)
+        .collect();
+    let outcome = if !failed_tools.is_empty() {
+        format!(
+            "{YELLOW}⚠ Completed with {} failure{}{RESET}",
+            failed_tools.len(),
+            if failed_tools.len() == 1 { "" } else { "s" }
+        )
+    } else if summary.outcome == "ROLLED_BACK" {
+        format!("{YELLOW}↺ Rolled back{RESET}")
+    } else if summary.outcome == "FAILED" {
+        format!("{RED}✗ Failed{RESET}")
+    } else {
+        format!("{GREEN}✓ Completed{RESET}")
+    };
+    let file_count = summary.files_changed.len();
+    let mut lines = vec![format!(
+        "  {outcome} {DIM}in {:.1}s · {} tool{} · {} file{} changed{RESET}",
+        summary.duration_secs,
+        summary.tool_calls_count,
+        if summary.tool_calls_count == 1 {
+            ""
+        } else {
+            "s"
+        },
+        file_count,
+        if file_count == 1 { "" } else { "s" },
+    )];
+
+    if file_count > 0 {
+        let mut names: Vec<String> = summary
+            .files_changed
+            .iter()
+            .take(6)
+            .map(|path| display_tool_target(path))
+            .collect();
+        if file_count > names.len() {
+            names.push(format!("+{} more", file_count - names.len()));
+        }
+        lines.push(format!("    {DIM}└ {}{RESET}", names.join(", ")));
+    }
+    for record in failed_tools.into_iter().take(3) {
+        let target = if record.target.is_empty() {
+            record.action.clone()
+        } else {
+            format!("{} [{}]", record.action, truncate_line(&record.target, 72))
+        };
+        lines.push(format!("    {RED}└ {target} failed{RESET}"));
+    }
+    lines
+}
+
 pub async fn run_code_agent_with_options(
     task: &str,
     root: &Path,
@@ -624,6 +682,9 @@ pub async fn run_code_agent_with_options(
     }
     let started_at = Instant::now();
     crate::interactive::clear_last_thought();
+    if let Some(tui) = &options.tui {
+        tui.reset_thoughts();
+    }
     let thinking_verb = random_thinking_verb();
     let approval_active = Arc::new(AtomicBool::new(false));
     let agent_done = Arc::new(AtomicBool::new(false));
@@ -943,6 +1004,11 @@ pub async fn run_code_agent_with_options(
         mint_core::avatar_bridge::AvatarBridgeConfig::from_mint_config(config),
     );
     let progress_cb = |progress: AgentProgress| {
+        if !options.fast_mode
+            && let Some(tui) = &options.tui
+        {
+            tui.tool_progress(&progress);
+        }
         avatar_bridge.on_agent_progress(&progress);
         if publish_mcp_progress(options.tui.as_ref(), &progress) {
             return;
@@ -1073,6 +1139,9 @@ pub async fn run_code_agent_with_options(
                     let elapsed = Duration::from_millis(elapsed_ms);
                     let elapsed_str = crate::interactive::format_thought_elapsed(elapsed);
                     crate::interactive::append_thought_delta(&id, &delta, &elapsed_str);
+                    if let Some(tui) = &options.tui {
+                        tui.append_thought_delta(&id, &delta, elapsed);
+                    }
                 }
             }
             AgentProgress::ExtendedThinking {
@@ -1091,11 +1160,7 @@ pub async fn run_code_agent_with_options(
                     let elapsed = elapsed_ms
                         .map(Duration::from_millis)
                         .unwrap_or_else(|| started_at.elapsed());
-                    // Extended thinking gets the same timeline-note treatment
-                    // as regular Thought — `print_timeline_note` already
-                    // distinguishes internal CoT (long) from short notes via
-                    // `is_internal_cot` and renders accordingly.
-                    print_timeline_note(&mut status, &thought, elapsed, id.as_deref());
+                    print_extended_thinking(&mut status, &thought, elapsed, id.as_deref());
                     status.thinking = None;
                     status.waiting_for_network = None;
                     render_live_status(&mut status);
@@ -1362,58 +1427,7 @@ pub async fn run_code_agent_with_options(
                     status.waiting_for_network = None;
                     commit_activity_snapshot(&mut status);
 
-                    let failed_tools: Vec<_> = summary
-                        .tool_timeline
-                        .iter()
-                        .filter(|record| !record.success)
-                        .collect();
-                    let outcome = if !failed_tools.is_empty() {
-                        format!(
-                            "{YELLOW}⚠ Completed with {} failure{}{RESET}",
-                            failed_tools.len(),
-                            if failed_tools.len() == 1 { "" } else { "s" }
-                        )
-                    } else if summary.outcome == "ROLLED_BACK" {
-                        format!("{YELLOW}↺ Rolled back{RESET}")
-                    } else if summary.outcome == "FAILED" {
-                        format!("{RED}✗ Failed{RESET}")
-                    } else {
-                        format!("{GREEN}✓ Completed{RESET}")
-                    };
-                    let file_count = summary.files_changed.len();
-                    let mut lines = vec![format!(
-                        "  {outcome} {DIM}in {:.1}s · {} tool{} · {} file{} changed{RESET}",
-                        summary.duration_secs,
-                        summary.tool_calls_count,
-                        if summary.tool_calls_count == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                        file_count,
-                        if file_count == 1 { "" } else { "s" },
-                    )];
-
-                    if file_count > 0 {
-                        let mut names: Vec<String> = summary
-                            .files_changed
-                            .iter()
-                            .take(6)
-                            .map(|path| display_tool_target(path))
-                            .collect();
-                        if file_count > names.len() {
-                            names.push(format!("+{} more", file_count - names.len()));
-                        }
-                        lines.push(format!("    {DIM}└ {}{RESET}", names.join(", ")));
-                    }
-                    for record in failed_tools.into_iter().take(3) {
-                        let target = if record.target.is_empty() {
-                            record.action.clone()
-                        } else {
-                            format!("{} [{}]", record.action, truncate_line(&record.target, 72))
-                        };
-                        lines.push(format!("    {RED}└ {target} failed{RESET}"));
-                    }
+                    let lines = run_summary_lines(&summary);
                     insert_permanent_lines(&mut status, &lines);
                 }
             }

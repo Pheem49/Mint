@@ -9,6 +9,16 @@
 
 ## Terminal and chat
 
+- Corrected parallel tool activity: identical calls retain separate cards and call IDs, blocked calls display failure, and parallel subagent dispatches report live status and actual elapsed time.
+
+- TUI `/resume` now restores saved tool cards, full input/output through **Ctrl+O**, reasoning through **Ctrl+T**, and per-turn completion/failure summaries. New tool events persist elapsed time; older activity without timing displays **time unavailable**. Unfinished saved calls display **Interrupted** without restarting a spinner, and reloading or switching sessions clears stale viewers and avoids duplicate history.
+
+- Restored pinned live tool details above the TUI composer after compact tool cards hid them: active counts, abbreviated commands, animated spinners, and elapsed timers stay visible while scrolling the transcript and take priority over older status lines. Finished calls leave this live area while their compact cards remain in history.
+
+- TUI tool calls now use compact three-line cards that update in place on completion, keeping long commands and output out of the default transcript. **Ctrl+O** opens full input/output, **Tab/Shift+Tab** switches calls, and **Ctrl+Y** copies all details. Active counts separate shell commands from other tools without counting completed calls; failures display in red and successful calls in green.
+
+- TUI now streams reasoning into a preview capped at six terminal rows, with a live **Thinking** timer and automatic scrolling to the latest text. Completed blocks collapse to **Thought · … (Ctrl+T to view)**. Ctrl+T opens the full reasoning during and after an agent turn, updates as text arrives, and preserves interrupted reasoning for review.
+
 - Added a startup TUI update menu with **Update now**, **Skip** (selected by default), and **Skip until next version**. Skipped versions persist across launches; newer releases still notify. Installation runs the existing approved npm updater outside the TUI and exits on success so Mint can be restarted. Slow background checks keep a passive notice instead of interrupting chat.
 
 - Improved Full-Screen TUI scrolling, drag selection, Back to bottom, multiline input, and long approval previews.

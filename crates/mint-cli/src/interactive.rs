@@ -18,9 +18,12 @@ mod picker;
 mod resume_picker;
 mod slash_commands;
 mod thought_viewer;
+mod tool_activity;
 
 pub(crate) use chat_tui::TuiHandle;
 pub(crate) use chat_tui::restore_terminal;
+#[cfg(test)]
+pub(crate) use chat_tui::{ChatTui, ChatViewState};
 pub use command_ui::*;
 pub use commands::*;
 pub use confirm::*;
