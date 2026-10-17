@@ -323,13 +323,6 @@ fn save_settings(
     Ok(())
 }
 #[tauri::command]
-fn hide_window(app: tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.hide();
-    }
-    let _ = app.emit("companion-visible", false);
-}
-#[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
@@ -429,7 +422,6 @@ fn main() {
             send_command,
             load_settings,
             save_settings,
-            hide_window,
             quit_app
         ])
         .run(tauri::generate_context!())

@@ -36,8 +36,8 @@ const ACCESSORY_MAP: Record<number, string | null> = {
 
 const TRACKING_SPEED = 1.25
 const MAX_DEVICE_PIXEL_RATIO = 1.25
-const IDLE_MAX_FPS = 24
-const INTERACTION_MAX_FPS = 45
+const IDLE_MAX_FPS = 60
+const INTERACTION_MAX_FPS = 60
 
 const clampToUnitCircle = (x: number, y: number) => {
   if (isNaN(x) || isNaN(y) || !isFinite(x) || !isFinite(y)) {
@@ -85,8 +85,8 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     const model = modelRef.current
     if (!app) return
 
-    // The model idles for most of a chat session. Keep its animation smooth
-    // without reserving a 60 FPS GPU budget until the user actually hovers it.
+    // Keep model updates and rendering on the same shared ticker so physics
+    // never advances at a different cadence from the frames shown on screen.
     app.ticker.maxFPS = interactive && !live.current.isLocked ? INTERACTION_MAX_FPS : IDLE_MAX_FPS
     if (model) {
       model.autoUpdate = active
@@ -130,6 +130,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
           antialias: false,
           autoDensity: true,
           resolution: Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO),
+          sharedTicker: true,
           resizeTo: containerRef.current!,
         })
         appInstance.ticker.maxFPS = IDLE_MAX_FPS

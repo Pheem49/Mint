@@ -2,6 +2,14 @@
 
 Released: 2026-10-17
 
+## Mint Companion UI
+
+- Reworked the Live2D Companion interface with Tailwind CSS, translucent blue glass controls, a fully transparent desktop canvas, and animated ambient light, orbital accents, connection feedback, and panel transitions. Reduced-motion preferences remain supported. Removed the duplicate message composer; Companion keeps the shared conversation history and character interactions while messages are sent from Mint Desktop or CLI.
+- Changed the Companion title-bar control to minimize to the OS taskbar or dock instead of hiding the window to the tray, and clarified its accessible label.
+- Consolidated the Companion's Chat, interaction, appearance, minimize, and quit actions into one circular tree menu. Category and nested action bubbles share one button style, reveal labels on hover, and connect with animated lines.
+- Synchronized Live2D model updates and rendering on Pixi's shared ticker, removed whole-stage idle bobbing, and kept rendering at 60 FPS to reduce visible model jitter.
+- Added Tailwind's Vite integration to the Companion workspace.
+
 ## Terminal and Web launch
 
 - Added `/shells stop` as a selectable autocomplete entry in CLI, Desktop, and Web.
