@@ -1533,6 +1533,51 @@ mod tests {
     }
 
     #[test]
+    fn shells_stop_without_id_stops_all_owned_running_jobs() {
+        let dir = TestDir::new();
+        let other_dir = TestDir::new();
+        let config = local_config();
+        let owner = Some(uuid::Uuid::new_v4().to_string());
+        let start = |workspace: &Path, job_owner: Option<String>| {
+            with_context(
+                JobContext {
+                    workspace: workspace.to_path_buf(),
+                    owner: job_owner,
+                    ..JobContext::default()
+                },
+                || start_background(workspace, &config, "sleep 30").unwrap(),
+            )
+        };
+        let empty = shells_command("stop", dir.path(), &owner, &config).unwrap();
+        assert!(empty.contains("No running"), "{empty}");
+        let first = start(dir.path(), owner.clone());
+        let _first_cleanup = StopOnDrop(first.id.clone());
+        let second = start(other_dir.path(), owner.clone());
+        let _second_cleanup = StopOnDrop(second.id.clone());
+        let third = start(dir.path(), owner.clone());
+        let _third_cleanup = StopOnDrop(third.id.clone());
+        let foreign = start(dir.path(), Some(uuid::Uuid::new_v4().to_string()));
+        let _foreign_cleanup = StopOnDrop(foreign.id.clone());
+        shells_command(&format!("stop {}", third.id), dir.path(), &owner, &config).unwrap();
+        wait_json(&third.id, |v| v["status"] == "stopped");
+        assert_eq!(job_json(&first.id, false).unwrap()["status"], "running");
+        assert_eq!(job_json(&second.id, false).unwrap()["status"], "running");
+        let stopped = shells_command("stop", dir.path(), &owner, &config).unwrap();
+        assert!(
+            stopped.contains(&first.id) && stopped.contains(&second.id),
+            "{stopped}"
+        );
+        wait_json(&first.id, |v| v["status"] == "stopped");
+        wait_json(&second.id, |v| v["status"] == "stopped");
+        assert_eq!(job_json(&foreign.id, false).unwrap()["status"], "running");
+        assert!(
+            shells_command("stop", dir.path(), &owner, &config)
+                .unwrap()
+                .contains("No running")
+        );
+    }
+
+    #[test]
     fn poll_unknown_job_errors() {
         assert!(matches!(
             poll_output("bg-does-not-exist"),
@@ -1574,12 +1619,32 @@ pub fn shells_command(
         }
         return Ok(lines.join("\n\n"));
     }
+    if rest == "stop" {
+        let jobs: Vec<_> = list_json(owner, None)
+            .into_iter()
+            .filter(|job| job["status"] == "running")
+            .collect();
+        if jobs.is_empty() {
+            return Ok("No running background terminals.".into());
+        }
+        let mut results = Vec::new();
+        for job in jobs {
+            let id = job["id"].as_str().unwrap_or("");
+            // Reuse the explicit-ID path so ownership and capability checks
+            // also apply to each job in the batch. Keep going on failures.
+            results.push(
+                shells_command(&format!("stop {id}"), workspace, owner, config)
+                    .unwrap_or_else(|error| format!("{id}: {error}")),
+            );
+        }
+        return Ok(results.join("\n"));
+    }
     let (action, id) = rest
         .split_once(char::is_whitespace)
         .map(|(a, i)| (a, i.trim()))
         .unwrap_or((rest, ""));
     if !matches!(action, "show" | "stop" | "kill") || id.is_empty() {
-        return Ok("Usage: /shells [all|show <id>|stop <id>|kill <id>]".into());
+        return Ok("Usage: /shells [all|show <id>|stop [<id>]|kill <id>]".into());
     }
     if !accessible(id, owner) {
         return Err(ShellError::JobNotFound(id.into()));

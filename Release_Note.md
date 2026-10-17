@@ -4,6 +4,10 @@ Released: 2026-10-17
 
 ## Terminal and Web launch
 
+- Added `/shells stop` as a selectable autocomplete entry in CLI, Desktop, and Web.
+
+- `/shells stop` now stops all running background terminals across workspaces accessible to the current user. `/shells stop <id>` still stops only the specified job; individual failures are reported without interrupting the rest.
+
 - Workspace pickers in chat and Code sessions now share a persistent removal preference. Each workspace has a floating `⋯` dropdown with English-only “Remove from list” text; removing a workspace leaves files, sessions, and the active project intact. Open folder… restores it to the list.
 - `/autoskill` now marks the active setting as `on (current)` or `off (current)` in its selection menu.
 - `/mint-web` now opens the default browser after both the Web UI and API are ready. It displays `Mint Web: http://localhost:9000` with the URL in blue in the CLI, followed by `Your browser will open automatically when ready.`

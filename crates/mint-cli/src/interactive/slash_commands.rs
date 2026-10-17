@@ -1714,6 +1714,17 @@ pub async fn handle_slash_command(
                 .unwrap_or((rest, ""));
 
             match sub {
+                "stop" if arg.is_empty() => {
+                    match mint_core::bg_shell::shells_command(
+                        "stop",
+                        &session.current_dir,
+                        &None,
+                        &session.config,
+                    ) {
+                        Ok(message) => ui.push_notice(message),
+                        Err(error) => ui.push_notice(error.to_string()),
+                    }
+                }
                 "show" if !arg.is_empty() => match mint_core::bg_shell::snapshot(arg) {
                     Ok(job) => {
                         let mut lines =
@@ -1741,7 +1752,7 @@ pub async fn handle_slash_command(
                     Ok(msg) => ui.push_notice(msg),
                     Err(_) => ui.push_notice("No such job."),
                 },
-                _ => ui.push_notice("Usage: /shells [all|show <id>|stop <id>|kill <id>]"),
+                _ => ui.push_notice("Usage: /shells [all|show <id>|stop [<id>]|kill <id>]"),
             }
             Some(SlashResult::Handled)
         }
