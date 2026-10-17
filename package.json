@@ -43,7 +43,7 @@
     "dev:companion": "npm run dev --workspace @mint/companion --",
     "build:companion": "npm run build --workspace @mint/companion --",
     "package:companion": "npm run package --workspace @mint/companion --",
-    "test:companion": "vitest run --root . apps/mint-companion/src/state.test.ts",
+    "test:companion": "vitest run --root . apps/mint-companion/src/state.test.ts apps/mint-companion/src/radial-layout.test.ts apps/mint-companion/src/tracking.test.ts",
     "typecheck:companion": "npm run typecheck --workspace @mint/companion",
     "test:styles": "node --test src/bin/styles.test.js"
   },

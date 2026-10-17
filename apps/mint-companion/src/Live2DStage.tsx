@@ -1,12 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react'
 import * as PIXI from 'pixi.js'
+import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { Status } from './state'
+import { calculateGazeTarget, smoothGaze, calculateStatusGesture } from './tracking'
 
 // Ensure PIXI is available globally for the live2d library
 ;(window as any).PIXI = PIXI
 
 interface Live2DStageProps {
   scale: number
+  offsetY?: number
   expressionIndex: number
   accessoryIndex: number
   isLocked: boolean
@@ -34,25 +38,13 @@ const ACCESSORY_MAP: Record<number, string | null> = {
   3: 'Pen',         // 拿笔 (Hold Pen)
 }
 
-const TRACKING_SPEED = 1.25
 const MAX_DEVICE_PIXEL_RATIO = 1.25
-const IDLE_MAX_FPS = 60
-const INTERACTION_MAX_FPS = 60
+const MAX_FPS = 60
+const GAZE_TRACKING_FACTOR = 0.22
+const GAZE_DEADZONE = 0.003
+const GLOBAL_POLL_INTERVAL_MS = 20
 
-const clampToUnitCircle = (x: number, y: number) => {
-  if (isNaN(x) || isNaN(y) || !isFinite(x) || !isFinite(y)) {
-    return { x: 0, y: 0 }
-  }
-  const distance = Math.hypot(x, y)
-  if (distance <= 1) return { x, y }
-
-  return {
-    x: x / distance,
-    y: y / distance,
-  }
-}
-
-export default function Live2DStage({ scale, expressionIndex, accessoryIndex, isLocked, isActive = true, onLoadComplete, onLoadError, status = 'idle' }: Live2DStageProps) {
+export default function Live2DStage({ scale, offsetY = 0, expressionIndex, accessoryIndex, isLocked, isActive = true, onLoadComplete, onLoadError, status = 'idle' }: Live2DStageProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const modelRef = useRef<any>(null)
@@ -61,10 +53,10 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
   const [shouldRender, setShouldRender] = useState(isActive)
   const baseWidthRef = useRef<number | null>(null)
   const baseHeightRef = useRef<number | null>(null)
-  const pointerInsideRef = useRef(false)
-  const live = useRef({ scale, expressionIndex, accessoryIndex, isLocked, isActive, status, changedAt: performance.now() })
+  const targetGazeRef = useRef({ x: 0, y: 0 })
+  const live = useRef({ scale, offsetY, expressionIndex, accessoryIndex, isLocked, isActive, status, changedAt: performance.now() })
   if (live.current.status !== status) live.current.changedAt = performance.now()
-  Object.assign(live.current, { scale, expressionIndex, accessoryIndex, isLocked, isActive, status })
+  Object.assign(live.current, { scale, offsetY, expressionIndex, accessoryIndex, isLocked, isActive, status })
   const expressions = useRef<Record<string, Array<{ Id: string; Value: number; Blend: string }>>>({})
   const reducedMotion = useRef(window.matchMedia('(prefers-reduced-motion: reduce)').matches)
   useEffect(() => {
@@ -80,14 +72,12 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     }
   }, [isActive, shouldRender])
 
-  const setRenderActive = (active: boolean, interactive = pointerInsideRef.current) => {
+  const setRenderActive = (active: boolean) => {
     const app = appRef.current
     const model = modelRef.current
     if (!app) return
 
-    // Keep model updates and rendering on the same shared ticker so physics
-    // never advances at a different cadence from the frames shown on screen.
-    app.ticker.maxFPS = interactive && !live.current.isLocked ? INTERACTION_MAX_FPS : IDLE_MAX_FPS
+    app.ticker.maxFPS = MAX_FPS
     if (model) {
       model.autoUpdate = active
       model.renderable = active
@@ -133,7 +123,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
           sharedTicker: true,
           resizeTo: containerRef.current!,
         })
-        appInstance.ticker.maxFPS = IDLE_MAX_FPS
+        appInstance.ticker.maxFPS = MAX_FPS
         appInstance.ticker.minFPS = 10
         appRef.current = appInstance
 
@@ -187,13 +177,13 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
           const widthScale = stageWidth / baseWidth
           const heightScale = stageHeight / baseHeight
           
-          const modelScale = Math.min(widthScale, heightScale) * 1.45 * live.current.scale
+          const modelScale = Math.min(widthScale, heightScale) * 1.55 * live.current.scale
           m.scale.set(modelScale)
           
           // Center the character within the floating stage.
           m.anchor.set(0.5, 0.5)
           m.x = stageWidth / 2
-          m.y = stageHeight / 2 + stageHeight * 0.28
+          m.y = stageHeight / 2 + stageHeight * (0.12 - (live.current.offsetY || 0))
         }
 
         fitModel()
@@ -201,12 +191,26 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
         // Handle resizing
         appInstance.renderer.on('resize', fitModel)
 
-        // Enable mouse tracking interactions
-        model.interactive = true
+        // Disable built-in auto-interaction to avoid conflicting pointer listeners
+        model.interactive = false
+        if ('autoInteract' in model) {
+          ;(model as any).autoInteract = false
+        }
 
         const focusController = model.internalModel.focusController
-        const updateFocus = focusController.update.bind(focusController)
-        focusController.update = (deltaMs: number) => updateFocus(deltaMs * TRACKING_SPEED)
+        // Update gaze target smoothly right before internal updateFocus() runs
+        focusController.update = () => {
+          const current = { x: focusController.x, y: focusController.y }
+          const target = live.current.isLocked ? { x: 0, y: 0 } : targetGazeRef.current
+          const smoothed = smoothGaze(current, target, GAZE_TRACKING_FACTOR, GAZE_DEADZONE)
+
+          focusController.x = smoothed.x
+          focusController.y = smoothed.y
+          focusController.targetX = target.x
+          focusController.targetY = target.y
+          focusController.vx = 0
+          focusController.vy = 0
+        }
 
         // Match the extra mouse-driven parameters configured by the original VTube Studio model.
         model.internalModel.on('beforeModelUpdate', () => {
@@ -226,18 +230,26 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
           for (const name of [EXPRESSION_MAP[live.current.expressionIndex], ACCESSORY_MAP[live.current.accessoryIndex]]) {
             for (const parameter of name ? expressions.current[name] || [] : []) {
               const value = coreModel.getParameterValueById(parameter.Id)
-              coreModel.setParameterValueById(parameter.Id, parameter.Blend === 'Overwrite' ? parameter.Value : parameter.Blend === 'Multiply' ? value * parameter.Value : value + parameter.Value)
+              coreModel.setParameterValueById(
+                parameter.Id,
+                parameter.Blend === 'Overwrite'
+                  ? parameter.Value
+                  : parameter.Blend === 'Multiply'
+                  ? value * parameter.Value
+                  : value + parameter.Value
+              )
             }
           }
           if (!reducedMotion.current) {
             const elapsed = (performance.now() - live.current.changedAt) / 1000
-            const state = live.current.status
-            const angle = state === 'thinking' ? Math.sin(elapsed * 1.1) * 3 : state === 'working' ? Math.sin(elapsed * 1.5) * 2 : 0
-            const nod = state === 'responding' ? Math.sin(elapsed * 2) * 2 : state === 'completed' && elapsed < 1 ? Math.sin(elapsed * Math.PI * 2) * 5 : 0
-            coreModel.addParameterValueById('ParamAngleZ', angle)
-            coreModel.addParameterValueById('ParamAngleY', nod)
+            const gesture = calculateStatusGesture(live.current.status, elapsed)
+            if (gesture.angleZ !== 0) {
+              coreModel.addParameterValueById('ParamAngleZ', gesture.angleZ)
+            }
+            if (gesture.angleY !== 0) {
+              coreModel.addParameterValueById('ParamAngleY', gesture.angleY)
+            }
           }
-
         })
 
         setRenderActive(live.current.isActive && document.visibilityState === 'visible')
@@ -256,10 +268,10 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     return () => {
       isMounted = false
       if (appInstance) {
-        appInstance.destroy(true, {
+        // Prevent Pixi from destroying the shared ticker
+        ;(appInstance as any)._ticker = null
+        appInstance.destroy(false, {
           children: true,
-          texture: true,
-          baseTexture: true,
         })
         appRef.current = null
       }
@@ -289,12 +301,12 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
       const widthScale = stageWidth / baseWidth
       const heightScale = stageHeight / baseHeight
       
-      const modelScale = Math.min(widthScale, heightScale) * 1.45 * live.current.scale
+      const modelScale = Math.min(widthScale, heightScale) * 1.55 * live.current.scale
       model.scale.set(modelScale)
       
       model.anchor.set(0.5, 0.5)
       model.x = stageWidth / 2
-      model.y = stageHeight / 2 + stageHeight * 0.28
+      model.y = stageHeight / 2 + stageHeight * (0.12 - (live.current.offsetY || 0))
     }
 
     const resizeObserver = new ResizeObserver(() => {
@@ -309,7 +321,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     return () => {
       resizeObserver.disconnect()
     }
-  }, [scale, loading, isActive])
+  }, [scale, offsetY, loading, isActive])
 
   useEffect(() => {
     const updateRenderState = () => {
@@ -324,79 +336,75 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     }
   }, [isActive])
 
-  // Only observe pointer movement while it is over the model. Listening on the
-  // entire window made normal chat typing and scrolling compete with Live2D.
+  // Track pointer across the companion window and across the entire OS desktop.
+  // When inside the window, pointermove provides zero-latency local tracking.
+  // When outside the window, Tauri's global cursor position query allows the character
+  // to look towards the cursor anywhere on the desktop.
   useEffect(() => {
-    let rafId: number | null = null
-    let pendingNormalized: { x: number; y: number } | null = null
-
-    const focus = (x: number, y: number) => {
-      if (isNaN(x) || isNaN(y) || !isFinite(x) || !isFinite(y)) {
-        x = 0
-        y = 0
-      }
-      modelRef.current?.internalModel?.focusController?.focus(x, y)
-    }
-
-    const centerFocus = () => focus(0, 0)
+    let lastLocalMove = 0
+    let active = true
+    let pollInterval: ReturnType<typeof setInterval> | null = null
 
     const handlePointerMove = (event: PointerEvent) => {
-      if (isLocked || !isActive || document.visibilityState !== 'visible' || !containerRef.current) return
-
-      const rect = containerRef.current.getBoundingClientRect()
-      if (!rect.width || !rect.height) return
-
-      const x = (event.clientX - (rect.left + rect.width / 2)) / (rect.width / 2)
-      const y = ((rect.top + rect.height / 2) - event.clientY) / (rect.height / 2)
-      pendingNormalized = clampToUnitCircle(x, y)
-
-      if (rafId === null) {
-        rafId = requestAnimationFrame(() => {
-          if (pendingNormalized) {
-            focus(pendingNormalized.x, pendingNormalized.y)
-            pendingNormalized = null
-          }
-          rafId = null
-        })
+      lastLocalMove = performance.now()
+      if (live.current.isLocked || !live.current.isActive || document.visibilityState !== 'visible') {
+        targetGazeRef.current = { x: 0, y: 0 }
+        return
       }
+
+      const container = containerRef.current
+      if (!container) return
+
+      const rect = container.getBoundingClientRect()
+      const faceCenterRatio = 0.42 - (live.current.offsetY || 0)
+      targetGazeRef.current = calculateGazeTarget({ x: event.clientX, y: event.clientY }, rect, faceCenterRatio)
     }
 
-    const handlePointerEnter = () => {
-      if (isLocked || !isActive || document.visibilityState !== 'visible') return
-      pointerInsideRef.current = true
-      setRenderActive(true, true)
-    }
+    // Poll global cursor position when cursor is outside the companion window
+    pollInterval = setInterval(async () => {
+      if (!active) return
+      // If pointer is moving inside the window or app is locked/inactive, skip global poll
+      if (performance.now() - lastLocalMove < 100) return
+      if (live.current.isLocked || !live.current.isActive || document.visibilityState !== 'visible') {
+        targetGazeRef.current = { x: 0, y: 0 }
+        return
+      }
 
-    const handlePointerLeave = () => {
-      pointerInsideRef.current = false
-      centerFocus()
-      setRenderActive(isActive && document.visibilityState === 'visible', false)
-    }
+      try {
+        const pos = await invoke<{ x: number; y: number } | null>('get_cursor_position')
+        if (pos && active) {
+          const container = containerRef.current
+          if (container) {
+            const rect = container.getBoundingClientRect()
+            const faceCenterRatio = 0.42 - (live.current.offsetY || 0)
+            targetGazeRef.current = calculateGazeTarget({ x: pos.x, y: pos.y }, rect, faceCenterRatio)
+          }
+        }
+      } catch {
+        // Fall back gracefully if not running in Tauri (e.g. browser preview or tests)
+      }
+    }, GLOBAL_POLL_INTERVAL_MS)
 
-    const container = containerRef.current
-    if (!container) return
-    if (isLocked) handlePointerLeave()
-
-    container.addEventListener('pointermove', handlePointerMove)
-    container.addEventListener('pointerenter', handlePointerEnter)
-    container.addEventListener('pointerleave', handlePointerLeave)
-    window.addEventListener('blur', centerFocus)
+    window.addEventListener('pointermove', handlePointerMove)
 
     return () => {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId)
-        rafId = null
-      }
-      container.removeEventListener('pointermove', handlePointerMove)
-      container.removeEventListener('pointerenter', handlePointerEnter)
-      container.removeEventListener('pointerleave', handlePointerLeave)
-      window.removeEventListener('blur', centerFocus)
+      active = false
+      if (pollInterval) clearInterval(pollInterval)
+      window.removeEventListener('pointermove', handlePointerMove)
     }
-  }, [isLocked, isActive])
+  }, [])
 
   return (
     <div
       ref={containerRef}
+      data-tauri-drag-region
+      onPointerDown={event => {
+        if (event.button === 0 && !isLocked) {
+          event.preventDefault()
+          try { getCurrentWindow().startDragging().catch(() => {}) } catch {}
+        }
+      }}
+      className={isLocked ? '' : 'cursor-grab active:cursor-grabbing'}
       style={{
         position: 'relative',
         width: '100%',
@@ -413,6 +421,13 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
       )}
       <canvas
         ref={canvasRef}
+        data-tauri-drag-region
+        onPointerDown={event => {
+          if (event.button === 0 && !isLocked) {
+            event.preventDefault()
+            try { getCurrentWindow().startDragging().catch(() => {}) } catch {}
+          }
+        }}
         style={{
           width: '100%',
           height: '100%',

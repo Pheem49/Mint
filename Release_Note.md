@@ -8,6 +8,10 @@ Released: 2026-10-17
 - Changed the Companion title-bar control to minimize to the OS taskbar or dock instead of hiding the window to the tray, and clarified its accessible label.
 - Consolidated the Companion's Chat, interaction, appearance, minimize, and quit actions into one circular tree menu. Category and nested action bubbles share one button style, reveal labels on hover, and connect with animated lines.
 - Synchronized Live2D model updates and rendering on Pixi's shared ticker, removed whole-stage idle bobbing, and kept rendering at 60 FPS to reduce visible model jitter.
+- Improved Live2D mouse tracking and gesture stability in Mint Companion: added Desktop-wide global cursor tracking via Tauri/Rust so the character can look towards the cursor anywhere on the OS screen even when the window is not focused, combined with zero-latency local pointer events inside the window, deadzone smoothing to prevent jitter when the mouse is stationary, natural decaying status gestures, and shared Pixi ticker preservation during stage remounts.
+- Added a visible "Move" drag grip pill in the header and enabled direct window dragging across the character stage, Live2D canvas, and chat card header with intuitive grab cursors, allowing users to effortlessly move the companion across the desktop.
+- Expanded the Live2D model stage to occupy the entire window height for an immersive, full-body character view, and redesigned the bottom chat card into a floating glass overlay toggleable via a dedicated `💬 Chat` button on the top-right header with an intuitive close button.
+- Added a "Vertical position" slider in Companion Settings (with one-click reset) allowing users to adjust the character up or down, and dynamically synchronized the gaze tracking facial anchor so eye contact remains centered regardless of the chosen vertical offset.
 - Added Tailwind's Vite integration to the Companion workspace.
 
 ## Terminal and Web launch

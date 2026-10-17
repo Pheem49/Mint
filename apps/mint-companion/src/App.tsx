@@ -6,8 +6,8 @@ import Live2DStage from './Live2DStage'
 import { activeTurn, applyTurn, characterStatus, modelExpression, terminal, type Event, type Host, type Session, type Turn } from './state'
 import { radialMenuOrigin } from './radial-layout'
 
-type Settings = { hostId: string; chatId: string; scale: number; expression: number; accessory: number; locked: boolean; guide: boolean; alwaysOnTop: boolean; normalWindow: boolean; panelOpen: boolean }
-const defaults: Settings = { hostId: '', chatId: '', scale: 1, expression: -1, accessory: 0, locked: false, guide: false, alwaysOnTop: true, normalWindow: false, panelOpen: true }
+type Settings = { hostId: string; chatId: string; scale: number; offsetY: number; expression: number; accessory: number; locked: boolean; guide: boolean; alwaysOnTop: boolean; normalWindow: boolean; panelOpen: boolean }
+const defaults: Settings = { hostId: '', chatId: '', scale: 1, offsetY: 0, expression: -1, accessory: 0, locked: false, guide: false, alwaysOnTop: true, normalWindow: false, panelOpen: false }
 const expressions = ['Auto', 'Default', 'Dazed', 'Dazed eyes', 'Photo', 'Poke', 'Cat filter']
 const accessories = ['None', 'Apron', 'Glasses', 'Pen']
 const areas = ['head', 'cheek', 'left hand', 'right hand', 'body', 'lower body']
@@ -80,6 +80,12 @@ export default function App() {
     document.addEventListener('keydown', closeOnEscape)
     return () => document.removeEventListener('keydown', closeOnEscape)
   }, [actionsOpen])
+
+  useEffect(() => {
+    const handleDragStart = (e: DragEvent) => e.preventDefault()
+    window.addEventListener('dragstart', handleDragStart)
+    return () => window.removeEventListener('dragstart', handleDragStart)
+  }, [])
 
   function toggleActionGroup(group: string) {
     setExpandedActionGroup(current => current === group ? null : group)
@@ -173,7 +179,38 @@ export default function App() {
   const automaticStatus = characterStatus(feedback || !current || !terminal(current.status) ? current?.status ?? 'idle' : 'idle', online, sessionExists)
   return <main className={`relative isolate flex h-dvh min-h-0 flex-col gap-3 overflow-hidden p-3 text-ice-50 sm:gap-4 sm:p-4 ${settings.normalWindow ? 'normal-window' : ''}`}>
     <div aria-hidden="true" className="companion-noise pointer-events-none absolute inset-0 -z-10 overflow-hidden rounded-[28px]" />
-    <header className="relative z-20 flex h-12 w-full shrink-0 items-center justify-end" onPointerDown={event => { if (event.button === 0 && event.target === event.currentTarget) getCurrentWindow().startDragging() }}>
+    <header className="relative z-20 flex h-12 w-full shrink-0 items-center justify-end gap-2.5" onPointerDown={event => { if (event.button === 0 && event.target === event.currentTarget) { event.preventDefault(); try { getCurrentWindow().startDragging().catch(() => {}) } catch {} } }}>
+      <div
+        data-tauri-drag-region
+        draggable={false}
+        onDragStart={e => e.preventDefault()}
+        onPointerDown={event => {
+          if (event.button === 0) {
+            event.preventDefault()
+            try { getCurrentWindow().startDragging().catch(() => {}) } catch {}
+          }
+        }}
+        title="Drag to move companion"
+        className="glass-panel group flex h-10 items-center gap-1.5 rounded-full border border-white/10 bg-black/25 px-3.5 py-1 text-xs text-ice-200/75 shadow-sm transition hover:border-ice-200/40 hover:bg-ice-200/15 hover:text-white cursor-grab active:cursor-grabbing select-none"
+      >
+        <span className="text-xs opacity-60 transition group-hover:opacity-100 font-mono select-none pointer-events-none" draggable={false}>⠿</span>
+        <span className="text-[11px] font-medium tracking-wide select-none pointer-events-none" draggable={false}>Move</span>
+      </div>
+      <button
+        type="button"
+        aria-label={settings.panelOpen ? 'Close chat panel' : 'Open chat panel'}
+        aria-expanded={settings.panelOpen}
+        title={settings.panelOpen ? 'Close chat panel' : 'Open chat panel'}
+        onClick={() => setSettings(s => ({ ...s, panelOpen: !s.panelOpen }))}
+        className={`glass-panel group flex h-10 items-center gap-1.5 rounded-full border px-3.5 py-1 text-xs shadow-sm transition hover:-translate-y-0.5 select-none ${
+          settings.panelOpen
+            ? 'border-ice-200/45 bg-ice-200/20 text-white shadow-[0_0_14px_rgba(182,232,255,0.25)]'
+            : 'border-white/10 bg-black/25 text-ice-200/75 hover:border-ice-200/40 hover:bg-ice-200/15 hover:text-white'
+        }`}
+      >
+        <span className="text-xs transition-transform duration-200 group-hover:scale-110">💬</span>
+        <span className="text-[11px] font-medium tracking-wide">Chat</span>
+      </button>
       <div className="relative shrink-0">
         <button ref={menuButtonRef} aria-label="Companion action tree" aria-expanded={actionsOpen} aria-controls="companion-action-tree" title="Companion menu" onClick={toggleActionMenu} style={actionsOpen ? { position: 'fixed', left: `${menuOrigin.left + 86}px`, top: `${menuOrigin.top + 86}px` } : undefined} className={`glass-panel group grid size-12 place-items-center rounded-full border text-xl transition duration-300 hover:-translate-y-0.5 hover:border-ice-200/45 hover:bg-ice-200/15 ${actionsOpen ? 'z-30 border-ice-200/40 bg-ice-200/15 text-white' : 'border-white/10 bg-black/10 text-ice-100/80'}`}>
           <span className={`text-xl transition-transform duration-300 ${actionsOpen ? 'rotate-0' : 'group-hover:rotate-12'}`}>{actionsOpen ? '×' : '☷'}</span>
@@ -218,13 +255,25 @@ export default function App() {
       </div>
     </header>
 
-    <div className="relative min-h-0 flex-1">
+    <div
+      data-tauri-drag-region
+      className={`relative min-h-0 flex-1 ${settings.locked ? '' : 'cursor-grab active:cursor-grabbing'}`}
+      onPointerDown={event => {
+        if (event.button === 0 && !settings.locked) {
+          const target = event.target as HTMLElement
+          if (!target.closest('button, select, input, a, [role="button"]')) {
+            event.preventDefault()
+            try { getCurrentWindow().startDragging().catch(() => {}) } catch {}
+          }
+        }
+      }}
+    >
       <div aria-hidden="true" className="orbit-ring pointer-events-none absolute left-1/2 top-[44%] aspect-square w-[min(72vw,420px)] -translate-x-1/2 -translate-y-1/2 rounded-full" />
       <div aria-hidden="true" className="orbit-ring pointer-events-none absolute left-1/2 top-[44%] aspect-square w-[min(62vw,360px)] -translate-x-1/2 -translate-y-1/2 rounded-full border-dashed opacity-70 [animation:orbit_36s_linear_infinite]" />
       <div aria-hidden="true" className="pointer-events-none absolute left-1/2 top-[43%] size-[min(62vw,360px)] -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-300/10 blur-3xl animate-glow" />
       <span aria-hidden="true" className="absolute left-[18%] top-[27%] size-1.5 rounded-full bg-ice-100 shadow-[0_0_14px_3px_rgba(130,215,255,.65)] animate-twinkle" />
       <span aria-hidden="true" className="absolute right-[17%] top-[54%] size-1 rounded-full bg-white shadow-[0_0_12px_3px_rgba(130,215,255,.7)] [animation:twinkle_2.7s_ease-in-out_1s_infinite]" />
-      <Live2DStage key={modelKey} scale={settings.scale} expressionIndex={modelExpression(settings.expression, automaticStatus)} accessoryIndex={settings.accessory} isLocked={settings.locked} isActive={visible} status={automaticStatus} onLoadError={setModelError} />
+      <Live2DStage key={modelKey} scale={settings.scale} offsetY={settings.offsetY} expressionIndex={modelExpression(settings.expression, automaticStatus)} accessoryIndex={settings.accessory} isLocked={settings.locked} isActive={visible} status={automaticStatus} onLoadError={setModelError} />
       {modelError && <div className="glass-panel absolute inset-x-4 top-[16%] rounded-2xl p-4 text-sm leading-relaxed text-rose-100" role="alert">The character could not load. Chat and settings are available.<button className="mt-3 block min-h-10 rounded-lg bg-white/10 px-4 py-2.5 text-sm" onClick={() => { setModelError(''); setModelKey(k => k + 1) }}>Retry character</button></div>}
     </div>
 
@@ -233,16 +282,82 @@ export default function App() {
         <h2 className="text-sm font-semibold text-white">Companion settings <span className="ml-1 text-ice-200">✦</span></h2>
         <button type="button" aria-label="Close settings" title="Close settings" onClick={() => setSettingsOpen(false)} className="grid size-9 shrink-0 place-items-center rounded-full border border-white/15 bg-white/5 text-base text-ice-100/75 transition hover:border-ice-200/45 hover:bg-ice-200/10 hover:text-white">×</button>
       </div>
-      <label className="col-span-2 flex flex-col gap-2 text-[11px] text-ice-100/70">Character size<input className="accent-sky-300" type="range" min="0.5" max="1.5" step="0.05" value={settings.scale} onChange={e => setSettings(s => ({ ...s, scale: +e.target.value }))} /></label>
+
+      <div className="col-span-2 flex flex-col gap-1.5">
+        <div className="flex items-center justify-between text-[11px] text-ice-100/70">
+          <span>Character size</span>
+          {settings.scale !== 1 && (
+            <button
+              type="button"
+              onClick={() => setSettings(s => ({ ...s, scale: 1 }))}
+              className="text-[10px] text-ice-200/60 hover:text-ice-100 transition"
+              title="Reset size to 100%"
+            >
+              Reset ({Math.round(settings.scale * 100)}%)
+            </button>
+          )}
+        </div>
+        <input
+          aria-label="Character size"
+          className="accent-sky-300"
+          type="range"
+          min="0.5"
+          max="1.5"
+          step="0.05"
+          value={settings.scale}
+          onChange={e => setSettings(s => ({ ...s, scale: +e.target.value }))}
+        />
+      </div>
+
+      <div className="col-span-2 flex flex-col gap-1.5">
+        <div className="flex items-center justify-between text-[11px] text-ice-100/70">
+          <span>Vertical position</span>
+          {settings.offsetY !== 0 && (
+            <button
+              type="button"
+              onClick={() => setSettings(s => ({ ...s, offsetY: 0 }))}
+              className="text-[10px] text-ice-200/60 hover:text-ice-100 transition"
+              title="Reset position to center"
+            >
+              Reset ({settings.offsetY > 0 ? `+${Math.round(settings.offsetY * 100)}%` : `${Math.round(settings.offsetY * 100)}%`})
+            </button>
+          )}
+        </div>
+        <input
+          aria-label="Vertical position"
+          className="accent-sky-300"
+          type="range"
+          min="-0.35"
+          max="0.35"
+          step="0.01"
+          value={settings.offsetY}
+          onChange={e => setSettings(s => ({ ...s, offsetY: +e.target.value }))}
+        />
+      </div>
       <label className="flex min-w-0 flex-col gap-1.5 text-[11px] text-ice-100/70">Expression<select className="min-w-0 rounded-xl border border-white/15 bg-night-950/75 px-2.5 py-2 text-xs text-white" value={settings.expression} onChange={e => setSettings(s => ({ ...s, expression: +e.target.value }))}>{expressions.map((name, i) => <option key={name} value={i-1}>{name}</option>)}</select></label>
       <label className="flex min-w-0 flex-col gap-1.5 text-[11px] text-ice-100/70">Accessory<select className="min-w-0 rounded-xl border border-white/15 bg-night-950/75 px-2.5 py-2 text-xs text-white" value={settings.accessory} onChange={e => setSettings(s => ({ ...s, accessory: +e.target.value }))}>{accessories.map((name, i) => <option key={name} value={i}>{name}</option>)}</select></label>
       {([['locked', 'Lock interactions'], ['alwaysOnTop', 'Always on top'], ['normalWindow', 'Normal window']] as const).map(([key, label]) => <label key={key} className="flex items-center gap-2 text-[11px] text-ice-100/75"><input className="accent-sky-300" type="checkbox" checked={settings[key]} onChange={e => setSettings(s => ({ ...s, [key]: e.target.checked }))} />{label}</label>)}
     </section>}
 
-    {settings.panelOpen && <section className="glass-panel animate-enter relative z-10 flex max-h-[43dvh] shrink-0 flex-col overflow-hidden rounded-[22px] p-3.5 sm:p-4" aria-label="Chat with Mint">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="min-w-0"><h1 className="truncate text-sm font-semibold tracking-wide text-white">A little company</h1><p className="mt-0.5 text-[10px] text-ice-100/55">Your conversation, shared with Mint</p></div>
-        <span className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] ${online ? 'border-emerald-200/20 bg-emerald-200/10 text-emerald-100' : 'border-white/10 bg-black/10 text-ice-100/65'}`}><span className={`size-1.5 rounded-full ${online ? 'bg-emerald-300 animate-pulse' : 'bg-slate-400'}`} />{online ? 'Connected' : 'Waiting for Mint'}</span>
+    {settings.panelOpen && <section className="glass-panel animate-enter absolute inset-x-3 bottom-3 z-30 flex max-h-[50dvh] flex-col overflow-hidden rounded-[24px] p-3.5 shadow-2xl backdrop-blur-2xl sm:inset-x-4 sm:bottom-4 sm:p-4" aria-label="Chat with Mint">
+      <div
+        data-tauri-drag-region
+        onPointerDown={event => {
+          if (event.button === 0 && !settings.locked) {
+            const target = event.target as HTMLElement
+            if (!target.closest('button, select, input, a, [role="button"]')) {
+              event.preventDefault()
+              try { getCurrentWindow().startDragging().catch(() => {}) } catch {}
+            }
+          }
+        }}
+        className={`mb-3 flex items-center justify-between gap-3 select-none ${settings.locked ? '' : 'cursor-grab active:cursor-grabbing'}`}
+      >
+        <div className="min-w-0 pointer-events-none"><h1 className="truncate text-sm font-semibold tracking-wide text-white">A little company</h1><p className="mt-0.5 text-[10px] text-ice-100/55">Your conversation, shared with Mint</p></div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] ${online ? 'border-emerald-200/20 bg-emerald-200/10 text-emerald-100' : 'border-white/10 bg-black/10 text-ice-100/65'}`}><span className={`size-1.5 rounded-full ${online ? 'bg-emerald-300 animate-pulse' : 'bg-slate-400'}`} />{online ? 'Connected' : 'Waiting for Mint'}</span>
+          <button type="button" aria-label="Close chat panel" title="Close chat panel" onClick={() => setSettings(s => ({ ...s, panelOpen: false }))} className="grid size-7 shrink-0 place-items-center rounded-full border border-white/15 bg-white/5 text-sm text-ice-100/75 transition hover:border-ice-200/45 hover:bg-ice-200/10 hover:text-white">×</button>
+        </div>
       </div>
       <div className="grid shrink-0 grid-cols-2 gap-2.5">
         <label className="flex min-w-0 flex-col gap-1.5 text-[10px] font-medium uppercase tracking-[.13em] text-ice-100/55">Mint instance<select className="w-full min-w-0 rounded-xl border border-white/15 bg-night-950/65 px-2.5 py-2.5 text-xs normal-case tracking-normal text-white transition hover:border-ice-200/40 disabled:opacity-50" value={settings.hostId} onChange={e => setSettings(s => ({ ...s, hostId: e.target.value, chatId: '' }))}><option value="">Choose Mint</option>{settings.hostId && !hosts.some(h => h.hostId === settings.hostId) && <option value={settings.hostId}>Selected Mint · offline</option>}{hosts.map(h => <option key={h.hostId} value={h.hostId}>{h.name}</option>)}</select></label>

@@ -29,6 +29,7 @@ struct Settings {
     host_id: String,
     chat_id: String,
     scale: f64,
+    offset_y: f64,
     expression: i32,
     accessory: u32,
     locked: bool,
@@ -47,6 +48,7 @@ impl Default for Settings {
             host_id: String::new(),
             chat_id: String::new(),
             scale: 1.0,
+            offset_y: 0.0,
             expression: -1,
             accessory: 0,
             locked: false,
@@ -326,6 +328,44 @@ fn save_settings(
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelativeCursorPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
+pub fn calculate_relative_cursor(
+    cursor_x: f64,
+    cursor_y: f64,
+    win_x: i32,
+    win_y: i32,
+    scale_factor: f64,
+) -> RelativeCursorPosition {
+    let scale = if scale_factor <= 0.0 || !scale_factor.is_finite() {
+        1.0
+    } else {
+        scale_factor
+    };
+    RelativeCursorPosition {
+        x: (cursor_x - win_x as f64) / scale,
+        y: (cursor_y - win_y as f64) / scale,
+    }
+}
+
+#[tauri::command]
+fn get_cursor_position(window: tauri::WebviewWindow) -> Option<RelativeCursorPosition> {
+    let cursor = window.cursor_position().ok()?;
+    let win_pos = window.outer_position().ok()?;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    Some(calculate_relative_cursor(
+        cursor.x,
+        cursor.y,
+        win_pos.x,
+        win_pos.y,
+        scale,
+    ))
+}
 fn show(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -422,7 +462,8 @@ fn main() {
             send_command,
             load_settings,
             save_settings,
-            quit_app
+            quit_app,
+            get_cursor_position
         ])
         .run(tauri::generate_context!())
         .expect("Failed to launch Mint Companion");
@@ -456,5 +497,26 @@ mod tests {
         ] {
             assert!(!valid_endpoint(endpoint));
         }
+    }
+    #[test]
+    fn relative_cursor_calculation_handles_offsets_and_dpi_scale() {
+        let origin = calculate_relative_cursor(1440.0, 100.0, 1440, 100, 1.0);
+        assert_eq!(origin, RelativeCursorPosition { x: 0.0, y: 0.0 });
+
+        let left = calculate_relative_cursor(440.0, 50.0, 1440, 100, 1.0);
+        assert_eq!(left, RelativeCursorPosition { x: -1000.0, y: -50.0 });
+
+        let scaled = calculate_relative_cursor(1640.0, 300.0, 1440, 100, 2.0);
+        assert_eq!(scaled, RelativeCursorPosition { x: 100.0, y: 100.0 });
+
+        let fallback = calculate_relative_cursor(1500.0, 200.0, 1440, 100, 0.0);
+        assert_eq!(fallback, RelativeCursorPosition { x: 60.0, y: 100.0 });
+    }
+    #[test]
+    fn settings_deserialization_defaults_offset_y() {
+        let json = r#"{"hostId":"","chatId":"","scale":1.2}"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.offset_y, 0.0);
+        assert_eq!(s.scale, 1.2);
     }
 }
