@@ -458,11 +458,59 @@ pub async fn handle_auto() -> Result<()> {
     Ok(())
 }
 
-pub async fn handle_web(dev: bool, tailscale: bool) -> Result<()> {
+async fn wait_for_web(urls: &[&str], timeout: std::time::Duration) -> Result<()> {
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(1))
+        .build()?;
+    tokio::time::timeout(timeout, async {
+        loop {
+            let mut ready = true;
+            for url in urls {
+                if !client
+                    .get(*url)
+                    .send()
+                    .await
+                    .is_ok_and(|r| r.status().is_success())
+                {
+                    ready = false;
+                    break;
+                }
+            }
+            if ready {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!("Mint Web did not become ready before the browser-opening timeout")
+    })
+}
+
+pub async fn handle_web(dev: bool, tailscale: bool, open: bool) -> Result<()> {
     if tailscale {
         return super::tailnet_web::run().await;
     }
-    launch_mint_target("web".into(), dev).await
+    let browser = open.then(|| tokio::spawn(async {
+        let result = async {
+            wait_for_web(
+                &["http://127.0.0.1:9000/", "http://127.0.0.1:3000/api/status"],
+                std::time::Duration::from_secs(120),
+            ).await?;
+            actions::open_system_handler("http://localhost:9000")
+        }.await;
+        if let Err(error) = result {
+            eprintln!("Could not open Mint Web automatically: {error}. Open http://localhost:9000 manually once ready.");
+        }
+    }));
+    let result = launch_mint_target("web".into(), dev).await;
+    if let Some(browser) = browser {
+        browser.abort();
+    }
+    result
 }
 
 pub async fn handle_api(port: u16) -> Result<()> {
@@ -1112,4 +1160,68 @@ pub async fn handle_avatar(command: AvatarCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod web_readiness_tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn server(ready: Arc<AtomicBool>) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = [0; 4096];
+                let bytes_read = stream.read(&mut request).await.unwrap();
+                if bytes_read == 0 {
+                    continue;
+                }
+                let status = if ready.load(Ordering::Acquire) {
+                    "200 OK"
+                } else {
+                    "503 Service Unavailable"
+                };
+                let response =
+                    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+        (url, task)
+    }
+
+    #[tokio::test]
+    async fn waits_for_both_frontend_and_api_to_succeed() {
+        let (frontend, frontend_task) = server(Arc::new(AtomicBool::new(true))).await;
+        let api_ready = Arc::new(AtomicBool::new(false));
+        let (api, api_task) = server(api_ready.clone()).await;
+        let urls = [frontend.as_str(), api.as_str()];
+        let ready = wait_for_web(&urls, std::time::Duration::from_secs(3));
+        tokio::pin!(ready);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(350), &mut ready)
+                .await
+                .is_err()
+        );
+        api_ready.store(true, Ordering::Release);
+        ready.await.unwrap();
+        frontend_task.abort();
+        api_task.abort();
+    }
+
+    #[tokio::test]
+    async fn unavailable_web_times_out_instead_of_opening_early() {
+        let (url, server_task) = server(Arc::new(AtomicBool::new(false))).await;
+        assert!(
+            wait_for_web(&[&url], std::time::Duration::from_millis(100))
+                .await
+                .is_err()
+        );
+        server_task.abort();
+    }
 }

@@ -11,13 +11,19 @@ use std::{
 static SERVERS: LazyLock<Mutex<HashMap<Option<String>, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+#[derive(Debug)]
+struct WebLaunch {
+    job_id: String,
+    reused: bool,
+}
+
 fn launch(
     cwd: &Path,
     owner: Option<String>,
     config: &MintConfig,
     program: Command,
     ports: &[u16],
-) -> Result<String, String> {
+) -> Result<WebLaunch, String> {
     crate::assert_path_capability(cwd, crate::Capability::Write, config)
         .map_err(|e| e.to_string())?;
     let mut servers = SERVERS.lock().map_err(|e| e.to_string())?;
@@ -25,7 +31,10 @@ fn launch(
         && let Ok(job) = crate::bg_shell::job_json(id, false)
     {
         if job["status"] == "running" {
-            return Ok(id.clone());
+            return Ok(WebLaunch {
+                job_id: id.clone(),
+                reused: true,
+            });
         }
         if job["status"] == "stopping" {
             return Err("Mint Web is stopping; try again after it stops.".into());
@@ -46,7 +55,10 @@ fn launch(
     })
     .map_err(|e| e.to_string())?;
     servers.insert(owner, job.id.clone());
-    Ok(job.id)
+    Ok(WebLaunch {
+        job_id: job.id,
+        reused: false,
+    })
 }
 
 fn executable() -> Result<PathBuf, String> {
@@ -83,10 +95,16 @@ pub fn command(
         return Err("Usage: /mint-web".into());
     }
     let mut program = Command::new(executable()?);
-    program.arg("web");
-    let id = launch(cwd, owner, config, program, &[9000, 3000])?;
+    program.args(["web", "--open"]);
+    let launch = launch(cwd, owner, config, program, &[9000, 3000])?;
+    let id = launch.job_id;
+    let browser_notice = if launch.reused {
+        "Mint Web is already running. Open the URL above to return to it."
+    } else {
+        "Your browser will open automatically when ready."
+    };
     Ok(format!(
-        "Mint Web background terminal: `{id}`\n\nOpen http://localhost:9000 once startup completes. It stops when this Mint backend closes.\n\nUse `/shells show {id}` for startup logs or `/shells stop {id}` to stop it."
+        "Mint Web background terminal: `{id}`\n\nMint Web: **http://localhost:9000**\n{browser_notice}\n\nIt stops when this Mint backend closes. Use `/shells show {id}` for startup logs or `/shells stop {id}` to stop it."
     ))
 }
 
@@ -139,14 +157,16 @@ mod tests {
             &[],
         )
         .unwrap();
-        assert_eq!(first, second);
+        assert!(!first.reused);
+        assert!(second.reused);
+        assert_eq!(first.job_id, second.job_id);
         assert!(crate::bg_shell::accessible(
-            &first,
+            &first.job_id,
             &Some("web-launch-test".into())
         ));
-        crate::bg_shell::kill_job(&first).unwrap();
+        crate::bg_shell::kill_job(&first.job_id).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while crate::bg_shell::job_json(&first, false).unwrap()["status"] == "stopping" {
+        while crate::bg_shell::job_json(&first.job_id, false).unwrap()["status"] == "stopping" {
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
@@ -158,7 +178,8 @@ mod tests {
             &[],
         )
         .unwrap();
-        assert_ne!(first, next);
-        crate::bg_shell::kill_job(&next).unwrap();
+        assert!(!next.reused);
+        assert_ne!(first.job_id, next.job_id);
+        crate::bg_shell::kill_job(&next.job_id).unwrap();
     }
 }

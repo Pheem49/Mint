@@ -121,6 +121,9 @@ pub enum Command {
     Auto,
     /// Launch the web UI and local API server.
     Web {
+        /// Open the default browser once the web UI and API are ready.
+        #[arg(long, default_value_t = false, conflicts_with = "tailscale")]
+        open: bool,
         /// Force development mode with Hot Module Replacement (HMR)
         #[arg(long, default_value_t = false, conflicts_with = "tailscale")]
         dev: bool,
@@ -352,7 +355,11 @@ pub async fn dispatch(cmd: Command, config: &mut MintConfig, cli: &crate::Cli) -
             Ok(())
         }
         Command::Auto => agent::handle_auto().await,
-        Command::Web { dev, tailscale } => agent::handle_web(dev, tailscale).await,
+        Command::Web {
+            dev,
+            tailscale,
+            open,
+        } => agent::handle_web(dev, tailscale, open).await,
         Command::Api { port } => agent::handle_api(port).await,
         Command::Gateway { command } => agent::handle_gateway(command).await,
         Command::Chat {
