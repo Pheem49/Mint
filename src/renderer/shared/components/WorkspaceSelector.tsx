@@ -1,6 +1,8 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 
 import { normalizeWorkspacePath, workspacePaths } from '../utils/workspaces'
+import { EMPTY_REMOVED_WORKSPACES, subscribeWorkspaceListPreferences, workspaceListPreferences } from '../utils/workspaceListPreferences'
 import './workspace-selector.css'
 
 interface WorkspaceSelectorProps {
@@ -18,37 +20,82 @@ export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWo
   const menuId = useId()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [actionsPath, setActionsPath] = useState<string | null>(null)
+  const [notice, setNotice] = useState('')
+  const removedPaths = useSyncExternalStore(subscribeWorkspaceListPreferences, workspaceListPreferences.getSnapshot, () => EMPTY_REMOVED_WORKSPACES)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const moreTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const removeRef = useRef<HTMLButtonElement>(null)
+  const actionsMenuRef = useRef<HTMLDivElement>(null)
 
   const visiblePaths = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
-    return workspacePaths(recentPaths, currentPath).filter((path) => {
+    return workspacePaths(recentPaths, currentPath, [], removedPaths).filter((path) => {
       if (!normalizedQuery) return true
       return path.toLocaleLowerCase().includes(normalizedQuery)
         || workspaceLabel(path).toLocaleLowerCase().includes(normalizedQuery)
     })
-  }, [query, recentPaths, currentPath])
+  }, [query, recentPaths, currentPath, removedPaths])
+
+  useLayoutEffect(() => {
+    if (!open || !actionsPath) return
+    const positionDropdown = () => {
+      const trigger = moreTriggerRef.current
+      const menu = actionsMenuRef.current
+      if (!trigger || !menu) return
+      const anchor = trigger.getBoundingClientRect()
+      const bounds = menu.getBoundingClientRect()
+      const width = document.documentElement.clientWidth
+      const left = Math.max(8, Math.min(anchor.right - bounds.width, width - bounds.width - 8))
+      const top = anchor.bottom + bounds.height + 4 <= window.innerHeight
+        ? anchor.bottom + 4 : Math.max(8, anchor.top - bounds.height - 4)
+      menu.style.left = `${left}px`
+      menu.style.top = `${top}px`
+    }
+    positionDropdown()
+    removeRef.current?.focus()
+    window.addEventListener('resize', positionDropdown)
+    window.addEventListener('scroll', positionDropdown, true)
+    return () => {
+      window.removeEventListener('resize', positionDropdown)
+      window.removeEventListener('scroll', positionDropdown, true)
+    }
+  }, [open, actionsPath])
 
   useEffect(() => {
     if (!open) return
     searchRef.current?.focus()
+    const fitMenuToViewport = () => {
+      const root = rootRef.current
+      if (!root) return
+      const width = Math.min(360, document.documentElement.clientWidth - 32)
+      const rootLeft = root.getBoundingClientRect().left
+      const left = Math.max(16, Math.min(rootLeft, document.documentElement.clientWidth - width - 16))
+      root.style.setProperty('--workspace-menu-width', `${width}px`)
+      root.style.setProperty('--workspace-menu-offset', `${left - rootLeft}px`)
+    }
+    fitMenuToViewport()
 
     const closeOnOutsidePointer = (event: MouseEvent) => {
+      if (actionsMenuRef.current?.contains(event.target as Node)) return
+      if (!moreTriggerRef.current?.contains(event.target as Node)) setActionsPath(null)
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
     }
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || event.defaultPrevented) return
       event.preventDefault()
       setOpen(false)
       triggerRef.current?.focus()
     }
     document.addEventListener('mousedown', closeOnOutsidePointer)
     window.addEventListener('keydown', closeOnEscape)
+    window.addEventListener('resize', fitMenuToViewport)
     return () => {
       document.removeEventListener('mousedown', closeOnOutsidePointer)
       window.removeEventListener('keydown', closeOnEscape)
+      window.removeEventListener('resize', fitMenuToViewport)
     }
   }, [open])
 
@@ -67,6 +114,8 @@ export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWo
         className={`workspace-select-btn ${currentPath ? 'has-workspace' : 'needs-workspace'}`}
         onClick={() => {
           setQuery('')
+          setActionsPath(null)
+          setNotice('')
           setOpen((current) => !current)
         }}
         aria-label={`${currentPath ? 'Change' : 'Choose'} workspace: ${currentPath ? workspaceLabel(currentPath) : 'Select Project'}`}
@@ -99,7 +148,7 @@ export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWo
               ref={searchRef}
               type="search"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => { setQuery(event.target.value); setActionsPath(null) }}
               placeholder="Search workspaces"
               aria-label="Search workspaces"
             />
@@ -109,8 +158,8 @@ export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWo
             {visiblePaths.length > 0 ? visiblePaths.map((path) => {
               const isCurrent = path === normalizeWorkspacePath(currentPath)
               return (
+                <div className="workspace-select-row" key={path}>
                 <button
-                  key={path}
                   type="button"
                   className="workspace-select-option"
                   onClick={() => chooseWorkspace(path)}
@@ -130,6 +179,27 @@ export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWo
                     </svg>
                   )}
                 </button>
+                <button
+                  type="button"
+                  className="workspace-select-more"
+                  aria-label={`Workspace actions: ${workspaceLabel(path)}`}
+                  title="Workspace actions"
+                  aria-haspopup="menu"
+                  aria-expanded={actionsPath === path}
+                  onClick={(event) => {
+                    moreTriggerRef.current = event.currentTarget
+                    setActionsPath(current => current === path ? null : path)
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'ArrowDown') { event.preventDefault(); moreTriggerRef.current = event.currentTarget; setActionsPath(path) }
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
+                  </svg>
+                </button>
+
+                </div>
               )
             }) : (
               <div className="workspace-select-empty">
@@ -137,6 +207,8 @@ export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWo
               </div>
             )}
           </div>
+
+          {notice && <p className="workspace-select-notice" role="status">{notice}</p>}
 
           <div className="workspace-select-menu-footer">
             <button type="button" className="workspace-select-open-folder" onClick={() => chooseWorkspace()}>
@@ -148,6 +220,26 @@ export default function WorkspaceSelector({ currentPath, recentPaths, onSelectWo
             </button>
           </div>
         </div>
+      )}
+      {open && actionsPath && visiblePaths.includes(actionsPath) && createPortal(
+        <div ref={actionsMenuRef} className="workspace-select-row-menu" role="menu" aria-label={`Workspace actions: ${workspaceLabel(actionsPath)}`}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault(); event.stopPropagation(); setActionsPath(null); moreTriggerRef.current?.focus()
+            }
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') event.preventDefault()
+          }}>
+          <button ref={removeRef} type="button" role="menuitem" className="workspace-select-remove"
+            onClick={() => {
+              workspaceListPreferences.remove(actionsPath)
+              setActionsPath(null)
+              setNotice('Removed from list. Use Open folder… to add it again.')
+              searchRef.current?.focus()
+            }}>
+            <span>Remove from list</span>
+            <small>Does not delete files or folders.</small>
+          </button>
+        </div>, document.body,
       )}
     </div>
   )

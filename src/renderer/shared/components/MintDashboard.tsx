@@ -40,6 +40,7 @@ import {
   parseUtcDate,
 } from '../utils/ui'
 import { workspacePaths } from '../utils/workspaces'
+import { workspaceListPreferences } from '../utils/workspaceListPreferences'
 import { executeSlashCommand } from '../utils/slashCommandProcessor'
 import { captureScreenForChat } from '../utils/screenCapture'
 import { useConversationCoordinator } from '../conversation/useConversationCoordinator'
@@ -1313,7 +1314,11 @@ export default function MintDashboard() {
   async function selectWorkspace(path?: string, showWorkspace = false) {
     const targetView = isDesktopApp && (showWorkspace || view === 'workspace') ? 'workspace' : 'chat'
     await conversationActions.selectProject(
-      async () => path || await selectLinkedFolderPath(),
+      async () => {
+        const selected = path || await selectLinkedFolderPath()
+        if (selected) workspaceListPreferences.restore(selected)
+        return selected
+      },
       {
         openSession: (session, nextView) => selectConversation(session.id, session, nextView),
         newChat: (targetPath, nextView) => clearHistory('New chat', targetPath, nextView),

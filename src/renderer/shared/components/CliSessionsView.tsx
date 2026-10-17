@@ -4,6 +4,7 @@ import type { ChatSession } from '../types'
 import { parseUtcDate } from '../utils/ui'
 import { normalizeWorkspacePath, workspacePaths } from '../utils/workspaces'
 import WorkspaceSelector from './WorkspaceSelector'
+import { workspaceListPreferences } from '../utils/workspaceListPreferences'
 import '../css/code-sessions.css'
 
 export interface CliSessionsViewProps {
@@ -205,6 +206,7 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
               try {
                 const selected = path || await onSelectFolder?.()
                 if (selected) {
+                  workspaceListPreferences.restore(selected)
                   setSelectedWorkspace(normalizeWorkspacePath(selected))
                   setScopeFilter('workspace')
                 }

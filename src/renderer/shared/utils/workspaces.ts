@@ -5,6 +5,7 @@ export function normalizeWorkspacePath(path?: string | null): string {
   return normalized.replace(/\/+$/, '') || (normalized.startsWith('/') ? '/' : '')
 }
 
-export function workspacePaths(recentPaths: string[], currentPath?: string, sessionPaths: (string | undefined)[] = []): string[] {
-  return [...new Set([...recentPaths, currentPath, ...sessionPaths].map(normalizeWorkspacePath).filter(Boolean))]
+export function workspacePaths(recentPaths: string[], currentPath?: string, sessionPaths: (string | undefined)[] = [], removedPaths: string[] = []): string[] {
+  const removed = new Set(removedPaths.map(normalizeWorkspacePath))
+  return [...new Set([...recentPaths, currentPath, ...sessionPaths].map(normalizeWorkspacePath).filter(path => Boolean(path) && !removed.has(path)))]
 }
