@@ -1,0 +1,101 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Mint dictation regression checks</title></head>
+<body><div id="root"></div><pre id="result">RUNNING</pre><script type="module">
+import React from 'react'; import {createRoot} from 'react-dom/client';
+import {useSpeechToText} from '../shared/utils/speech';
+import {useNativeVoiceInput} from '../shared/utils/useNativeVoiceInput';
+const wait=()=>new Promise(resolve=>setTimeout(resolve,30));
+const assert=(ok,message)=>{if(!ok)throw Error(message)};
+let root,voice,changeDraft,changeChat,recognition,transcript,finishTranscript;let endDelay=0;
+const writes=[],sends=[],checks=[];
+class Recognition {
+ constructor(){recognition=this;this.results=[]}
+ start(){setTimeout(()=>this.onstart?.(),0)}
+ stop(){setTimeout(()=>this.onend?.(),endDelay)}
+ abort(){}
+ result(text,final=true,index=this.results.length){
+  const result=[{transcript:text}];result.isFinal=final;this.results[index]=result;
+  this.onresult?.({resultIndex:index,results:this.results});
+ }
+}
+window.SpeechRecognition=Recognition;
+function Web(){
+ const [message,setMessage]=React.useState('Existing');changeDraft=setMessage;const [chatId,setChatId]=React.useState('chat-a');changeChat=setChatId;
+ voice=useSpeechToText({chatId,message,sending:false,isSpeaking:false,onSetMessage:text=>{writes.push(text);setMessage(text)},onSendVoiceMessage:async text=>sends.push(text)});
+ return null;
+}
+function Native(){
+ const [message,setMessage]=React.useState('Existing');changeDraft=setMessage;const [chatId,setChatId]=React.useState('chat-a');changeChat=setChatId;
+ voice=useNativeVoiceInput({chatId,message,onSetMessage:text=>{writes.push(text);setMessage(text)},onSendVoiceMessage:async text=>sends.push(text),
+  startRecording:async()=>{},cancelRecording:async()=>{},stopRecordingAndTranscribe:()=>transcript});
+ return null;
+}
+async function mount(Component){
+ if(root){root.unmount();await wait()}
+ writes.length=0;sends.length=0;root=createRoot(document.getElementById('root'));
+ root.render(React.createElement(Component));await wait();
+}
+async function check(name,run){try{await run();checks.push('PASS '+name)}catch(error){checks.push('FAIL '+name+': '+error.message)}}
+window.runVoiceDictationChecks=async()=>{
+ await check('web retains every final phrase and never sends',async()=>{
+  await mount(Web);await voice.startRecognition();await wait();
+  recognition.result('First sentence. ');recognition.result('Second sentence.');
+  assert(writes.length===0&&sends.length===0,'must wait for stop');
+  voice.stopRecognition();await wait();
+  assert(writes.join('|')==='Existing First sentence. Second sentence.',JSON.stringify({writes,sends}));
+  assert(sends.length===0,'dictation sent a chat message');
+ });
+ await check('web replaces interim results without duplicating final results',async()=>{
+  await mount(Web);await voice.startRecognition();await wait();
+  recognition.result('hello ',true);recognition.result('worl',false);
+  recognition.result('world',true,1);recognition.result('world',true,1);
+  changeDraft('Edited draft');await wait();voice.stopRecognition();await wait();
+  assert(writes.join('|')==='Edited draft hello world',JSON.stringify(writes));
+  assert(sends.length===0,'dictation sent a chat message');
+ });
+ await check('web cancel discards all recognized phrases',async()=>{
+  await mount(Web);await voice.startRecognition();await wait();recognition.result('discard');
+  voice.cancelRecognition();await wait();assert(writes.length===0&&sends.length===0,'canceled text was applied');
+ });
+ await check('desktop stop appends to latest draft and never sends',async()=>{
+  await mount(Native);transcript=new Promise(resolve=>{finishTranscript=resolve});
+  await voice.startRecognition();await wait();const stop=voice.stopRecognition();
+  changeDraft('Edited while transcribing');await wait();finishTranscript('  Native words  ');await stop;await wait();
+  assert(writes.join('|')==='Edited while transcribing Native words',JSON.stringify({writes,sends}));
+  assert(sends.length===0,'desktop sent a chat message');
+ });
+ await check('desktop cancellation during transcription leaves draft alone',async()=>{
+  await mount(Native);transcript=new Promise(resolve=>{finishTranscript=resolve});
+  await voice.startRecognition();await wait();const stop=voice.stopRecognition();
+  const cancel=voice.cancelRecognition();finishTranscript('discard');await stop;await cancel;await wait();
+  assert(writes.length===0&&sends.length===0,'canceled text was applied');
+ });
+ await check('desktop empty transcript leaves draft alone',async()=>{
+  await mount(Native);transcript=Promise.resolve('  ');await voice.startRecognition();await wait();
+  await voice.stopRecognition();await wait();assert(writes.length===0&&sends.length===0,'empty text changed the draft');
+ });
+ await check('desktop discards delayed transcript after switching chats',async()=>{
+  await mount(Native);transcript=new Promise(resolve=>{finishTranscript=resolve});await voice.startRecognition();await wait();
+  const stopping=voice.stopRecognition();changeChat('chat-b');changeDraft('Other chat draft');await wait();
+  finishTranscript('private words from chat A');await stopping;await wait();
+  assert(writes.length===0&&sends.length===0,'old transcript was inserted into the new chat');
+ });
+ await check('web discards pending recognition after switching chats',async()=>{
+  await mount(Web);await voice.startRecognition();await wait();recognition.result('private words from chat A');
+  endDelay=80;voice.stopRecognition();changeChat('chat-b');changeDraft('Other chat draft');await wait();await new Promise(resolve=>setTimeout(resolve,100));endDelay=0;
+  assert(writes.length===0&&sends.length===0,'old recognition was inserted into the new chat');
+ });
+ await check('unsupported browser shows popup and leaves draft alone',async()=>{
+  await mount(Web);const original=window.SpeechRecognition,webkit=window.webkitSpeechRecognition,alert=window.alert;const popups=[];
+  try{
+   window.SpeechRecognition=undefined;window.webkitSpeechRecognition=undefined;window.alert=text=>popups.push(text);
+   const started=await voice.startRecognition();await wait();
+   assert(started===false&&!voice.isRecording&&!voice.voiceMode,'unsupported browser entered recording mode');
+   assert(popups.length===1&&popups[0].includes('Chrome or Edge'),'unsupported popup missing');
+   assert(writes.length===0&&sends.length===0,'unsupported microphone changed the draft');
+  }finally{window.SpeechRecognition=original;window.webkitSpeechRecognition=webkit;window.alert=alert}
+ });
+ root.unmount();root=null;
+ document.getElementById('result').textContent=checks.join('\n');
+ return checks;
+}
+</script></body></html>

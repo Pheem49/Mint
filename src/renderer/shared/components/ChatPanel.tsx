@@ -718,9 +718,8 @@ export default function ChatPanel({
   }
 
 
-  // The mic button always drives native push-to-talk transcription; Gemini Live is a
-  // separate "Live" button + overlay (see below), not a swap-in replacement for the
-  // same button.
+  // The mic button dictates into the composer (native capture on Desktop,
+  // browser speech recognition on Web). Gemini Live has its own button and overlay.
   const {
     isRecording,
     voiceMode,
@@ -736,6 +735,7 @@ export default function ChatPanel({
     scheduleVoiceListen,
     clearRestartTimer
   } = useVoiceInput({
+    chatId,
     onSendVoiceMessage,
     language: settingsConfig?.language,
     message,
