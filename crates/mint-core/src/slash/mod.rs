@@ -585,7 +585,15 @@ fn cmd_bool_toggle(
     config: &mut MintConfig,
 ) -> SlashResponse {
     match parse_on_off(rest) {
-        None if rest.is_empty() => needs_on_off(command, label),
+        None if rest.is_empty() => {
+            let mut response = needs_on_off(command, label);
+            if command == "/autoskill"
+                && let SlashResponse::NeedsChoice { options, .. } = &mut response
+            {
+                options[usize::from(!current)].label.push_str(" (current)");
+            }
+            response
+        }
         None => error(format!("Usage: {command} [on|off]")),
         Some(v) => {
             set(config, v);

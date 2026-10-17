@@ -1089,7 +1089,11 @@ pub async fn handle_slash_command(
                 println!(
                     "{DIM}When enabled, the agent proposes a skill after a reusable task. Each proposed diff needs your approval before saving.{RESET}"
                 );
-                let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
+                let options = if session.config.auto_skill_writing {
+                    vec!["on (current)".to_string(), "off".to_string()]
+                } else {
+                    vec!["on".to_string(), "off (current)".to_string()]
+                };
                 let current = if session.config.auto_skill_writing {
                     &options[0]
                 } else {
