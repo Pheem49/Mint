@@ -57,6 +57,8 @@ export default function App() {
   const [menuOrigin, setMenuOrigin] = useState({ left: 0, top: 0 })
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const [visible, setVisible] = useState(true)
+  const [compact, setCompact] = useState(false)
+  const [resizing, setResizing] = useState(false)
   const [modelError, setModelError] = useState('')
   const [modelKey, setModelKey] = useState(0)
   const [feedback, setFeedback] = useState(false)
@@ -152,6 +154,7 @@ export default function App() {
         } else if (payload.type === 'error') setError(payload.message)
       }))
       subscriptions.push(await listen<boolean>('companion-visible', ({ payload }) => setVisible(payload)))
+      subscriptions.push(await listen<boolean>('companion-compact', ({ payload }) => setCompact(payload)))
       const saved = await invoke<Settings>('load_settings')
       if (!disposed) { setSettings({ ...defaults, ...saved }); setReady(true) }
       else subscriptions.splice(0).forEach(unlisten => unlisten())
@@ -228,8 +231,25 @@ export default function App() {
     } catch (reason) { if (navigationTarget.current === target) setNavigationNotice(String(reason)) }
     finally { setOpening(false) }
   }
+  async function changeCompact(compact: boolean) {
+    if (resizing) return
+    setResizing(true)
+    closeActionMenu()
+    try {
+      await invoke('set_compact', { compact })
+      setCompact(compact)
+      setSettingsOpen(false); setSpeechOpen(false)
+    } catch (reason) {
+      setError(`Could not resize Companion: ${String(reason)}`)
+      setSettings(s => ({ ...s, panelOpen: true }))
+    } finally { setResizing(false) }
+  }
   const automaticStatus = characterStatus(feedback || !current || !terminal(current.status) ? current?.status ?? 'idle' : 'idle', online, sessionExists)
-  return <main className={`relative isolate flex h-dvh min-h-0 flex-col gap-3 overflow-hidden p-3 text-ice-50 sm:gap-4 sm:p-4 ${settings.normalWindow ? 'normal-window' : ''}`}>
+  return <>
+    {compact && <main className="grid h-dvh place-items-center bg-transparent text-ice-50">
+    <button type="button" aria-label="Expand Companion" title="Expand Companion" disabled={resizing} onClick={() => { void changeCompact(false) }} className="glass-panel grid size-12 place-items-center rounded-full border border-ice-200/35 text-xl text-ice-100 transition hover:border-ice-200/60 hover:bg-ice-200/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-200 disabled:opacity-50">☷</button>
+  </main>}
+  <main style={compact ? { display: 'none' } : undefined} aria-hidden={compact || undefined} className={`relative isolate flex h-dvh min-h-0 flex-col gap-3 overflow-hidden p-3 text-ice-50 sm:gap-4 sm:p-4 ${settings.normalWindow ? 'normal-window' : ''}`}>
     <div aria-hidden="true" className="companion-noise pointer-events-none absolute inset-0 -z-10 overflow-hidden rounded-[28px]" />
     <header className="relative z-20 flex h-12 w-full shrink-0 items-center justify-end gap-2.5" onPointerDown={event => { if (event.button === 0 && event.target === event.currentTarget) { event.preventDefault(); try { getCurrentWindow().startDragging().catch(() => {}) } catch {} } }}>
       <div
@@ -311,7 +331,7 @@ export default function App() {
             <RadialAction label="Window" icon="▢" expanded={expandedActionGroup === 'window'} ariaExpanded={expandedActionGroup === 'window'} onClick={() => toggleActionGroup('window')} />
           </div>}
           {expandedActionGroup === 'window' && <>
-            <div className="pointer-events-auto absolute z-20 animate-[bubble-in_320ms_cubic-bezier(.16,1,.3,1)_both]" style={{ right: '120px', top: '244px' }}><RadialAction label="Minimize Companion" icon="−" onClick={() => { closeActionMenu(); getCurrentWindow().minimize().catch(reason => setError(String(reason))) }} /></div>
+            <div className="pointer-events-auto absolute z-20 animate-[bubble-in_320ms_cubic-bezier(.16,1,.3,1)_both]" style={{ right: '120px', top: '244px' }}><RadialAction label="Collapse to menu button" icon="−" disabled={resizing} onClick={() => { void changeCompact(true) }} /></div>
             <div className="pointer-events-auto absolute z-20 animate-[bubble-in_320ms_cubic-bezier(.16,1,.3,1)_both]" style={{ right: '68px', top: '244px', animationDelay: '45ms' }}><RadialAction label="Quit Companion" icon="×" onClick={() => invoke('quit_app')} /></div>
           </>}
         </nav>}
@@ -354,7 +374,7 @@ export default function App() {
       <div aria-hidden="true" className="pointer-events-none absolute left-1/2 top-[43%] size-[min(62vw,360px)] -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-300/10 blur-3xl animate-glow" />
       <span aria-hidden="true" className="absolute left-[18%] top-[27%] size-1.5 rounded-full bg-ice-100 shadow-[0_0_14px_3px_rgba(130,215,255,.65)] animate-twinkle" />
       <span aria-hidden="true" className="absolute right-[17%] top-[54%] size-1 rounded-full bg-white shadow-[0_0_12px_3px_rgba(130,215,255,.7)] [animation:twinkle_2.7s_ease-in-out_1s_infinite]" />
-      <Live2DStage mouthLevel={speech.mouth} mouthActive={speech.active} key={modelKey} scale={settings.scale} offsetY={settings.offsetY} expressionIndex={modelExpression(settings.expression, automaticStatus)} accessoryIndex={settings.accessory} isLocked={settings.locked} isActive={visible} status={automaticStatus} onLoadError={setModelError} />
+      <Live2DStage mouthLevel={speech.mouth} mouthActive={speech.active} key={modelKey} scale={settings.scale} offsetY={settings.offsetY} expressionIndex={modelExpression(settings.expression, automaticStatus)} accessoryIndex={settings.accessory} isLocked={settings.locked} isActive={visible && !compact} status={automaticStatus} onLoadError={setModelError} />
       {modelError && <div className="glass-panel absolute inset-x-4 top-[16%] rounded-2xl p-4 text-sm leading-relaxed text-rose-100" role="alert">The character could not load. Chat and settings are available.<button className="mt-3 block min-h-10 rounded-lg bg-white/10 px-4 py-2.5 text-sm" onClick={() => { setModelError(''); setModelKey(k => k + 1) }}>Retry character</button></div>}
     </div>
 
@@ -454,4 +474,5 @@ export default function App() {
       <p className="mt-2.5 text-center text-[9px] tracking-wide text-ice-100/45">Chat history is shared with Mint · continue in Desktop, TUI or Web</p>
     </section>}
   </main>
+  </>
 }

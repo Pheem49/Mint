@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod compact;
+
 use futures_util::{SinkExt, StreamExt};
 use mint_companion_protocol::{Command, Event, HostDescriptor, VERSION};
 use serde::{Deserialize, Serialize};
@@ -465,6 +467,7 @@ fn get_cursor_position(window: tauri::WebviewWindow) -> Option<RelativeCursorPos
 }
 fn show(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        let _ = compact::set_compact(window.clone(), false);
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -474,6 +477,7 @@ fn show(app: &tauri::AppHandle) {
 fn main() {
     tauri::Builder::default()
         .manage(Client::default())
+        .manage(compact::CompactWindow::default())
         .setup(|app| {
             let settings = read_settings();
             if let Some(window) = app.get_webview_window("main") {
@@ -538,13 +542,27 @@ fn main() {
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::Moved(position) => {
+                if window
+                    .state::<compact::CompactWindow>()
+                    .active
+                    .load(Ordering::Acquire)
+                {
+                    return;
+                }
                 let state = window.state::<Client>();
                 let mut settings = state.settings.lock().unwrap();
                 settings.x = Some(position.x);
                 settings.y = Some(position.y);
                 let _ = persist(&settings);
             }
-            tauri::WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
+            tauri::WindowEvent::Resized(size) if size.width >= 340 && size.height >= 560 => {
+                if window
+                    .state::<compact::CompactWindow>()
+                    .active
+                    .load(Ordering::Acquire)
+                {
+                    return;
+                }
                 let state = window.state::<Client>();
                 let mut settings = state.settings.lock().unwrap();
                 settings.width = size.width;
@@ -554,6 +572,7 @@ fn main() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
+            compact::set_compact,
             discover_hosts,
             open_conversation,
             speech_request,

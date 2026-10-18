@@ -273,7 +273,9 @@ export default function Live2DStage({ mouthLevel, mouthActive, scale, offsetY = 
     return () => {
       isMounted = false
       if (appInstance) {
-        // Prevent Pixi from destroying the shared ticker
+        // Detach this renderer before preserving the shared ticker. Leaving its
+        // callback registered would invoke a destroyed renderer on later frames.
+        appInstance.ticker.remove(appInstance.render, appInstance)
         ;(appInstance as any)._ticker = null
         appInstance.destroy(false, {
           children: true,

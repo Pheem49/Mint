@@ -4,6 +4,10 @@ Released: 2026-10-17
 
 ## Mint Companion UI
 
+- Fixed the Live2D freeze after expanding Companion: collapse now pauses and hides the existing model instead of destroying/reloading it. Stage cleanup also removes its render callback from Pixi’s shared ticker before disposing the renderer.
+
+- Replaced Companion’s permission-blocked OS minimize action with Collapse to menu button: the native window shrinks to 64×64 logical pixels, leaving a single circular menu button. Clicking it or choosing Show Companion from the tray restores the previous size, window style and maximized state; compact geometry does not replace saved full-window dimensions.
+
 - Fixed speech readiness when connection and initial snapshot events arrive together, and made the latest-turn check atomic with automatic playback ownership so a new message cannot be overtaken by a stale read request.
 
 - Collapsed the persistent connection and handoff bars into a small accessible status dot beside Chat. Conversation names and connection/navigation details live in Chat; Continue in Mint is available from the Conversation radial group when ready. Disconnection shows a four-second notice before returning to the dot.
