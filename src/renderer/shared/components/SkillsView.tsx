@@ -137,6 +137,16 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
           <p className="management-subtitle">
             Instructions Mint follows automatically, reviewed before every prompt.
           </p>
+          <div className="management-workspace-info">
+            <span className="management-workspace-label">Workspace:</span>
+            {workspacePath ? (
+              <code className="management-workspace-path" title={workspacePath}>
+                {workspacePath}
+              </code>
+            ) : (
+              <span className="management-workspace-none">No active workspace</span>
+            )}
+          </div>
         </div>
         <button
           type="button"
@@ -246,6 +256,12 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
               <span className={`management-tag ${isWorkspaceSkill(detailSkill) ? 'workspace' : 'global'}`}>
                 {isWorkspaceSkill(detailSkill) ? 'Workspace' : 'Global'}
               </span>
+
+              {detailSkill.sourcePath && (
+                <div className="management-modal-source">
+                  <code>{detailSkill.sourcePath}</code>
+                </div>
+              )}
 
               {detailSkill.description && (
                 <p style={{ color: 'var(--text-soft, #d1d1d4)', lineHeight: 1.55, margin: 0 }}>

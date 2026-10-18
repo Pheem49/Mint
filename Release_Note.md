@@ -2,7 +2,15 @@
 
 Released: 2026-10-17
 
+## Skills & Workspace Transparency
+
+- Added active workspace path display to the Skills management view in Web and Desktop UI (`SkillsView`), showing which project workspace is being inspected or indicating when no workspace is active.
+- Added source file path indicator in the skill detail modal to reveal where each skill file resides on disk.
+- Added workspace directory label to CLI skill listings (`/learn`, `/skill list`, and `mint learn --list`).
+
 ## Mint Companion UI
+
+- Added separate Window width (340–2000 logical pixels) and Window height (560–2000 logical pixels) controls to Companion Settings. Changes resize the native app and retain full-window geometry across launches, including larger physical dimensions on high-DPI displays.
 
 - Fixed the Live2D freeze after expanding Companion: collapse now pauses and hides the existing model instead of destroying/reloading it. Stage cleanup also removes its render callback from Pixi’s shared ticker before disposing the renderer.
 

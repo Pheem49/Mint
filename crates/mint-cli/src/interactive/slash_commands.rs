@@ -2004,9 +2004,15 @@ pub async fn handle_slash_command(
                     }
                 };
                 if unique_skills.is_empty() {
-                    println!("No learned skills found. Use '/learn <path>' to add one.\n");
+                    println!(
+                        "No learned skills found in workspace: {}. Use '/learn <path>' to add one.\n",
+                        session.current_dir.display()
+                    );
                 } else {
-                    println!("Learned AI Skills:");
+                    println!(
+                        "Learned AI Skills (Workspace: {}):",
+                        session.current_dir.display()
+                    );
                     for entry in &unique_skills {
                         let skill = &entry.skill;
                         let name = &skill.name;
@@ -2052,10 +2058,11 @@ pub async fn handle_slash_command(
                     let skills = load_all_available_skills(&session.current_dir);
                     if skills.is_empty() {
                         println!(
-                            "No skills found. Use `/skill add <path|github-repo|url>` to add one.\n"
+                            "No skills found in workspace: {}. Use `/skill add <path|github-repo|url>` to add one.\n",
+                            session.current_dir.display()
                         );
                     } else {
-                        println!("Skills:");
+                        println!("Skills (Workspace: {}):", session.current_dir.display());
                         for skill in &skills {
                             let loc = if skill.source_path.contains("/.config/mint/mint-skills") {
                                 "Global"
