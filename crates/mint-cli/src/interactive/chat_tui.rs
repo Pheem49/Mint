@@ -1499,16 +1499,32 @@ impl ChatViewState {
             .filter(|thought| thought.updated_at.is_some() && !thought.text.trim().is_empty())
     }
 
+    fn thought_total_elapsed_label(&self) -> String {
+        if self.thoughts.iter().all(|thought| thought.elapsed_known) {
+            super::format_thought_elapsed(self.thoughts.iter().map(ThinkingSegment::elapsed).sum())
+        } else {
+            "time unavailable".into()
+        }
+    }
+
     fn thought_record(&self) -> Option<ThoughtModalState> {
-        let latest = self.thoughts.last()?;
+        self.thoughts.last()?;
         Some(ThoughtModalState {
-            elapsed_str: latest.elapsed_label(),
+            elapsed_str: self.thought_total_elapsed_label(),
             lines: self
                 .thoughts
                 .iter()
-                .map(|thought| thought.text.as_str())
+                .enumerate()
+                .map(|(index, thought)| {
+                    format!(
+                        "── Thought {} · {} ──────────────────────────\n{}",
+                        index + 1,
+                        thought.elapsed_label(),
+                        thought.text
+                    )
+                })
                 .collect::<Vec<_>>()
-                .join("\n\n── Next Step ──────────────────────────\n")
+                .join("\n\n")
                 .lines()
                 .map(str::to_owned)
                 .collect(),
@@ -3054,18 +3070,58 @@ impl ChatViewState {
                 let title_height = Paragraph::new(lines.clone())
                     .wrap(Wrap { trim: false })
                     .line_count(width);
-                let body = Paragraph::new(
+                let command_line_count = if dialog.title == "Local shell command"
+                    && dialog.body.starts_with("Command: ")
+                {
+                    dialog
+                        .body
+                        .rfind("\nMode: ")
+                        .map_or(0, |end| dialog.body[..end].lines().count())
+                } else {
+                    0
+                };
+                let detail_lines = self
+                    .tool_viewer
+                    .and_then(|index| self.tools.get(index))
+                    .map(|tool| {
+                        tool.detail_lines()
+                            .into_iter()
+                            .map(|mut line| {
+                                line.spans.insert(0, Span::raw(" "));
+                                line
+                            })
+                            .collect::<Vec<_>>()
+                    });
+                let body = Paragraph::new(detail_lines.unwrap_or_else(|| {
                     dialog
                         .body
                         .lines()
-                        .map(|line| {
+                        .enumerate()
+                        .map(|(index, line)| {
+                            if index < command_line_count {
+                                let (label, command) = if index == 0 {
+                                    (" Command: ", &line["Command: ".len()..])
+                                } else {
+                                    (" ", line)
+                                };
+                                return Line::from(vec![
+                                    Span::styled(
+                                        label,
+                                        Style::default().fg(crate::terminal_theme::TEXT),
+                                    ),
+                                    Span::styled(
+                                        command,
+                                        Style::default().fg(crate::terminal_theme::ACCENT),
+                                    ),
+                                ]);
+                            }
                             Line::styled(
                                 format!(" {line}"),
                                 Style::default().fg(crate::terminal_theme::TEXT),
                             )
                         })
-                        .collect::<Vec<_>>(),
-                )
+                        .collect::<Vec<_>>()
+                }))
                 .wrap(Wrap { trim: false });
                 let body_lines = if dialog.body.is_empty() {
                     0
@@ -3073,7 +3129,7 @@ impl ChatViewState {
                     body.line_count(width)
                 };
                 let hint = if self.tool_viewer.is_some() {
-                    " PgUp/PgDn scroll · Tab next · Ctrl+Y copy all · Esc close"
+                    " Shift+Tab previous · Tab next (wraps)\n PgUp/PgDn scroll · Ctrl+Y copy all · Esc/Ctrl+O close"
                 } else if dialog.update_prompt {
                     " ↑/↓ navigate · 1-3 choose · Enter continue · Esc skip"
                 } else if dialog.input.is_some() {
@@ -3107,7 +3163,8 @@ impl ChatViewState {
                 let fixed_height = title_height + filter_height + 1 + option_height;
                 let body_overflows =
                     body_lines > inner_height.saturating_sub(fixed_height + normal_footer_height);
-                let hint = if body_overflows && dialog.input.is_none() {
+                let hint = if body_overflows && dialog.input.is_none() && self.tool_viewer.is_none()
+                {
                     if dialog.checked.is_some() {
                         " Space toggle · Enter confirm · Esc cancel"
                     } else {
@@ -3341,10 +3398,9 @@ impl ChatViewState {
                     if !body_overflows {
                         lines.push(Line::raw(""));
                     }
-                    lines.push(Line::styled(
-                        hint,
-                        Style::default().fg(crate::terminal_theme::MUTED),
-                    ));
+                    lines.extend(hint.lines().map(|line| {
+                        Line::styled(line, Style::default().fg(crate::terminal_theme::MUTED))
+                    }));
                     if !body_overflows {
                         lines.push(Line::raw(""));
                     }
@@ -3386,16 +3442,18 @@ impl ChatViewState {
         } else if let Some(modal) = &self.thought_modal {
             let panel_area = rows[3];
             let content_width = (panel_area.width as usize).saturating_sub(4).max(20);
-            let mut wrapped_lines: Vec<String> = Vec::new();
+            let mut wrapped_lines: Vec<(String, bool)> = Vec::new();
             for paragraph in &modal.lines {
                 let p_trimmed = paragraph.trim_end();
+                let separator = p_trimmed.starts_with("── Thought ")
+                    && p_trimmed.ends_with(" ──────────────────────────");
                 if p_trimmed.is_empty() {
-                    wrapped_lines.push(String::new());
+                    wrapped_lines.push((String::new(), false));
                 } else {
                     let options = textwrap::Options::new(content_width).break_words(true);
                     let filled = textwrap::fill(p_trimmed, &options);
                     for l in filled.lines() {
-                        wrapped_lines.push(l.to_string());
+                        wrapped_lines.push((l.to_string(), separator));
                     }
                 }
             }
@@ -3404,41 +3462,56 @@ impl ChatViewState {
             let max_scroll = wrapped_lines.len().saturating_sub(inner_height);
             let scroll = modal.scroll.min(max_scroll);
 
-            let scroll_hint = if max_scroll > 0 {
-                format!(
-                    " ↑/↓ scroll {}/{} · Esc / Ctrl+T to close ",
+            let key_style = Style::default().fg(crate::terminal_theme::BLUE);
+            let mut hint_spans = Vec::new();
+            if max_scroll > 0 {
+                hint_spans.push(Span::styled(" ↑/↓", key_style));
+                hint_spans.push(Span::raw(format!(
+                    " scroll {}/{} ·",
                     scroll + 1,
                     max_scroll + 1
-                )
-            } else {
-                " Esc / Ctrl+T to close ".to_string()
-            };
+                )));
+            }
+            hint_spans.extend([
+                Span::styled(" Esc", key_style),
+                Span::raw(" / "),
+                Span::styled("Ctrl+T", key_style),
+                Span::raw(" to close "),
+            ]);
+            let scroll_hint =
+                Line::from(hint_spans).style(Style::default().fg(crate::terminal_theme::MUTED));
 
             let block = Block::default()
                 .borders(Borders::TOP)
                 .border_style(Style::default().fg(crate::terminal_theme::BLUE))
                 .title(Span::styled(
                     format!(
-                        " Thought Process ({}) ",
-                        self.live_thought()
-                            .map(|thought| super::format_thought_elapsed(thought.elapsed()))
-                            .unwrap_or_else(|| modal.elapsed_str.clone())
+                        " Thought Process · {} ",
+                        if self.thoughts.is_empty() {
+                            modal.elapsed_str.clone()
+                        } else {
+                            self.thought_total_elapsed_label()
+                        }
                     ),
                     Style::default()
                         .fg(crate::terminal_theme::BLUE)
                         .add_modifier(Modifier::BOLD),
                 ))
-                .title_bottom(Span::styled(
-                    scroll_hint,
-                    Style::default().fg(crate::terminal_theme::MUTED),
-                ));
+                .title_bottom(scroll_hint);
 
             let visible = &wrapped_lines[scroll..(scroll + inner_height).min(wrapped_lines.len())];
             let mut p_lines: Vec<Line> = Vec::with_capacity(inner_height);
-            for l in visible {
+            for (l, separator) in visible {
                 p_lines.push(Line::from(vec![
                     Span::raw(" "),
-                    Span::styled(l.clone(), Style::default().fg(crate::terminal_theme::TEXT)),
+                    Span::styled(
+                        l.clone(),
+                        Style::default().fg(if *separator {
+                            crate::terminal_theme::ACCENT
+                        } else {
+                            crate::terminal_theme::TEXT
+                        }),
+                    ),
                 ]));
             }
             for _ in visible.len()..inner_height {
@@ -5503,7 +5576,7 @@ mod dialog_tests {
             assert!(!state.tools[0].running());
             assert!(state.handle_thought_key(ctrl_t()));
             assert_eq!(
-                state.thought_modal.as_ref().unwrap().lines,
+                state.thought_modal.as_ref().unwrap().lines[1..],
                 vec!["Saved reasoning"]
             );
             state.handle_thought_key(make_key(KeyCode::Esc));
@@ -5577,7 +5650,7 @@ mod dialog_tests {
         assert!(super::super::tool_activity::running_lines(&state.tools, 80, 0).is_empty());
         assert!(state.handle_thought_key(ctrl_t()));
         assert_eq!(
-            state.thought_modal.as_ref().unwrap().lines,
+            state.thought_modal.as_ref().unwrap().lines[1..],
             vec!["unfinished reasoning"]
         );
         state.reload_transcript_with(&memory, "another-session", &root);
@@ -6804,7 +6877,7 @@ mod dialog_tests {
         let state = state.lock().unwrap();
         assert_eq!(state.transcript.len(), 2);
         assert_eq!(
-            state.transcript[1].rendered_lines[0].style.fg,
+            state.transcript[1].rendered_lines[0].spans[0].style.fg,
             Some(Color::Red)
         );
         assert!(
@@ -6872,6 +6945,10 @@ mod dialog_tests {
             assert_eq!(text.matches("first complete").count(), 1);
             assert_eq!(text.matches("second complete").count(), 1);
             assert!(!text.contains("partial"));
+            let screen = thought_screen(&state, 100, 30).join("\n");
+            assert!(screen.contains("Thought Process · 3.0s"), "{screen}");
+            assert!(screen.contains("Thought 1 · 1.0s"), "{screen}");
+            assert!(screen.contains("Thought 2 · 2.0s"), "{screen}");
             assert_eq!(state.transcript.len(), 2);
         }
         handle.reset_thoughts();
@@ -6953,7 +7030,7 @@ mod dialog_tests {
         assert_eq!(state.transcript.len(), 1);
         assert!(state.handle_thought_key(ctrl_t()));
         assert_eq!(
-            state.thought_modal.as_ref().unwrap().lines,
+            state.thought_modal.as_ref().unwrap().lines[1..],
             vec!["complete reasoning"]
         );
     }
@@ -6967,7 +7044,7 @@ mod dialog_tests {
         handle.append_thought_delta("one", " second", std::time::Duration::from_secs(1));
         let mut state = state.lock().unwrap();
         assert_eq!(
-            state.thought_modal.as_ref().unwrap().lines,
+            state.thought_modal.as_ref().unwrap().lines[1..],
             vec!["first second"]
         );
         assert!(state.handle_thought_key(make_key(KeyCode::Esc)));
@@ -6993,7 +7070,7 @@ mod dialog_tests {
         );
         assert!(state.handle_thought_key(ctrl_t()));
         assert_eq!(
-            state.thought_modal.as_ref().unwrap().lines,
+            state.thought_modal.as_ref().unwrap().lines[1..],
             vec!["unfinished reasoning"]
         );
         assert_eq!(state.transcript.len(), 1);

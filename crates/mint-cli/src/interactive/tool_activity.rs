@@ -76,9 +76,9 @@ impl ToolActivity {
         };
         let (icon, status) = match self.status {
             None => ("●", "running"),
-            Some(ToolStatus::Success) => ("✓", "completed"),
-            Some(ToolStatus::Failed) => ("✗", "failed"),
-            Some(ToolStatus::TimedOut) => ("✗", "timed out"),
+            Some(ToolStatus::Success) => ("●", "completed"),
+            Some(ToolStatus::Failed) => ("●", "failed"),
+            Some(ToolStatus::TimedOut) => ("●", "timed out"),
             Some(ToolStatus::Cancelled)
                 if self
                     .result
@@ -131,22 +131,13 @@ impl ToolActivity {
         self.input.to_string()
     }
     pub fn lines(&self, width: u16) -> Vec<Line<'static>> {
-        let color = match self.status {
-            None => crate::terminal_theme::TEXT,
-            Some(ToolStatus::Success) => crate::terminal_theme::ACCENT,
-            Some(ToolStatus::Cancelled) => crate::terminal_theme::WARNING,
-            _ => Color::Red,
-        };
         let output = self
             .result
             .as_ref()
             .map(|result| format!("Output · {} lines · ", result.lines().count()))
             .unwrap_or_default();
         vec![
-            Line::styled(
-                clip(&self.heading(), width as usize),
-                Style::default().fg(color),
-            ),
+            self.heading_line(width as usize),
             Line::styled(
                 clip(&format!("  {}", self.subject()), width as usize),
                 Style::default().fg(crate::terminal_theme::TEXT),
@@ -163,7 +154,24 @@ impl ToolActivity {
             ]),
         ]
     }
-    pub fn details(&self) -> String {
+    fn heading_line(&self, width: usize) -> Line<'static> {
+        let color = match self.status {
+            None => crate::terminal_theme::TEXT,
+            Some(ToolStatus::Success) => crate::terminal_theme::ACCENT,
+            Some(ToolStatus::Cancelled) => crate::terminal_theme::WARNING,
+            _ => Color::Red,
+        };
+        let heading = clip(&self.heading(), width);
+        let icon_end = heading.chars().next().map_or(0, char::len_utf8);
+        Line::from(vec![
+            Span::styled(heading[..icon_end].to_owned(), Style::default().fg(color)),
+            Span::styled(
+                heading[icon_end..].to_owned(),
+                Style::default().fg(crate::terminal_theme::TEXT),
+            ),
+        ])
+    }
+    fn detail_input(&self) -> (bool, String) {
         let command = self
             .input
             .get("command")
@@ -172,15 +180,44 @@ impl ToolActivity {
         let input = command
             .map(str::to_owned)
             .unwrap_or_else(|| serde_json::to_string_pretty(&self.input).unwrap_or_default());
+        (command.is_some(), input)
+    }
+    pub fn detail_lines(&self) -> Vec<Line<'static>> {
+        use crate::terminal_theme::{ACCENT, BLUE, TEXT};
+        let (command, input) = self.detail_input();
+        let mut lines = vec![
+            self.heading_line(usize::MAX),
+            Line::styled(format!("Tool: {}", self.action), Style::default().fg(TEXT)),
+            Line::default(),
+            Line::styled(
+                if command { "Command" } else { "Input" },
+                Style::default().fg(BLUE),
+            ),
+        ];
+        lines.extend(input.lines().map(|line| {
+            Line::styled(
+                line.to_owned(),
+                Style::default().fg(if command { ACCENT } else { TEXT }),
+            )
+        }));
+        lines.push(Line::default());
+        lines.push(Line::styled("Output", Style::default().fg(BLUE)));
+        lines.extend(
+            self.result
+                .as_deref()
+                .unwrap_or("Waiting for result…")
+                .lines()
+                .map(|line| Line::styled(line.to_owned(), Style::default().fg(TEXT))),
+        );
+        lines
+    }
+    pub fn details(&self) -> String {
+        let (command, input) = self.detail_input();
         format!(
             "{}\nTool: {}\n\n{}\n{}\n\nOutput\n{}",
             self.heading(),
             self.action,
-            if command.is_some() {
-                "Command"
-            } else {
-                "Input"
-            },
+            if command { "Command" } else { "Input" },
             input,
             self.result.as_deref().unwrap_or("Waiting for result…")
         )
@@ -301,7 +338,7 @@ mod tests {
             };
             tool.finish(result, None);
             assert!(matches!(tool.status, Some(ToolStatus::Failed)), "{result}");
-            assert_eq!(tool.lines(80)[0].style.fg, Some(Color::Red));
+            assert_eq!(tool.lines(80)[0].spans[0].style.fg, Some(Color::Red));
         }
     }
 

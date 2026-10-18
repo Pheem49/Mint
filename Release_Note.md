@@ -41,6 +41,18 @@ Released: 2026-10-17
 
 ## Terminal and Web launch
 
+- The Ctrl+T panel title now shows total thinking time across rounds. Each round begins with a Mint-green numbered heading and its own duration (including the first round); active timing continues updating, and missing historical durations remain marked unavailable.
+
+- The Ctrl+T thought panel now uses the shared Mint accent for Next Step separators and blue for footer key names, while preserving white thought text and muted hint descriptions.
+
+- Tool details now use shared theme colors for status dots, blue Command/Input and Output headings, and Mint-green shell code, while keeping output text white and copied details unchanged.
+
+- Tool details now always show previous/next command shortcuts (Shift+Tab/Tab with wraparound), scrolling, copying, and Esc/Ctrl+O closing hints, including when long content scrolls.
+
+- Shell approval dialogs now display the command and multiline code in the shared Mint accent color; labels, execution metadata, and approval controls retain their existing colors.
+
+- Replaced TUI tool-card success and failure check/cross icons with green and red dots, keeping the status text and other heading details in the normal text color.
+
 - Added `/shells stop` as a selectable autocomplete entry in CLI, Desktop, and Web.
 
 - `/shells stop` now stops all running background terminals across workspaces accessible to the current user. `/shells stop <id>` still stops only the specified job; individual failures are reported without interrupting the rest.
