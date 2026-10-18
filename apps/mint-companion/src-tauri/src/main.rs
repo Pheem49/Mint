@@ -27,6 +27,11 @@ fn valid_endpoint(endpoint: &str) -> bool {
 #[serde(default, rename_all = "camelCase")]
 struct Settings {
     host_id: String,
+    host_identity: String,
+    host_peers: Vec<String>,
+    speech_auto: bool,
+    speech_muted: bool,
+    speech_volume: f64,
     chat_id: String,
     scale: f64,
     offset_y: f64,
@@ -46,6 +51,11 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             host_id: String::new(),
+            host_identity: String::new(),
+            host_peers: Vec::new(),
+            speech_auto: false,
+            speech_muted: false,
+            speech_volume: 1.0,
             chat_id: String::new(),
             scale: 1.0,
             offset_y: 0.0,
@@ -75,6 +85,9 @@ struct Client {
 struct Host {
     host_id: String,
     name: String,
+    identity: Option<String>,
+    surface: Option<mint_companion_protocol::Surface>,
+    speech: bool,
 }
 fn settings_path() -> Result<PathBuf, String> {
     dirs::config_dir()
@@ -174,10 +187,15 @@ async fn discover_hosts() -> Result<Vec<Host>, String> {
             Event::Snapshot {
                 host_id,
                 version: VERSION,
+                surface,
+                speech,
                 ..
             } if host_id == id => Some(Host {
                 host_id: id,
                 name: host.name,
+                identity: host.identity,
+                surface,
+                speech,
             }),
             _ => None,
         }
@@ -278,6 +296,84 @@ fn connect_host(
     *state.task.lock().unwrap() = Some(task);
 }
 #[tauri::command]
+async fn open_conversation(
+    host_id: String,
+    chat_id: String,
+    new_terminal: bool,
+) -> Result<mint_companion_protocol::NavigationOutcome, String> {
+    let host = descriptor(&host_id)?;
+    tokio::time::timeout(std::time::Duration::from_secs(12), async {
+        let mut socket = open(&host).await?;
+        let command = Command::OpenChat {
+            chat_id,
+            new_terminal,
+        };
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&command)
+                    .map_err(|error| error.to_string())?
+                    .into(),
+            ))
+            .await
+            .map_err(|error| error.to_string())?;
+        while let Some(message) = socket.next().await {
+            let message = message.map_err(|error| error.to_string())?;
+            if let Message::Text(text) = message {
+                let event: Event =
+                    serde_json::from_str(&text).map_err(|error| error.to_string())?;
+                match event {
+                    Event::Navigation { outcome } => {
+                        let _ = socket.close(None).await;
+                        return Ok(outcome);
+                    }
+                    Event::Error { message, .. } => return Err(message),
+                    _ => {}
+                }
+            }
+        }
+        Err("Mint disconnected before confirming navigation. Try again after checking Mint.".into())
+    })
+    .await
+    .map_err(|_| "Mint did not confirm navigation. Check Mint before trying again.".to_string())?
+}
+
+#[tauri::command]
+async fn speech_request(
+    host_id: String,
+    request: mint_companion_protocol::SpeechRequest,
+) -> Result<mint_companion_protocol::SpeechReply, String> {
+    let host = descriptor(&host_id)?;
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        let mut socket = open(&host).await?;
+        let command = Command::Speech { request };
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&command)
+                    .map_err(|e| e.to_string())?
+                    .into(),
+            ))
+            .await
+            .map_err(|e| e.to_string())?;
+        while let Some(message) = socket.next().await {
+            let message = message.map_err(|e| e.to_string())?;
+            if let Message::Text(text) = message {
+                match serde_json::from_str::<Event>(&text).map_err(|e| e.to_string())? {
+                    Event::Speech { reply } => {
+                        let _ = socket.close(None).await;
+                        return Ok(reply);
+                    }
+                    Event::Error { message, .. } => return Err(message),
+                    _ => {}
+                }
+            }
+        }
+        Err("Mint disconnected while preparing speech".into())
+    })
+    .await
+    .map_err(|_| "Mint speech request timed out".to_string())?
+}
+
+#[tauri::command]
 async fn send_command(state: tauri::State<'_, Client>, command: Command) -> Result<(), String> {
     let sender = state
         .sender
@@ -300,6 +396,11 @@ fn save_settings(
     state: tauri::State<'_, Client>,
     mut settings: Settings,
 ) -> Result<(), String> {
+    settings.speech_volume = if settings.speech_volume.is_finite() {
+        settings.speech_volume.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
     settings.scale = settings.scale.clamp(0.5, 1.5);
     settings.expression = settings.expression.clamp(-1, 5);
     settings.accessory = settings.accessory.min(3);
@@ -359,11 +460,7 @@ fn get_cursor_position(window: tauri::WebviewWindow) -> Option<RelativeCursorPos
     let win_pos = window.outer_position().ok()?;
     let scale = window.scale_factor().unwrap_or(1.0);
     Some(calculate_relative_cursor(
-        cursor.x,
-        cursor.y,
-        win_pos.x,
-        win_pos.y,
-        scale,
+        cursor.x, cursor.y, win_pos.x, win_pos.y, scale,
     ))
 }
 fn show(app: &tauri::AppHandle) {
@@ -458,6 +555,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             discover_hosts,
+            open_conversation,
+            speech_request,
             connect_host,
             send_command,
             load_settings,
@@ -504,7 +603,13 @@ mod tests {
         assert_eq!(origin, RelativeCursorPosition { x: 0.0, y: 0.0 });
 
         let left = calculate_relative_cursor(440.0, 50.0, 1440, 100, 1.0);
-        assert_eq!(left, RelativeCursorPosition { x: -1000.0, y: -50.0 });
+        assert_eq!(
+            left,
+            RelativeCursorPosition {
+                x: -1000.0,
+                y: -50.0
+            }
+        );
 
         let scaled = calculate_relative_cursor(1640.0, 300.0, 1440, 100, 2.0);
         assert_eq!(scaled, RelativeCursorPosition { x: 100.0, y: 100.0 });

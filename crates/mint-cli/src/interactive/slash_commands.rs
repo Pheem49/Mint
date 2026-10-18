@@ -487,6 +487,7 @@ pub async fn handle_slash_command(
                     ui.push_notice(format!("Already in session '{target_id}'."));
                 } else {
                     session.chat_id = target_id.clone();
+                    crate::companion_navigation::set_chat(&session.chat_id);
                     mint_core::live_sync::update_live_sync_chat_id(&session.chat_id);
                     ui.reload_transcript(&session.chat_id, &session.current_dir);
                     if let Ok(memory) = MemoryStore::open_default() {

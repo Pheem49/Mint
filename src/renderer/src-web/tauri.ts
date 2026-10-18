@@ -467,6 +467,17 @@ export const { sendChatMessage, streamChatMessage } = createConversationTranspor
   ownerToken: getStoredAuthToken,
 })
 
+export async function speechRequest(request: import('../shared/speech/types').SpeechRequest): Promise<import('../shared/speech/types').SpeechReply> {
+  if (isTauriRuntime()) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke('speech_request', { request })
+  }
+  const response = await authFetch(`${getLocalApiBase()}/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) })
+  const result = await response.json()
+  if (!response.ok) throw new Error(result.error || 'Speech request failed')
+  return result
+}
+
 export async function getTtsUrls(text: string): Promise<TtsUrl[]> {
   if (typeof window === 'undefined') return []
   if (!isTauriRuntime()) return []
@@ -650,6 +661,12 @@ export async function saveInteractionAgentActivity(
   }
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('save_interaction_agent_activity', { interactionId, activity })
+}
+
+export async function pendingCompanionChat(acknowledgedId?: string): Promise<string | null> {
+  if (!isTauriRuntime()) return null
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string | null>('pending_companion_chat', { acknowledgedId: acknowledgedId ?? null })
 }
 
 export async function listChatSessions(): Promise<ChatSession[]> {
@@ -2325,14 +2342,14 @@ const _apiCheck: MintPlatformApi = {
   detectSystemTools,
   sendChatMessage,
   streamChatMessage,
-  getTtsUrls,
+  getTtsUrls, speechRequest,
   cancelChatMessage,
   getRecentInteractions,
   getConversationSnapshot,
   getConversationChanges,
   saveSystemInteraction,
   saveInteractionAgentActivity,
-  listChatSessions,
+  listChatSessions, pendingCompanionChat,
   updateChatSessionWorkspace,
   deleteChatSession,
   renameChatSession,

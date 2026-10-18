@@ -240,6 +240,7 @@ pub(crate) async fn launch_mint_target(target: String, dev: bool) -> Result<()> 
             let frontend = mint_core::bg_shell::start_web_frontend(&project_root, &config, web_cmd)
                 .map_err(|e| anyhow::anyhow!("Failed to launch web app: {e}"))?;
             mint_core::bg_shell::watch_web_owner();
+            mint_core::companion::navigation::configure_web("http://localhost:9000/".into());
 
             println!("\n{MINT}✔ Mint Web is running!{RESET}\n");
             println!("    {BLUE}Web UI:{RESET}     {MINT}http://localhost:9000{RESET}");

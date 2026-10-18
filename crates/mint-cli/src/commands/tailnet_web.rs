@@ -152,6 +152,7 @@ pub async fn run() -> Result<()> {
             .context("Could not start the production Web UI")?,
     );
     wait_for_port(9000).await?;
+    mint_core::companion::navigation::configure_web(url.clone());
 
     let api_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 3000);
     let mut api = tokio::spawn(mint_core::api_server::start_api_server_on(api_addr));

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, type RefObject } from 'react'
 import * as PIXI from 'pixi.js'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -9,6 +9,8 @@ import { calculateGazeTarget, smoothGaze, calculateStatusGesture } from './track
 ;(window as any).PIXI = PIXI
 
 interface Live2DStageProps {
+  mouthLevel?: RefObject<number>
+  mouthActive?: RefObject<boolean>
   scale: number
   offsetY?: number
   expressionIndex: number
@@ -44,7 +46,7 @@ const GAZE_TRACKING_FACTOR = 0.22
 const GAZE_DEADZONE = 0.003
 const GLOBAL_POLL_INTERVAL_MS = 20
 
-export default function Live2DStage({ scale, offsetY = 0, expressionIndex, accessoryIndex, isLocked, isActive = true, onLoadComplete, onLoadError, status = 'idle' }: Live2DStageProps) {
+export default function Live2DStage({ mouthLevel, mouthActive, scale, offsetY = 0, expressionIndex, accessoryIndex, isLocked, isActive = true, onLoadComplete, onLoadError, status = 'idle' }: Live2DStageProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const modelRef = useRef<any>(null)
@@ -57,6 +59,8 @@ export default function Live2DStage({ scale, offsetY = 0, expressionIndex, acces
   const live = useRef({ scale, offsetY, expressionIndex, accessoryIndex, isLocked, isActive, status, changedAt: performance.now() })
   if (live.current.status !== status) live.current.changedAt = performance.now()
   Object.assign(live.current, { scale, offsetY, expressionIndex, accessoryIndex, isLocked, isActive, status })
+  const mouth = useRef(mouthLevel); mouth.current = mouthLevel
+  const speaking = useRef(mouthActive); speaking.current = mouthActive
   const expressions = useRef<Record<string, Array<{ Id: string; Value: number; Blend: string }>>>({})
   const reducedMotion = useRef(window.matchMedia('(prefers-reduced-motion: reduce)').matches)
   useEffect(() => {
@@ -240,6 +244,7 @@ export default function Live2DStage({ scale, offsetY = 0, expressionIndex, acces
               )
             }
           }
+          if (speaking.current?.current) coreModel.setParameterValueById('ParamMouthOpenY', Math.max(0, Math.min(1, mouth.current?.current ?? 0)))
           if (!reducedMotion.current) {
             const elapsed = (performance.now() - live.current.changedAt) / 1000
             const gesture = calculateStatusGesture(live.current.status, elapsed)

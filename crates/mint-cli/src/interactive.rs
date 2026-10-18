@@ -370,6 +370,8 @@ pub async fn run_interactive_chat_with_session(
         jobs: BackgroundJobs::new(),
     };
 
+    crate::companion_navigation::configure(&session.chat_id);
+
     let mut tui = if use_tui {
         match chat_tui::ChatTui::enter(&session.current_dir) {
             Ok(terminal) => {
@@ -434,6 +436,7 @@ pub async fn run_interactive_chat_with_session(
         ) {
             Ok(Some(target_id)) => {
                 session.chat_id = target_id.clone();
+                crate::companion_navigation::set_chat(&session.chat_id);
                 mint_core::live_sync::update_live_sync_chat_id(&session.chat_id);
                 ui.reload_transcript(&session.chat_id, &session.current_dir);
                 ui.push_notice(format!("Switched to session: {target_id}"));

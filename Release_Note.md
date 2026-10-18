@@ -4,6 +4,19 @@ Released: 2026-10-17
 
 ## Mint Companion UI
 
+- Fixed speech readiness when connection and initial snapshot events arrive together, and made the latest-turn check atomic with automatic playback ownership so a new message cannot be overtaken by a stale read request.
+
+- Collapsed the persistent connection and handoff bars into a small accessible status dot beside Chat. Conversation names and connection/navigation details live in Chat; Continue in Mint is available from the Conversation radial group when ready. Disconnection shows a four-second notice before returning to the dot.
+
+- Moved Companion voice controls into the circular action menu: the ♪ button toggles a floating panel, closed initially, with Read, Stop, Mute, Auto and Volume. Close or Escape dismisses the panel without stopping playback or changing voice preferences.
+
+- Added optional Companion speech with Read latest reply, Stop, Mute, automatic reading (off by default), and local volume controls. Mint prepares completed replies and retrieves bounded audio chunks; Companion plays the bytes and drives Shiroko's `ParamMouthOpenY` from measured audio amplitude with smoothing.
+- Centralized Desktop/Web read-aloud and Companion speech around shared text preparation, saved TTS settings, cancellation, and a cross-process SQLite playback lease. An enabled Companion owns automatic reading for its selected conversation; other surfaces avoid duplicate automatic playback, with short-lived routing that expires when Companion disconnects. New messages stop existing speech; reconnect snapshots do not replay history. OS Native remains available on Desktop/Web; Companion requires the Google audio engine.
+
+- Added “Continue in Mint” conversation handoff from Companion: Desktop restores its existing window and selects the saved chat, Web opens its host-provided conversation URL, and TUI tries the original identifiable terminal before offering an explicit new-terminal action with the same chat ID and workspace. Offline and deleted sessions show recovery states; Desktop retains pending navigation until its renderer acknowledges it.
+
+- Companion now recovers a restarted local Mint host when exactly one authenticated instance matches its saved executable and launch directory, keeping the selected conversation. Previously observed sibling processes cannot take over the selection; ambiguous or older hosts require manual selection. The connection status dot opens Chat and its conversation selector.
+
 - Reworked the Live2D Companion interface with Tailwind CSS, translucent blue glass controls, a fully transparent desktop canvas, and animated ambient light, orbital accents, connection feedback, and panel transitions. Reduced-motion preferences remain supported. Removed the duplicate message composer; Companion keeps the shared conversation history and character interactions while messages are sent from Mint Desktop or CLI.
 - Changed the Companion title-bar control to minimize to the OS taskbar or dock instead of hiding the window to the tray, and clarified its accessible label.
 - Consolidated the Companion's Chat, interaction, appearance, minimize, and quit actions into one circular tree menu. Category and nested action bubbles share one button style, reveal labels on hover, and connect with animated lines.

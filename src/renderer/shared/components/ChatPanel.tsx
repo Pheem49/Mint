@@ -1,3 +1,4 @@
+import { SpeechPlayer } from '../speech/player'
 import McpToolResults from './McpToolResults'
 import ViewedImages from './ViewedImages'
 import { CollapsiblePasteInput } from './CollapsiblePasteInput'
@@ -25,7 +26,7 @@ import SlashSuggestions, { type SlashSuggestionsHandle } from './SlashSuggestion
 import { ChatCodeBlock } from './ChatCodeBlock'
 import { renderApprovalDetails, renderDiff, type ApprovalDetails } from '../utils/approval'
 import { ApprovalCard } from './ApprovalCard'
-import { readableAssistantText, cleanSpeechText, renderSpeakerIcon, renderCopyIcon } from '../utils/markdown'
+import { readableAssistantText, renderSpeakerIcon, renderCopyIcon } from '../utils/markdown'
 import { ThinkingBlock } from './ThinkingBlock'
 import ChatMessageItem from './ChatMessageItem'
 import { FormattedMessage } from './FormattedMessage'
@@ -34,7 +35,7 @@ import { VirtualChatHistory, type VirtualChatHistoryHandle } from './VirtualChat
 import { ArtifactPreviewPanel, type ArtifactFile } from './ArtifactPreviewPanel'
 import { RewindModal } from './RewindModal'
 import type { AgentProgress, ChatResponse, DiffHunk, FileChange, GitCheckpoint, RuntimeStatus } from '../types'
-import { numericSetting, shouldShowSessionDivider, formatSessionDividerLabel } from '../utils/ui'
+import { shouldShowSessionDivider, formatSessionDividerLabel } from '../utils/ui'
 import { useVoiceInput } from '@/voiceInput'
 import VoicePill from './VoicePill'
 import { useGeminiLiveVoice } from '../utils/useGeminiLiveVoice'
@@ -83,7 +84,7 @@ function useThrottledValue<T>(value: T, intervalMs: number): T {
 }
 
 const {
-  getTtsUrls, startGeminiLiveSession, sendGeminiLiveAudioChunk, stopGeminiLiveSession,
+  speechRequest, startGeminiLiveSession, sendGeminiLiveAudioChunk, stopGeminiLiveSession,
   listGitCheckpoints, rollbackGitCheckpoint, undoGitCheckpoint,
 } = conversationPlatform
 const { fetchProviderModels } = catalogPlatform
@@ -390,6 +391,7 @@ export default function ChatPanel({
 
     return () => clearInterval(timer)
   }, [sending])
+  const [speechError, setSpeechError] = useState('')
   const [speakingText, setSpeakingText] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | number | null>(null)
 
@@ -637,8 +639,6 @@ export default function ChatPanel({
 
 
   const toolMenuRef = useRef<HTMLDivElement | null>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const speechRunRef = useRef(0)
   const historyReadyRef = useRef(false)
   const submittedDuringSessionRef = useRef(false)
   const lastAutoSpokenIdRef = useRef<number | string | null>(null)
@@ -944,86 +944,25 @@ export default function ChatPanel({
     submitOnEnter(event)
   }
 
-  const cancelSpeech = () => {
-    speechRunRef.current += 1
-    audioRef.current?.pause()
-    audioRef.current = null
-    speakingRef.current = null
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel()
-    }
-    setSpeakingText(null)
-  }
-  const speakNative = (text: string, displayText: string) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) {
-      setSpeakingText(null)
-      return
-    }
-    const hasThai = /[\u0e00-\u0e7f]/.test(text)
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = hasThai ? 'th-TH' : 'en-US'
-    utterance.volume = Math.max(0, Math.min(1, numericSetting(settingsConfig?.ttsVolume, 1)))
-    utterance.rate = Math.max(0.1, Math.min(10, numericSetting(settingsConfig?.ttsSpeed, 1)))
-    utterance.pitch = Math.max(0, Math.min(2, numericSetting(settingsConfig?.ttsPitch, 1)))
-    const voice = window.speechSynthesis.getVoices().find((item) => {
-      const lang = item.lang.toLowerCase()
-      const target = hasThai ? 'th' : 'en'
-      return lang.startsWith(target) || lang.includes(target)
-    })
-    if (voice) utterance.voice = voice
-    const finishSpeech = () => {
-      setSpeakingText((current) => (current === displayText ? null : current))
-      speakingRef.current = null
-      scheduleVoiceListen(900)
-    }
-    utterance.onend = finishSpeech
-    utterance.onerror = finishSpeech
-    speakingRef.current = displayText
-    setSpeakingText(displayText)
-    window.speechSynthesis.speak(utterance)
-  }
-  const playGoogleTts = async (text: string, displayText: string, runId: number) => {
-    const chunks = await getTtsUrls(text)
-    for (const chunk of chunks) {
-      if (speechRunRef.current !== runId) return
-      await new Promise<void>((resolve, reject) => {
-        const audio = new Audio(chunk.url)
-        audio.volume = Math.max(0, Math.min(1, numericSetting(settingsConfig?.ttsVolume, 1)))
-        audio.playbackRate = Math.max(0.25, Math.min(4, numericSetting(settingsConfig?.ttsSpeed, 1)))
-        audioRef.current = audio
-        audio.onended = () => resolve()
-        audio.onpause = () => resolve()
-        audio.onerror = () => reject(new Error('Google TTS playback failed'))
-        audio.play().catch(reject)
-      })
-    }
-    if (speechRunRef.current === runId) {
-      setSpeakingText((current) => (current === displayText ? null : current))
-      speakingRef.current = null
-      scheduleVoiceListen(900)
-    }
-  }
-  const speak = useLatestCallback((text: string) => {
-    const speechText = cleanSpeechText(text)
-    if (!speechText) return
-    if (speakingText === text) {
-      cancelSpeech()
-      return
-    }
-
-    cancelSpeech()
-    const runId = speechRunRef.current
-    speakingRef.current = text
-    setSpeakingText(text)
-    if (settingsConfig?.ttsProvider === 'google') {
-      playGoogleTts(speechText, text, runId).catch((error) => {
-        console.warn('Google TTS failed, falling back to native speech synthesis:', error)
-        if (speechRunRef.current === runId) speakNative(speechText, text)
-      })
-      return
-    }
-    speakNative(speechText, text)
+  const speechPlayerRef = useRef<SpeechPlayer | null>(null)
+  const speechTextRef = useRef<string | null>(null)
+  if (!speechPlayerRef.current) speechPlayerRef.current = new SpeechPlayer(speechRequest, state => {
+    setSpeakingText(state === 'idle' ? null : speechTextRef.current)
+    speakingRef.current = state === 'idle' ? null : speechTextRef.current
+    if (state === 'idle') scheduleVoiceListen(900)
+  }, message => setSpeechError(message))
+  const cancelSpeech = () => { void speechPlayerRef.current?.stop() }
+  const speak = useLatestCallback((text: string, turnId?: number, automatic = false) => {
+    if (!automatic && speakingText === text) { cancelSpeech(); return }
+    setSpeechError('')
+    speechTextRef.current = text
+    const saved = turnId ?? Number([...interactions].reverse().find(interaction => interaction.aiText === text)?.id)
+    void speechPlayerRef.current?.play({ chatId, text, turnId: Number.isFinite(saved) && saved > 0 ? saved : undefined, automatic })
   })
+  useEffect(() => { cancelSpeech() }, [chatId, sending])
+  useEffect(() => {
+    historyReadyRef.current = false; submittedDuringSessionRef.current = false; lastAutoSpokenIdRef.current = null
+  }, [chatId])
 
   const resizeInput = (element: HTMLTextAreaElement) => {
     element.style.height = 'auto'
@@ -1031,7 +970,7 @@ export default function ChatPanel({
   }
   useEffect(() => {
     return () => {
-      cancelSpeech()
+      void speechPlayerRef.current?.dispose()
     }
   }, [])
   useEffect(() => {
@@ -1061,7 +1000,7 @@ export default function ChatPanel({
     }
 
     lastAutoSpokenIdRef.current = latest.id
-    speak(latest.aiText)
+    speak(latest.aiText, Number(latest.id), true)
   }, [interactions, sending, settingsConfig?.enableVoiceReply, geminiLive.voiceMode, voiceMode])
   useEffect(() => {
     if (!toolMenuOpen) return
@@ -1512,8 +1451,9 @@ export default function ChatPanel({
                       <button
                         type="button"
                         className={`msg-action-btn tts-btn ${speakingText === throttledStreamedReply ? 'is-speaking' : ''}`}
+                        disabled={sending}
                         onClick={() => speak(throttledStreamedReply)}
-                        title={speakingText === throttledStreamedReply ? 'Stop reading' : 'Read aloud'}
+                        title={sending ? 'Read after the reply finishes' : speakingText === throttledStreamedReply ? 'Stop reading' : 'Read aloud'}
                       >
                         {renderSpeakerIcon(speakingText === throttledStreamedReply)}
                       </button>
@@ -1545,6 +1485,7 @@ export default function ChatPanel({
       onDrop={handleDrop}
       style={activeArtifact || reviewPage ? { flex: '0 0 calc(100% - var(--preview-width, 50%))', width: 'calc(100% - var(--preview-width, 50%))', minWidth: '320px', maxWidth: 'none', margin: 0, position: 'relative' } : undefined}
     >
+        {speechError && <p role="status" style={{ padding: '8px 16px', fontSize: '12px', color: 'var(--text-muted)' }}>{speechError} <button type="button" onClick={() => setSpeechError('')}>Dismiss</button></p>}
         {isDragging && (
           <div
             className="drag-drop-overlay"

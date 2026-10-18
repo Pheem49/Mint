@@ -98,6 +98,7 @@ struct TurnLease {
 impl TurnLease {
     async fn start(memory: &MemoryStore, chat_id: &str, text: &str) -> Result<Self, MemoryError> {
         let id = memory.start_turn(chat_id, text)?;
+        crate::tts::playback::cancel_chat(memory, chat_id);
         crate::companion::queued(chat_id, id, text);
         let _ = TURN_START_LISTENER.try_with(|listener| {
             if listener.chat_id == chat_id {

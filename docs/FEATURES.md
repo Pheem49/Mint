@@ -17,6 +17,7 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 ### 2. <img src="../assets/live2d.svg" width="18" height="18" valign="middle" /> Mint Companion — Optional Live2D App
 - **Shiroko** lives in a separate floating desktop app, with gaze tracking, expressions, accessories, and interaction areas.
 - Connect to a running Mint CLI, Desktop, or Web backend on the same machine. Select the instance and conversation to follow thinking, tool use, queued chat, completion, and failures.
+- Optional read-aloud and amplitude lip sync: read the latest completed reply, stop/mute, local volume, and automatic reading off by default. Mint supplies voice audio and coordinates playback with Desktop/Web.
 - Chat shares the selected conversation's memory and queue. Tools and approvals stay in Mint. Companion waits offline when Mint is closed and never starts another backend.
 - Development: `npm run dev:companion`. Build: `npm run build:companion`. Package: `npm run package:companion -- --bundles deb` (Linux), `nsis` (Windows), or `dmg` (macOS).
 - See [Companion architecture and operation](MINT_COMPANION.md).

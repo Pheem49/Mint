@@ -1,4 +1,4 @@
-const MENU_BOUNDS = { minX: -73, maxX: 152, minY: 68, maxY: 296 }
+const MENU_BOUNDS = { minX: -73, maxX: 152, minY: 36, maxY: 296 }
 const MENU_ORIGIN = 110
 const VIEWPORT_GUTTER = 8
 

@@ -13,7 +13,7 @@ import type { ChatSession, DocumentAttachment, RuntimeStatus } from '../types'
 const {
   clearChatHistory, deleteChatSession, renameChatSession,
   saveSystemInteraction, updateChatSessionWorkspace,
-  listen, readClipboardImage,
+  listen, readClipboardImage, listChatSessions, pendingCompanionChat,
 } = conversationPlatform
 const { getRuntimeStatus, setActiveModel, selectWorkspaceDirectory, selectLinkedFolderPath, isTauriRuntime } = runtimePlatform
 const { convertFileSrc } = mediaPlatform
@@ -44,7 +44,7 @@ import { workspaceListPreferences } from '../utils/workspaceListPreferences'
 import { executeSlashCommand } from '../utils/slashCommandProcessor'
 import { captureScreenForChat } from '../utils/screenCapture'
 import { useConversationCoordinator } from '../conversation/useConversationCoordinator'
-import { isPersistedConversation } from '../conversation/projectNavigation'
+import { isPersistedConversation, navigateToSavedConversation } from '../conversation/projectNavigation'
 import type { PromptOptions } from '../conversation/lifecycle'
 
 
@@ -420,8 +420,28 @@ export default function MintDashboard() {
     })
   }
 
+  const savedNavigationEpoch = useRef(0)
+  useEffect(() => () => { savedNavigationEpoch.current += 1 }, [])
+  const savedNavigationRef = useRef<(id: string) => Promise<void>>(async () => {})
+  savedNavigationRef.current = async (id: string) => {
+    const epoch = ++savedNavigationEpoch.current
+    try {
+      const opened = await navigateToSavedConversation(id, {
+        listSessions: listChatSessions,
+        openSession: (session, view) => selectConversation(session.id, session, view),
+        isCurrent: () => savedNavigationEpoch.current === epoch,
+      })
+      if (!opened && savedNavigationEpoch.current === epoch) {
+        setError('This conversation no longer exists. Choose another conversation.')
+        changeView('chat')
+        setMobileSidebarOpen(true)
+      }
+    } catch (reason) { if (savedNavigationEpoch.current === epoch) setError(errorMessage(reason)) }
+  }
+
   useEffect(() => {
     const handleUrlChange = () => {
+      savedNavigationEpoch.current += 1
       if (window.location.hash === '#' || window.location.hash === '#/') {
         window.history.replaceState({}, '', window.location.pathname + window.location.search)
       }
@@ -433,11 +453,7 @@ export default function MintDashboard() {
 
       const urlSessionId = getConversationIdFromUrl()
       if (urlSessionId && urlSessionId !== conversationId) {
-        window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, urlSessionId)
-        activateConversation(urlSessionId)
-        conversationActions.refreshHistory().catch((error) => {
-          console.error('Failed to load conversation history:', error)
-        })
+        void savedNavigationRef.current(urlSessionId)
       } else if (!urlSessionId && isRootOrNewChatRoute()) {
         const next = createConversationId()
         activateConversation(next)
@@ -493,6 +509,21 @@ export default function MintDashboard() {
     }
     const clicked = (event: Event) => openChat((event as CustomEvent).detail?.chatId)
     window.addEventListener('mint:notification-click', clicked)
+    const openCompanionChat = async () => {
+      try {
+        const chatId = await pendingCompanionChat()
+        if (!chatId || disposed) return
+        initialRouteValidated.current = true
+        await savedNavigationRef.current(chatId)
+        if (!disposed) await pendingCompanionChat(chatId)
+      } catch (reason) { if (!disposed) setError(errorMessage(reason)) }
+    }
+    if (isTauriRuntime()) {
+      register(listen('companion-open-chat', () => { void openCompanionChat() }).then(unlisten => {
+        if (!disposed) void openCompanionChat()
+        return unlisten
+      }))
+    }
     register(listen('notification-clicked', (event: { payload: { chatId?: string } }) => openChat(event.payload?.chatId)))
     register(Promise.resolve(window.api?.onProactiveNotification?.((payload: any) => {
       if (disposed) return
@@ -543,6 +574,13 @@ export default function MintDashboard() {
   const [planMode, setPlanMode] = useState(() => window.localStorage.getItem('mint:plan-mode') === 'true')
   const [toastMessage, setToastMessage] = useState('')
   const [dashboardDataReady, setDashboardDataReady] = useState(false)
+  const initialRouteValidated = useRef(false)
+  useEffect(() => {
+    if (!dashboardDataReady || initialRouteValidated.current) return
+    initialRouteValidated.current = true
+    const chatId = getConversationIdFromUrl()
+    if (chatId) void savedNavigationRef.current(chatId)
+  }, [dashboardDataReady])
   const [startupTimedOut, setStartupTimedOut] = useState(false)
   const [settingsConfig, setSettingsConfig] = useState<any>(null)
   const notificationConfigRef = useRef(settingsConfig)
@@ -1487,6 +1525,7 @@ export default function MintDashboard() {
   }
 
   async function selectConversation(id: string, selectedSession?: ChatSession, targetView: 'chat' | 'workspace' = 'chat') {
+    savedNavigationEpoch.current += 1
     window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, id)
     touchActiveTimestamp()
     activateConversation(id)

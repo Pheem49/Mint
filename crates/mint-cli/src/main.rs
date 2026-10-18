@@ -8,6 +8,7 @@ mod actions;
 mod agent;
 mod background;
 pub mod commands;
+mod companion_navigation;
 mod cron_wizard;
 mod gateway;
 mod gmail;

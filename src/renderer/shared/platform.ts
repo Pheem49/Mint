@@ -112,6 +112,7 @@ export interface MintPlatformApi {
     onTurnStarted?: (interactionId: number) => void,
     attachmentMetadata?: import('./types').AttachmentMetadata,
   ): Promise<ChatResponse>
+  speechRequest(request: import('./speech/types').SpeechRequest): Promise<import('./speech/types').SpeechReply>
   getTtsUrls(text: string): Promise<TtsUrl[]>
   cancelChatMessage(chatId: string): Promise<void>
   getRecentInteractions(limit?: number, chatId?: string | null, workspacePath?: string | null): Promise<InteractionMemory[]>
@@ -128,6 +129,7 @@ export interface MintPlatformApi {
   ): Promise<any>
 
   saveInteractionAgentActivity(interactionId: number, progress: any[]): Promise<void>
+  pendingCompanionChat(acknowledgedId?: string): Promise<string | null>
   listChatSessions(): Promise<ChatSession[]>
   updateChatSessionWorkspace(chatId: string, workspacePath: string | null): Promise<void>
   deleteChatSession(chatId: string): Promise<number>
@@ -267,11 +269,11 @@ export const conversationPlatform = {
   clearChatHistory: operation('clearChatHistory'), deleteChatSession: operation('deleteChatSession'),
   renameChatSession: operation('renameChatSession'), getRecentInteractions: operation('getRecentInteractions'),
   getConversationSnapshot: operation('getConversationSnapshot'), getConversationChanges: operation('getConversationChanges'),
-  saveSystemInteraction: operation('saveSystemInteraction'), listChatSessions: operation('listChatSessions'),
+  saveSystemInteraction: operation('saveSystemInteraction'), listChatSessions: operation('listChatSessions'), pendingCompanionChat: operation('pendingCompanionChat'),
   updateChatSessionWorkspace: operation('updateChatSessionWorkspace'),
   saveInteractionAgentActivity: operation('saveInteractionAgentActivity'), streamChatMessage: operation('streamChatMessage'),
   cancelChatMessage: operation('cancelChatMessage'), submitToolApproval: operation('submitToolApproval'),
-  listen: operation('listen'), readClipboardImage: operation('readClipboardImage'), getTtsUrls: operation('getTtsUrls'),
+  listen: operation('listen'), readClipboardImage: operation('readClipboardImage'), getTtsUrls: operation('getTtsUrls'), speechRequest: operation('speechRequest'),
   startGeminiLiveSession: operation('startGeminiLiveSession'), sendGeminiLiveAudioChunk: operation('sendGeminiLiveAudioChunk'),
   stopGeminiLiveSession: operation('stopGeminiLiveSession'), listGitCheckpoints: operation('listGitCheckpoints'),
   rollbackGitCheckpoint: operation('rollbackGitCheckpoint'), undoGitCheckpoint: operation('undoGitCheckpoint'),

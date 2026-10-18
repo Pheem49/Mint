@@ -357,6 +357,17 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                 log_api_req(method, route, "200 OK", Some(&auth_label));
             }
 
+            if method == "POST" && route == "/api/speech" {
+                let result = match serde_json::from_str::<crate::tts::playback::SpeechRequest>(body) {
+                    Ok(request) => crate::tts::playback::request(request).await,
+                    Err(error) => Err(error.to_string()),
+                };
+                match result {
+                    Ok(reply) => send_json_response(socket, "200 OK", &serde_json::to_string(&reply).unwrap()).await,
+                    Err(error) => send_json_response(socket, "400 Bad Request", &json!({"error":error}).to_string()).await,
+                }
+                return;
+            }
             match (method, route) {
                 ("GET" | "POST" | "DELETE", route) if route == "/api/library" || route.starts_with("/api/library/") => {
                     routes::library::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
