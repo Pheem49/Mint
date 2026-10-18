@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AgentProgress, FileChange } from '../types'
-import WorkspaceContextPopover from './WorkspaceContextPopover'
 import { useWorkspaceUndo } from '../workspaceUndo'
 import ToolsPanelToggle from './ToolsPanelToggle'
 
@@ -13,6 +11,7 @@ interface DesktopTitlebarProps {
   onToggleSidebar: () => void
   onNewChat: () => void
   onOpenWorkspace: () => void
+  onShowWorkspace: () => void
   onOpenTerminal: () => void
   onToggleTerminal: () => void
   onOpenBrowser: () => void
@@ -27,11 +26,6 @@ interface DesktopTitlebarProps {
   workspaceRevision: number
   sending: boolean
   onWorkspaceUndoError: (message: string) => void
-  terminalCount: number
-  chatId: string
-  liveProgress: AgentProgress[]
-  recentChanges: FileChange[]
-  onOpenReview: (changes: FileChange[]) => void
   onRefreshWorkspace: () => void
 }
 
@@ -43,6 +37,7 @@ export default function DesktopTitlebar({
   onToggleSidebar,
   onNewChat,
   onOpenWorkspace,
+  onShowWorkspace,
   onOpenTerminal,
   onToggleTerminal,
   onOpenBrowser,
@@ -57,11 +52,6 @@ export default function DesktopTitlebar({
   workspaceRevision,
   sending,
   onWorkspaceUndoError,
-  terminalCount,
-  chatId,
-  liveProgress,
-  recentChanges,
-  onOpenReview,
   onRefreshWorkspace,
 }: DesktopTitlebarProps) {
   const [openMenu, setOpenMenu] = useState<MenuName | null>(null)
@@ -311,16 +301,9 @@ export default function DesktopTitlebar({
           aria-hidden="true"
           onDoubleClick={toggleMaximizeWindow}
         />
-        <WorkspaceContextPopover
-          workspacePath={workspacePath}
-          terminalCount={terminalCount}
-          chatId={chatId}
-          liveProgress={liveProgress}
-          recentChanges={recentChanges}
-          onOpenWorkspace={onOpenWorkspace}
-          onOpenReview={onOpenReview}
-          onRefreshWorkspace={onRefreshWorkspace}
-        />
+        <button className="mint-titlebar-icon-button" type="button" aria-label="Show workspace" title="Show workspace" aria-pressed={workspaceActive} onClick={onShowWorkspace}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h6l1.7 2H20v9.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M4 6.5v-1a2 2 0 0 1 2-2h4l1.7 2H18a2 2 0 0 1 2 2v1"/></svg>
+        </button>
         <ToolsPanelToggle className="mint-titlebar-icon-button mint-tools-panel-toggle" open={toolsPanelOpen} count={backgroundTaskCount} onToggle={onToggleToolsPanel} />
         <div className="mint-titlebar-window-controls">
           <button type="button" className="mint-window-control" aria-label="Minimize window" title="Minimize" onClick={minimizeWindow}>

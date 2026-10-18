@@ -178,6 +178,8 @@ export interface MintPlatformApi {
   rollbackGitCheckpoint(chatId: string, step: number, workspacePath?: string): Promise<{ status: string; message: string }>
   undoGitCheckpoint(workspacePath?: string): Promise<{ status: string; message: string }>
   readWorkspaceFile(path: string, workspacePath?: string): Promise<string>
+  readWorkspaceImage(path: string, workspacePath: string): Promise<string>
+  readWorkspaceMedia(path: string, workspacePath: string): Promise<import('./types').WorkspaceMediaSource>
   testMcpConnection(
     url: string,
     headers?: Record<string, string>,
@@ -318,7 +320,7 @@ export const runtimePlatform = {
   appIconPath: () => String(requireRendererPlatform().APP_ICON_PATH ?? './assets/icon.png'),
   getRuntimeStatus: operation('getRuntimeStatus'), setActiveModel: operation('setActiveModel'),
   selectWorkspaceDirectory: operation('selectWorkspaceDirectory'), selectLinkedFolderPath: operation('selectLinkedFolderPath'),
-  isTauriRuntime: operation('isTauriRuntime'), readWorkspaceFile: operation('readWorkspaceFile'),
+  isTauriRuntime: operation('isTauriRuntime'), readWorkspaceFile: operation('readWorkspaceFile'), readWorkspaceImage: operation('readWorkspaceImage'), readWorkspaceMedia: operation('readWorkspaceMedia'),
 }
 
 /** Install the Desktop or Web adapter before rendering the application. */

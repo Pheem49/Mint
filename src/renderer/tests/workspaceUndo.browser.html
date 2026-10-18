@@ -9,6 +9,7 @@ import { installWorkspacePlatform } from '/shared/platform.ts';
 let entries = [{ id: 'first', label: 'Undo Move to Trash: note.txt', path: 'note.txt', kind: 'trash' }];
 let undoCalls = 0, trashCalls = 0, confirmCalls = 0, textCommands = [];
 let confirmation;
+let showWorkspaceCalls = 0, pickWorkspaceCalls = 0;
 window.__TAURI_INTERNALS__ = { invoke: async (command) => {
   if (command === 'plugin:dialog|message') { confirmCalls++; return new Promise(resolve => confirmation = resolve); }
   return false;
@@ -34,10 +35,10 @@ installWorkspacePlatform({
   createWorkspaceFile: noop, createWorkspaceFolder: noop,
 });
 createRoot(document.getElementById('root')).render(React.createElement(React.Fragment, null,
-  React.createElement(DesktopTitlebar, { sidebarCollapsed: false, onToggleSidebar: noop, onNewChat: noop, onOpenWorkspace: noop,
+  React.createElement(DesktopTitlebar, { sidebarCollapsed: false, onToggleSidebar: noop, onNewChat: noop, onOpenWorkspace: () => { pickWorkspaceCalls++; }, onShowWorkspace: () => { showWorkspaceCalls++; },
     onOpenTerminal: noop, onToggleTerminal: noop, onOpenBrowser: noop, toolsPanelOpen: false, onToggleToolsPanel: noop,
     onOpenSettings: noop, onCheckForUpdates: noop, onShowAbout: noop, workspacePath: root, workspaceActive: true,
-    workspaceRevision: 0, sending: false, onWorkspaceUndoError: noop, terminalCount: 0, sourceNames: [], recentChanges: [], onOpenReview: noop, onRefreshWorkspace: noop }),
+    workspaceRevision: 0, sending: false, onWorkspaceUndoError: noop, onRefreshWorkspace: noop }),
   React.createElement('textarea', { id: 'composer' }),
   React.createElement(WorkspacePanel, { workspacePath: root, agentMode: true, sending: false,
     onEnableAgentMode: noop, onSetMessage: noop, onWorkspaceReady: noop })));
@@ -50,6 +51,12 @@ function click(element) { element.dispatchEvent(new MouseEvent('mousedown', { bu
 function openMenu() { document.querySelector('.workspace-tree-row').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 100 })); }
 function button(container, label) { return [...document.querySelectorAll(container + ' button')].find(element => (element.querySelector('span')?.textContent || element.textContent) === label); }
 try {
+  await until(() => document.querySelector('[aria-label="Show workspace"]'));
+  click(document.querySelector('[aria-label="Show workspace"]'));
+  assert(showWorkspaceCalls === 1 && pickWorkspaceCalls === 0, 'folder button must show Workspace without launching a folder picker');
+  assert(!document.querySelector('.workspace-context-popover'), 'folder button must not open a context popover');
+  ok('titlebar folder opens Workspace directly');
+  if (!new URLSearchParams(location.search).has('titlebar')) {
   await until(() => document.querySelector('.workspace-tree-row') && document.querySelector('.workspace-undo-bar button'));
   const composer = document.getElementById('composer'); composer.focus(); await sleep();
   const key = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'z', ctrlKey: true }); composer.dispatchEvent(key);
@@ -87,6 +94,7 @@ try {
   assert(document.querySelector('.workspace-undo-bar button').textContent.includes('note.txt'), 'undo must name target');
   click(document.querySelector('.workspace-undo-bar button'));
   await until(() => undoCalls === 2); ok('Trash shows named Undo and Undo invokes restoration');
+  }
   document.getElementById('result').textContent = JSON.stringify({ status: 'PASS', checks });
 } catch (error) { document.getElementById('result').textContent = JSON.stringify({ status: 'FAIL', error: String(error), checks }); }
 </script></body></html>

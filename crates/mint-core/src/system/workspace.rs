@@ -5,6 +5,110 @@ use std::{
 };
 
 const MAX_DEPTH: usize = 9;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedWorkspaceMedia {
+    pub path: PathBuf,
+    pub mime_type: &'static str,
+    pub byte_length: u64,
+}
+
+/// Authorize one document/media file without reading its payload into memory.
+pub fn prepare_media(
+    root: &Path,
+    relative: &str,
+    config: &crate::MintConfig,
+) -> Result<PreparedWorkspaceMedia, String> {
+    let root = crate::assert_path_capability(root, crate::Capability::Read, config)
+        .map_err(|error| error.to_string())?;
+    let path = resolve(&root, relative)?;
+    let path = crate::assert_path_capability(&path, crate::Capability::Read, config)
+        .map_err(|error| error.to_string())?
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let mime_type = match extension.as_str() {
+        "pdf" => "application/pdf",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" | "oga" | "opus" => "audio/ogg",
+        "flac" => "audio/flac",
+        "m4a" => "audio/mp4",
+        "aac" => "audio/aac",
+        "weba" => "audio/webm",
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "ogv" => "video/ogg",
+        "mov" => "video/quicktime",
+        _ => {
+            return Err("Select a supported PDF, audio, or video file inside the workspace".into());
+        }
+    };
+    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+        return Err("Select a media file".into());
+    }
+    Ok(PreparedWorkspaceMedia {
+        path,
+        mime_type,
+        byte_length: metadata.len(),
+    })
+}
+
+const MAX_PREVIEW_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Return image bytes over the existing IPC/API boundary, without a background service.
+pub fn read_image(
+    root: &Path,
+    relative: &str,
+    config: &crate::MintConfig,
+) -> Result<String, String> {
+    use base64::Engine;
+    use std::io::Read;
+    let root = crate::assert_path_capability(root, crate::Capability::Read, config)
+        .map_err(|error| error.to_string())?;
+    let path = resolve(&root, relative)?;
+    crate::assert_path_capability(&path, crate::Capability::Read, config)
+        .map_err(|error| error.to_string())?;
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let mime = match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "ico" => "image/x-icon",
+        "svg" => "image/svg+xml",
+        _ => return Err("Select a supported image file inside the workspace".into()),
+    };
+    let file = fs::File::open(&path).map_err(|error| error.to_string())?;
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+        return Err("Select an image file".into());
+    }
+    if metadata.len() > MAX_PREVIEW_IMAGE_BYTES {
+        return Err("Image preview supports files up to 32 MiB".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_PREVIEW_IMAGE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > MAX_PREVIEW_IMAGE_BYTES {
+        return Err("Image preview supports files up to 32 MiB".into());
+    }
+    Ok(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
 const MAX_CHILDREN: usize = 400;
 const COLLAPSED: &[&str] = &[
     ".git",
@@ -202,6 +306,106 @@ mod tests {
         ));
         fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    #[test]
+    fn workspace_media_prepares_scoped_files_without_reading_large_payloads() {
+        let root = root();
+        let config = crate::MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            ..Default::default()
+        };
+        for (name, mime) in [
+            ("book.PDF", "application/pdf"),
+            ("song.mp3", "audio/mpeg"),
+            ("clip.webm", "video/webm"),
+        ] {
+            fs::write(root.join(name), [0_u8, 255, 128]).unwrap();
+            let media = prepare_media(&root, name, &config).unwrap();
+            assert_eq!(media.mime_type, mime);
+            assert_eq!(media.byte_length, 3);
+            assert_eq!(media.path, root.join(name).canonicalize().unwrap());
+        }
+        fs::File::create(root.join("large.mp4"))
+            .unwrap()
+            .set_len(1024 * 1024 * 1024)
+            .unwrap();
+        assert_eq!(
+            prepare_media(&root, "large.mp4", &config)
+                .unwrap()
+                .byte_length,
+            1024 * 1024 * 1024
+        );
+        fs::write(root.join("private.txt"), "not media").unwrap();
+        assert!(prepare_media(&root, "private.txt", &config).is_err());
+        assert!(prepare_media(&root, "../book.PDF", &config).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_media_rejects_links_outside_the_selected_root() {
+        let root = root();
+        let outside =
+            std::env::temp_dir().join(format!("mint-outside-media-{}.mp4", uuid::Uuid::new_v4()));
+        fs::write(&outside, [1_u8]).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("escape.mp4")).unwrap();
+        let config = crate::MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            ..Default::default()
+        };
+        assert!(prepare_media(&root, "escape.mp4", &config).is_err());
+        fs::remove_file(outside).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn workspace_image_reads_binary_data_directly_and_rejects_unsupported_or_oversized_files() {
+        let root = root();
+        let config = crate::MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            ..Default::default()
+        };
+        fs::write(root.join("photo.PNG"), [0_u8, 255, 128, 1]).unwrap();
+        assert_eq!(
+            read_image(&root, "photo.PNG", &config).unwrap(),
+            "data:image/png;base64,AP+AAQ=="
+        );
+        fs::write(root.join("icon.svg"), "<svg/>").unwrap();
+        assert_eq!(
+            read_image(&root, "icon.svg", &config).unwrap(),
+            "data:image/svg+xml;base64,PHN2Zy8+"
+        );
+        fs::write(root.join("notes.txt"), "hello").unwrap();
+        assert!(read_image(&root, "notes.txt", &config).is_err());
+        assert!(read_image(&root, "../photo.PNG", &config).is_err());
+        assert!(read_image(&root, root.join("photo.PNG").to_str().unwrap(), &config).is_err());
+        let large = fs::File::create(root.join("large.png")).unwrap();
+        large.set_len(MAX_PREVIEW_IMAGE_BYTES + 1).unwrap();
+        assert!(
+            read_image(&root, "large.png", &config)
+                .unwrap_err()
+                .contains("32 MiB")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_image_rejects_symlinks_outside_its_source_root() {
+        let root = root();
+        let other = root
+            .join("../")
+            .join(format!("mint-outside-{}.png", uuid::Uuid::new_v4()));
+        fs::write(&other, [1_u8, 2, 3]).unwrap();
+        std::os::unix::fs::symlink(&other, root.join("escape.png")).unwrap();
+        let config = crate::MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            ..Default::default()
+        };
+        assert!(read_image(&root, "escape.png", &config).is_err());
+        fs::remove_file(other).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

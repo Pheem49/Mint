@@ -1236,7 +1236,9 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                 | ("POST", "/api/checkpoints/undo")
                 | ("GET", "/api/workspace-history")
                 | ("POST", "/api/workspace-history/undo")
-                | ("GET", "/api/file/read") => {
+                | ("GET", "/api/file/read")
+                | ("GET", "/api/file/image")
+                | ("GET", "/api/file/media") => {
                     routes::misc::execute(
                         routes::RequestCtx {
                             method,

@@ -444,6 +444,86 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             }
         }
 
+        ("GET", "/api/file/media") => {
+            let path = query_param(query, "path").unwrap_or_default();
+            let root = query_param(query, "workspace").unwrap_or_default();
+            let prepared = tokio::task::spawn_blocking(move || {
+                if root.trim().is_empty() {
+                    return Err("Select a source workspace".to_string());
+                }
+                crate::workspace::prepare_media(
+                    std::path::Path::new(&root),
+                    &path,
+                    &load_config().map_err(|error| error.to_string())?,
+                )
+            })
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|value| value);
+            match prepared {
+                Ok(media) => match tokio::fs::File::open(&media.path).await {
+                    Ok(mut file) => {
+                        let headers = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
+                            media.mime_type, media.byte_length
+                        );
+                        let mut socket = socket;
+                        if socket.write_all(headers.as_bytes()).await.is_ok() {
+                            let _ = tokio::io::copy(&mut file, &mut socket).await;
+                        }
+                    }
+                    Err(error) => {
+                        send_json_response(
+                            socket,
+                            "404 Not Found",
+                            &json!({"error": error.to_string()}).to_string(),
+                        )
+                        .await
+                    }
+                },
+                Err(error) => {
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        &json!({"error": error}).to_string(),
+                    )
+                    .await
+                }
+            }
+        }
+
+        ("GET", "/api/file/image") => {
+            let path = query_param(query, "path").unwrap_or_default();
+            let root = query_param(query, "workspace").unwrap_or_default();
+            let result = tokio::task::spawn_blocking(move || {
+                if root.trim().is_empty() {
+                    return Err("Select a source workspace".to_string());
+                }
+                let config = load_config().map_err(|error| error.to_string())?;
+                crate::workspace::read_image(std::path::Path::new(&root), &path, &config)
+            })
+            .await;
+            match result {
+                Ok(Ok(data_url)) => {
+                    send_json_response(socket, "200 OK", &json!({"dataUrl": data_url}).to_string())
+                        .await
+                }
+                other => {
+                    let error = match other {
+                        Ok(Err(error)) => error,
+                        Err(error) => error.to_string(),
+                        _ => unreachable!(),
+                    };
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        &json!({"error": error}).to_string(),
+                    )
+                    .await;
+                }
+            }
+        }
+
         ("GET", "/api/file/read") => {
             let file_path = query_param(query, "path").unwrap_or_default();
             if file_path.is_empty() {

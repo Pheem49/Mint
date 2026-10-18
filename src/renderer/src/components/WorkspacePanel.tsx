@@ -6,6 +6,8 @@ import { WorkspaceSnapshotReader } from '@shared/utils/workspaceSnapshot'
 import { detectArtifactType } from '@shared/components/ArtifactPreviewPanel'
 import { workspacePlatform } from '@shared/platform'
 import { announceWorkspaceChange, useWorkspaceUndo } from '@shared/workspaceUndo'
+import { normalizeWorkspacePath } from '@shared/utils/workspaces'
+import { WORKSPACE_FILE_MIME } from '@shared/utils/workspaceDrag'
 import type { WorkspaceSnapshot, WorkspaceTreeEntry } from '@shared/types'
 import {
   materialFolderIcon,
@@ -46,8 +48,17 @@ interface WorkspaceMenu {
   trigger: HTMLButtonElement
 }
 
-function TreeNode({ entry, level, onContextMenu }: { entry: WorkspaceTreeEntry; level: number; onContextMenu: (event: React.MouseEvent<HTMLButtonElement>, entry: WorkspaceTreeEntry) => void; key?: string }) {
-  const [open, setOpen] = useState(level < 1)
+interface TreeNodeProps {
+  workspacePath: string
+  entry: WorkspaceTreeEntry
+  level: number
+  expanded: Set<string>
+  onToggle: (path: string) => void
+  onContextMenu: (event: React.MouseEvent<HTMLButtonElement>, entry: WorkspaceTreeEntry) => void
+}
+
+function TreeNode({ workspacePath, entry, level, expanded, onToggle, onContextMenu }: TreeNodeProps) {
+  const open = expanded.has(entry.path)
   const isDirectory = entry.kind === 'directory'
   const hasChildren = entry.children.length > 0
   const fileExtension = extension(entry.name)
@@ -61,14 +72,16 @@ function TreeNode({ entry, level, onContextMenu }: { entry: WorkspaceTreeEntry; 
         type="button"
         className={`workspace-tree-row ${isDirectory ? 'is-directory' : 'is-file'}`}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
-        onClick={() => isDirectory && hasChildren && setOpen((current) => !current)}
+        onClick={() => isDirectory && hasChildren && onToggle(entry.path)}
         onContextMenu={(event) => onContextMenu(event, entry)}
         aria-haspopup="menu"
+        aria-expanded={isDirectory ? open : undefined}
         title={entry.path}
         draggable
         onDragStart={(event) => {
           event.dataTransfer.setData('application/x-mint-workspace-path', dragText)
           event.dataTransfer.setData('text/plain', dragText)
+          if (!isDirectory) event.dataTransfer.setData(WORKSPACE_FILE_MIME, JSON.stringify({ root: workspacePath, path: entry.path, kind: 'file' }))
           event.dataTransfer.effectAllowed = 'copy'
         }}
       >
@@ -87,12 +100,36 @@ function TreeNode({ entry, level, onContextMenu }: { entry: WorkspaceTreeEntry; 
       {isDirectory && open && hasChildren && (
         <div className="workspace-tree-children">
           {entry.children.map((child) => (
-            <TreeNode key={child.path} entry={child} level={level + 1} onContextMenu={onContextMenu} />
+            <TreeNode key={child.path} workspacePath={workspacePath} entry={child} level={level + 1} expanded={expanded} onToggle={onToggle} onContextMenu={onContextMenu} />
           ))}
         </div>
       )}
     </div>
   )
+}
+
+function WorkspaceTree({ workspacePath, entries, onContextMenu }: {
+  workspacePath: string
+  entries: WorkspaceTreeEntry[]
+  onContextMenu: TreeNodeProps['onContextMenu']
+}) {
+  const storageKey = `mint:workspace-expanded-folders:${encodeURIComponent(workspacePath)}`
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    try {
+      const saved: unknown = JSON.parse(window.localStorage.getItem(storageKey) || '[]')
+      return new Set(Array.isArray(saved) ? saved.filter((path): path is string => typeof path === 'string') : [])
+    } catch { return new Set() }
+  })
+  const toggle = (path: string) => {
+    const next = new Set(expanded)
+    if (next.has(path)) next.delete(path)
+    else next.add(path)
+    setExpanded(next)
+    try { window.localStorage.setItem(storageKey, JSON.stringify([...next])) } catch { /* Keep this view usable when storage is unavailable. */ }
+  }
+  return <div className="workspace-tree">
+    {entries.map(entry => <TreeNode key={entry.path} workspacePath={workspacePath} entry={entry} level={0} expanded={expanded} onToggle={toggle} onContextMenu={onContextMenu} />)}
+  </div>
 }
 
 export default function WorkspacePanel({ agentMode, sending, workspacePath, onEnableAgentMode, onSetMessage, onWorkspaceReady, refreshRevision = 0, onOpenHtml, onOpenPreview }: WorkspacePanelProps) {
@@ -373,11 +410,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
               </span>
               <span>{tree.name}</span>
             </div>
-            <div className="workspace-tree">
-              {tree.children.map((entry) => (
-                <TreeNode key={entry.path} entry={entry} level={0} onContextMenu={handleContextMenu} />
-              ))}
-            </div>
+            <WorkspaceTree key={normalizeWorkspacePath(workspacePath)} workspacePath={normalizeWorkspacePath(workspacePath)} entries={tree.children} onContextMenu={handleContextMenu} />
           </>
         ) : (
           <div className="workspace-tree-empty">Select a project to show workspace files.</div>

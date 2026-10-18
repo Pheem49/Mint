@@ -1,10 +1,14 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { openArtifactInMintBrowser } from '../utils/artifactBrowser'
 import { runtimePlatform } from '../platform'
 import { renderFormattedMessage } from '../utils/markdown'
 import { ChatCodeBlock } from './ChatCodeBlock'
+import WorkspaceFileInfo from './WorkspaceFileInfo'
+import WorkspaceMediaPreview from './WorkspaceMediaPreview'
 
-export type ArtifactType = 'html' | 'svg' | 'markdown' | 'image' | 'code'
+const WorkspacePdfPreview = lazy(() => import('./WorkspacePdfPreview'))
+
+export type ArtifactType = 'html' | 'svg' | 'markdown' | 'image' | 'code' | 'file' | 'pdf' | 'audio' | 'video'
 export type ViewportMode = 'desktop' | 'tablet' | 'mobile'
 
 export interface ArtifactFile {
@@ -13,6 +17,10 @@ export interface ArtifactFile {
   url?: string
   content?: string
   type?: ArtifactType
+  mimeType?: string
+  byteLength?: number
+  objectUrl?: boolean
+  range?: boolean
 }
 
 interface Props {
@@ -27,6 +35,9 @@ export function detectArtifactType(filePath: string): ArtifactType {
   if (/\.(png|jpe?g|gif|webp|ico)$/.test(lower)) return 'image'
   if (lower.endsWith('.svg')) return 'svg'
   if (lower.endsWith('.md') || lower.endsWith('.markdown')) return 'markdown'
+  if (lower.endsWith('.pdf')) return 'pdf'
+  if (/\.(mp3|wav|ogg|oga|opus|flac|m4a|aac|weba)$/.test(lower)) return 'audio'
+  if (/\.(mp4|m4v|webm|ogv|mov)$/.test(lower)) return 'video'
   return 'code'
 }
 
@@ -53,6 +64,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
   const [activeTab, setActiveTab] = useState<'preview' | 'code'>('preview')
   const [viewport, setViewport] = useState<ViewportMode>('desktop')
   const [content, setContent] = useState<string>(artifact?.content || '')
+  const [imageUrl, setImageUrl] = useState(artifact?.url || '')
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [openingBrowser, setOpeningBrowser] = useState(false)
@@ -79,15 +91,27 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
   }, [artifact, filePath])
 
   const language = useMemo(() => getFileLanguage(filePath), [filePath])
+  const mediaPreview = artifactType === 'pdf' || artifactType === 'audio' || artifactType === 'video'
 
-  const fetchContent = useCallback(async () => {
+  const fetchContent = useCallback(async (refreshImage = false) => {
     const revision = ++requestRevision.current
     setError(null)
     setReloadRevision((value) => value + 1)
     if (!filePath) return
+    if (refreshImage && activeTab === 'preview' && (artifactType === 'image' || artifactType === 'svg') && artifact?.url?.startsWith('data:image/') && sourceWorkspace) {
+      setLoading(true)
+      try {
+        const url = await runtimePlatform.readWorkspaceImage(filePath, sourceWorkspace)
+        if (requestRevision.current === revision) setImageUrl(url)
+      } catch (reason) {
+        if (requestRevision.current === revision) setError(reason instanceof Error ? reason.message : String(reason))
+      } finally { if (requestRevision.current === revision) setLoading(false) }
+      return
+    }
     // Served previews load directly. Text is only needed when their Code tab is selected.
-    if (artifactType === 'image' || (artifact?.url && activeTab === 'preview')) {
+    if (mediaPreview || artifactType === 'file' || artifactType === 'image' || (artifact?.url && activeTab === 'preview')) {
       setLoading(false)
+      if (mediaPreview && !artifact?.url) setError('No media preview source is available')
       if (artifactType === 'image' && !artifact?.url) setError('No image preview URL is available')
       return
     }
@@ -102,12 +126,13 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
     } finally {
       if (requestRevision.current === revision) setLoading(false)
     }
-  }, [filePath, sourceWorkspace, artifact, artifactType, activeTab])
+  }, [filePath, sourceWorkspace, artifact, artifactType, activeTab, mediaPreview])
 
   useEffect(() => {
     setActiveTab('preview')
     setBrowserError(null)
     setContent(artifact?.content ?? '')
+    setImageUrl(artifact?.url ?? '')
     setError(null)
   }, [artifact])
 
@@ -261,9 +286,9 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
                 transition: 'all 0.15s ease',
               }}
             >
-              Preview
+              {artifactType === 'file' ? 'Details' : 'Preview'}
             </button>
-            {artifactType !== 'image' && <button
+            {artifactType !== 'image' && artifactType !== 'file' && !mediaPreview && <button
               type="button"
               onClick={() => setActiveTab('code')}
               style={{
@@ -347,9 +372,9 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
 
         {/* Right actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <button
+          {!mediaPreview && <button
             type="button"
-            onClick={fetchContent}
+            onClick={() => { void fetchContent(true) }}
             disabled={loading}
             title="Reload content from file"
             style={{
@@ -378,9 +403,9 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
               <polyline points="1 20 1 14 7 14" />
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
             </svg>
-          </button>
+          </button>}
 
-          <button
+          {artifactType !== 'file' && !mediaPreview && !artifact.url?.startsWith('data:image/') && <button
             type="button"
             onClick={() => { void handleOpenInMintBrowser() }}
             disabled={openingBrowser}
@@ -403,7 +428,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
               <polyline points="15 3 21 3 21 9" />
               <line x1="10" y1="14" x2="21" y2="3" />
             </svg>
-          </button>
+          </button>}
 
           <button
             type="button"
@@ -453,7 +478,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
             <p style={{ fontSize: '0.8rem', opacity: 0.8 }}>{error}</p>
             <button
               type="button"
-              onClick={fetchContent}
+              onClick={() => { void fetchContent(true) }}
               style={{
                 marginTop: '12px',
                 padding: '4px 12px',
@@ -468,6 +493,12 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
               Retry
             </button>
           </div>
+        ) : artifactType === 'file' ? (
+          <WorkspaceFileInfo key={`${sourceWorkspace}:${filePath}`} path={filePath} root={sourceWorkspace} />
+        ) : artifactType === 'pdf' && artifact.url ? (
+          <Suspense fallback={<p role="status">Loading PDF viewer…</p>}><WorkspacePdfPreview key={artifact.url} url={artifact.url} path={filePath} root={sourceWorkspace} byteLength={artifact.byteLength} range={artifact.range} /></Suspense>
+        ) : (artifactType === 'audio' || artifactType === 'video') && artifact.url ? (
+          <WorkspaceMediaPreview key={artifact.url} kind={artifactType} url={artifact.url} path={filePath} root={sourceWorkspace} mimeType={artifact.mimeType} />
         ) : activeTab === 'code' ? (
           <div style={{ width: '100%', height: '100%', overflow: 'auto', padding: '12px' }}>
             <ChatCodeBlock code={content} language={language} />
@@ -505,10 +536,10 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
           <div style={{ width: '100%', height: '100%', padding: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
             <img
               key={reloadRevision}
-              src={artifact.url}
+              src={imageUrl || artifact.url}
               alt={fileName}
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-              onError={() => setError('Unable to load image. Check that the preview server is still running.')}
+              onError={() => setError('Unable to load image. Reload the preview or check that the file is still available.')}
             />
           </div>
         ) : artifactType === 'svg' ? (

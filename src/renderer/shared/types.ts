@@ -220,6 +220,7 @@ export interface WorkspaceTreeEntry {
   children: WorkspaceTreeEntry[]
 }
 export interface WorkspaceSnapshot { path: string; tree: WorkspaceTreeEntry; git: GitBranchInfo; revision: number }
+export interface WorkspaceMediaSource { url: string; mimeType: string; byteLength?: number; objectUrl?: boolean; range?: boolean }
 export interface WorkspaceOperation { root: string; relativePath: string; revision: number }
 export interface WorkspaceHistoryEntry { id: string; label: string; path: string; kind: string; destination: string | null; expected: string | null; backup: string | null }
 

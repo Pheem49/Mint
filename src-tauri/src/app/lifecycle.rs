@@ -272,6 +272,8 @@ pub fn run() {
             commands::workspace::rollback_git_checkpoint,
             commands::workspace::undo_git_checkpoint,
             commands::workspace::read_workspace_file,
+            commands::workspace::read_workspace_image,
+            commands::workspace::prepare_workspace_media,
             native::windows::open_window,
             native::windows::hide_desktop_window,
             native::windows::close_desktop_window,

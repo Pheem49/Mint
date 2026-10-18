@@ -51,7 +51,7 @@ function Fixture() {
       <main className="assistant-workspace"><h1>Conversation</h1><p>{workspace}</p><div className="fixture-composer"><ModsPanel workspacePath={workspace} chatId="chat-a" panelTarget={modsTarget} onOpen={() => utility('mods')} /><textarea aria-label="Message" placeholder="Ask Mint…" /></div></main>
       {open && <ToolSurfacePage surfaces={surfaces} activeSurfaceId={active} workspacePath={workspace} terminalSize={440} desktopTools={desktop} backgroundTaskCount={count}
         onSelect={setActive} onClose={id => { setSurfaces(s => s.filter(v => v.id !== id)); setActive(null) }} onCloseAll={noop} onDuplicate={noop} onRename={noop} onCloseOthers={noop} onResizeTerminal={noop} onResizePanel={noop}
-        onOpenTerminal={noop} onOpenBrowser={noop} onOpenReview={noop} onOpenFiles={noop} onOpenMods={() => utility('mods')} onOpenBackgroundTasks={() => utility('background')} onModsPanelTarget={setModsTarget} onBackgroundPanelTarget={setTasksTarget} onClosePanel={() => setOpen(false)} />}
+        onOpenSources={noop} onOpenTerminal={noop} onOpenBrowser={noop} onOpenReview={noop} onOpenFiles={noop} onOpenMods={() => utility('mods')} onOpenBackgroundTasks={() => utility('background')} onModsPanelTarget={setModsTarget} onBackgroundPanelTarget={setTasksTarget} onClosePanel={() => setOpen(false)} />}
       <BackgroundTerminals workspacePath={workspace} panelTarget={tasksTarget} onCountChange={setCount} />
     </div>
     <pre id="qa-results">Running…</pre>

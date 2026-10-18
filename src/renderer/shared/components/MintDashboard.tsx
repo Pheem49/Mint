@@ -1,4 +1,4 @@
-import { createWorkspacePreview } from '../utils/workspacePreview'
+import { createWorkspacePreviewOpener } from '../utils/workspacePreview'
 import { shouldNotify } from '../utils/notificationSettings'
 import { deliverNotification, receiveProactiveNotification } from '../utils/notifications'
 import '../css/notification-notice.css'
@@ -30,6 +30,9 @@ import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import DesktopTitlebar from './DesktopTitlebar'
 import ErrorNotice from './ErrorNotice'
 import type { ToolSurface } from './ToolSurfacePage'
+import SessionSources from './SessionSources'
+import { useSessionSources } from '../utils/useSessionSources'
+import { PreviewObjectUrls } from '../utils/previewObjectUrls'
 import {
   errorMessage,
   readImage,
@@ -547,8 +550,20 @@ export default function MintDashboard() {
   const liveExtendedThinkingOpenRef = useRef(true)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
   const [toolSurfaces, setToolSurfaces] = useState<ToolSurface[]>([])
+  const toolSurfacesRef = useRef(toolSurfaces)
+  toolSurfacesRef.current = toolSurfaces
+  const workspacePreviewOpener = useRef<ReturnType<typeof createWorkspacePreviewOpener> | null>(null)
+  const previewObjectUrls = useRef(new PreviewObjectUrls())
+  useEffect(() => {
+    previewObjectUrls.current = new PreviewObjectUrls()
+    return () => previewObjectUrls.current.dispose()
+  }, [])
+  useEffect(() => {
+    previewObjectUrls.current.update(toolSurfaces.flatMap(surface => surface.kind === 'preview' ? [surface.artifact] : []))
+  }, [toolSurfaces])
   const [activeSurfaceId, setActiveSurfaceId] = useState<string | null>(null)
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
+  const sessionSources = useSessionSources(conversationId, streamingConversationId === conversationId ? agentProgress : [], toolsPanelOpen)
   const [modsPanelTarget, setModsPanelTarget] = useState<HTMLDivElement | null>(null)
   const [backgroundPanelTarget, setBackgroundPanelTarget] = useState<HTMLDivElement | null>(null)
   const [backgroundTaskCount, setBackgroundTaskCount] = useState(0)
@@ -561,7 +576,6 @@ export default function MintDashboard() {
     const saved = Number(window.localStorage.getItem('mint:sidebar-width'))
     return saved >= SIDEBAR_MIN_WIDTH && saved <= SIDEBAR_MAX_WIDTH ? saved : SIDEBAR_DEFAULT_WIDTH
   })
-  const recentAgentChanges = parseFileChangesFromProgress(agentProgress)
   const conversationReviewChanges = mergeFileChanges([
     ...interactions.map((interaction) => {
       const interactionId = String(interaction.id)
@@ -916,9 +930,9 @@ export default function MintDashboard() {
     })
   }
 
-  const openUtilitySurface = (kind: 'mods' | 'background') => {
+  const openUtilitySurface = (kind: 'sources' | 'mods' | 'background') => {
     setToolsPanelOpen(true)
-    setToolSurfaces(current => current.some(surface => surface.id === kind) ? current : [...current, { id: kind, kind, title: kind === 'mods' ? 'Mods' : 'Background tasks' }])
+    setToolSurfaces(current => current.some(surface => surface.id === kind) ? current : [...current, { id: kind, kind, title: kind === 'sources' ? 'Sources' : kind === 'mods' ? 'Mods' : 'Background tasks' }])
     setActiveSurfaceId(kind)
   }
 
@@ -935,7 +949,7 @@ export default function MintDashboard() {
     setToolSurfaces((current) => {
       const source = current.find((surface) => surface.id === id)
       if (!source) return current
-      if (source.kind === 'mods' || source.kind === 'background') return current
+      if (source.kind === 'sources' || source.kind === 'mods' || source.kind === 'background') return current
       const duplicateId = `${source.kind}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`
       const duplicate = { ...source, id: duplicateId, title: `${source.title} copy` } as ToolSurface
       setActiveSurfaceId(duplicateId)
@@ -979,6 +993,7 @@ export default function MintDashboard() {
   }
 
   const openArtifactSurface = (artifact: import('./ArtifactPreviewPanel').ArtifactFile) => {
+    if (!previewObjectUrls.current.accept(artifact)) return
     setToolsPanelOpen(true)
     const fileName = artifact.path.replace(/\\/g, '/').split('/').pop() || artifact.path
     artifact = { ...artifact, workspacePath: artifact.workspacePath ?? workspacePath }
@@ -991,11 +1006,20 @@ export default function MintDashboard() {
   }
 
   const openWorkspacePreview = async (root: string, path: string) => {
-    const artifact = await createWorkspacePreview(root, path, {
+    setToolsPanelOpen(true)
+    workspacePreviewOpener.current ??= createWorkspacePreviewOpener({
       readWorkspaceFile: (file, workspace) => runtimePlatform.readWorkspaceFile(file, workspace),
+      readWorkspaceImage: (file, workspace) => runtimePlatform.readWorkspaceImage(file, workspace),
+      readWorkspaceMedia: (file, workspace) => runtimePlatform.readWorkspaceMedia(file, workspace),
       startHtmlPreview: (workspace, file) => workspacePlatform.startHtmlPreview(workspace, file),
+      selectIfOpen: id => {
+        if (!toolSurfacesRef.current.some(surface => surface.id === id)) return false
+        setActiveSurfaceId(id)
+        return true
+      },
+      open: openArtifactSurface,
     })
-    openArtifactSurface(artifact)
+    await workspacePreviewOpener.current(root, path)
   }
 
   const openReviewSurface = (review: Extract<ToolSurface, { kind: 'review' }>) => {
@@ -1863,6 +1887,7 @@ export default function MintDashboard() {
           onToggleSidebar={toggleSidebar}
           onNewChat={() => clearHistory('New chat')}
           onOpenWorkspace={() => selectWorkspace(undefined, true)}
+          onShowWorkspace={() => { setToolsPanelOpen(false); changeView('workspace') }}
           onOpenTerminal={openTerminalSurface}
           onToggleTerminal={toggleTerminalSurface}
           onOpenBrowser={() => openNativeBrowser()}
@@ -1877,11 +1902,6 @@ export default function MintDashboard() {
           workspaceRevision={workspaceRefreshRevision}
           sending={sending}
           onWorkspaceUndoError={showToast}
-          terminalCount={toolSurfaces.filter((surface) => surface.kind === 'terminal').length}
-          chatId={conversationId}
-          liveProgress={streamingConversationId === conversationId ? agentProgress : []}
-          recentChanges={recentAgentChanges}
-          onOpenReview={(changes) => openReviewSurface({ id: `review:workspace:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: 'Recent agent changes', changes })}
           onRefreshWorkspace={() => setWorkspaceRefreshRevision((revision) => revision + 1)}
         />
       )}
@@ -2001,7 +2021,7 @@ export default function MintDashboard() {
               />
             </Suspense>
           )}
-        <ChatPanel conversation={chatConversation} actions={chatActions} showSessionSources={!isDesktopApp} tools={{
+        <ChatPanel conversation={chatConversation} actions={chatActions} tools={{
           modsPanelTarget, onOpenMods: () => openUtilitySurface('mods'),
           open: toolsPanelOpen, backgroundTaskCount,
           onToggle: isDesktopApp ? undefined : () => setToolsPanelOpen(open => !open),
@@ -2014,7 +2034,15 @@ export default function MintDashboard() {
               activeSurfaceId={activeSurfaceId}
               workspacePath={workspacePath}
               desktopTools={isDesktopApp}
+              onDropWorkspaceFile={isDesktopApp ? file => openWorkspacePreview(file.root, file.path) : undefined}
               backgroundTaskCount={backgroundTaskCount}
+              sourceCount={sessionSources.sources.length}
+              onOpenSources={() => openUtilitySurface('sources')}
+              sourcesContent={<SessionSources key={conversationId} {...sessionSources} onRetry={sessionSources.retry} onOpenLibrary={url => {
+                window.history.pushState({}, '', url)
+                window.dispatchEvent(new PopStateEvent('popstate'))
+                setToolsPanelOpen(false)
+              }} />}
               onOpenMods={() => openUtilitySurface('mods')}
               onOpenBackgroundTasks={() => openUtilitySurface('background')}
               onModsPanelTarget={setModsPanelTarget}

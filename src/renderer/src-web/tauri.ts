@@ -1,3 +1,5 @@
+import { createWorkspaceMediaReader } from '../shared/utils/workspaceMedia'
+import { createWorkspaceImageReader } from '../shared/utils/workspaceImage'
 import { createLibraryTransport } from '../shared/library/transport'
 import { createSourcesTransport } from '../shared/conversation/sourcesTransport'
 export * from '../shared/types'
@@ -2286,6 +2288,10 @@ export async function undoGitCheckpoint(
   }
 }
 
+export const readWorkspaceMedia = createWorkspaceMediaReader({ isNative: isTauriRuntime, apiBase: getLocalApiBase, fetch: authFetch, convertFileSrc })
+
+export const readWorkspaceImage = createWorkspaceImageReader({ isNative: isTauriRuntime, apiBase: getLocalApiBase, fetch: authFetch })
+
 export const readWorkspaceFile = async (path: string, workspacePath?: string): Promise<string> => {
   if (!isTauriRuntime()) {
     try {
@@ -2391,7 +2397,7 @@ const _apiCheck: MintPlatformApi = {
   listGitCheckpoints,
   rollbackGitCheckpoint,
   undoGitCheckpoint,
-  readWorkspaceFile,
+  readWorkspaceFile, readWorkspaceImage, readWorkspaceMedia,
   testMcpConnection,
 }
 

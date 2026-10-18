@@ -41,6 +41,22 @@ Released: 2026-10-17
 
 ## Terminal and Web launch
 
+- Escape still cancels generation from the chat composer while Tools is open; Escape within Tools remains reserved for that panel. Added browser regression coverage for this distinction and corrupt audio/video fallback.
+
+- Added direct PDF, audio and video previews in Tools without preview servers or Background tasks. PDF includes page navigation and zoom with a bundled local PDF.js worker; audio/video have playback and seeking controls. Desktop streams authorized workspace files with range reads; Web uses bounded Blob URLs (up to 256 MiB) and releases them when their last tab closes. Unsupported playback falls back to file information and an external-app button. HTML keeps its existing service for relative assets.
+
+- Workspace image and SVG previews now read bytes directly through native IPC or the existing authenticated API, without starting a localhost preview service or Background task. Reload rereads the original image; HTML previews keep their existing service. Image reads enforce workspace/read permissions and a 32 MiB limit.
+
+- Added Workspace file drag-and-drop into Tools with a Mint-colored “Drop to preview” target. Images, Markdown, HTML and text/code open in preview tabs; other file types show their name, type, path and source workspace with an external-app button. Repeat drops reuse existing tabs and simultaneous drops share one load. Previews retain their source workspace, drag cancellation clears feedback, and load errors can be retried. The file context menu also provides Preview in Mint for text and unsupported files.
+
+- Workspace child folders now start collapsed on the first visit. Expanded/collapsed choices are saved locally per workspace and restored on reopening, switching workspaces, and app restarts; collapsing a parent retains its descendants’ saved choices.
+
+- Removed Desktop’s Workspace context popover. Its titlebar folder button now opens the Workspace view directly and closes Tools if needed; the File menu and Ctrl+O retain their folder-picker behavior.
+
+- Sources now displays every item in its scrollable Tools tab with per-group counts and two-line titles. Collections above eight items include a search field filtering names, domains, and URLs, with matching/total group counts and an empty-result message.
+
+- Moved session Sources into the shared Desktop/Web Tools sidebar with a source count and a dedicated tab. Removed the Web header Sources popover and the duplicate Desktop workspace-popover section; source grouping, retry, live updates, and Library links remain available in Tools.
+
 - The Ctrl+T panel title now shows total thinking time across rounds. Each round begins with a Mint-green numbered heading and its own duration (including the first round); active timing continues updating, and missing historical durations remain marked unavailable.
 
 - The Ctrl+T thought panel now uses the shared Mint accent for Next Step separators and blue for footer key names, while preserving white thought text and muted hint descriptions.

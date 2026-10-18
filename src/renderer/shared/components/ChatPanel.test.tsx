@@ -6,16 +6,16 @@ import { chatPanelFixture } from '../../tests/chatPanelFixture'
 import { installRendererPlatform } from '../platform'
 import * as webAdapter from '../../src-web/tauri'
 
-describe('Web Sources entry point', () => {
-  it('shows Sources beside Tools in the real web chat header', () => {
+describe('Shared Tools entry point', () => {
+  it('keeps Sources out of the chat header and offers Tools instead', () => {
     installRendererPlatform(webAdapter)
-    const html = renderToStaticMarkup(createElement(ChatPanel, { ...chatPanelFixture(), showSessionSources: true } as any))
-    expect(html).toContain('aria-label="Open session sources"')
-    expect(html.indexOf('Open session sources')).toBeLessThan(html.indexOf('Open tools panel'))
+    const html = renderToStaticMarkup(createElement(ChatPanel, { ...chatPanelFixture(), tools: { modsPanelTarget: null, onOpenMods: () => {}, open: false, backgroundTaskCount: 0, onToggle: () => {} } } as any))
+    expect(html).not.toContain('Open session sources')
+    expect(html).toContain('Open tools panel')
   })
-  it('leaves Desktop Sources in its existing titlebar', () => {
+  it('does not duplicate Desktop’s titlebar Tools button', () => {
     installRendererPlatform(webAdapter)
-    const html = renderToStaticMarkup(createElement(ChatPanel, { ...chatPanelFixture(), showSessionSources: false } as any))
+    const html = renderToStaticMarkup(createElement(ChatPanel, chatPanelFixture() as any))
     expect(html).not.toContain('Open session sources')
   })
 })

@@ -45,7 +45,6 @@ import ModelSelectorPopover from './ModelSelectorPopover'
 import GitBranchSelector from './GitBranchSelector'
 import WorkspaceSelector from './WorkspaceSelector'
 import ToolsPanelToggle from './ToolsPanelToggle'
-import SessionSourcesPopover from './SessionSourcesPopover'
 import { ModsPanel } from './ModsPanel'
 import CodeReviewPage from './CodeReviewPage'
 import type { ToolSurface } from './ToolSurfacePage'
@@ -175,7 +174,6 @@ export type ConversationActions = Omit<ChatPanelContract, keyof ConversationView
 interface ChatPanelProps {
   conversation: ConversationViewModel
   actions: ConversationActions
-  showSessionSources?: boolean
   tools?: { modsPanelTarget: HTMLElement | null; onOpenMods: () => void; onToggle?: () => void; open: boolean; backgroundTaskCount: number }
 }
 
@@ -183,7 +181,6 @@ export default function ChatPanel({
   conversation,
   actions,
   tools,
-  showSessionSources = false,
 }: ChatPanelProps) {
   const {
   interactions,
@@ -313,7 +310,6 @@ export default function ChatPanel({
   const [reviewPage, setReviewPage] = useState<{ title: string; changes: FileChange[] } | null>(null)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactFile | null>(null)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
-  const [sessionSourcesOpen, setSessionSourcesOpen] = useState(false)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
   const toggleActivity = useCallback((id: string) => {
@@ -1024,13 +1020,14 @@ export default function ChatPanel({
   }, [onPasteImage])
   useEffect(() => {
     const handleEscapeKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape' && sending && !sessionSourcesOpen) {
+      const insideTools = event.target instanceof Element && event.target.closest('.tool-surface-page')
+      if (event.key === 'Escape' && sending && !event.defaultPrevented && !insideTools) {
         onCancelMessage()
       }
     }
     window.addEventListener('keydown', handleEscapeKeyDown, true)
     return () => window.removeEventListener('keydown', handleEscapeKeyDown, true)
-  }, [sending, onCancelMessage, sessionSourcesOpen])
+  }, [sending, onCancelMessage])
   useEffect(() => {
     if (message) return
     const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
@@ -1592,7 +1589,6 @@ export default function ChatPanel({
             )}
           </div>
           <div className="chat-header-actions">
-            {showSessionSources && <SessionSourcesPopover chatId={chatId} liveProgress={agentProgress} open={sessionSourcesOpen} onOpenChange={setSessionSourcesOpen} />}
             {tools?.onToggle && <ToolsPanelToggle open={tools.open} count={tools.backgroundTaskCount} onToggle={tools.onToggle} />}
             {activeArtifact && (
               <button

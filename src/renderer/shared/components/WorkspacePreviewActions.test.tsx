@@ -16,9 +16,10 @@ describe('workspace preview menu', () => {
     expect(renderActions('index.html')).toContain('Open in Browser')
     for (const name of ['README.md', 'photo.png']) expect(renderActions(name)).not.toContain('Open in Browser')
   })
-  it('does not offer previews for directories or unsupported files', () => {
+  it('keeps directories out of previews and provides a menu alternative to dragging any file', () => {
     expect(renderActions('guide.md', 'directory')).toBe('')
-    expect(renderActions('script.rs')).toBe('')
+    expect(renderActions('script.rs')).toContain('Preview in Mint')
+    expect(renderActions('archive.zip')).toContain('Preview in Mint')
   })
   it('disables preview actions while another operation is pending', () => { expect(renderActions('README.md', 'file', true)).toContain('disabled=""') })
 })

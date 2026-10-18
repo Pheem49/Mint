@@ -1,18 +1,19 @@
 import '../../src/css/tool-surfaces.css'
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { PointerEvent as ReactPointerEvent } from 'react'
+import type { PointerEvent as ReactPointerEvent, ReactNode, DragEvent as ReactDragEvent } from 'react'
 import type { ArtifactFile } from './ArtifactPreviewPanel'
 import { ArtifactPreviewPanel } from './ArtifactPreviewPanel'
 import CodeReviewPage from './CodeReviewPage'
 import TerminalDock from './TerminalDock'
 import type { FileChange } from '../types'
-import { ListTodo, Puzzle } from 'lucide-react'
+import { ListTodo, Paperclip, Puzzle } from 'lucide-react'
+import { WORKSPACE_FILE_MIME, parseWorkspaceFileDrag, type WorkspaceFileDrag } from '../utils/workspaceDrag'
 
 export type ToolSurface =
   | { id: string; kind: 'preview'; title: string; artifact: ArtifactFile }
   | { id: string; kind: 'review'; title: string; reviewTitle: string; changes: FileChange[] }
   | { id: string; kind: 'terminal'; title: string }
-  | { id: string; kind: 'mods' | 'background'; title: string }
+  | { id: string; kind: 'sources' | 'mods' | 'background'; title: string }
 
 interface Props {
   surfaces: ToolSurface[]
@@ -35,14 +36,19 @@ interface Props {
   onClosePanel: () => void
   desktopTools?: boolean
   backgroundTaskCount?: number
+  sourceCount?: number
+  sourcesContent?: ReactNode
+  onOpenSources: () => void
   onOpenMods: () => void
   onOpenBackgroundTasks: () => void
   onModsPanelTarget: (target: HTMLDivElement | null) => void
   onBackgroundPanelTarget: (target: HTMLDivElement | null) => void
+  onDropWorkspaceFile?: (file: WorkspaceFileDrag) => Promise<void>
 }
 
 
 function surfaceIcon(kind: ToolSurface['kind']) {
+  if (kind === 'sources') return <Paperclip size={13} aria-hidden="true" />
   if (kind === 'mods') return <Puzzle size={13} aria-hidden="true" />
   if (kind === 'background') return <ListTodo size={13} aria-hidden="true" />
   if (kind === 'terminal') {
@@ -92,19 +98,51 @@ export default function ToolSurfacePage({
   onClosePanel,
   desktopTools = true,
   backgroundTaskCount = 0,
+  sourceCount = 0,
+  sourcesContent,
+  onOpenSources,
   onOpenMods,
   onOpenBackgroundTasks,
   onModsPanelTarget,
   onBackgroundPanelTarget,
+  onDropWorkspaceFile,
 }: Props) {
   const active = surfaces.find((surface) => surface.id === activeSurfaceId) ?? surfaces[0] ?? null
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [tabMenuState, setTabMenuState] = useState<{ id: string; x: number; y: number } | null>(null)
   const [isMaximized, setIsMaximized] = useState(false)
   const panelRef = useRef<HTMLElement>(null)
+  const [draggingFile, setDraggingFile] = useState(false)
+  const [workspaceDragActive, setWorkspaceDragActive] = useState(false)
+  const [dropError, setDropError] = useState('')
+  const [openingFiles, setOpeningFiles] = useState(0)
+  const dragDepth = useRef(0)
+  const acceptsFile = (event: ReactDragEvent) => Boolean(onDropWorkspaceFile && event.dataTransfer.types.includes(WORKSPACE_FILE_MIME))
+  const resetDrag = () => { dragDepth.current = 0; setDraggingFile(false); setWorkspaceDragActive(false) }
+  useEffect(() => {
+    const start = (event: DragEvent) => {
+      if (onDropWorkspaceFile && event.dataTransfer?.types.includes(WORKSPACE_FILE_MIME)) setWorkspaceDragActive(true)
+    }
+    window.addEventListener('dragstart', start)
+    window.addEventListener('dragend', resetDrag)
+    window.addEventListener('drop', resetDrag)
+    return () => { window.removeEventListener('dragstart', start); window.removeEventListener('dragend', resetDrag); window.removeEventListener('drop', resetDrag) }
+  }, [onDropWorkspaceFile])
+  const dropFile = async (event: ReactDragEvent) => {
+    event.preventDefault()
+    const raw = event.dataTransfer.getData(WORKSPACE_FILE_MIME)
+    resetDrag()
+    if (!onDropWorkspaceFile || !raw) return
+    event.stopPropagation()
+    setDropError('')
+    setOpeningFiles(count => count + 1)
+    try { await onDropWorkspaceFile(parseWorkspaceFileDrag(raw)) }
+    catch (reason) { setDropError(reason instanceof Error ? reason.message : String(reason)) }
+    finally { setOpeningFiles(count => count - 1) }
+  }
 
   useEffect(() => {
-    panelRef.current?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"], [role="menuitem"]')?.focus()
+    panelRef.current?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"], [role="menuitem"]')?.focus({ preventScroll: true })
   }, [active?.id])
 
   useEffect(() => {
@@ -226,6 +264,7 @@ export default function ToolSurfacePage({
   )
 
   const launcherItems = [
+    { label: 'Sources', title: 'Session sources', shortcut: '', icon: <Paperclip />, className: 'is-sources', action: onOpenSources },
     { label: 'Mods', title: 'Workspace mods', shortcut: '', icon: <Puzzle />, className: 'is-mods', action: onOpenMods },
     { label: 'Background tasks', title: 'Background tasks', shortcut: '', icon: <ListTodo />, className: 'is-background', action: onOpenBackgroundTasks },
     ...(desktopTools ? [
@@ -242,6 +281,7 @@ export default function ToolSurfacePage({
         <button type="button" role="menuitem" className="tool-surface-launcher-item" key={item.label} title={item.title} onClick={() => { item.action(); setSwitcherOpen(false) }}>
           <span className={`tool-surface-menu-icon ${item.className}`} aria-hidden="true">{item.icon}</span>
           <span className="tool-surface-menu-copy"><span className="tool-surface-menu-label">{item.label}</span></span>
+          {item.className === 'is-sources' && <span className="tools-task-count" aria-label={`${sourceCount} session sources`}>{sourceCount}</span>}
           {item.className === 'is-background' && backgroundTaskCount > 0 && <span className="tools-task-count" aria-label={`${backgroundTaskCount} active background tasks`}>{backgroundTaskCount}</span>}
           {item.shortcut && <kbd>{item.shortcut}</kbd>}
         </button>
@@ -335,7 +375,7 @@ export default function ToolSurfacePage({
   }
 
   const handleAddNewTab = () => {
-    if (active?.kind === 'mods' || active?.kind === 'background') {
+    if (active?.kind === 'sources' || active?.kind === 'mods' || active?.kind === 'background') {
       toggleSwitcher()
       return
     }
@@ -348,7 +388,7 @@ export default function ToolSurfacePage({
     }
   }
 
-  const newTabTooltip = active?.kind === 'mods' || active?.kind === 'background' ? 'Open a tool' : active?.kind === 'review'
+  const newTabTooltip = active?.kind === 'sources' || active?.kind === 'mods' || active?.kind === 'background' ? 'Open a tool' : active?.kind === 'review'
     ? 'New Review Tab'
     : active?.kind === 'preview'
     ? 'Duplicate Preview Tab'
@@ -360,7 +400,24 @@ export default function ToolSurfacePage({
       className={`tool-surface-page ${isEntering ? 'is-entering' : ''} ${isMaximized ? 'is-maximized' : ''} ${isResizing ? 'is-resizing' : ''}`}
       onAnimationEnd={() => setIsEntering(false)}
       aria-label="Tools"
+      onDragEnter={event => {
+        if (!acceptsFile(event)) return
+        event.preventDefault(); dragDepth.current++; setDraggingFile(true)
+      }}
+      onDragOver={event => {
+        if (!acceptsFile(event)) return
+        event.preventDefault(); event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={() => {
+        dragDepth.current = Math.max(0, dragDepth.current - 1)
+        if (!dragDepth.current) setDraggingFile(false)
+      }}
+      onDrop={event => { void dropFile(event) }}
     >
+      {workspaceDragActive && <div className="tool-surface-drag-shield" aria-hidden="true" />}
+      {draggingFile && <div className="tool-surface-drop-overlay" role="status"><Paperclip size={24} aria-hidden="true" /><span>Drop to preview</span></div>}
+      {openingFiles > 0 && <div className="tool-surface-drop-status" role="status">Opening file…</div>}
+      {dropError && <div className="tool-surface-drop-error" role="alert">Could not open preview: {dropError}</div>}
       {!isMaximized && (
         <div
           className={`tool-surface-resize-handle ${isResizing ? 'is-resizing' : ''}`}
@@ -520,7 +577,7 @@ export default function ToolSurfacePage({
               }}
               role="menu"
             >
-              {surfaces.find(surface => surface.id === tabMenuState.id)?.kind !== 'mods' && surfaces.find(surface => surface.id === tabMenuState.id)?.kind !== 'background' && <button type="button" role="menuitem" onClick={() => { onDuplicate(tabMenuState.id); setTabMenuState(null) }}>
+              {surfaces.find(surface => surface.id === tabMenuState.id)?.kind !== 'sources' && surfaces.find(surface => surface.id === tabMenuState.id)?.kind !== 'mods' && surfaces.find(surface => surface.id === tabMenuState.id)?.kind !== 'background' && <button type="button" role="menuitem" onClick={() => { onDuplicate(tabMenuState.id); setTabMenuState(null) }}>
                 Duplicate tab
               </button>}
               <button type="button" role="menuitem" onClick={() => { onRename(tabMenuState.id); setTabMenuState(null) }}>
@@ -539,6 +596,7 @@ export default function ToolSurfacePage({
 
       <div className={`tool-surface-content${active ? '' : ' is-launcher'}`}>
         {!active && renderLauncher()}
+        {active?.kind === 'sources' && <div className="tool-surface-sources">{sourcesContent}</div>}
         {active?.kind === 'mods' && <div key="mods" className="tool-surface-panel-host" ref={onModsPanelTarget} />}
         {active?.kind === 'background' && <div key="background" className="tool-surface-panel-host" ref={onBackgroundPanelTarget} />}
         {active?.kind === 'preview' && <ArtifactPreviewPanel key={active.id} artifact={active.artifact} onClose={() => active && onClose(active.id)} workspacePath={workspacePath || undefined} />}

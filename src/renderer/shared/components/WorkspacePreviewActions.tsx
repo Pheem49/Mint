@@ -11,7 +11,7 @@ interface Props {
 
 export default function WorkspacePreviewActions({ entry, pending, onPreview, onOpenHtml }: Props) {
   const type = detectArtifactType(entry.name)
-  if (entry.kind !== 'file' || type === 'code') return null
+  if (entry.kind !== 'file') return null
   return <>
     {type === 'html' && onOpenHtml && <button type="button" role="menuitem" disabled={pending} onClick={onOpenHtml}>Open in Browser</button>}
     {onPreview && <button type="button" role="menuitem" disabled={pending} onClick={onPreview}>Preview in Mint</button>}

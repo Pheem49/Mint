@@ -1,0 +1,12 @@
+.workspace-file-info { width: 100%; padding: 32px 20px; color: var(--text-main); }
+.workspace-file-info > svg { color: var(--accent); }
+.workspace-file-info h2 { margin: 16px 0 8px; font-size: 16px; overflow-wrap: anywhere; }
+.workspace-file-info p { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.workspace-file-info dl { margin: 24px 0; font-size: 12px; }
+.workspace-file-info dt { margin-top: 14px; color: var(--text-muted); }
+.workspace-file-info dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.workspace-file-info button { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); background: var(--surface-bg); color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+.workspace-file-info button:hover:not(:disabled) { background: var(--surface-strong); }
+.workspace-file-info button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.workspace-file-info button:disabled { opacity: .5; cursor: default; }
+.workspace-file-info .workspace-file-info-error { color: var(--status-error); }
