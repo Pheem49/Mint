@@ -51,6 +51,9 @@ export default function App() {
   const [terminalFallback, setTerminalFallback] = useState(false)
   const [navigationNotice, setNavigationNotice] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [windowSize, setWindowSize] = useState<[number, number]>([480, 800])
+  const [windowSizeError, setWindowSizeError] = useState('')
+  const resizeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [speechOpen, setSpeechOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
   const [expandedActionGroup, setExpandedActionGroup] = useState<string | null>(null)
@@ -114,6 +117,23 @@ export default function App() {
     window.addEventListener('dragstart', handleDragStart)
     return () => window.removeEventListener('dragstart', handleDragStart)
   }, [])
+
+  useEffect(() => {
+    if (!settingsOpen) return
+    let disposed = false
+    invoke<[number, number]>('window_dimensions').then(size => { if (!disposed) setWindowSize(size) }).catch(reason => { if (!disposed) setWindowSizeError(String(reason)) })
+    return () => { disposed = true }
+  }, [settingsOpen])
+  useEffect(() => () => clearTimeout(resizeTimer.current), [])
+  function resizeWindow(index: number, value: number) {
+    const size: [number, number] = [...windowSize]
+    size[index] = value
+    setWindowSize(size); setWindowSizeError('')
+    clearTimeout(resizeTimer.current)
+    resizeTimer.current = setTimeout(() => {
+      void invoke('resize_companion', { width: size[0], height: size[1] }).catch(reason => setWindowSizeError(String(reason)))
+    }, 150)
+  }
 
   function toggleActionGroup(group: string) {
     setExpandedActionGroup(current => current === group ? null : group)
@@ -234,6 +254,7 @@ export default function App() {
   async function changeCompact(compact: boolean) {
     if (resizing) return
     setResizing(true)
+    clearTimeout(resizeTimer.current)
     closeActionMenu()
     try {
       await invoke('set_compact', { compact })
@@ -383,6 +404,12 @@ export default function App() {
         <h2 className="text-sm font-semibold text-white">Companion settings <span className="ml-1 text-ice-200">✦</span></h2>
         <button type="button" aria-label="Close settings" title="Close settings" onClick={() => setSettingsOpen(false)} className="grid size-9 shrink-0 place-items-center rounded-full border border-white/15 bg-white/5 text-base text-ice-100/75 transition hover:border-ice-200/45 hover:bg-ice-200/10 hover:text-white">×</button>
       </div>
+
+      {(['Window width', 'Window height'] as const).map((label, index) => <label key={label} className="col-span-2 flex flex-col gap-1.5 text-[11px] text-ice-100/70">
+        <span className="flex items-center justify-between"><span>{label}</span><span>{windowSize[index]} px</span></span>
+        <input aria-label={label} className="accent-sky-300" type="range" min={index === 0 ? 340 : 560} max="2000" step="10" value={windowSize[index]} onChange={event => resizeWindow(index, Number(event.target.value))} />
+      </label>)}
+      {windowSizeError && <p role="alert" className="col-span-2 text-xs text-rose-200">{windowSizeError}</p>}
 
       <div className="col-span-2 flex flex-col gap-1.5">
         <div className="flex items-center justify-between text-[11px] text-ice-100/70">

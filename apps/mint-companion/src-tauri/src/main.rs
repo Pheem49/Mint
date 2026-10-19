@@ -431,6 +431,33 @@ fn save_settings(
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
+#[tauri::command]
+fn window_dimensions(window: tauri::WebviewWindow) -> Result<(u32, u32), String> {
+    let scale = window.scale_factor().map_err(|error| error.to_string())?;
+    let size = window
+        .inner_size()
+        .map_err(|error| error.to_string())?
+        .to_logical::<u32>(scale);
+    Ok((size.width, size.height))
+}
+
+#[tauri::command]
+fn resize_companion(window: tauri::WebviewWindow, width: u32, height: u32) -> Result<(), String> {
+    if window
+        .state::<compact::CompactWindow>()
+        .active
+        .load(Ordering::Acquire)
+    {
+        return Err("Expand Companion before resizing it".into());
+    }
+    window.unmaximize().map_err(|error| error.to_string())?;
+    window
+        .set_size(tauri::LogicalSize::new(
+            width.clamp(340, 2000),
+            height.clamp(560, 2000),
+        ))
+        .map_err(|error| error.to_string())
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelativeCursorPosition {
@@ -485,8 +512,8 @@ fn main() {
                 window.set_decorations(settings.normal_window)?;
                 if settings.x.is_some() {
                     window.set_size(tauri::PhysicalSize::new(
-                        settings.width.clamp(340, 3200),
-                        settings.height.clamp(560, 3200),
+                        settings.width.clamp(340, 10000),
+                        settings.height.clamp(560, 10000),
                     ))?;
                 } else {
                     window.set_size(tauri::LogicalSize::new(480.0, 800.0))?;
@@ -573,6 +600,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             compact::set_compact,
+            window_dimensions,
+            resize_companion,
             discover_hosts,
             open_conversation,
             speech_request,
