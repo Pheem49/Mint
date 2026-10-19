@@ -566,7 +566,8 @@ impl AvatarBridge {
             | AgentProgress::ToolProgress { .. }
             | AgentProgress::ToolArtifacts { .. }
             | AgentProgress::ToolDiscovery { .. }
-            | AgentProgress::DeviceState { .. } => {}
+            | AgentProgress::DeviceState { .. }
+            | AgentProgress::ExecutionUpdate { .. } => {}
         }
     }
 

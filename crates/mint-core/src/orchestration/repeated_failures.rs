@@ -37,6 +37,14 @@ impl RepeatedFailures {
             ..
         } in results
         {
+            if matches!(
+                *status,
+                crate::mcp_result::ToolStatus::Running
+                    | crate::mcp_result::ToolStatus::Unknown
+                    | crate::mcp_result::ToolStatus::Skipped
+            ) {
+                continue;
+            }
             let error = result.split("\n\n[System Tip:").next().unwrap_or(result);
             let error = error
                 .split(". No tool was executed for this call.")

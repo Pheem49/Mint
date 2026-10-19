@@ -4,6 +4,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import McpToolResults from '../components/McpToolResults'
 import { reduceLiveAgentProgress, compactAgentProgressForPersistence } from '../agentProgress'
 
+it('shows screenshot origin and dimensions in saved artifact cards', () => {
+  const progress: any[] = [{ type: 'ToolArtifacts', data: { callId: 'capture', warnings: [], artifacts: [{ id: 'capture-image', kind: 'image', name: 'result.png', size: 100, metadata: { url: 'http://localhost:3000/result', width: 1440, height: 900 } }] } }]
+  const html = renderToStaticMarkup(<McpToolResults progress={progress} />)
+  expect(html).toContain('http://localhost:3000/result')
+  expect(html).toContain('1440 × 900')
+})
+
 describe('MCP progress retention', () => {
   it('keeps artifacts visible after later tools and folds progress by call', () => {
     let events: any[] = [{ type: 'ToolArtifacts', data: { callId: 'a', artifacts: [{ id: 'image' }], warnings: [] } }]

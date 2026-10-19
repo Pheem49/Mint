@@ -1172,6 +1172,10 @@ fn default_sandbox_command() -> &'static str {
 fn runtime_extra_defaults() -> BTreeMap<String, Value> {
     serde_json::from_value(serde_json::json!({
         "automationBrowser": "chromium",
+        "browserAgentMode": "headless",
+        "browserExecutable": "",
+        "browserViewportWidth": 1440,
+        "browserViewportHeight": 900,
         "browserDebugUrl": "http://127.0.0.1:9222/json/list",
         "browserExtensionContextUrl": "http://127.0.0.1:3212/context",
         "proactiveInterval": 60,

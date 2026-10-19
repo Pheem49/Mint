@@ -18,6 +18,9 @@ pub enum ToolStatus {
     Failed,
     TimedOut,
     Cancelled,
+    Running,
+    Unknown,
+    Skipped,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +36,8 @@ pub struct McpArtifact {
     pub server: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Default)]
@@ -53,6 +58,8 @@ impl From<String> for ToolOutcome {
             || text.starts_with("User denied")
         {
             ToolStatus::Failed
+        } else if text.starts_with("Skipped") {
+            ToolStatus::Skipped
         } else {
             ToolStatus::Success
         };
@@ -74,6 +81,42 @@ pub fn artifact_directory() -> Result<PathBuf, String> {
 
 pub fn read_artifact(id: &str) -> Result<(McpArtifact, Vec<u8>), String> {
     read_artifact_in(&artifact_directory()?, id)
+}
+
+pub fn delete_chat_artifacts(chat: &str) -> Result<usize, String> {
+    let directory = artifact_directory()?;
+    if !directory.exists() {
+        return Ok(0);
+    }
+    let mut removed = 0;
+    for file in fs::read_dir(&directory).map_err(|e| e.to_string())? {
+        let file = file.map_err(|e| e.to_string())?;
+        let path = file.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json")
+            || file.metadata().map_err(|e| e.to_string())?.len() > 1_048_576
+        {
+            continue;
+        }
+        let Ok(bytes) = fs::read(&path) else {
+            continue;
+        };
+        let Ok(entry) = serde_json::from_slice::<McpArtifact>(&bytes) else {
+            continue;
+        };
+        if entry.chat_id != chat
+            || uuid::Uuid::parse_str(&entry.id).is_err()
+            || path != directory.join(format!("{}.json", entry.id))
+        {
+            continue;
+        }
+        let data = directory.join(&entry.id);
+        if data.exists() {
+            fs::remove_file(data).map_err(|e| e.to_string())?;
+        }
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+        removed += 1;
+    }
+    Ok(removed)
 }
 
 fn read_artifact_in(directory: &Path, id: &str) -> Result<(McpArtifact, Vec<u8>), String> {
@@ -142,6 +185,7 @@ fn normalize_in(
                         call_id: call.into(),
                         server: server.into(),
                         uri: Some(uri.into()),
+                        metadata: None,
                     });
                 }
                 continue;
@@ -229,6 +273,7 @@ fn normalize_in(
                 call_id: call.into(),
                 server: server.into(),
                 uri: None,
+                metadata: None,
             };
             if entry.name.is_empty() {
                 entry.name = "MCP attachment".into();

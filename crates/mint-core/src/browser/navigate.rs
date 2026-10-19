@@ -145,22 +145,75 @@ pub async fn read_page_text(config: &MintConfig) -> Result<String, String> {
 /// Capture a PNG screenshot of the current browser page.
 /// Returns base64-encoded PNG string.
 pub async fn screenshot(config: &MintConfig) -> Result<String, String> {
+    capture_page(config, &json!({"mode":"viewport"})).await
+}
+
+pub(super) async fn capture_page(
+    config: &MintConfig,
+    args: &serde_json::Value,
+) -> Result<String, String> {
     log_action("SCREENSHOT", "Capturing screenshot");
     ensure_page_open(config).await?;
 
-    match cdp_call_raw(
+    let mode = args["mode"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("viewport");
+    let mut params =
+        json!({"format":"png","fromSurface":true,"captureBeyondViewport":mode!="viewport"});
+    let geometry = if mode == "fullPage" {
+        let metrics = cdp_call_raw(config, "Page.getLayoutMetrics", json!({})).await?;
+        let size = metrics["result"]
+            .get("cssContentSize")
+            .unwrap_or(&metrics["result"]["contentSize"]);
+        json!({"x":0,"y":0,"width":size["width"],"height":size["height"],"scale":1})
+    } else if mode == "element" {
+        let selector = args["selector"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or("Element capture requires a selector or current elementRef")?;
+        let find = super::interact::selector_to_js_find(selector);
+        let response=cdp_call_raw(config,"Runtime.evaluate",json!({"expression":format!("(() => {{ {find} if(!el || !el.isConnected) throw new Error('stale_reference'); const r=el.getBoundingClientRect(); return {{x:r.x+scrollX,y:r.y+scrollY,width:r.width,height:r.height,scale:1}}; }})()"),"returnByValue":true})).await?;
+        response["result"]["result"]["value"].clone()
+    } else if mode == "viewport" {
+        let response = cdp_call_raw(
+            config,
+            "Runtime.evaluate",
+            json!({"expression":"({width:innerWidth,height:innerHeight})","returnByValue":true}),
+        )
+        .await?;
+        response["result"]["result"]["value"].clone()
+    } else {
+        return Err("Screenshot mode must be viewport, fullPage or element".into());
+    };
+    let dpr = cdp_call_raw(
         config,
-        "Page.captureScreenshot",
-        json!({
-            "format": "png",
-            "fromSurface": true,
-            "captureBeyondViewport": false
-        }),
+        "Runtime.evaluate",
+        json!({"expression":"devicePixelRatio","returnByValue":true}),
     )
-    .await
+    .await?["result"]["result"]["value"]
+        .as_f64()
+        .unwrap_or(1.0);
+    let width = geometry["width"].as_f64().unwrap_or(0.0);
+    let height = geometry["height"].as_f64().unwrap_or(0.0);
+    if !width.is_finite()
+        || !height.is_finite()
+        || width <= 0.0
+        || height <= 0.0
+        || width * height * dpr * dpr > crate::media::tool_images::PIXEL_LIMIT as f64
     {
+        return Err("Screenshot exceeds 32 million pixels or target has no visible area; capture the viewport or one element.".into());
+    }
+    if mode != "viewport" {
+        params["clip"] = geometry;
+    }
+
+    match cdp_call_raw(config, "Page.captureScreenshot", params).await {
         Ok(response) => {
             if let Some(data) = response["result"]["data"].as_str() {
+                if data.len() > crate::media::tool_images::ORIGINAL_LIMIT.div_ceil(3) * 4 + 4 {
+                    return Err("Screenshot exceeds 20 MiB; capture a smaller region.".into());
+                }
                 log_action(
                     "SCREENSHOT_SUCCESS",
                     &format!("Captured {} base64 bytes", data.len()),

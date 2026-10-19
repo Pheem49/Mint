@@ -551,6 +551,15 @@ pub(crate) fn mcp_progress_notes(event: &AgentProgress) -> Option<Vec<String>> {
                 update.message.as_deref().unwrap_or_default()
             )]
         }
+        AgentProgress::ExecutionUpdate { executions, .. } => executions
+            .iter()
+            .map(|e| {
+                let kind = if e.check { "Check" } else { "Command" };
+                let exit = e.exit_code.map(|c| format!(" · exit {c}")).unwrap_or_default();
+                let job = e.job_id.as_ref().map(|j| format!(" · job {j}")).unwrap_or_default();
+                format!("[{kind}] {:?} · {}{exit}{job}", e.state, e.command)
+            })
+            .collect(),
         AgentProgress::ToolArtifacts {
             artifacts,
             warnings,
@@ -566,13 +575,19 @@ pub(crate) fn mcp_progress_notes(event: &AgentProgress) -> Option<Vec<String>> {
                             .display()
                             .to_string()
                     });
-                    format!("[MCP {}] {}: {location}", artifact.kind, artifact.name)
+                    let tag = match artifact.server.as_str() {
+                        "browser" => "Screenshot".into(),
+                        "view_image" => "Viewed image".into(),
+                        other if !other.is_empty() => format!("MCP {other}"),
+                        _ => format!("MCP {}", artifact.kind),
+                    };
+                    format!("[{tag}] {}: {location}", artifact.name)
                 })
                 .collect::<Vec<_>>();
             notes.extend(
                 warnings
                     .iter()
-                    .map(|warning| format!("[MCP warning] {warning}")),
+                    .map(|warning| format!("[Warning] {warning}")),
             );
             notes
         }
@@ -605,18 +620,18 @@ pub(crate) fn run_summary_lines(
         .iter()
         .filter(|record| !record.success)
         .collect();
-    let outcome = if !failed_tools.is_empty() {
-        format!(
-            "{YELLOW}⚠ Completed with {} failure{}{RESET}",
+    let outcome = match summary.outcome.as_str() {
+        "FAILED" => format!("{RED}✗ Failed{RESET}"),
+        "BLOCKED" => format!("{YELLOW}○ Blocked{RESET}"),
+        "UNVERIFIED" => format!("{YELLOW}? Unverified{RESET}"),
+        "ROLLED_BACK" => format!("{YELLOW}↺ Rolled back{RESET}"),
+        _ if !failed_tools.is_empty() => format!(
+            "{YELLOW}⚠ Completed with {} previous failure{}{RESET}",
             failed_tools.len(),
             if failed_tools.len() == 1 { "" } else { "s" }
-        )
-    } else if summary.outcome == "ROLLED_BACK" {
-        format!("{YELLOW}↺ Rolled back{RESET}")
-    } else if summary.outcome == "FAILED" {
-        format!("{RED}✗ Failed{RESET}")
-    } else {
-        format!("{GREEN}✓ Completed{RESET}")
+        ),
+        "VERIFIED" => format!("{GREEN}✓ Verified{RESET}"),
+        _ => format!("{GREEN}✓ Completed{RESET}"),
     };
     let file_count = summary.files_changed.len();
     let mut lines = vec![format!(
@@ -1392,7 +1407,8 @@ pub async fn run_code_agent_with_options(
             AgentProgress::ToolDiscovery { .. }
             | AgentProgress::DeviceState { .. }
             | AgentProgress::ToolProgress { .. }
-            | AgentProgress::ToolArtifacts { .. } => {}
+            | AgentProgress::ToolArtifacts { .. }
+            | AgentProgress::ExecutionUpdate { .. } => {}
             AgentProgress::PlanUpdated { plan } => {
                 if let Ok(mut status) = progress_live_status.lock() {
                     status.thinking = None;

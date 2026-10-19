@@ -796,6 +796,9 @@ impl MemoryStore {
         let deleted =
             transaction.execute("DELETE FROM chat_sessions WHERE id = ?1", params![chat_id])?;
         transaction.commit()?;
+        if let Err(error) = crate::mcp_result::delete_chat_artifacts(&chat_id) {
+            eprintln!("Could not remove conversation artifacts: {error}");
+        }
         Ok(deleted)
     }
 

@@ -142,7 +142,7 @@ exposing it beyond your machine. See
 - [Configuration](docs/CONFIGURATION.md) — providers, local settings, safety, and privacy.
 - [Gateway and VPS](docs/GATEWAY.md) — messaging bridges, cron, and systemd operation.
 - [Mint Mods](docs/mods/README.md) — custom panels, commands, authoring, and testing.
-- [Browser automation](docs/MINT_AUTO_BROWSER.md) — the dedicated automation browser.
+- [Browser automation](docs/MINT_AUTO_BROWSER.md) — shared Mint Browser engine, headless workflows, clicks, typing, and screenshot artifacts.
 - [Agent architecture](docs/AGENT_HARNESS.md) and [memory](docs/MEMORY_ARCHITECTURE.md) — technical details.
 - [Development](docs/DEVELOPMENT.md) and [build/release](BUILD_AND_RELEASE.md) — source layout and validation.
 

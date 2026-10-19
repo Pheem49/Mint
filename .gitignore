@@ -80,3 +80,6 @@ desktop.ini
 
 # Tauri Companion generated capabilities/schema output
 /apps/mint-companion/src-tauri/gen/
+
+# Browser workflow screenshots and private import reports
+.mint/browser-runs/

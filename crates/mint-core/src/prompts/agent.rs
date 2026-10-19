@@ -1,31 +1,12 @@
 use super::persona;
 use crate::MintConfig;
 
-pub(crate) fn browser_endpoint_available(config: &MintConfig) -> bool {
-    use std::net::{TcpStream, ToSocketAddrs};
-    use std::time::Duration;
-    let endpoint = config
+pub(crate) fn browser_tools_enabled(config: &MintConfig) -> bool {
+    config
         .extra
-        .get("browserDebugUrl")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("http://127.0.0.1:9222/json/list");
-    let Ok(url) = reqwest::Url::parse(endpoint) else {
-        return false;
-    };
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-    let Some(port) = url.port_or_known_default() else {
-        return false;
-    };
-    (host, port)
-        .to_socket_addrs()
-        .ok()
-        .is_some_and(|mut addresses| {
-            addresses.any(|address| {
-                TcpStream::connect_timeout(&address, Duration::from_millis(50)).is_ok()
-            })
-        })
+        .get("browserAutomationEnabled")
+        .and_then(serde_json::Value::as_bool)
+        != Some(false)
 }
 
 pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
@@ -172,7 +153,7 @@ pub fn build_system_prompt(
 ) -> String {
     let mut allowed_actions = base_allowed_actions();
 
-    if browser_endpoint_available(config) {
+    if browser_tools_enabled(config) {
         allowed_actions.extend_from_slice(crate::browser::BROWSER_TOOLS);
     }
 
@@ -283,7 +264,7 @@ pub fn build_system_prompt(
         input_formats.push("- browser_key_press: {\"key\":\"Enter\"} (keys: Enter,Tab,Escape,Backspace,Delete,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,F1-F12,Space)");
     }
     if allowed_actions.contains(&"browser_screenshot") {
-        input_formats.push("- browser_screenshot: {}");
+        input_formats.push("- browser_screenshot: {mode?:viewport|fullPage|element,selector?:string,elementRef?:string}");
     }
     if allowed_actions.contains(&"memory_recall") {
         input_formats.push("- memory_recall: {\"query\":\"what did user say about X\"}");
@@ -505,6 +486,7 @@ pub fn build_system_prompt(
         rules.push("4. Shell commands and file edits require user approval. Mint handles approval after you request the tool.");
         rules.push("4a. SKILL CHANGES: Create or edit reusable skills only when the user asks for that work. Otherwise complete the current task and suggest the skill in your summary. Use write_file or apply_patch for skill files so Mint can show the concrete diff and request approval for each change. A general file or session permission does not authorize changing persistent skill instructions. After approval, report the saved skill path and what changed.");
     }
+    rules.push("Execution evidence: distinguish succeeded, failed, running, cancelled and unknown. Inspect background jobs with shell_output before claiming completion. Retry a command after relevant changes or with retryReason, but observe ambiguous side effects before repeating them. finish.completionStatus must be verified, unverified, blocked or failed; a verification explanation cannot override failed or pending checks. When checks cannot run, finish honestly with unverified/blocked and the reason. Opening a browser or starting a process completes only that step, not the user's entire task.");
     if allowed_actions.contains(&"run_shell") {
         rules.push("5. Shell commands are classified as readOnly, test, network, or mutating. Only policy-allowed modes may run after approval. Never request destructive commands such as rm -rf, git reset --hard, git checkout --, or git clean -f.");
     }
@@ -533,7 +515,7 @@ pub fn build_system_prompt(
         rules.push("7v. A Project Avatar is connected. Call avatar_signal when your reply carries an emotional beat the automatic tool-based reactions can't express — greeting, joking, apologizing, thinking something over. Don't call it for routine tool-driven turns (shell, browser, image/video generation); those already react on their own.");
     }
     if allowed_actions.contains(&"browser_open") {
-        rules.push("7a. Use browser_open to open websites in the automation browser. Inspect the returned page observation, then use browser_observe/browser_read to read the page or browser_screenshot for visual inspection; verify the requested URL/content with browser_wait before finishing. A successful browser_open already opens the website for the user: do not also launch it through run_shell, xdg-open, open, Start-Process, or another browser. Keep website navigation and interaction in the automation browser. If the user explicitly requests an external browser, use that route instead of first opening the website in automation. If automation is unavailable or blocked, report that and ask the user before switching browsers.");
+        rules.push("7a. Use browser_open to open websites; Mint starts an isolated browser session automatically (headless by default). Inspect the returned page observation, then use browser_observe/browser_read to read the page or browser_screenshot for visual inspection; verify the requested URL/content with browser_wait before finishing. A successful browser_open already opens the website for the user: do not also launch it through run_shell, xdg-open, open, Start-Process, or another browser. Keep website navigation and interaction in the automation browser. If the user explicitly requests an external browser, use that route instead of first opening the website in automation. If automation is unavailable or blocked, report that and ask the user before switching browsers. For a predefined command-line workflow, write a JSON steps file and run mint browser run --file <file> through run_shell; --headed explicitly shows its window. Use the shared engine rather than hand-written browser scripts.");
     }
     if allowed_actions.contains(&"browser_click") {
         rules.push("7b. Use browser_click to click elements. Selector can be: CSS selector (button.class, #id, [attr=val]), text=ExactText to find by visible text, contains=PartialText for partial match, or xpath=//expr for XPath. Prefer text= or contains= when the element has visible text but no unique CSS class.");
@@ -556,7 +538,7 @@ pub fn build_system_prompt(
         rules.push("7g. Use browser_key_press to press a keyboard key (e.g. Enter, Tab, Escape, ArrowDown). Use after browser_type or browser_mouse_click to interact with focused elements.");
     }
     if allowed_actions.contains(&"browser_screenshot") {
-        rules.push("7h. Use browser_screenshot to capture the current page as a PNG image (base64). Use it to inspect the visual state of the page before deciding where to click.");
+        rules.push("7h. Use browser_screenshot to capture the page as a durable image artifact, shown in chat and attached to the model. Use it to inspect the visual state of the page before deciding where to click.");
     }
     if allowed_actions.contains(&"browser_observe") {
         rules.push("7i. Browser workflow: browser_observe -> action -> inspect the returned observation -> verify the expected result with browser_wait. Each run starts in its own tab. Use browser_tabs to list/open/select/close tabs; select new popup tabs explicitly. Prefer elementRef from the most recent observation over guessing selectors. Old refs expire after observation refresh, navigation, removed nodes, or tab selection. browser_fill replaces text; browser_type appends. browser_select handles native dropdowns; browser_scroll scrolls the viewport or a target. browser_wait accepts condition url/text/visible/hidden, value or target, and timeoutMs (default 10000, maximum 30000). Observations support textOffset and elementOffset pagination. Coordinate actions require a screenshot of the selected tab within 30 seconds. Never retry an ambiguous click or submission automatically; observe and check the result first. input_dispatched is not task completion. Cite observed URL/text/field evidence in finish.verification, or say the task is unverified/blocked. If blocked by login, CAPTCHA, or repeated lack of progress, ask_user for manual takeover; only after user confirmation call browser_observe with takeoverComplete=true.");

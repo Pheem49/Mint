@@ -81,13 +81,19 @@ export interface RunTelemetrySummary {
   retriesCount: number
 }
 
-export type ToolStatus = 'success' | 'failed' | 'timed_out' | 'cancelled'
+export type ToolStatus = 'success' | 'failed' | 'timed_out' | 'cancelled' | 'running' | 'unknown' | 'skipped'
+export interface ExecutionEvidence {
+  callId: string; command: string; state: 'succeeded' | 'failed' | 'running' | 'cancelled' | 'unknown'
+  exitCode?: number | null; jobId?: string | null; revision: number; check: boolean; conditionVerified?: boolean | null
+}
 export interface McpArtifact {
   id: string; name: string; mimeType: string; kind: 'image' | 'file' | 'link'; size: number
   chatId: string; callId: string; server: string; uri?: string
+  metadata?: { url?: string; capturedAt?: string; width?: number; height?: number; mode?: string; sessionId?: string; tabId?: string }
 }
 
 export type AgentProgress =
+  | { type: 'ExecutionUpdate'; data: { callId: string; executions: ExecutionEvidence[] } }
   | { type: 'ToolDiscovery'; data: { server: string; tool: string; message: string } }
   | { type: 'DeviceState'; data: { callId: string; server: string; tool: string; update: { state: 'accepted' | 'running' | 'verified' | 'failed' | 'unconfirmed'; deviceId?: string | null; operationId?: string | null; target: Record<string, unknown> | null; actual: Record<string, unknown> | null; observationSeq?: number | null; elapsedSecs: number; message: string } } }
   | { type: 'ToolProgress'; data: { callId: string; server: string; tool: string; update: { progress: number; total?: number; message?: string; elapsedSecs: number } } }

@@ -29,7 +29,11 @@ pub(super) fn action_fingerprint(decision: &AgentDecision) -> String {
         "create_plan" | "update_plan" => format!("{}:{}", decision.action, input.steps.join("\n")),
         "request_user_approval" => format!("request_user_approval:{}", input.summary.trim()),
         "ask_user" => format!("ask_user:{}", input.query.trim()),
-        "view_image" => format!("view_image:{}", input.path.trim()),
+        "view_image" => format!(
+            "view_image:{}:{}",
+            input.path.trim(),
+            input.artifact_id.trim()
+        ),
         "run_shell" => format!("run_shell:{}", input.command.trim()),
         "verify" => format!("verify:{}", input.commands.join("\n")),
         "apply_patch" => input

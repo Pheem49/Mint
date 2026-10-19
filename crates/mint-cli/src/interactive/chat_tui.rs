@@ -5571,7 +5571,7 @@ mod dialog_tests {
                 .join("\n");
             assert!(text.contains("Shell failed · 3.4s · exit 2"));
             assert_eq!(text.matches("Thought · 1.9s").count(), 1);
-            assert!(text.contains("Completed with 1 failure"));
+            assert!(text.contains("✗ Failed"));
             assert!(text.contains("16.2s"));
             assert!(!state.tools[0].running());
             assert!(state.handle_thought_key(ctrl_t()));

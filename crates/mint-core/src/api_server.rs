@@ -377,7 +377,12 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                 }
                 ("GET", route) if route.starts_with("/api/mcp-artifacts/") => {
                     let id = route.trim_start_matches("/api/mcp-artifacts/").to_owned();
-                    let artifact = tokio::task::spawn_blocking(move || crate::integrations::mcp_result::read_artifact(&id)).await;
+                    let chat=reqwest::Url::parse(&format!("http://localhost/?{query}")).ok().and_then(|url|url.query_pairs().find(|(key,_)|key=="chatId").map(|(_,value)|value.into_owned()));
+                    let artifact = tokio::task::spawn_blocking(move || {
+                        let (entry,bytes)=crate::integrations::mcp_result::read_artifact(&id)?;
+                        if chat.as_deref()!=Some(entry.chat_id.as_str()) {return Err(String::from("Artifact unavailable"));}
+                        Ok((entry,bytes))
+                    }).await;
                     match artifact {
                         Ok(Ok((entry, bytes))) => {
                             let mime = if entry.kind == "image" { entry.mime_type.as_str() } else { "application/octet-stream" };

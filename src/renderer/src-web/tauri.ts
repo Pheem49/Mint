@@ -2424,12 +2424,12 @@ export async function startHtmlPreview(root: string, relativePath: string, mintB
 }
 
 /** Loads artifacts by ID; no server-provided filesystem path is accepted. */
-export async function readMcpArtifact(id: string): Promise<string> {
+export async function readMcpArtifact(id: string, chatId?: string): Promise<string> {
   if (isTauriRuntime()) {
     const { invoke } = await import('@tauri-apps/api/core')
-    return invoke<string>('read_mcp_artifact', { id })
+    return invoke<string>('read_mcp_artifact', { id, chatId })
   }
-  const response = await authFetch(`${getApiBase()}/mcp-artifacts/${encodeURIComponent(id)}`)
+  const response = await authFetch(`${getApiBase()}/mcp-artifacts/${encodeURIComponent(id)}${chatId ? `?chatId=${encodeURIComponent(chatId)}` : ''}`)
   if (!response.ok) throw new Error('Artifact unavailable')
   return URL.createObjectURL(await response.blob())
 }

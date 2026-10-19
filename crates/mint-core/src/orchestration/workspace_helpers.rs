@@ -127,7 +127,7 @@ pub(super) async fn read_diagnostics(
         }
     };
     match command {
-        Some(command) => run_shell(root, config, chat_id, command).await,
+        Some(command) => run_shell(root, config, chat_id, command, "").await,
         None => Ok("No diagnostics command detected.".into()),
     }
 }
@@ -155,19 +155,46 @@ pub(super) fn view_image(path: &Path, config: &MintConfig) -> Result<String, Orc
     };
     let metadata = std::fs::metadata(&path)
         .map_err(|e| OrchestrationError::Agent(format!("cannot stat image: {e}")))?;
-    if metadata.len() > 2_000_000 {
-        return Ok(format!(
-            "Image exists but is too large to inline ({} bytes): {}",
-            metadata.len(),
-            path.display()
+    if metadata.len() > crate::media::tool_images::ORIGINAL_LIMIT as u64 {
+        return Err(OrchestrationError::Agent(
+            "Image exceeds 20 MiB; use a smaller capture.".into(),
         ));
     }
     let bytes = std::fs::read(&path)
         .map_err(|e| OrchestrationError::Agent(format!("cannot read image: {e}")))?;
-    Ok(format!(
-        "data:{mime};base64,{}",
-        BASE64_STANDARD.encode(bytes)
-    ))
+    crate::media::tool_images::prepare(&bytes, mime)
+        .map(|image| image.data_uri)
+        .map_err(OrchestrationError::Agent)
+}
+
+#[cfg(test)]
+mod image_size_regressions {
+    use super::*;
+    #[test]
+    fn a_large_valid_image_is_prepared_for_the_model_instead_of_discarded() {
+        let path =
+            std::env::temp_dir().join(format!("mint-large-image-{}.png", uuid::Uuid::new_v4()));
+        let mut seed = 123456789u32;
+        let image = image::RgbImage::from_fn(1400, 900, |_, _| {
+            let mut p = [0; 3];
+            for v in &mut p {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                *v = seed as u8;
+            }
+            image::Rgb(p)
+        });
+        image.save(&path).unwrap();
+        assert!(std::fs::metadata(&path).unwrap().len() > 2_000_000);
+        let mut config = MintConfig::default();
+        config.allowed_read_paths.push(std::env::temp_dir());
+        let result = view_image(&path, &config);
+        let _ = std::fs::remove_file(path);
+        let image = result.unwrap();
+        assert!(image.starts_with("data:image/"));
+        assert!(image.len() < 2_700_000);
+    }
 }
 
 // `async` and dispatched onto tokio's blocking-thread-pool via
@@ -188,17 +215,30 @@ pub(super) async fn run_shell(
     config: &MintConfig,
     chat_id: &str,
     command: &str,
+    retry_reason: &str,
 ) -> Result<String, OrchestrationError> {
     tools::shell::prevent_duplicate_browser_launch(command).await?;
+    run_control::check()?;
+    if let Err(reason) = reliability::before_shell(command, retry_reason) {
+        return Ok(format!("Skipped: {reason}"));
+    }
     let root = root.to_path_buf();
     let config = config.clone();
     let chat_id = chat_id.to_owned();
     let command = command.to_owned();
+    let cancellation = run_control::token();
     let output = {
         let command = command.clone();
         tokio::task::spawn_blocking(move || {
             crate::bg_shell::with_context(crate::bg_shell::chat_context(&root, &chat_id), || {
-                run_shell_command(&command, &root, true, &config, Some(&chat_id))
+                crate::shell::run_shell_command_cancellable(
+                    &command,
+                    &root,
+                    true,
+                    &config,
+                    Some(&chat_id),
+                    cancellation.as_ref(),
+                )
             })
         })
         .await
@@ -209,16 +249,7 @@ pub(super) async fn run_shell(
         .status
         .map_or_else(|| "unknown".into(), |status| status.to_string());
 
-    let mut hint = "";
-    let cmd_lower = command.to_lowercase();
-    if output.success
-        && (cmd_lower.contains("open")
-            || cmd_lower.contains("launch")
-            || cmd_lower.contains("chrome")
-            || cmd_lower.contains("firefox"))
-    {
-        hint = "\nNote: Opening URLs, files, folders, or launching applications are background processes. Even if there are warnings or stdout/stderr outputs, since the command exited successfully with status 0, the operation has succeeded and you should now use the 'finish' action to inform the user.";
-    }
+    reliability::record_shell(&output);
 
     let warning_line = output
         .sandbox_warning
@@ -227,8 +258,8 @@ pub(super) async fn run_shell(
         .unwrap_or_default();
 
     Ok(format!(
-        "exit: {}\nmode: {}\nsandboxed: {}{}\nstdout:\n{}\nstderr:\n{}{}",
-        status_str, output.mode, output.sandboxed, warning_line, output.stdout, output.stderr, hint
+        "exit: {}\nmode: {}\nsandboxed: {}{}\nstdout:\n{}\nstderr:\n{}",
+        status_str, output.mode, output.sandboxed, warning_line, output.stdout, output.stderr
     ))
 }
 

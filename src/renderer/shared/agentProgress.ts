@@ -65,7 +65,7 @@ export function trimAgentProgress(progress: AgentProgress[], maxNonThought = 20)
   )
   return progress.filter(
     (event) =>
-      event.type === 'ToolArtifacts' || event.type === 'DeviceState' || event.type === 'ToolDiscovery' ||
+      event.type === 'ToolArtifacts' || event.type === 'DeviceState' || event.type === 'ToolDiscovery' || event.type === 'ExecutionUpdate' || event.type === 'RunCompleted' ||
       ((event.type === 'ToolStart' || event.type === 'ToolEnd') && ['mcp_tool', 'view_image'].includes(event.data.action)) ||
       event.type === 'Thought' ||
       event.type === 'ThinkingDelta' ||

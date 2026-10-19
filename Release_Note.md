@@ -2,6 +2,24 @@
 
 Released: 2026-10-17
 
+## Agent Execution Reliability (Phase 1) & Browser Automation (Phase 2) (2026-10-19)
+
+### Phase 1: Agent Execution Reliability & Evidence-Based Verification
+- **Replaced unconditional duplicate-shell skips**: Turn-local execution evidence allows repeating commands after file modifications or with an explicit `retryReason`. Unchanged identical failures are bounded to 3 attempts before halting with a clear rationale.
+- **Typed process outcomes**: Replaced stdout string parsing with structured execution states (`succeeded`, `failed`, `running`, `cancelled`, `unknown`), exit codes, job IDs, and call IDs. Running processes are not repeated automatically; background jobs are polled with `shell_output`. Skipped commands report `skipped` with rationale.
+- **Evidence-based completion**: Added `completionStatus` (`verified`, `unverified`, `blocked`, `failed`) to `finish`. Model prose cannot promote failed or unrun checks to verified. Checks executed prior to the latest edit do not verify that edit. Tasks with constraints finish honestly with `unverified` or `blocked` and an explicit reason.
+- **Removed premature finish hints**: Removed instructions prompting the agent to finish immediately upon launching an application (such as opening Chrome or background processes).
+
+### Phase 2: Browser Automation on Shared Engine
+- **Headless Chromium runtime by default**: Agent automation uses an isolated, headless Chrome/Chromium/Edge runtime with a temporary profile, dynamic loopback port, and retained CDP connections. The user's manual Mint Browser window and profiles remain completely untouched. Added settings for agent browser mode (`headless` vs `headed`) and custom `browserExecutable`.
+- **Command-line workflows via shared engine**:
+  - `mint browser run --file browser-task.json`
+  - `mint browser run --file browser-task.json --headed`
+  - Executes ordered actions (open, observe, click, type/fill, select, scroll, wait, tabs, screenshot) in a single process/session with JSON reporting, failure exit codes, step checkpoints, and 120s timeout. Foreground commands automatically import screenshot artifacts into the conversation.
+- **Screenshot & durable image artifacts**: Added `viewport`, `fullPage`, and `element` capture modes with cursor suppression. Screenshots and `view_image` produce durable, conversation-scoped artifacts with URL, timestamp, and dimensions, viewable and downloadable in chat across Desktop, Web, and TUI.
+- **CDP scope note**: Initial release covers Chromium-based browsers (Chrome, Chromium, Edge) via Chrome DevTools Protocol (CDP). Firefox and full desktop operating system control are outside the scope of this release.
+
+
 ## Skills & Workspace Transparency
 
 - Added active workspace path display to the Skills management view in Web and Desktop UI (`SkillsView`), showing which project workspace is being inspected or indicating when no workspace is active.

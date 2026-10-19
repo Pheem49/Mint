@@ -29,6 +29,18 @@ export default function AutomationTab({
         </div>
         <div className="form-grid single">
           <div className="setting-row">
+            <label>Agent browser mode</label>
+            <div className="pill-segmented" role="radiogroup" aria-label="Agent browser mode">
+              {[{ id: 'headless', label: 'Headless' }, { id: 'headed', label: 'Show window' }].map(option => <button key={option.id} type="button" role="radio" aria-checked={config.browserAgentMode === option.id} className={`pill-segmented-btn ${config.browserAgentMode === option.id ? 'active' : ''}`} onClick={() => updateField('browserAgentMode', option.id)}>{option.label}</button>)}
+            </div>
+            <p className="hint">Headless runs in the background. Opening Mint Browser yourself still shows its window.</p>
+          </div>
+          <div className="setting-row">
+            <label>Agent browser executable</label>
+            <input type="text" value={config.browserExecutable} placeholder="Auto-detect Chrome / Chromium / Edge" onChange={event => updateField('browserExecutable', event.target.value)} />
+            <p className="hint">Optional executable path for Chromium-based automation. Firefox is not supported by this engine.</p>
+          </div>
+          <div className="setting-row">
             <label>Browser engine</label>
             <div className="pill-segmented" role="radiogroup" aria-label="Browser engine">
               {[

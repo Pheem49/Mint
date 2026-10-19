@@ -25,17 +25,17 @@ pub(super) fn looks_skill_worthy(step: usize, action_counts: &BTreeMap<String, u
 
 /// Whether `finish` should be rejected because the run modified a file
 /// (`apply_patch`/`write_file`) without a subsequent `verify` call and without
-/// an explicit written reason in the `finish` action's `verification` field.
+/// a subsequent check. An explanation cannot stand in for execution evidence.
 pub(super) fn unverified_modification(
     last_modify_step: Option<usize>,
     last_verify_step: Option<usize>,
-    verification_field: &str,
+    _verification_field: &str,
 ) -> bool {
     let Some(modify_step) = last_modify_step else {
         return false;
     };
     let verified_since = last_verify_step.is_some_and(|verify_step| verify_step >= modify_step);
-    !verified_since && meaningful_verification(verification_field).is_empty()
+    !verified_since
 }
 
 /// Whether any `run_shell`/`verify` command in `result` — which may join
@@ -46,7 +46,7 @@ pub(super) fn unverified_modification(
 pub(super) fn shell_result_failed(result: &str) -> bool {
     result.lines().any(|line| {
         line.strip_prefix("exit: ")
-            .is_some_and(|code| !matches!(code.trim(), "0" | "unknown"))
+            .is_some_and(|code| code.trim() != "0")
     })
 }
 
@@ -61,9 +61,9 @@ pub(super) fn shell_result_failed(result: &str) -> bool {
 /// run has nobody watching live to catch it.
 pub(super) fn unacknowledged_verify_failure(
     last_verify_failed: Option<bool>,
-    verification_field: &str,
+    _verification_field: &str,
 ) -> bool {
-    last_verify_failed == Some(true) && meaningful_verification(verification_field).is_empty()
+    last_verify_failed == Some(true)
 }
 
 pub(super) fn meaningful_verification(value: &str) -> &str {
@@ -82,5 +82,34 @@ pub(super) fn meaningful_verification(value: &str) -> &str {
         ""
     } else {
         value
+    }
+}
+
+#[cfg(test)]
+mod reliability_regressions {
+    use super::*;
+
+    #[test]
+    fn success_prose_cannot_override_a_failed_check() {
+        assert!(unacknowledged_verify_failure(
+            Some(true),
+            "All tests passed."
+        ));
+    }
+
+    #[test]
+    fn success_prose_cannot_verify_an_unchecked_edit() {
+        assert!(unverified_modification(
+            Some(2),
+            None,
+            "Verified successfully."
+        ));
+    }
+
+    #[test]
+    fn an_unknown_exit_is_not_a_passed_check() {
+        assert!(shell_result_failed(
+            "exit: unknown\nCommand moved to the background"
+        ));
     }
 }

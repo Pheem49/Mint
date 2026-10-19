@@ -14,6 +14,13 @@ const base: ChatMessageItemProps = {
 }
 const unchanged = (next: Partial<ChatMessageItemProps>) => (ChatMessageItem as any).compare(base, { ...base, ...next })
 
+it('keeps an unverified completion visible in saved chat with Activity collapsed', () => {
+  const progress: any[] = [{ type: 'RunCompleted', data: { summary: { outcome: 'UNVERIFIED' } } }]
+  const html = renderToStaticMarkup(<ChatMessageItem {...base} interaction={{ ...base.interaction, agentActivity: progress }} />)
+  expect(html).toContain('data-completion-status="unverified"')
+  expect(html).toContain('Unverified')
+})
+
 describe('message update isolation', () => {
   it('updates a file summary when its initially expanded review is collapsed', () => {
     expect(unchanged({ openReviewIds: { '7': false } })).toBe(false)

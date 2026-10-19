@@ -55,6 +55,13 @@ impl ToolActivity {
             {
                 return ToolStatus::Cancelled;
             }
+            if result
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with("skipped")
+            {
+                return ToolStatus::Skipped;
+            }
             if result.lines().any(|line| {
                 line.strip_prefix("exit: ")
                     .is_some_and(|code| !matches!(code.trim(), "0" | "unknown"))
@@ -88,6 +95,9 @@ impl ToolActivity {
                 ("○", "interrupted")
             }
             Some(ToolStatus::Cancelled) => ("○", "cancelled"),
+            Some(ToolStatus::Running) => ("◌", "running"),
+            Some(ToolStatus::Unknown) => ("?", "unconfirmed"),
+            Some(ToolStatus::Skipped) => ("○", "skipped"),
         };
         let elapsed = if self.running() {
             Some(self.started.elapsed())
@@ -158,7 +168,7 @@ impl ToolActivity {
         let color = match self.status {
             None => crate::terminal_theme::TEXT,
             Some(ToolStatus::Success) => crate::terminal_theme::ACCENT,
-            Some(ToolStatus::Cancelled) => crate::terminal_theme::WARNING,
+            Some(ToolStatus::Cancelled | ToolStatus::Skipped) => crate::terminal_theme::WARNING,
             _ => Color::Red,
         };
         let heading = clip(&self.heading(), width);

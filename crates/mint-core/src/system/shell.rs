@@ -36,6 +36,8 @@ pub(crate) const SHELL_COMMAND_TIMEOUT: Duration = Duration::from_secs(180);
 pub(crate) struct CommandResult {
     pub(crate) status_code: Option<i32>,
     pub(crate) success: bool,
+    pub(crate) job_id: Option<String>,
+    pub(crate) cancelled: bool,
     pub(crate) stdout: Vec<u8>,
     pub(crate) stderr: Vec<u8>,
 }
@@ -62,10 +64,20 @@ fn spawn_reader(
 /// the same timeout/output-buffering behavior for `docker exec` instead of
 /// duplicating it.
 pub(crate) fn run_with_timeout(
+    cmd: Command,
+    timeout: Duration,
+    command: &str,
+    cwd: &Path,
+) -> std::io::Result<CommandResult> {
+    run_with_timeout_cancellable(cmd, timeout, command, cwd, None)
+}
+
+fn run_with_timeout_cancellable(
     mut cmd: Command,
     timeout: Duration,
     command: &str,
     cwd: &Path,
+    cancellation: Option<&tokio_util::sync::CancellationToken>,
 ) -> std::io::Result<CommandResult> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -82,12 +94,50 @@ pub(crate) fn run_with_timeout(
 
     let deadline = Instant::now() + timeout;
     loop {
+        if cancellation.is_some_and(|token| token.is_cancelled()) {
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-(child.id() as i32), libc::SIGTERM);
+            }
+            // Allow the browser helper to drop its separate Chrome runtime.
+            let grace = Instant::now() + Duration::from_millis(500);
+            while Instant::now() < grace {
+                if child.try_wait()?.is_some() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-(child.id() as i32), libc::SIGKILL);
+            }
+            #[cfg(windows)]
+            {
+                let _ = Command::new("taskkill")
+                    .args(["/PID", &child.id().to_string(), "/T", "/F"])
+                    .output();
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            let stdout = stdout_handle.join().unwrap_or_default();
+            let stderr = stderr_handle.join().unwrap_or_default();
+            return Ok(CommandResult {
+                status_code: None,
+                success: false,
+                job_id: None,
+                cancelled: true,
+                stdout,
+                stderr,
+            });
+        }
         if let Some(status) = child.try_wait()? {
             let stdout = stdout_handle.join().unwrap_or_default();
             let stderr = stderr_handle.join().unwrap_or_default();
             return Ok(CommandResult {
                 status_code: status.code(),
                 success: status.success(),
+                job_id: None,
+                cancelled: false,
                 stdout,
                 stderr,
             });
@@ -117,6 +167,8 @@ pub(crate) fn run_with_timeout(
             return Ok(CommandResult {
                 status_code: None,
                 success: false,
+                job_id: Some(started.id),
+                cancelled: false,
                 stdout: Vec::new(),
                 stderr,
             });
@@ -133,6 +185,8 @@ pub struct ShellOutput {
     pub mode: String,
     pub status: Option<i32>,
     pub success: bool,
+    pub job_id: Option<String>,
+    pub cancelled: bool,
     pub sandboxed: bool,
     /// Set when a mutating/network command ran unconfined because sandboxing was
     /// unavailable (rather than intentionally disabled via `sandboxMode: "off"`),
@@ -193,6 +247,23 @@ pub fn run_shell_command(
     config: &MintConfig,
     chat_id: Option<&str>,
 ) -> Result<ShellOutput, ShellError> {
+    run_shell_command_cancellable(command, cwd, approved, config, chat_id, None)
+}
+
+pub fn run_shell_command_cancellable(
+    command: &str,
+    cwd: &Path,
+    approved: bool,
+    config: &MintConfig,
+    chat_id: Option<&str>,
+    cancellation: Option<&tokio_util::sync::CancellationToken>,
+) -> Result<ShellOutput, ShellError> {
+    if cancellation.is_some_and(|token| token.is_cancelled()) {
+        return Err(ShellError::Execute(std::io::Error::new(
+            std::io::ErrorKind::Interrupted,
+            "Command cancelled before dispatch",
+        )));
+    }
     if crate::bg_shell::is_shutting_down() {
         return Err(ShellError::Execute(std::io::Error::other(
             "Mint backend is shutting down",
@@ -245,7 +316,7 @@ pub fn run_shell_command(
     let sandbox_mode = config.sandbox_mode.trim().to_ascii_lowercase();
     let mut sandbox_warning = None;
     if config.safety_enabled && sandbox_mode != "off" {
-        if let Some(output) = run_in_sandbox(&prepared_cmd, &cwd, config)? {
+        if let Some(output) = run_in_sandbox(&prepared_cmd, &cwd, config, cancellation)? {
             return Ok(shell_output(
                 command,
                 cwd,
@@ -288,8 +359,10 @@ pub fn run_shell_command(
     }
 
     let mut cmd = shell_command(&prepared_cmd);
+    crate::browser::workflow::configure_shell(&mut cmd, config);
     cmd.current_dir(&cwd);
-    let output = run_with_timeout(cmd, SHELL_COMMAND_TIMEOUT, command, &cwd)?;
+    let output =
+        run_with_timeout_cancellable(cmd, SHELL_COMMAND_TIMEOUT, command, &cwd, cancellation)?;
     Ok(shell_output(
         command,
         cwd,
@@ -321,6 +394,7 @@ fn run_in_sandbox(
     command: &str,
     cwd: &Path,
     config: &MintConfig,
+    cancellation: Option<&tokio_util::sync::CancellationToken>,
 ) -> Result<Option<CommandResult>, ShellError> {
     #[cfg(target_os = "linux")]
     {
@@ -331,6 +405,7 @@ fn run_in_sandbox(
             return Ok(None);
         }
         let mut process = Command::new(sandbox);
+        crate::browser::workflow::configure_shell(&mut process, config);
         // Own process group, same reasoning as `shell_command`'s: lets a
         // timed-out or interrupted run be killed as a whole tree via
         // `terminate_process_group` instead of just the `bwrap` wrapper.
@@ -345,7 +420,13 @@ fn run_in_sandbox(
             .arg("--chdir")
             .arg(cwd)
             .args(["bash", "-lc", command]);
-        let output = run_with_timeout(process, SHELL_COMMAND_TIMEOUT, command, cwd)?;
+        let output = run_with_timeout_cancellable(
+            process,
+            SHELL_COMMAND_TIMEOUT,
+            command,
+            cwd,
+            cancellation,
+        )?;
         Ok(Some(output))
     }
 
@@ -358,19 +439,26 @@ fn run_in_sandbox(
             return Ok(None);
         }
         let mut process = Command::new(sandbox);
+        crate::browser::workflow::configure_shell(&mut process, config);
         process
             .process_group(0)
             .arg("-p")
             .arg(mac_sandbox_profile(config, cwd))
             .args(["bash", "-lc", command])
             .current_dir(cwd);
-        let output = run_with_timeout(process, SHELL_COMMAND_TIMEOUT, command, cwd)?;
+        let output = run_with_timeout_cancellable(
+            process,
+            SHELL_COMMAND_TIMEOUT,
+            command,
+            cwd,
+            cancellation,
+        )?;
         return Ok(Some(output));
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
-        let _ = (command, cwd, config);
+        let _ = (command, cwd, config, cancellation);
         Ok(None)
     }
 }
@@ -525,6 +613,8 @@ fn shell_output(
         mode: mode.into(),
         status: output.status_code,
         success: output.success,
+        job_id: output.job_id,
+        cancelled: output.cancelled,
         sandboxed,
         sandbox_warning,
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -534,6 +624,34 @@ fn shell_output(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[cfg(unix)]
+    fn cancellation_stops_the_foreground_process_group_and_preserves_partial_output() {
+        let token = tokio_util::sync::CancellationToken::new();
+        let cancel = token.clone();
+        let thread = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            cancel.cancel();
+        });
+        let mut config = local_config();
+        config.allowed_write_paths.push(std::env::temp_dir());
+        let started = std::time::Instant::now();
+        let result = super::run_shell_command_cancellable(
+            "printf started; sleep 5; printf should-not-run",
+            &std::env::temp_dir(),
+            true,
+            &config,
+            None,
+            Some(&token),
+        )
+        .unwrap();
+        thread.join().unwrap();
+        assert!(result.cancelled);
+        assert_eq!(result.status, None);
+        assert!(result.stdout.contains("started"));
+        assert!(!result.stdout.contains("should-not-run"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
     use super::*;
 
     fn local_config() -> MintConfig {

@@ -5,6 +5,7 @@ use clap::Subcommand;
 use mint_core::MintConfig;
 
 pub mod agent;
+pub mod browser;
 pub mod config;
 pub mod eval;
 pub mod git;
@@ -119,6 +120,11 @@ pub enum Command {
     },
     /// Start the browser automation environment and enable browser actions.
     Auto,
+    /// Run browser automation workflows using the shared Mint Browser engine.
+    Browser {
+        #[command(subcommand)]
+        command: browser::BrowserCommand,
+    },
     /// Launch the web UI and local API server.
     Web {
         /// Open the default browser once the web UI and API are ready.
@@ -355,6 +361,7 @@ pub async fn dispatch(cmd: Command, config: &mut MintConfig, cli: &crate::Cli) -
             Ok(())
         }
         Command::Auto => agent::handle_auto().await,
+        Command::Browser { command } => browser::handle(command, config, cli.plan).await,
         Command::Web {
             dev,
             tailscale,

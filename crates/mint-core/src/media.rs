@@ -16,6 +16,7 @@ pub mod pictures;
 pub mod speech;
 pub mod subtitle;
 pub mod timeline;
+pub mod tool_images;
 pub mod tts;
 pub mod video_edit;
 pub mod video_gen;

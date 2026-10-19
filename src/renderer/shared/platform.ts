@@ -68,7 +68,7 @@ export type SlashResponse =
 
 export interface MintPlatformApi {
   modsOperation(operation: import("./mods").ModOperation): Promise<import("./mods").ModResponse>
-  readMcpArtifact(id: string): Promise<string>
+  readMcpArtifact(id: string, chatId?: string): Promise<string>
   listBackgroundJobs(workspace?: string): Promise<import("./types").BackgroundJob[]>
   getBackgroundJob(id: string): Promise<import("./types").BackgroundJobOutput>
   stopBackgroundJob(id: string): Promise<import("./types").BackgroundJob>

@@ -3,7 +3,7 @@ import type { AgentProgress, McpArtifact } from '../types'
 import { mediaPlatform } from '../platform'
 import '../css/mcp-results.css'
 
-function Artifact({ artifact }: { artifact: McpArtifact }) {
+function Artifact({ artifact, chatId }: { artifact: McpArtifact; chatId?: string }) {
   const [src, setSrc] = useState('')
   const [error, setError] = useState('')
   const dialog = useRef<HTMLDialogElement>(null)
@@ -11,12 +11,12 @@ function Artifact({ artifact }: { artifact: McpArtifact }) {
     if (artifact.kind === 'link') return
     let active = true
     let loaded = ''
-    mediaPlatform.readMcpArtifact(artifact.id).then(url => {
+    mediaPlatform.readMcpArtifact(artifact.id, chatId).then(url => {
       if (!active) { if (url.startsWith('blob:')) URL.revokeObjectURL(url); return }
       loaded = url; setSrc(url)
     }).catch(() => { if (active) setError('Attachment unavailable') })
     return () => { active = false; if (loaded.startsWith('blob:')) URL.revokeObjectURL(loaded) }
-  }, [artifact.id, artifact.kind])
+  }, [artifact.id, artifact.kind, chatId])
   if (artifact.kind === 'link') {
     // Custom resource URIs are copied as text; only web URLs are navigable.
     return /^https?:\/\//i.test(artifact.uri || '')
@@ -34,11 +34,14 @@ function Artifact({ artifact }: { artifact: McpArtifact }) {
       </dialog>
     </>}
     {src ? <a href={src} download={artifact.name}>{artifact.name} · {(artifact.size / 1024).toFixed(1)} KB</a> : <span>{artifact.name} · {error || 'Loading attachment…'}</span>}
+    {artifact.metadata?.url && <span title={artifact.metadata.url}>{artifact.metadata.url}</span>}
+    {!!artifact.metadata?.width && !!artifact.metadata?.height && <span>{artifact.metadata.width} × {artifact.metadata.height}</span>}
+    {artifact.metadata?.capturedAt && <time dateTime={artifact.metadata.capturedAt}>{artifact.metadata.capturedAt}</time>}
     {error && src && <span role="status">{error}</span>}
   </div>
 }
 
-export default memo(function McpToolResults({ progress, running = false, interrupted = false }: { progress: AgentProgress[]; running?: boolean; interrupted?: boolean }) {
+export default memo(function McpToolResults({ progress, running = false, interrupted = false, chatId }: { progress: AgentProgress[]; running?: boolean; interrupted?: boolean; chatId?: string }) {
   const [, tick] = useState(0)
   const started = useRef(new Map<string, number>())
   const { calls, discovery, artifacts, warnings } = useMemo(() => {
@@ -85,6 +88,7 @@ export default memo(function McpToolResults({ progress, running = false, interru
       const deviceLabel=call.device && (active && !interrupted || ['verified','failed','unconfirmed'].includes(call.device.state)) ? ({accepted:'Command accepted; awaiting device confirmation',running:'Awaiting device completion',verified:'Device completion verified',failed:'Device reported failure',unconfirmed:'Device completion unconfirmed'}[call.device.state]) : undefined
       const status = call.status === 'cancelled' || (!call.status && interrupted) ? 'Stopped waiting; remote work may still be running.'
         : call.status === 'timed_out' ? 'Timed out; remote completion is unconfirmed.'
+        : call.status === 'skipped' ? 'Skipped'
         : call.status === 'failed' ? 'Failed' : call.status === 'success' ? 'Completed' : active ? `Working · ${elapsed}s` : 'Interrupted; result unconfirmed'
       return <div key={id} className="mcp-call-status" role="status">
         <strong>{call.label}</strong><span>{deviceLabel || status}</span>
@@ -93,7 +97,7 @@ export default memo(function McpToolResults({ progress, running = false, interru
         {active && percent !== undefined && <progress max={100} value={percent} aria-label={`${call.label} progress`}>{percent}%</progress>}
       </div>
     })}
-    <div className="mcp-artifacts">{[...artifacts.values()].map(artifact => <Artifact key={artifact.id} artifact={artifact} />)}</div>
+    <div className="mcp-artifacts">{[...artifacts.values()].map(artifact => <Artifact key={artifact.id} artifact={artifact} chatId={chatId} />)}</div>
     {[...warnings].map(warning => <p key={warning} role="status">{warning}</p>)}
   </section>
 })

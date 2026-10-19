@@ -12,7 +12,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use super::agent::{PLAN_MODE_ALLOWED_ACTIONS, base_allowed_actions, browser_endpoint_available};
+use super::agent::{PLAN_MODE_ALLOWED_ACTIONS, base_allowed_actions, browser_tools_enabled};
 use crate::MintConfig;
 use crate::chat::ToolSpec;
 use crate::subagents::list_subagents;
@@ -34,8 +34,7 @@ fn tool(name: &str, description: &str, parameters: Value) -> ToolSpec {
 }
 
 /// Builds the native tool-calling catalog for the current request: the set of
-/// actions available given `config.disabled_tools`, whether the automation
-/// browser is reachable on port 9222, and whether plan mode is active (which
+/// actions available given `config.disabled_tools`, whether browser automation is enabled, and whether plan mode is active (which
 /// restricts to investigation-only actions plus `exit_plan_mode`).
 ///
 /// Mirrors the exact filtering `build_system_prompt` applies to
@@ -55,7 +54,7 @@ pub fn tool_catalog(
     allow_subagent_dispatch: bool,
 ) -> Vec<ToolSpec> {
     let mut allowed = base_allowed_actions();
-    if browser_endpoint_available(config) {
+    if browser_tools_enabled(config) {
         allowed.extend_from_slice(crate::browser::BROWSER_TOOLS);
     }
     if !config.avatar_token.is_empty() && !config.avatar_signal_disabled {
@@ -126,7 +125,11 @@ fn finish_tool() -> ToolSpec {
                 },
                 "verification": {
                     "type": "string",
-                    "description": "Verification performed after file changes and its result; otherwise omit."
+                    "description": "Observed check results, or the reason completion is limited. Prose cannot override actual execution evidence."
+                },
+                "completionStatus": {
+                    "type": "string", "enum": ["verified", "unverified", "blocked", "failed"],
+                    "description": "Use verified only with actual evidence. Use unverified/blocked/failed and explain limitations in verification."
                 }
             }),
             &["summary"],
@@ -424,7 +427,10 @@ fn all_tools() -> Vec<ToolSpec> {
         tool(
             "browser_screenshot",
             "Capture the current automation browser page as an image.",
-            schema(json!({}), &[]),
+            schema(
+                json!({"mode":{"type":"string","enum":["viewport","fullPage","element"]},"selector":{"type":"string"},"elementRef":{"type":"string"}}),
+                &[],
+            ),
         ),
         tool(
             "memory_recall",
@@ -605,8 +611,11 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "view_image",
-            "View an image file from the workspace.",
-            schema(json!({ "path": { "type": "string" } }), &["path"]),
+            "View an image from the workspace using path, or reopen an image artifact from this conversation using artifactId.",
+            schema(
+                json!({ "path": { "type": "string" }, "artifactId":{"type":"string"} }),
+                &[],
+            ),
         ),
         tool(
             "search_docs",
@@ -687,6 +696,7 @@ fn all_tools() -> Vec<ToolSpec> {
             schema(
                 json!({
                     "command": { "type": "string" },
+                    "retryReason": { "type": "string", "description": "Reason for retrying a previous command. Inspect running/unknown results before repeating side effects." },
                     "background": {
                         "type": "boolean",
                         "description": "Run detached and return immediately with a job_id instead of waiting for the command to exit. Defaults to false."
@@ -1046,6 +1056,31 @@ fn all_tools() -> Vec<ToolSpec> {
             ),
         ),
     ]
+}
+
+#[cfg(test)]
+mod browser_startup_tests {
+    use super::*;
+    #[test]
+    fn browser_tools_are_discoverable_before_chrome_starts() {
+        let mut config = MintConfig::default();
+        config.extra.insert(
+            "browserDebugUrl".into(),
+            json!("http://127.0.0.1:1/json/list"),
+        );
+        let tools = tool_catalog(&config, false, Path::new("."), false);
+        assert!(tools.iter().any(|tool| tool.name == "browser_open"));
+        assert!(
+            crate::prompts::agent::build_system_prompt(&config, false, false, None, None)
+                .contains("browser_open")
+        );
+        config.disabled_tools.push("browser_open".into());
+        assert!(
+            !tool_catalog(&config, false, Path::new("."), false)
+                .iter()
+                .any(|tool| tool.name == "browser_open")
+        );
+    }
 }
 
 #[cfg(test)]

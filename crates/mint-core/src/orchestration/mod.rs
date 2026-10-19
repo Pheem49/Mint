@@ -12,10 +12,13 @@ use std::time::Instant;
 use thiserror::Error;
 
 pub mod approvals;
+#[cfg(test)]
+mod image_regressions;
 mod mcp_review;
 #[cfg(test)]
 mod mod_authoring_regressions;
 mod progress_clock;
+mod reliability;
 mod repeated_failures;
 #[cfg(all(test, unix))]
 mod review_regressions;
@@ -35,7 +38,6 @@ use crate::knowledge::KnowledgeStore;
 use crate::plugins::execute_native_plugin;
 use crate::prompts::tool_catalog::tool_catalog;
 use crate::semantic::{index_semantic_code, search_semantic_code};
-use crate::shell::run_shell_command;
 use crate::symbols::build_symbol_index;
 use crate::{
     Capability, ChatError, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID, MemoryError,
@@ -486,6 +488,10 @@ fn model_tool_result(action: &str, result: &str) -> String {
 
 fn tool_progress_input(root: &Path, decision: &AgentDecision) -> Value {
     let mut input = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+    if matches!(decision.action.as_str(), "browser_type" | "browser_fill") {
+        input["text"] = "[redacted input]".into();
+        input["query"] = "[redacted input]".into();
+    }
     if decision.action == "read_file"
         && let Some(skill) = crate::skills::skill_for_read_path(root, &decision.input.path)
         && let Some(object) = input.as_object_mut()
@@ -762,6 +768,11 @@ pub enum AgentProgress {
         artifacts: Vec<crate::integrations::mcp_result::McpArtifact>,
         warnings: Vec<String>,
     },
+    ExecutionUpdate {
+        #[serde(rename = "callId")]
+        call_id: String,
+        executions: Vec<reliability::ExecutionEvidence>,
+    },
     Thinking {
         elapsed_secs: u64,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -1030,6 +1041,8 @@ pub struct AgentResult {
     pub model: String,
     pub summary: String,
     pub verification: String,
+    #[serde(default)]
+    pub completion_status: String,
     pub fallback: Option<String>,
     #[serde(default)]
     pub fallback_reason: Option<String>,
@@ -1070,6 +1083,8 @@ struct AgentDecision {
 struct AgentInput {
     #[serde(default)]
     path: String,
+    #[serde(default)]
+    artifact_id: String,
     #[serde(
         default,
         alias = "q",
@@ -1097,6 +1112,8 @@ struct AgentInput {
     command: String,
     #[serde(default)]
     background: bool,
+    #[serde(default, alias = "retryReason")]
+    retry_reason: String,
     #[serde(default, alias = "job_id")]
     job_id: String,
     #[serde(default)]
@@ -1109,6 +1126,8 @@ struct AgentInput {
     summary: String,
     #[serde(default)]
     verification: String,
+    #[serde(default)]
+    completion_status: String,
     #[serde(default)]
     plan: String,
     #[serde(default)]
@@ -1163,6 +1182,8 @@ struct AgentInput {
     tab_id: String,
     #[serde(default)]
     operation: String,
+    #[serde(default)]
+    mode: String,
     #[serde(default)]
     condition: String,
     #[serde(default)]
@@ -1766,7 +1787,7 @@ where
             );
             let mut mod_usage = crate::mods::UsageTracker::new(&root, chat_id, companion_turn_id);
             let resolved_task = resolve_github_links(task, config).await;
-            let agent_result = crate::browser::run_session(async {
+            let agent_result = reliability::scope(Box::pin(crate::browser::run_session(async {
         // Subagent runs use a synthetic `{parent_chat_id}::subagent::{name}` chat id
         // (see the `dispatch_subagent` arm in `execute_tool`) so their own memory
         // interaction doesn't leak into the parent conversation's history. That
@@ -1838,16 +1859,7 @@ where
         let mut repeated_failures = RepeatedFailures::default();
         let mut streamed_finish_summary = String::new();
         let mut streamed_direct_text = String::new();
-        // Track the most recent step (if any) that successfully modified a file
-        // (`apply_patch`/`write_file`) and the most recent step that ran `verify`,
-        // so `finish` can be rejected when code was changed but never checked —
-        // see the gate right before the `finish` handling block below.
-        let mut last_modify_step: Option<usize> = None;
-        let mut last_verify_step: Option<usize> = None;
-        // Whether the most recent `verify` call actually passed — separate from
-        // `last_verify_step`, which only records that one *ran*. Lets `finish` be
-        // rejected when the agent ignores a real failure and claims success anyway;
-        // see `unacknowledged_verify_failure` right before the `finish` handling block.
+        // Used only for retry telemetry; finish validation uses the typed ledger.
         let mut last_verify_failed: Option<bool> = None;
         let mut trajectory: Vec<String> = Vec::new();
         // Structured history for native tool-calling providers, maintained alongside
@@ -1946,9 +1958,7 @@ where
             // A finish can still be rejected after the provider finishes
             // streaming when edited files have not been verified. Don't show
             // that provisional summary to the user as if the run were done.
-            let allow_final_stream =
-                !unverified_modification(last_modify_step, last_verify_step, "")
-                    && last_verify_failed != Some(true);
+            let allow_final_stream = reliability::completion("verified", "").is_ok();
 
             if tool_mode == ToolCallingMode::JsonPrompt
                 && active_config.ai_provider == "ollama"
@@ -2362,59 +2372,18 @@ where
                             reject_native_finish(tool_mode, &mut native_messages, &response.text, error);
                             continue 'steps;
                         }
-                        if unverified_modification(
-                            last_modify_step,
-                            last_verify_step,
-                            &decision.input.verification,
-                        ) {
-                            let err_msg = "Error: You modified a file (apply_patch/write_file) in this \
-                                       run but finished without verifying it. Call the verify tool \
-                                       with build/test/lint commands appropriate for this project \
-                                       before finishing. If no check genuinely applies (e.g. no test \
-                                       suite, documentation-only change), say so explicitly in the \
-                                       finish action's 'verification' field and finish again.";
-                            trajectory.push(format_trajectory_step(
-                                step,
-                                &decision.thought,
-                                &decision.action,
-                                err_msg,
-                            ));
-                            rebuild_observation(task, &root, &trajectory, &mut observation);
-                            reject_native_finish(
-                                tool_mode,
-                                &mut native_messages,
-                                &response.text,
-                                err_msg,
-                            );
-                            continue 'steps;
-                        }
-                        if unacknowledged_verify_failure(
-                            last_verify_failed,
-                            &decision.input.verification,
-                        ) {
-                            let err_msg = "Error: Your last verify call reported a failure \
-                                       (non-zero exit code), but you're finishing without \
-                                       addressing it. Read the stdout/stderr from that verify \
-                                       call, fix the actual problem, and run verify again until \
-                                       it passes. Do not report success in the finish summary \
-                                       while a real check is failing — if the failure is genuinely \
-                                       unrelated to your change (e.g. pre-existing), say so \
-                                       explicitly in the finish action's 'verification' field and \
-                                       finish again.";
-                            trajectory.push(format_trajectory_step(
-                                step,
-                                &decision.thought,
-                                &decision.action,
-                                err_msg,
-                            ));
-                            rebuild_observation(task, &root, &trajectory, &mut observation);
-                            reject_native_finish(
-                                tool_mode,
-                                &mut native_messages,
-                                &response.text,
-                                err_msg,
-                            );
-                            continue 'steps;
+                        let completion_status = match reliability::completion(&decision.input.completion_status, &decision.input.verification) {
+                            Ok(status) => status,
+                            Err(error) => {
+                                trajectory.push(format_trajectory_step(step, &decision.thought, &decision.action, &error));
+                                rebuild_observation(task, &root, &trajectory, &mut observation);
+                                reject_native_finish(tool_mode, &mut native_messages, &response.text, &error);
+                                continue 'steps;
+                            }
+                        };
+                        if completion_status != "verified" {
+                            let notice = format!("\n\nCompletion: {}. {}", completion_status, decision.input.verification.trim());
+                            summary.push_str(&notice);
                         }
                         // Auto-append generated media (image/video) and model feedback to summary if LLM omitted it
                         let mut media_blocks = Vec::new();
@@ -2482,7 +2451,7 @@ where
                         let run_summary = RunTelemetrySummary {
                             run_id: format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
                             task: task.to_string(),
-                            outcome: "SUCCESS".to_string(),
+                            outcome: completion_status.to_ascii_uppercase(),
                             total_tokens: turn_total_tokens as usize,
                             tool_calls_count: executed_tools.len(),
                             files_changed: files_created
@@ -2512,6 +2481,7 @@ where
                             model: final_model,
                             summary,
                             verification,
+                            completion_status,
                             fallback: final_fallback,
                             fallback_reason: final_fallback_reason,
                             total_tokens: turn_total_tokens,
@@ -2549,7 +2519,7 @@ where
                     };
 
                     // Set only on the real `execute_tool` path below (PreHookOutcome::Allowed);
-                    // stays false for plan-mode/hook blocks and the duplicate-shell skip, since
+                    // stays false for plan-mode/hook blocks, since
                     // those don't actually run anything and shouldn't count toward verification.
                     let mut action_succeeded = false;
                     let mut outcome_status = None;
@@ -2639,11 +2609,6 @@ where
                             "Blocked: '{}' is not available in plan mode (read-only investigation only). Call exit_plan_mode with your proposed plan once you are ready to implement it; the user will approve or reject it.",
                             decision.action
                         )
-                    } else if decision.action == "run_shell" && action_count > 1 {
-                        format!(
-                            "Skipped duplicate shell command: {}\n\n[System Tip: This exact shell command already ran once in this task. Do not run it again. Use the finish action now and tell the user the action was completed.]",
-                            decision.input.command.trim()
-                        )
                     } else if pinned_mcp_server.is_some_and(|p| {
                         (decision.action == "mcp_tool" || decision.action == "mcp_list_tools")
                             && decision.input.server != p
@@ -2707,7 +2672,7 @@ where
                                 {
                                     Ok(outcome) => {
                                         if decision.action=="mcp_tool" {mcp_review.record_result(&decision.input.server,&decision.input.tool,&decision.input.arguments,&outcome);}
-                                        if matches!(decision.action.as_str(),"mcp_tool"|"mcp_list_tools") { outcome_status = Some(outcome.status); }
+                                        outcome_status = Some(outcome.status);
                                         if !outcome.images.is_empty() { step_images.insert(call_id.clone(), outcome.images); }
                                         let success = outcome.status == crate::integrations::mcp_result::ToolStatus::Success;
                                         (outcome.text, success)
@@ -2758,7 +2723,7 @@ where
                         subagent: None,
                     });
 
-                    let success = action_succeeded && !shell_result_failed(&result);
+                    let success = outcome_status.map(|s| s == crate::mcp_result::ToolStatus::Success).unwrap_or(action_succeeded);
                     let target = if !decision.input.path.is_empty() {
                         decision.input.path.clone()
                     } else if !decision.input.command.is_empty() {
@@ -2787,7 +2752,6 @@ where
                     if action_succeeded {
                         match decision.action.as_str() {
                             "apply_patch" | "write_file" | "note_write" => {
-                                last_modify_step = Some(step);
                                 let path = if let Some(patch) = &decision.input.patch {
                                     patch.path.to_string_lossy().into_owned()
                                 } else if !decision.input.path.is_empty() {
@@ -2812,8 +2776,7 @@ where
                             // actually passed is tracked separately in `last_verify_failed`
                             // and enforced by `unacknowledged_verify_failure` at finish time.
                             "verify" | "run_tests" | "run_typecheck" | "run_linter" => {
-                                last_verify_step = Some(step);
-                                last_verify_failed = Some(shell_result_failed(&result));
+                                last_verify_failed = Some(!success);
                             }
                             _ => {}
                         }
@@ -2850,7 +2813,7 @@ where
                         "\n\n[System Tip: The command failed with a non-zero exit code. \
                          Analyze the stdout/stderr above to locate the error, read the offending files, \
                          apply corrected edits (using apply_patch), and run the verification command again. \
-                         Do not finish or stop until the compilation or test errors are resolved!]"
+                         If checks cannot pass, finish with completionStatus=blocked/failed/unverified and explain the actual result; never claim they passed.]"
                     );
                         }
                     }
@@ -2858,9 +2821,8 @@ where
                         final_result.push_str(
                     "\n\n[System Tip: The file edit was approved and applied successfully. \
                      Before finishing, verify this change with the verify tool (build/test/lint, \
-                     whatever fits this project) — finish will be rejected until you do, unless you \
-                     state in the finish action's verification field why no check applies (e.g. no \
-                     test suite, documentation-only change). Do not broaden the scope, do not make \
+                     whatever fits this project). If no check applies, finish with completionStatus=unverified \
+                     and explain why in verification. A written explanation is not a passed check. Do not broaden the scope, do not make \
                      additional unrelated edits, and do not reread the same file unless you need one \
                      concise verification read.]",
                 );
@@ -2881,7 +2843,7 @@ where
                     ));
 
                     step_tool_results.push(ToolResultEntry {
-                        call_id, action:decision.action.clone(), input:tool_progress_input(&root,&decision),
+                        call_id, action:decision.action.clone(), input:serde_json::to_value(&decision.input).unwrap_or(Value::Null),
                         text:final_result, status:outcome_status.unwrap_or(if success {crate::mcp_result::ToolStatus::Success}else{crate::mcp_result::ToolStatus::Failed}),
                     });
                 } // end `for (call_id, decision) in decisions`
@@ -2970,7 +2932,7 @@ where
             "code agent reached the limit of {} steps; task incomplete. Last browser state: {}",
             MAX_STEPS, crate::browser::session_last_state().await
         )))
-        }).await;
+        }))).await;
             if agent_result.is_err() && !turn.finished {
                 if run_control::cancelled() {
                     turn.interrupt();
@@ -3359,6 +3321,7 @@ async fn run_parallel_read_only_batch(
         let decision = decision;
 
         tasks.push(async move {
+            let activity_call_id=call_id.clone();
             if !fast_mode && !thought.trim().is_empty() {
                 let t = thought.trim();
                 let mut guard = progress_mutex.lock().unwrap();
@@ -3377,13 +3340,15 @@ async fn run_parallel_read_only_batch(
 
             {
                 let mut guard = progress_mutex.lock().unwrap();
-                (*guard)(AgentProgress::ToolStart { call_id: Some(call_id.clone()),
+                (*guard)(AgentProgress::ToolStart { call_id: Some(activity_call_id.clone()),
                     action: action.clone(),
                     input: input_val.clone(),
                     subagent: None,
                 });
             }
 
+            let mut images=Vec::new();
+            let mut typed_status=None;
             let result: String = if pinned_mcp_server.is_some_and(|p| {
                 (action == "mcp_tool" || action == "mcp_list_tools") && decision.input.server != p
             }) {
@@ -3410,17 +3375,18 @@ async fn run_parallel_read_only_batch(
                             (*guard)(event);
                         };
 
-                        let (tool_result, success) = match execute_tool(
+                        let (tool_result, success) = match execute_tool_outcome(
                             root,
                             config,
                             &decision,
                             chat_id,
                             &mut approve_adapter,
                             &mut progress_adapter,
+                            &activity_call_id,
                         )
                         .await
                         {
-                            Ok(res) => (res, true),
+                            Ok(outcome) => {images=outcome.images;typed_status=Some(outcome.status);(outcome.text,outcome.status==crate::mcp_result::ToolStatus::Success)},
                             Err(err) => (format!("Error: {}", err), false),
                         };
 
@@ -3452,7 +3418,7 @@ async fn run_parallel_read_only_batch(
 
             {
                 let mut guard = progress_mutex.lock().unwrap();
-                (*guard)(AgentProgress::ToolEnd { elapsed_ms: None, call_id: Some(call_id.clone()), status: None,
+                (*guard)(AgentProgress::ToolEnd { elapsed_ms: None, call_id: Some(activity_call_id.clone()), status: typed_status,
                     action: action.clone(),
                     input: input_val.clone(),
                     result: result.clone(),
@@ -3461,7 +3427,7 @@ async fn run_parallel_read_only_batch(
             }
 
             (
-                index, call_id, thought, action, input_val, action_key, result,
+                index, call_id, thought, action, input_val, action_key, result, images, typed_status,
             )
         });
     }
@@ -3474,7 +3440,12 @@ async fn run_parallel_read_only_batch(
     results.sort_by_key(|(index, ..)| *index);
 
     let mut step_tool_results = Vec::with_capacity(results.len());
-    for (_, call_id, thought, action, input_val, action_key, result) in results {
+    for (_, call_id, thought, action, input_val, action_key, result, images, typed_status) in
+        results
+    {
+        if !images.is_empty() {
+            step_images.insert(call_id.clone(), images);
+        }
         let action_count = {
             let count = action_counts.entry(action_key).or_insert(0);
             *count += 1;
@@ -3516,7 +3487,11 @@ async fn run_parallel_read_only_batch(
             &final_result,
         ));
 
-        step_tool_results.push((call_id, action, input_val, final_result).into());
+        let mut entry = ToolResultEntry::from((call_id, action, input_val, final_result));
+        if let Some(status) = typed_status {
+            entry.status = status;
+        }
+        step_tool_results.push(entry);
     }
 
     step_tool_results
@@ -3591,10 +3566,19 @@ async fn execute_tool_outcome_reviewed(
         origin.as_deref(),
     )
     .map_err(OrchestrationError::Agent)?;
-    let result = execute_tool_outcome_reviewed_inner(
+    let execution = execute_tool_outcome_reviewed_inner(
         root, config, decision, chat_id, approve, progress, call_id, expected,
-    )
-    .await;
+    );
+    let result = if matches!(
+        decision.action.as_str(),
+        "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter"
+    ) {
+        // Foreground shell cancellation joins process cleanup and imports any
+        // checkpointed screenshots before the turn is marked interrupted.
+        execution.await
+    } else {
+        run_control::run(Box::pin(execution)).await
+    };
     let _ = crate::mods::event(
         root,
         chat_id,
@@ -3695,6 +3679,67 @@ async fn execute_tool_outcome_reviewed_inner(
     expected: Option<&mcp_review::McpReview>,
 ) -> Result<crate::integrations::mcp_result::ToolOutcome, OrchestrationError> {
     run_control::check()?;
+    if decision.action == "view_image" {
+        if decision.input.path.is_empty() == decision.input.artifact_id.is_empty() {
+            return Err(OrchestrationError::Agent(
+                "Provide exactly one of path or artifactId".into(),
+            ));
+        }
+        let root = root.to_path_buf();
+        let config = config.clone();
+        let chat = chat_id.to_owned();
+        let call = call_id.to_owned();
+        let path = decision.input.path.clone();
+        let artifact_id = decision.input.artifact_id.clone();
+        let out = tokio::task::spawn_blocking(
+            move || -> Result<crate::mcp_result::ToolOutcome, String> {
+                if !artifact_id.is_empty() {
+                    return crate::media::tool_images::view_artifact(&artifact_id, &chat);
+                }
+                let path = workspace_path(&root, &path).map_err(|e| e.to_string())?;
+                let path = assert_path_capability(&path, Capability::Read, &config)
+                    .map_err(|e| e.to_string())?;
+                if std::fs::metadata(&path).map_err(|e| e.to_string())?.len()
+                    > crate::media::tool_images::ORIGINAL_LIMIT as u64
+                {
+                    return Err("Image exceeds 20 MiB".into());
+                }
+                let mime = match path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase()
+                    .as_str()
+                {
+                    "png" => "image/png",
+                    "jpg" | "jpeg" => "image/jpeg",
+                    "gif" => "image/gif",
+                    "webp" => "image/webp",
+                    "svg" => "image/svg+xml",
+                    _ => return Err("Unsupported image type".into()),
+                };
+                let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+                crate::media::tool_images::save(
+                    &bytes,
+                    mime,
+                    path.file_name().and_then(|n| n.to_str()).unwrap_or("Image"),
+                    &chat,
+                    &call,
+                    "view_image",
+                    None,
+                )
+            },
+        )
+        .await
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?
+        .map_err(OrchestrationError::Agent)?;
+        progress(AgentProgress::ToolArtifacts {
+            call_id: call_id.into(),
+            artifacts: out.artifacts.clone(),
+            warnings: out.warnings.clone(),
+        });
+        return Ok(out);
+    }
     if matches!(decision.action.as_str(), "mcp_tool" | "mcp_list_tools") {
         let mut out = tools::plugins_mcp::execute_reviewed(
             &decision.action,
@@ -3724,9 +3769,134 @@ async fn execute_tool_outcome_reviewed_inner(
         }
         Ok(out)
     } else {
-        execute_tool_text(root, config, decision, chat_id, approve, progress)
+        let mut tool_config = config.clone();
+        let bridge = if decision.action == "run_shell" && !decision.input.background {
+            crate::browser::workflow::ShellBridge::prepare(
+                &decision.input.command,
+                root,
+                &mut tool_config,
+            )
+            .map_err(OrchestrationError::Agent)?
+        } else {
+            None
+        };
+        let checkpoint = reliability::checkpoint();
+        let text = match execute_tool_text(root, &tool_config, decision, chat_id, approve, progress)
             .await
-            .map(Into::into)
+        {
+            Ok(text) => text,
+            Err(error) => {
+                if decision.action.starts_with("browser_") {
+                    reliability::record_browser(&decision.action, None, false);
+                }
+                reliability::complete_tool(&decision.action, call_id, checkpoint, false);
+                return Err(error);
+            }
+        };
+        let mut out = if decision.action == "browser_screenshot"
+            && text.starts_with("data:image/png;base64,")
+        {
+            let bytes = BASE64_STANDARD
+                .decode(text.trim_start_matches("data:image/png;base64,"))
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            let metadata = crate::browser::capture_metadata().await;
+            let out = crate::media::tool_images::save(
+                &bytes,
+                "image/png",
+                &format!("screenshot-{call_id}.png"),
+                chat_id,
+                call_id,
+                "browser",
+                Some(metadata),
+            )
+            .map_err(OrchestrationError::Agent)?;
+            progress(AgentProgress::ToolArtifacts {
+                call_id: call_id.into(),
+                artifacts: out.artifacts.clone(),
+                warnings: out.warnings.clone(),
+            });
+            out
+        } else {
+            crate::mcp_result::ToolOutcome::from(text)
+        };
+        let mut workflow_verified = None;
+        if let Some(bridge) = bridge {
+            match bridge.images(chat_id, call_id) {
+                Ok((images, verified)) => {
+                    workflow_verified = Some(verified);
+                    out.text.push_str(&images.text);
+                    out.images.extend(images.images);
+                    out.artifacts.extend(images.artifacts);
+                    out.warnings.extend(images.warnings);
+                    progress(AgentProgress::ToolArtifacts {
+                        call_id: call_id.into(),
+                        artifacts: out.artifacts.clone(),
+                        warnings: out.warnings.clone(),
+                    });
+                }
+                Err(error) => {
+                    out.text.push_str(&format!("\nWarning: {error}"));
+                    out.warnings.push(error);
+                    workflow_verified = Some(false);
+                }
+            }
+        }
+        if decision.action.starts_with("browser_") {
+            let report = serde_json::from_str::<Value>(&out.text).ok();
+            if report
+                .as_ref()
+                .is_some_and(|r| r.get("error").is_some_and(|e| !e.is_null()))
+            {
+                out.status = crate::mcp_result::ToolStatus::Failed;
+            }
+            reliability::record_browser(
+                &decision.action,
+                report.as_ref(),
+                out.status == crate::mcp_result::ToolStatus::Success,
+            );
+        }
+        let mut entries = reliability::complete_tool(
+            &decision.action,
+            call_id,
+            checkpoint,
+            out.status == crate::mcp_result::ToolStatus::Success,
+        );
+        if let Some(verified) = workflow_verified {
+            entries = reliability::mark_workflow(call_id, verified);
+        }
+        if decision.action == "shell_output" {
+            entries = reliability::for_job(&decision.input.job_id);
+        }
+        if !entries.is_empty() {
+            out.status = if entries
+                .iter()
+                .any(|e| e.state == reliability::ExecutionState::Cancelled)
+            {
+                crate::mcp_result::ToolStatus::Cancelled
+            } else if entries
+                .iter()
+                .any(|e| e.state == reliability::ExecutionState::Failed)
+            {
+                crate::mcp_result::ToolStatus::Failed
+            } else if entries
+                .iter()
+                .any(|e| e.state == reliability::ExecutionState::Running)
+            {
+                crate::mcp_result::ToolStatus::Running
+            } else if entries
+                .iter()
+                .any(|e| e.state == reliability::ExecutionState::Unknown)
+            {
+                crate::mcp_result::ToolStatus::Unknown
+            } else {
+                crate::mcp_result::ToolStatus::Success
+            };
+            progress(AgentProgress::ExecutionUpdate {
+                call_id: call_id.into(),
+                executions: entries,
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -3995,7 +4165,12 @@ fn append_native_tool_results(
         tool_result_content.push(ContentBlock::ToolResult {
             tool_use_id: call_id.clone(),
             content: final_result.clone(),
-            is_error: *status != crate::mcp_result::ToolStatus::Success,
+            is_error: matches!(
+                *status,
+                crate::mcp_result::ToolStatus::Failed
+                    | crate::mcp_result::ToolStatus::TimedOut
+                    | crate::mcp_result::ToolStatus::Cancelled
+            ),
         });
         if let Some(data_uris) = images.get(call_id) {
             for data_uri in data_uris {
@@ -4033,11 +4208,12 @@ struct ToolResultEntry {
 impl From<(String, String, Value, String)> for ToolResultEntry {
     fn from((call_id, action, input, text): (String, String, Value, String)) -> Self {
         let mut status = crate::mcp_result::ToolOutcome::from(text.clone()).status;
-        if text.starts_with("Skipped")
-            || (matches!(
-                action.as_str(),
-                "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter"
-            ) && shell_result_failed(&text))
+        if text.starts_with("Skipped") {
+            status = crate::mcp_result::ToolStatus::Skipped;
+        } else if matches!(
+            action.as_str(),
+            "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter"
+        ) && shell_result_failed(&text)
         {
             status = crate::mcp_result::ToolStatus::Failed;
         }
@@ -4858,7 +5034,7 @@ mod tests {
             "exit: 1\nmode: normal\nsandboxed: true\nstdout:\nfail\nstderr:\n"
         ));
         // A killed/unknown-status process isn't treated as a confirmed failure.
-        assert!(!shell_result_failed(
+        assert!(shell_result_failed(
             "exit: unknown\nmode: normal\nsandboxed: true\nstdout:\nstderr:\n"
         ));
     }
@@ -4883,8 +5059,8 @@ mod tests {
         assert!(unverified_modification(Some(2), Some(1), ""));
         // Edited, verified after — satisfied regardless of what verify found.
         assert!(!unverified_modification(Some(2), Some(3), ""));
-        // Edited, never verified, but explicitly explained why no check applies.
-        assert!(!unverified_modification(
+        // An explanation cannot promote an unchecked edit to verified.
+        assert!(unverified_modification(
             Some(2),
             None,
             "Docs-only change, no test suite."
@@ -4900,9 +5076,8 @@ mod tests {
         // "claims success while a check is actually failing" case.
         assert!(unacknowledged_verify_failure(Some(true), ""));
         assert!(unacknowledged_verify_failure(Some(true), "n/a"));
-        // Verify failed, but the agent explicitly addressed it in the finish
-        // action's verification field (e.g. explaining it's pre-existing).
-        assert!(!unacknowledged_verify_failure(
+        // Even an explanation of pre-existing failures does not make them pass.
+        assert!(unacknowledged_verify_failure(
             Some(true),
             "2 pre-existing test failures unrelated to this change; see notes."
         ));
@@ -5172,8 +5347,8 @@ mod tests {
     }
 
     #[test]
-    fn explicit_written_justification_satisfies_the_gate_without_a_verify_call() {
-        assert!(!unverified_modification(
+    fn explicit_written_justification_does_not_verify_an_unchecked_edit() {
+        assert!(unverified_modification(
             Some(2),
             None,
             "Documentation-only change; no test suite in this repo."

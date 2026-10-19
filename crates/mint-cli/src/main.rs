@@ -26,6 +26,19 @@ pub(crate) mod terminal_theme;
 mod updater;
 
 pub use commands::Command;
+
+#[cfg(test)]
+mod browser_cli_regressions {
+    use super::*;
+    #[test]
+    fn browser_workflow_command_accepts_a_file_and_headed_override() {
+        let parsed =
+            Cli::try_parse_from(["mint", "browser", "run", "--file", "task.json", "--headed"])
+                .unwrap();
+        assert!(matches!(parsed.command, Some(Command::Browser { .. })));
+        assert!(Cli::try_parse_from(["mint", "browser", "run"]).is_err());
+    }
+}
 pub use interactive::{
     SESSION_APPROVED, active_model, confirm, confirm_security, print_welcome_banner,
     run_interactive_chat, run_interactive_chat_with_options,
