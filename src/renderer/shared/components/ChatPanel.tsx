@@ -1406,7 +1406,7 @@ export default function ChatPanel({
               )}
               <div className="message-bubble">
                 <McpToolResults progress={agentProgress} running chatId={chatId} />
-                <ViewedImages progress={agentProgress} />
+                <ViewedImages progress={agentProgress} chatId={chatId} />
                 <ExecutionResults progress={agentProgress} />
                 <span>
                   {compaction ? (

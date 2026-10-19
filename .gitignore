@@ -26,6 +26,7 @@ mint-chat-history.json
 
 # Workspace-local Mint mods
 /.mint-mods/
+/.mint-screenshots/
 
 # ==========================
 # Generated Build Output

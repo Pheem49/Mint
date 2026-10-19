@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { X } from 'lucide-react'
 import type { AgentProgress, McpArtifact } from '../types'
 import { mediaPlatform } from '../platform'
 import '../css/mcp-results.css'
@@ -28,8 +29,12 @@ function Artifact({ artifact, chatId }: { artifact: McpArtifact; chatId?: string
       <button type="button" className="mcp-image-button" onClick={() => dialog.current?.showModal()} aria-label={`View ${artifact.name}`}>
         <img src={src} alt={artifact.name} onError={() => setError('Image unavailable')} />
       </button>
-      <dialog ref={dialog} className="mcp-image-dialog" aria-label={artifact.name}>
-        <button type="button" onClick={() => dialog.current?.close()}>Close</button>
+      <dialog ref={dialog} className="mcp-image-dialog" aria-label={artifact.name}
+        onClose={() => dialog.current?.close()} onClick={event => { if (event.target === event.currentTarget) dialog.current?.close() }}>
+        <header>
+          <span title={artifact.name}>{artifact.name}</span>
+          <button type="button" aria-label="Close" onClick={() => dialog.current?.close()}><X size={18} /></button>
+        </header>
         <img src={src} alt={artifact.name} />
       </dialog>
     </>}
@@ -72,13 +77,16 @@ export default memo(function McpToolResults({ progress, running = false, interru
     }
     return { calls, discovery, artifacts, warnings }
   }, [progress])
+  const displayedArtifacts = useMemo(() => {
+    return [...artifacts.values()].filter(artifact => artifact.server !== 'view_image')
+  }, [artifacts])
   const hasActiveCalls = running && [...calls.values()].some(call => !call.status)
   useEffect(() => {
     if (!hasActiveCalls) return
     const timer = setInterval(() => tick(n => n + 1), 1000)
     return () => clearInterval(timer)
   }, [hasActiveCalls])
-  if (!calls.size && !artifacts.size && !warnings.size && !discovery.size) return null
+  if (!calls.size && !displayedArtifacts.length && !warnings.size && !discovery.size) return null
   return <section className="mcp-results" aria-label="MCP results">
     {[...discovery].map(([label,message])=><div key={label} className="mcp-call-status" role="status"><strong>{label}</strong><span>{message}</span></div>)}
     {[...calls].map(([id, call]) => {
@@ -97,7 +105,7 @@ export default memo(function McpToolResults({ progress, running = false, interru
         {active && percent !== undefined && <progress max={100} value={percent} aria-label={`${call.label} progress`}>{percent}%</progress>}
       </div>
     })}
-    <div className="mcp-artifacts">{[...artifacts.values()].map(artifact => <Artifact key={artifact.id} artifact={artifact} chatId={chatId} />)}</div>
+    <div className="mcp-artifacts">{displayedArtifacts.map(artifact => <Artifact key={artifact.id} artifact={artifact} chatId={chatId} />)}</div>
     {[...warnings].map(warning => <p key={warning} role="status">{warning}</p>)}
   </section>
 })

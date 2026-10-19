@@ -225,7 +225,7 @@ const ChatMessageItem = React.memo(
               {interaction.status === 'failed' && <span>This turn failed. Send the prompt again to retry.</span>}
               {interaction.status === 'interrupted' && <span>This turn was interrupted. Send the prompt again to retry.</span>}
               <McpToolResults progress={progress} running={interaction.status === 'running'} interrupted={interaction.status === 'interrupted'} chatId={props.chatId || interaction.chatId} />
-              <ViewedImages progress={progress} />
+              <ViewedImages progress={progress} chatId={props.chatId || interaction.chatId} />
               <ExecutionResults progress={progress} />
               {fallbackWeatherData && <WeatherCard data={fallbackWeatherData} />}
               {fallbackStockData && <StockCard data={fallbackStockData} />}
