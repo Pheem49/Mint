@@ -77,7 +77,7 @@ impl ToolActivity {
     }
     pub fn heading(&self) -> String {
         let name = if self.shell() {
-            "Shell".to_owned()
+            "run_shell".to_owned()
         } else {
             self.action.replace('_', " ")
         };
@@ -138,7 +138,7 @@ impl ToolActivity {
                 }
             }
         }
-        self.input.to_string()
+        String::new()
     }
     pub fn lines(&self, width: u16) -> Vec<Line<'static>> {
         let output = self
@@ -146,23 +146,25 @@ impl ToolActivity {
             .as_ref()
             .map(|result| format!("Output · {} lines · ", result.lines().count()))
             .unwrap_or_default();
-        vec![
-            self.heading_line(width as usize),
-            Line::styled(
-                clip(&format!("  {}", self.subject()), width as usize),
+        let subject = self.subject();
+        let mut lines = vec![self.heading_line(width as usize)];
+        if !subject.is_empty() {
+            lines.push(Line::styled(
+                clip(&format!("  {}", subject), width as usize),
                 Style::default().fg(crate::terminal_theme::TEXT),
+            ));
+        }
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {output}"),
+                Style::default().fg(crate::terminal_theme::MUTED),
             ),
-            Line::from(vec![
-                Span::styled(
-                    format!("  {output}"),
-                    Style::default().fg(crate::terminal_theme::MUTED),
-                ),
-                Span::styled(
-                    "Ctrl+O details",
-                    Style::default().fg(crate::terminal_theme::BLUE),
-                ),
-            ]),
-        ]
+            Span::styled(
+                "Ctrl+O details",
+                Style::default().fg(crate::terminal_theme::BLUE),
+            ),
+        ]));
+        lines
     }
     fn heading_line(&self, width: usize) -> Line<'static> {
         let color = match self.status {

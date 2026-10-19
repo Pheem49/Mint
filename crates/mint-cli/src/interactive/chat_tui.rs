@@ -5569,7 +5569,7 @@ mod dialog_tests {
                 .map(|entry| entry.text.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
-            assert!(text.contains("Shell failed · 3.4s · exit 2"));
+            assert!(text.contains("run_shell failed · 3.4s · exit 2"));
             assert_eq!(text.matches("Thought · 1.9s").count(), 1);
             assert!(text.contains("✗ Failed"));
             assert!(text.contains("16.2s"));
@@ -6838,7 +6838,7 @@ mod dialog_tests {
         let state = state.lock().unwrap();
         assert_eq!(state.transcript.len(), 3);
         let screen = thought_screen(&state, 100, 30).join("\n");
-        assert!(screen.contains("Shell completed"));
+        assert!(screen.contains("run_shell completed"));
         assert!(screen.contains("Running 2 tasks · 1 shell command · 1 tool"));
         assert!(!screen.contains("stdout:"));
     }

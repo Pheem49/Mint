@@ -1062,8 +1062,15 @@ fn all_tools() -> Vec<ToolSpec> {
 mod browser_startup_tests {
     use super::*;
     #[test]
-    fn browser_tools_are_discoverable_before_chrome_starts() {
+    fn browser_tools_are_discoverable_when_browser_automation_enabled() {
         let mut config = MintConfig::default();
+        let default_tools = tool_catalog(&config, false, Path::new("."), false);
+        assert!(!default_tools.iter().any(|tool| tool.name == "browser_open"));
+
+        config.extra.insert(
+            "browserAutomationEnabled".into(),
+            json!(true),
+        );
         config.extra.insert(
             "browserDebugUrl".into(),
             json!("http://127.0.0.1:1/json/list"),

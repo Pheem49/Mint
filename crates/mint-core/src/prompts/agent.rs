@@ -6,7 +6,7 @@ pub(crate) fn browser_tools_enabled(config: &MintConfig) -> bool {
         .extra
         .get("browserAutomationEnabled")
         .and_then(serde_json::Value::as_bool)
-        != Some(false)
+        == Some(true)
 }
 
 pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
@@ -46,13 +46,6 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "video_waveform",
     "note_write",
     "mcp_list_tools",
-    "browser_open",
-    "browser_read",
-    "browser_observe",
-    "browser_wait",
-    "browser_scroll",
-    "browser_mouse_move",
-    "browser_screenshot",
     "run_shell",
     // Read-only poll of a background job's buffered output; the run_shell
     // call that started it is still gated to read-only commands above.
@@ -513,6 +506,9 @@ pub fn build_system_prompt(
     }
     if allowed_actions.contains(&"avatar_signal") {
         rules.push("7v. A Project Avatar is connected. Call avatar_signal when your reply carries an emotional beat the automatic tool-based reactions can't express — greeting, joking, apologizing, thinking something over. Don't call it for routine tool-driven turns (shell, browser, image/video generation); those already react on their own.");
+    }
+    if allowed_actions.contains(&"run_shell") && !allowed_actions.contains(&"browser_open") {
+        rules.push("7a. For browsing, viewing, or capturing websites/webpages: use run_shell to run headless browser commands directly (e.g. google-chrome --headless=new --screenshot=screenshot.png <url>). ALWAYS call view_image with the generated image path (e.g. view_image(path: \"screenshot.png\")) immediately after capturing a screenshot so you and the user can inspect the visual result.");
     }
     if allowed_actions.contains(&"browser_open") {
         rules.push("7a. Use browser_open to open websites; Mint starts an isolated browser session automatically (headless by default). Inspect the returned page observation, then use browser_observe/browser_read to read the page or browser_screenshot for visual inspection; verify the requested URL/content with browser_wait before finishing. A successful browser_open already opens the website for the user: do not also launch it through run_shell, xdg-open, open, Start-Process, or another browser. Keep website navigation and interaction in the automation browser. If the user explicitly requests an external browser, use that route instead of first opening the website in automation. If automation is unavailable or blocked, report that and ask the user before switching browsers. For a predefined command-line workflow, write a JSON steps file and run mint browser run --file <file> through run_shell; --headed explicitly shows its window. Use the shared engine rather than hand-written browser scripts.");
