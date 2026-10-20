@@ -4,6 +4,10 @@ declare module '*.md?raw' {
   const content: string;
   export default content;
 }
+declare module 'react-dom/server' {
+  export function renderToStaticMarkup(element: any): string;
+  export function renderToString(element: any): string;
+}
 
 interface Window {
   api: {
