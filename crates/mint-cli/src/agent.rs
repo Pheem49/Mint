@@ -10,8 +10,8 @@ use ansi_to_tui::IntoText;
 use anyhow::{Result, anyhow};
 use mint_core::{
     AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption, CHAT_CLI_ID,
-    MemoryStore, MintConfig, OrchestrationError, PermissionDecision, PermissionRule,
-    orchestrate_agent_loop, permission_decision_for,
+    ExecutionState, MemoryStore, MintConfig, OrchestrationError, PermissionDecision,
+    PermissionRule, orchestrate_agent_loop, permission_decision_for,
 };
 use syntect::easy::HighlightLines;
 use syntect::highlighting::ThemeSet;
@@ -555,9 +555,39 @@ pub(crate) fn mcp_progress_notes(event: &AgentProgress) -> Option<Vec<String>> {
             .iter()
             .map(|e| {
                 let kind = if e.check { "Check" } else { "Command" };
-                let exit = e.exit_code.map(|c| format!(" · exit {c}")).unwrap_or_default();
-                let job = e.job_id.as_ref().map(|j| format!(" · job {j}")).unwrap_or_default();
-                format!("[{kind}] {:?} · {}{exit}{job}", e.state, e.command)
+                let state_str = match e.state {
+                    ExecutionState::Succeeded => {
+                        format!("{}Succeeded{RESET}", crate::terminal_theme::ANSI_ACCENT_BOLD)
+                    }
+                    ExecutionState::Failed => {
+                        format!("{}Failed{RESET}", crate::terminal_theme::ANSI_ERROR_BOLD)
+                    }
+                    ExecutionState::Running => {
+                        format!("{}Running{RESET}", crate::terminal_theme::ANSI_BLUE_BOLD)
+                    }
+                    ExecutionState::Cancelled => {
+                        format!("{DIM}Cancelled{RESET}")
+                    }
+                    ExecutionState::Unknown => {
+                        format!("{}Unknown{RESET}", crate::terminal_theme::ANSI_WARNING_BOLD)
+                    }
+                };
+                let exit = e
+                    .exit_code
+                    .map(|c| {
+                        if c == 0 {
+                            format!(" · {DIM}exit {c}{RESET}")
+                        } else {
+                            format!(" · {RED}exit {c}{RESET}")
+                        }
+                    })
+                    .unwrap_or_default();
+                let job = e
+                    .job_id
+                    .as_ref()
+                    .map(|j| format!(" · {DIM}job {j}{RESET}"))
+                    .unwrap_or_default();
+                format!("[{kind}] {state_str} · {}{exit}{job}", e.command)
             })
             .collect(),
         AgentProgress::ToolArtifacts {
@@ -1897,5 +1927,43 @@ mod skill_card_tests {
     fn memory_recall_result_with_no_skill_hits_yields_nothing() {
         let result = "[2026-08-01] You: hi\nMint: hello";
         assert!(skill_names_from_memory_recall(result).is_empty());
+    }
+
+    #[test]
+    fn execution_update_progress_notes_highlight_succeeded_and_failed() {
+        use mint_core::{ExecutionEvidence, ExecutionState};
+        let update = AgentProgress::ExecutionUpdate {
+            call_id: "test".into(),
+            executions: vec![
+                ExecutionEvidence {
+                    call_id: "test1".into(),
+                    command: "ls -la".into(),
+                    state: ExecutionState::Succeeded,
+                    exit_code: Some(0),
+                    job_id: None,
+                    revision: 1,
+                    check: false,
+                    condition_verified: None,
+                },
+                ExecutionEvidence {
+                    call_id: "test2".into(),
+                    command: "cargo check".into(),
+                    state: ExecutionState::Failed,
+                    exit_code: Some(1),
+                    job_id: None,
+                    revision: 2,
+                    check: true,
+                    condition_verified: None,
+                },
+            ],
+        };
+        let notes = mcp_progress_notes(&update).expect("should produce notes");
+        assert_eq!(notes.len(), 2);
+        assert!(notes[0].contains("[Command]"));
+        assert!(notes[0].contains("Succeeded"));
+        assert!(notes[0].contains("exit 0"));
+        assert!(notes[1].contains("[Check]"));
+        assert!(notes[1].contains("Failed"));
+        assert!(notes[1].contains("exit 1"));
     }
 }

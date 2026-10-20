@@ -2,6 +2,15 @@
 
 Released: 2026-10-17
 
+## Mint TUI Command Styling & Execution Status Highlighting (2026-10-20)
+
+- **Green Accent Command Styling in TUI**: Styled shell command subjects in the full-screen Mint TUI activity cards using the Mint Green accent color (`terminal_theme::ACCENT`), matching the detail view in `Ctrl+O` for visual clarity and consistency across the transcript.
+- **Execution Status Highlighting (`[Command]` & `[Check]`)**: Styled execution progress notices across CLI, Desktop, and Web:
+  - `Succeeded` highlighted in bold Mint Green (`ACCENT`).
+  - `Failed` highlighted in bold Red (`ERROR`).
+  - Exit code `0` muted in dim gray, and non-zero exit codes highlighted in red.
+  - Desktop and Web UI parity: Added semantic `.execution-state` and `.execution-exit` styling to `ExecutionResults.tsx` and `mcp-results.css`.
+
 ## Inline Viewed Image Previews in Agent Activity (2026-10-20)
 
 - **Inline Auto-Preview under `view_image` activities**: Integrated image thumbnails directly beneath completed `view_image` tool rows in the Activity timeline across both Web and Desktop UI (`AgentActivityTable`). Provides immediate visual feedback of inspected screenshots/images in chronological context without requiring users to scroll down to the bottom of the conversation.

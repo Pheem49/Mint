@@ -13,4 +13,11 @@
 .mcp-image-dialog button { display: grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface-soft); color: var(--text-main); cursor: pointer; }
 .mcp-image-dialog img { display: block; max-width: 100%; max-height: calc(94dvh - 86px); object-fit: contain; }
 .mcp-image-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.execution-state { font-weight: 600; }
+.execution-state-succeeded { color: var(--accent, #69e6a6); }
+.execution-state-failed { color: var(--danger, #ff6b6b); }
+.execution-state-running { color: var(--interactive-fg, #60a5fa); }
+.execution-state-cancelled { color: var(--muted, #888); }
+.execution-exit { color: var(--muted, #888); }
+.execution-exit-error { color: var(--danger, #ff6b6b); }
 

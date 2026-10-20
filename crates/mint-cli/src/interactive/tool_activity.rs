@@ -147,11 +147,23 @@ impl ToolActivity {
             .map(|result| format!("Output · {} lines · ", result.lines().count()))
             .unwrap_or_default();
         let subject = self.subject();
+        let is_command = self
+            .input
+            .get("command")
+            .or_else(|| self.input.get("cmd"))
+            .and_then(Value::as_str)
+            .is_some()
+            || self.shell();
         let mut lines = vec![self.heading_line(width as usize)];
         if !subject.is_empty() {
+            let color = if is_command {
+                crate::terminal_theme::ACCENT
+            } else {
+                crate::terminal_theme::TEXT
+            };
             lines.push(Line::styled(
                 clip(&format!("  {}", subject), width as usize),
-                Style::default().fg(crate::terminal_theme::TEXT),
+                Style::default().fg(color),
             ));
         }
         lines.push(Line::from(vec![
@@ -373,5 +385,36 @@ mod tests {
             tool.details()
                 .contains("User denied shell command: echo example")
         );
+    }
+
+    #[test]
+    fn command_subject_is_styled_with_accent_color() {
+        let tool = ToolActivity {
+            entry: 0,
+            call_id: None,
+            action: "run_shell".into(),
+            input: serde_json::json!({"command":"mkdir -p /tmp/test"}),
+            subagent: None,
+            started: Instant::now(),
+            elapsed: None,
+            result: None,
+            status: None,
+        };
+        let lines = tool.lines(80);
+        assert_eq!(lines[1].style.fg, Some(crate::terminal_theme::ACCENT));
+
+        let non_command = ToolActivity {
+            entry: 0,
+            call_id: None,
+            action: "read_file".into(),
+            input: serde_json::json!({"path":"/tmp/test.png"}),
+            subagent: None,
+            started: Instant::now(),
+            elapsed: None,
+            result: None,
+            status: None,
+        };
+        let non_cmd_lines = non_command.lines(80);
+        assert_eq!(non_cmd_lines[1].style.fg, Some(crate::terminal_theme::TEXT));
     }
 }

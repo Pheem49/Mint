@@ -18,7 +18,8 @@ mod mcp_review;
 #[cfg(test)]
 mod mod_authoring_regressions;
 mod progress_clock;
-mod reliability;
+pub mod reliability;
+pub use reliability::{ExecutionEvidence, ExecutionState};
 mod repeated_failures;
 #[cfg(all(test, unix))]
 mod review_regressions;

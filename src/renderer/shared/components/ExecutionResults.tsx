@@ -16,7 +16,11 @@ export default memo(function ExecutionResults({ progress }: { progress: AgentPro
   return <section className="mcp-results" aria-label="Execution results">
     {label && <p role="status" data-completion-status={outcome}>{label}</p>}
     {[...executions].map(([id, entry]) => <details key={id} className="mcp-call-status">
-      <summary>{entry.check ? 'Check' : 'Command'} · {entry.state}{entry.exitCode != null ? ` · exit ${entry.exitCode}` : ''}{entry.conditionVerified === false ? ' · result unverified' : ''}</summary>
+      <summary>
+        {entry.check ? 'Check' : 'Command'} · <span className={`execution-state execution-state-${entry.state.toLowerCase()}`}>{entry.state}</span>
+        {entry.exitCode != null ? <span className={`execution-exit${entry.exitCode !== 0 ? ' execution-exit-error' : ''}`}> · exit {entry.exitCode}</span> : ''}
+        {entry.conditionVerified === false ? ' · result unverified' : ''}
+      </summary>
       <code>{entry.command}</code>
       {entry.jobId && <span>Job: {entry.jobId}</span>}
     </details>)}
