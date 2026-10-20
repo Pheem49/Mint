@@ -57,7 +57,10 @@ async function main() {
     ? await require('./auto-build').autoBuild(root)
     : findBinary();
   if (!binaryPath) throw new Error('native binary not found; run npm run build:cli first');
-  const child = spawn(binaryPath, process.argv.slice(2), { stdio: 'inherit' });
+  const child = spawn(binaryPath, process.argv.slice(2), {
+    stdio: 'inherit',
+    env: { ...process.env, MINT_ROOT: process.env.MINT_ROOT || root },
+  });
   child.once('error', err => { console.error(`mint: ${err.message}`); process.exitCode = 1; });
   child.once('close', (code, signal) => {
     if (signal) process.kill(process.pid, signal);

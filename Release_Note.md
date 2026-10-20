@@ -2,6 +2,10 @@
 
 Released: 2026-10-17
 
+## Mint Web Workspace Resolution (2026-10-20)
+
+- **Fixed `mint web` launching outside the Mint project directory**: Centralized Mint project root resolution (`find_mint_root`) to inspect explicit environment overrides (`MINT_ROOT`, `MINT_PROJECT_ROOT`, `MINT_WEB_ROOT`), executable ancestors, compile-time manifest paths, and common installation locations. Validates Mint-specific markers (`vite.config.web.ts`, `out/web/index-web.html`, and `@pheem49/mint`) so running `mint web` or `mint web --tailscale` from home (`~`) or other project directories correctly locates Mint's web UI assets without crashing with `Failed to find project root directory containing package.json` or misidentifying other repositories as Mint.
+
 ## Agent Execution Reliability (Phase 1) & Browser Automation (Phase 2) (2026-10-19)
 
 ### Phase 1: Agent Execution Reliability & Evidence-Based Verification

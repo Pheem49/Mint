@@ -22,13 +22,7 @@ impl Drop for ChildGuard {
 }
 
 fn project_root() -> Result<PathBuf> {
-    let cwd = std::env::current_dir()?;
-    let exe = std::env::current_exe()?;
-    exe.ancestors()
-        .chain(cwd.ancestors())
-        .find(|path| path.join("package.json").exists())
-        .map(PathBuf::from)
-        .context("Could not find the Mint project root (package.json)")
+    super::agent::find_mint_root()
 }
 
 fn tailscale(args: &[&str]) -> Result<String> {
