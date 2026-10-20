@@ -13,3 +13,92 @@
 .viewed-image-dialog > img { display: block; max-width: 100%; max-height: calc(94dvh - 86px); object-fit: contain; }
 .viewed-image-button:focus-visible, .viewed-image-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 480px) { .viewed-image-button img { height: 220px; } }
+
+/* ── Activity Inline Image Preview ── */
+.agent-activity-inline-preview {
+  margin: 6px 0 10px 28px;
+}
+
+.agent-activity-subitem-preview {
+  margin: 4px 10px 8px 24px;
+}
+
+.viewed-image-inline {
+  position: relative;
+  display: inline-block;
+  margin: 0;
+  max-width: 340px;
+}
+
+.viewed-image-inline-btn {
+  position: relative;
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--panel-soft, #1e293b) 60%, black);
+  cursor: zoom-in;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.2s ease,
+              box-shadow 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.viewed-image-inline-btn:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent, #10b981);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35), 0 0 12px color-mix(in srgb, var(--accent, #10b981) 25%, transparent);
+}
+
+.viewed-image-inline-btn img {
+  display: block;
+  max-width: 100%;
+  max-height: 160px;
+  min-height: 60px;
+  object-fit: contain;
+  background: repeating-conic-gradient(rgba(255, 255, 255, 0.03) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+  transition: transform 0.25s ease;
+}
+
+.viewed-image-inline-btn:hover img {
+  transform: scale(1.02);
+}
+
+.viewed-image-inline-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 6px 8px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.5) 0%, transparent 50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.viewed-image-inline-btn:hover .viewed-image-inline-overlay {
+  opacity: 1;
+}
+
+.viewed-image-inline-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.viewed-image-inline-status {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}

@@ -4,6 +4,7 @@ import { groupActivities } from '../utils/agentActivity'
 import { materialFileIcon, materialFolderIcon, getExtension } from '../utils/fileIcons'
 import { InlineThoughtNote } from './InlineThoughtNote'
 import { renderFormattedMessage } from '../utils/markdown'
+import { ViewedImage } from './ViewedImages'
 import {
   Brain,
   Calculator,
@@ -19,6 +20,7 @@ import {
 
 interface Props {
   activityView: AgentActivityView
+  chatId?: string
 }
 
 function getFilename(target: string): string {
@@ -82,7 +84,7 @@ function renderStatusIndicator(state: AgentActivity['state']) {
   return <Check size={12} className="agent-activity-status-check" />
 }
 
-export function AgentActivityTable({ activityView }: Props) {
+export function AgentActivityTable({ activityView, chatId }: Props) {
   const groups: AgentActivityGroup[] = activityView.groups || groupActivities(activityView.items)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const [expandedIndices, setExpandedIndices] = useState<Record<string, boolean>>({})
@@ -141,6 +143,11 @@ export function AgentActivityTable({ activityView }: Props) {
             )}
           </span>
         </div>
+        {activity.viewedImage && (
+          <div className="agent-activity-inline-preview">
+            <ViewedImage image={activity.viewedImage} chatId={chatId} variant="inline" />
+          </div>
+        )}
         {isItemExpanded && output && (
           <div className="agent-activity-output">
             <pre>{output}</pre>
@@ -220,6 +227,11 @@ export function AgentActivityTable({ activityView }: Props) {
                       )}
                     </span>
                   </div>
+                  {activity.viewedImage && (
+                    <div className="agent-activity-inline-preview agent-activity-subitem-preview">
+                      <ViewedImage image={activity.viewedImage} chatId={chatId} variant="inline" />
+                    </div>
+                  )}
                   {isItemExpanded && output && (
                     <div className="agent-activity-output agent-activity-subitem-output">
                       <pre>{output}</pre>

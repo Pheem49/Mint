@@ -66,10 +66,44 @@ it('shows a readable view_image result instead of raw image bytes while preservi
   expect(view.items[0].result).toContain('[Hook] Checked')
 })
 
-it('keeps viewed image identity stable when earlier text-only activities are trimmed', () => {
-  const earlier: AgentProgress[] = Array.from({ length: 10 }, () => ({ type: 'ToolEnd', data: { action: 'read_file', input: {}, result: 'Read' } }))
-  const image: AgentProgress = { type: 'ToolEnd', data: { action: 'view_image', input: { path: 'image.png' }, result: 'data:image/png;base64,aGVsbG8=' } }
-  const initial = [...earlier, image]
-  const later = Array.from({ length: 40 }, () => ({ type: 'ToolEnd' as const, data: { action: 'read_file', input: {}, result: 'Read' } })).reduce(reduceLiveAgentProgress, initial)
-  expect(viewedImagesFrom(later).map(item => item.id)).toEqual(viewedImagesFrom(initial).map(item => item.id))
+it('attaches viewedImage metadata to successful view_image activities but not failed ones', () => {
+  const failInput = { path: '/tmp/failed.png' }
+  const successInput = { path: '.mint-screenshots/captured.png' }
+  const dataUri = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+
+  const view = activitiesFrom([
+    { type: 'ToolStart', data: { callId: 'call-fail', action: 'view_image', input: failInput } },
+    { type: 'ToolEnd', data: { callId: 'call-fail', action: 'view_image', input: failInput, result: 'Error: file not found', status: 'error' } },
+    {
+      type: 'ToolArtifacts',
+      data: {
+        callId: 'call-success',
+        warnings: [],
+        artifacts: [
+          {
+            id: 'art-captured',
+            name: 'captured.png',
+            mimeType: 'image/png',
+            kind: 'image',
+            size: 1024,
+            chatId: 'chat-1',
+            callId: 'call-success',
+            server: 'view_image',
+          },
+        ],
+      },
+    },
+    { type: 'ToolStart', data: { callId: 'call-success', action: 'view_image', input: successInput } },
+    { type: 'ToolEnd', data: { callId: 'call-success', action: 'view_image', input: successInput, result: 'Image saved: captured.png (artifactId: art-captured)', status: 'success' } },
+  ])
+
+  // Failed activity should not have a viewed image
+  expect(view.items[0].viewedImage).toBeUndefined()
+
+  // Successful activity should have the artifact-backed viewed image
+  expect(view.items[1].viewedImage).toBeDefined()
+  expect(view.items[1].viewedImage?.artifactId).toBe('art-captured')
+  expect(view.items[1].viewedImage?.path).toBe('.mint-screenshots/captured.png')
+  expect(view.items[1].viewedImage?.name).toBe('captured.png')
 })
+

@@ -5,7 +5,7 @@
  */
 import type { AgentProgress } from '../types'
 import { isInternalCot } from '../agentProgress'
-import { viewedImageDataUri } from './viewedImages'
+import { viewedImageDataUri, viewedImagesFrom, type ViewedImageItem } from './viewedImages'
 
 export interface AgentActivity {
   label: string
@@ -16,6 +16,7 @@ export interface AgentActivity {
   callId?: string
   /** Raw ToolEnd output text, shown when the row is expanded in the UI. */
   result?: string
+  viewedImage?: ViewedImageItem
 }
 
 export interface AgentActivityGroup {
@@ -417,6 +418,32 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
       const hasError = item.group.items.some((it) => it.state === 'error')
       const hasRetry = item.group.items.some((it) => it.state === 'retry')
       item.group.state = hasActive ? 'active' : hasDone ? 'done' : hasRetry ? 'retry' : hasError ? 'error' : 'done'
+    }
+  }
+
+  const viewedImages = viewedImagesFrom(progress)
+  if (viewedImages.length > 0) {
+    const byCallId = new Map<string, ViewedImageItem>()
+    const byPath = new Map<string, ViewedImageItem[]>()
+    for (const img of viewedImages) {
+      if (img.id) byCallId.set(img.id, img)
+      if (img.path) {
+        const list = byPath.get(img.path) || []
+        list.push(img)
+        byPath.set(img.path, list)
+      }
+    }
+    for (const act of activities) {
+      if (act.action === 'view_image' && act.state === 'done') {
+        if (act.callId && byCallId.has(act.callId)) {
+          act.viewedImage = byCallId.get(act.callId)
+        } else if (byPath.has(act.target)) {
+          const list = byPath.get(act.target)!
+          if (list.length > 0) {
+            act.viewedImage = list.shift()
+          }
+        }
+      }
     }
   }
 

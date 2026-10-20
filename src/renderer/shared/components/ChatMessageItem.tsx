@@ -217,7 +217,7 @@ const ChatMessageItem = React.memo(
         <div className="message ai-message">
           <div className="bubble-wrapper">
             {interaction.status === 'completed' && <ProgressActivity progress={progress} id={String(interaction.id)}
-              historical isOpen={Boolean(openActivityIds?.[String(interaction.id)])} onToggle={toggleActivity} />}
+              historical isOpen={Boolean(openActivityIds?.[String(interaction.id)])} onToggle={toggleActivity} chatId={props.chatId || interaction.chatId} />}
             {interaction.status === 'completed' && renderFileChanges(interaction)}
             <div className="message-bubble">
               {interaction.status === 'queued' && <span>Queued for this session…</span>}

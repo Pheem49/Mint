@@ -19,6 +19,7 @@ interface Props {
   isHistorical?: boolean
   pendingApproval?: boolean
   rawProgress?: AgentProgress[]
+  chatId?: string
   key?: any
 }
 
@@ -29,6 +30,7 @@ export function AgentActivityDrawer({
   isHistorical = false,
   pendingApproval = false,
   rawProgress,
+  chatId,
 }: Props) {
   const [viewMode, setViewMode] = useState<'list' | 'dag'>('list')
 
@@ -144,7 +146,7 @@ export function AgentActivityDrawer({
       {viewMode === 'dag' && hasSubagents ? (
         <SubagentDagView progress={rawProgress || []} isLive={!isHistorical} />
       ) : activityView.items.length > 0 || (activityView.timeline && activityView.timeline.length > 0) ? (
-        <AgentActivityTable activityView={activityView} />
+        <AgentActivityTable activityView={activityView} chatId={chatId} />
       ) : null}
     </>
   )

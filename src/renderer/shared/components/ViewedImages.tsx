@@ -5,7 +5,7 @@ import { viewedImagesFrom, type ViewedImageItem } from '../utils/viewedImages'
 import { mediaPlatform } from '../platform'
 import '../css/viewed-images.css'
 
-function ViewedImage({ image, chatId }: { image: ViewedImageItem; chatId?: string }) {
+export function ViewedImage({ image, chatId, variant = 'card' }: { image: ViewedImageItem; chatId?: string; variant?: 'card' | 'inline' }) {
   const [src, setSrc] = useState(image.src || '')
   const [broken, setBroken] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -38,6 +38,45 @@ function ViewedImage({ image, chatId }: { image: ViewedImageItem; chatId?: strin
   useEffect(() => {
     if (expanded) dialog.current?.showModal()
   }, [expanded])
+
+  if (variant === 'inline') {
+    return (
+      <figure className="viewed-image-inline" data-activity-image={image.id}>
+        {broken || !src ? (
+          <p className="viewed-image-inline-status" role="status">
+            {broken ? 'Image preview unavailable' : 'Loading image…'}
+          </p>
+        ) : (
+          <button
+            type="button"
+            className="viewed-image-inline-btn"
+            aria-label={`Expand ${image.name}`}
+            onClick={() => setExpanded(true)}
+          >
+            <img src={src} alt={`Viewed image: ${image.name}`} loading="lazy" onError={() => setBroken(true)} />
+            <span className="viewed-image-inline-overlay">
+              <span className="viewed-image-inline-badge">Click to zoom</span>
+            </span>
+          </button>
+        )}
+        <dialog
+          ref={dialog}
+          className="viewed-image-dialog"
+          aria-label={`Image preview: ${image.name}`}
+          onClose={() => setExpanded(false)}
+          onClick={event => { if (event.target === event.currentTarget) dialog.current?.close() }}
+        >
+          <header>
+            <span title={image.path}>{image.name}</span>
+            <button type="button" aria-label="Close image preview" onClick={() => dialog.current?.close()}>
+              <X size={18} />
+            </button>
+          </header>
+          {expanded && src && <img src={src} alt={image.name} />}
+        </dialog>
+      </figure>
+    )
+  }
 
   return <figure className="viewed-image" data-viewed-image={image.id}>
     {broken || !src ? <p className="viewed-image-error" role="status">{broken ? 'Image preview unavailable' : 'Loading image…'}</p> :

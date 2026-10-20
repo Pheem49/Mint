@@ -1380,6 +1380,7 @@ export default function ChatPanel({
               isOpen={openActivityIds['live'] ?? true}
               onToggle={toggleActivity}
               pendingApproval={!!pendingApproval}
+              chatId={chatId}
             />
           )}
           {renderActiveFileChanges()}

@@ -2,6 +2,13 @@
 
 Released: 2026-10-17
 
+## Inline Viewed Image Previews in Agent Activity (2026-10-20)
+
+- **Inline Auto-Preview under `view_image` activities**: Integrated image thumbnails directly beneath completed `view_image` tool rows in the Activity timeline across both Web and Desktop UI (`AgentActivityTable`). Provides immediate visual feedback of inspected screenshots/images in chronological context without requiring users to scroll down to the bottom of the conversation.
+- **Click-to-zoom modal**: Each inline preview includes an interactive thumbnail card with hover zoom micro-interactions, dark glassmorphism styling with checkerboard pattern for transparent graphics, and full-screen image inspection modal with pan/zoom and close controls.
+- **Deep module integration & Platform Parity**: Reused the shared `ViewedImage` artifact and data URI resolver so Desktop and Web maintain identical behavior and lifecycle cleanup.
+
+
 ## Mint Web Workspace Resolution (2026-10-20)
 
 - **Fixed `mint web` launching outside the Mint project directory**: Centralized Mint project root resolution (`find_mint_root`) to inspect explicit environment overrides (`MINT_ROOT`, `MINT_PROJECT_ROOT`, `MINT_WEB_ROOT`), executable ancestors, compile-time manifest paths, and common installation locations. Validates Mint-specific markers (`vite.config.web.ts`, `out/web/index-web.html`, and `@pheem49/mint`) so running `mint web` or `mint web --tailscale` from home (`~`) or other project directories correctly locates Mint's web UI assets without crashing with `Failed to find project root directory containing package.json` or misidentifying other repositories as Mint.
