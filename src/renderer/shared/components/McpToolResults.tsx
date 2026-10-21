@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { X } from 'lucide-react'
+import { Info, X } from 'lucide-react'
 import type { AgentProgress, McpArtifact } from '../types'
 import { mediaPlatform } from '../platform'
 import '../css/mcp-results.css'
@@ -87,7 +87,8 @@ export default memo(function McpToolResults({ progress, running = false, interru
     return () => clearInterval(timer)
   }, [hasActiveCalls])
   if (!calls.size && !displayedArtifacts.length && !warnings.size && !discovery.size) return null
-  return <section className="mcp-results" aria-label="MCP results">
+  const isOnlyWarnings = !calls.size && !displayedArtifacts.length && !discovery.size && warnings.size > 0
+  return <section className={`mcp-results${isOnlyWarnings ? ' mcp-results-compact' : ''}`} aria-label="MCP results">
     {[...discovery].map(([label,message])=><div key={label} className="mcp-call-status" role="status"><strong>{label}</strong><span>{message}</span></div>)}
     {[...calls].map(([id, call]) => {
       const active = running && !call.status
@@ -105,7 +106,13 @@ export default memo(function McpToolResults({ progress, running = false, interru
         {active && percent !== undefined && <progress max={100} value={percent} aria-label={`${call.label} progress`}>{percent}%</progress>}
       </div>
     })}
-    <div className="mcp-artifacts">{displayedArtifacts.map(artifact => <Artifact key={artifact.id} artifact={artifact} chatId={chatId} />)}</div>
-    {[...warnings].map(warning => <p key={warning} role="status">{warning}</p>)}
+    {displayedArtifacts.length > 0 && <div className="mcp-artifacts">{displayedArtifacts.map(artifact => <Artifact key={artifact.id} artifact={artifact} chatId={chatId} />)}</div>}
+    {[...warnings].map(warning => (
+      <div key={warning} className="mcp-warning-banner" role="status">
+        <Info size={14} className="mcp-warning-icon" aria-hidden="true" />
+        <span className="mcp-warning-text">{warning}</span>
+      </div>
+    ))}
   </section>
 })
+

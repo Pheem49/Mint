@@ -9,6 +9,9 @@ const active = (job: BackgroundJob) => job.status === 'running' || job.status ==
 const elapsed = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`
 const workspaceName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() || path
 
+export const filterScopedJobs = (jobs: BackgroundJob[], workspacePath?: string | null): BackgroundJob[] =>
+  workspacePath ? jobs.filter(job => job.workspacePath === workspacePath) : []
+
 export function BackgroundTerminals({ workspacePath, panelTarget, onCountChange }: {
   workspacePath?: string | null; panelTarget: HTMLElement | null; onCountChange: (count: number) => void
 }) {
@@ -35,8 +38,9 @@ export function BackgroundTerminals({ workspacePath, panelTarget, onCountChange 
       if (busy || document.hidden) return
       busy = true
       try {
-        const [next, scoped] = await Promise.all([backgroundPlatform.list(), workspacePath ? backgroundPlatform.list(workspacePath) : Promise.resolve([])])
+        const next = await backgroundPlatform.list()
         if (disposed) return
+        const scoped = filterScopedJobs(next, workspacePath)
         let message = ''
         for (const job of next) {
           const previous = statuses.current.get(job.id)
@@ -58,7 +62,7 @@ export function BackgroundTerminals({ workspacePath, panelTarget, onCountChange 
       } finally { busy = false; if (!disposed) setLoading(false) }
     }
     void refresh()
-    const timer = window.setInterval(() => void refresh(), 1000)
+    const timer = window.setInterval(() => void refresh(), 3000)
     const resume = () => { if (!document.hidden) void refresh() }
     document.addEventListener('visibilitychange', resume)
     return () => { disposed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', resume) }

@@ -115,6 +115,38 @@ pub(crate) fn log_api_err(context: &str, error: &dyn std::fmt::Display) {
     );
 }
 
+pub(crate) fn should_log_api_route(route: &str) -> bool {
+    if !route.starts_with("/api/") {
+        return false;
+    }
+
+    if route.starts_with("/api/pictures/")
+        || route.starts_with("/api/thumbnails/")
+        || route.starts_with("/api/background-jobs")
+        || route == "/api/media"
+        || route == "/api/chat"
+        || route == "/api/chat-stream"
+        || route == "/api/image-generate"
+        || route == "/api/video-generate"
+        || route == "/api/action"
+        || route == "/api/config"
+        || route == "/api/gemini-live"
+        || route == "/api/interactions"
+        || route == "/api/conversation-snapshot"
+        || route == "/api/conversation-changes"
+        || route == "/api/status"
+        || route == "/api/chat-sessions"
+        || route == "/api/mods"
+        || route.starts_with("/api/mods/")
+        || route == "/api/models"
+        || route.starts_with("/api/models/")
+    {
+        return false;
+    }
+
+    true
+}
+
 /// Binds the local HTTP API on `port` and blocks forever serving requests.
 /// Also starts the messaging bridges and cron scheduler as a side effect —
 /// callers (`mint api`, `mint gateway start --api-port`, ...) must not call
@@ -337,23 +369,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                 return;
             }
 
-            if route.starts_with("/api/")
-                && !route.starts_with("/api/pictures/")
-                && !route.starts_with("/api/thumbnails/")
-                && route != "/api/media"
-                && route != "/api/chat"
-                && route != "/api/chat-stream"
-                && route != "/api/image-generate"
-                && route != "/api/video-generate"
-                && route != "/api/action"
-                && route != "/api/config"
-                && route != "/api/gemini-live"
-                && route != "/api/interactions"
-                && route != "/api/conversation-snapshot"
-                && route != "/api/conversation-changes"
-                && route != "/api/status"
-                && route != "/api/chat-sessions"
-            {
+            if should_log_api_route(route) {
                 log_api_req(method, route, "200 OK", Some(&auth_label));
             }
 
@@ -1993,4 +2009,24 @@ mod tests {
         assert!(ts >= before);
         assert!(ts < before + 5);
     }
+
+    #[test]
+    fn test_should_log_api_route_exclusions() {
+        // Routine noisy/polling routes should be suppressed from terminal log spam
+        assert!(!should_log_api_route("/api/background-jobs"));
+        assert!(!should_log_api_route("/api/background-jobs/abc"));
+        assert!(!should_log_api_route("/api/mods"));
+        assert!(!should_log_api_route("/api/models"));
+        assert!(!should_log_api_route("/api/status"));
+        assert!(!should_log_api_route("/api/interactions"));
+        assert!(!should_log_api_route("/api/pictures/foo.png"));
+        assert!(!should_log_api_route("/api/thumbnails/bar.jpg"));
+        assert!(!should_log_api_route("/not-api/test"));
+
+        // Standard operational API calls should still be logged
+        assert!(should_log_api_route("/api/library"));
+        assert!(should_log_api_route("/api/system-info"));
+        assert!(should_log_api_route("/api/select-folder"));
+    }
 }
+

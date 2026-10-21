@@ -21,3 +21,34 @@
 .execution-exit { color: var(--muted, #888); }
 .execution-exit-error { color: var(--danger, #ff6b6b); }
 
+.mcp-results-compact {
+  margin: 6px 0 10px 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.mcp-warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface-soft);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.mcp-warning-icon {
+  flex-shrink: 0;
+  color: var(--interactive-fg, var(--accent));
+  opacity: 0.9;
+}
+
+.mcp-warning-text {
+  flex: 1;
+  min-width: 0;
+}
+

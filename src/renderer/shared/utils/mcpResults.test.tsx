@@ -96,3 +96,19 @@ it('shows stopped waiting when interrupted during a device operation', () => {
   expect(html).toContain('Stopped waiting')
   expect(html).not.toContain('Awaiting device completion')
 })
+
+it('renders warning banner with icon and accessible status', () => {
+  const progress: any[] = [{
+    type: 'ToolArtifacts',
+    data: {
+      callId: 'a',
+      artifacts: [],
+      warnings: ['Model input was resized/compressed; the original image is available for download.'],
+    },
+  }]
+  const html = renderToStaticMarkup(<McpToolResults progress={progress} />)
+  expect(html).toContain('mcp-warning-banner')
+  expect(html).toContain('mcp-results-compact')
+  expect(html).toContain('Model input was resized/compressed')
+})
+

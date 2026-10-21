@@ -33,6 +33,10 @@ export function ModsPanel({ workspacePath, chatId, panelTarget, onOpen }: { work
     setData({ mods: [] }); setLoading(Boolean(workspacePath && chatId)); setBusy(false); setError(''); setTab('manage'); seen.current.clear(); setReports({})
     async function refresh() {
       if (!workspacePath || !chatId || stopped) return
+      if (document.hidden) {
+        if (!stopped) timer = setTimeout(refresh, 3000)
+        return
+      }
       try {
         const value = await modsPlatform.operation({ workspacePath, chatId, action: 'list' })
         if (!stopped && generation.current === current) {
@@ -42,11 +46,14 @@ export function ModsPanel({ workspacePath, chatId, panelTarget, onOpen }: { work
           if (fresh) { onOpenRef.current(); setTab(fresh.id) }
         }
       } catch (e) { if (!stopped && generation.current === current) { setError(String(e)); setLoading(false) } }
-      if (!stopped) timer = setTimeout(refresh, 1000)
+      if (!stopped) timer = setTimeout(refresh, 3000)
     }
     void refresh()
+    const resume = () => { if (!document.hidden && !stopped) void refresh() }
+    document.addEventListener('visibilitychange', resume)
     return () => {
       stopped = true; clearTimeout(timer)
+      document.removeEventListener('visibilitychange', resume)
       if (workspacePath && chatId) void modsPlatform.operation({ workspacePath, chatId, action: 'close' }).catch(() => {})
     }
   }, [workspacePath, chatId])

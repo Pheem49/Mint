@@ -2,6 +2,15 @@
 
 Released: 2026-10-17
 
+## API Server Log De-noising & Frontend Polling Optimization (2026-10-21)
+
+- **Server-Side API Log Filtering (`should_log_api_route`)**: Added high-frequency polling routes (`/api/background-jobs`, `/api/mods`, `/api/models`) to the route exclusion filter in `crates/mint-core/src/api_server.rs`. Completely eliminates repetitive terminal spam from routine UI polling while ensuring standard operational and administrative API calls (`/api/library`, `/api/system-info`, etc.) remain logged.
+- **Eliminated Duplicate Request in `BackgroundTerminals`**: Replaced the parallel secondary `backgroundPlatform.list(workspacePath)` call with an in-memory client-side filter (`filterScopedJobs`). All background job scopes are now derived from a single fetch, cutting network requests in half.
+- **Throttled Polling Frequencies & Visibility Pause**:
+  - Relaxed `BackgroundTerminals` list polling interval from 1,000ms to 3,000ms.
+  - Relaxed `ModsPanel` status polling interval from 1,000ms to 3,000ms, and added `document.hidden` guards with `visibilitychange` listeners to pause polling entirely when tabs/windows are inactive, saving CPU and bandwidth.
+- **Model Input Warning Banner Refinement (`McpToolResults`)**: Refactored raw text warning notices into an accessible `.mcp-warning-banner` with Lucide `Info` icon and soft muted styling. Added `.mcp-results-compact` when only warnings are present to remove the oversized outer bordered box, maintaining strict design token parity (`var(--bg-surface-soft)`, `var(--border)`, `var(--text-muted)`, `var(--interactive-fg)`) across Desktop and Web without hardcoded colors.
+
 ## Mint TUI Command Styling & Execution Status Highlighting (2026-10-20)
 
 - **Green Accent Command Styling in TUI**: Styled shell command subjects in the full-screen Mint TUI activity cards using the Mint Green accent color (`terminal_theme::ACCENT`), matching the detail view in `Ctrl+O` for visual clarity and consistency across the transcript.
