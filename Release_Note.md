@@ -10,7 +10,8 @@ Released: 2026-10-17
   - `Failed` highlighted in bold Red (`ERROR`).
   - Exit code `0` muted in dim gray, and non-zero exit codes highlighted in red.
   - Desktop and Web UI parity: Added semantic `.execution-state` and `.execution-exit` styling to `ExecutionResults.tsx` and `mcp-results.css`.
-  - **Verification Evidence Card Redesign (Web & Desktop)**: Redesigned the raw `ExecutionResults` block into a cohesive, dark-glassmorphism verification card matching the Mint design system. Features an integrated header with outcome status badges (`Verified`, `Unverified`, `Blocked`, `Failed`), execution summary counts (passed/failed/running), collapsible section toggling, and interactive item rows with kind badges (`[Command]` / `[Check]`), monospace command previews, semantic outcome chips, exit codes, and expandable inspection drawers with full command view and one-click copy.
+  - **Streamlined Execution Activity into Native Timeline (Web & Desktop Parity)**: Removed the redundant bottom `ExecutionResults` / "Verified Evidence" block from the chat message bubble. All command executions are now unified directly inside the chronological Activity Timeline (`AgentActivityTable`), flowing naturally right where each action occurs with Mint's native pill card styling, terminal icons, and exit status badges (`→ exit: 0`), eliminating out-of-order duplicate command blocks at the bottom while keeping backend reliability and verification contracts fully intact.
+  - **Full-Screen TUI Transcript De-duplication**: Suppressed redundant raw `[Command] Succeeded` / `[Check]` text notices in the Full-Screen TUI (both during live runs and transcript restore). All command executions are now represented exclusively by native interactive `ToolActivity` cards (`🟢 run_shell completed · exit 0`), keeping the TUI transcript clean, focused, and dev-native without duplicate noise.
 
 ## Inline Viewed Image Previews in Agent Activity (2026-10-20)
 

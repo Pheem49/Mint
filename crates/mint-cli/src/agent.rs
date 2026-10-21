@@ -629,6 +629,11 @@ pub(crate) fn publish_mcp_progress(
     tui: Option<&crate::interactive::TuiHandle>,
     event: &AgentProgress,
 ) -> bool {
+    // In Full-Screen TUI, executions are already rendered as interactive ToolActivity cards.
+    // Suppress redundant [Command]/[Check] text notices in TUI while preserving them for Classic CLI.
+    if tui.is_some() && matches!(event, AgentProgress::ExecutionUpdate { .. }) {
+        return false;
+    }
     let Some(notes) = mcp_progress_notes(event) else {
         return false;
     };

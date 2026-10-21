@@ -1939,9 +1939,12 @@ impl ChatViewState {
                     _ => {}
                 }
             }
-            if let Some(notes) = crate::agent::mcp_progress_notes(&event) {
-                for note in notes {
-                    self.push_notice(note);
+            // Suppress redundant ExecutionUpdate notices in TUI (handled by ToolActivity cards)
+            if !matches!(event, mint_core::AgentProgress::ExecutionUpdate { .. }) {
+                if let Some(notes) = crate::agent::mcp_progress_notes(&event) {
+                    for note in notes {
+                        self.push_notice(note);
+                    }
                 }
             }
         }
@@ -5760,6 +5763,37 @@ mod dialog_tests {
         assert!(rendered.contains("target"));
         assert!(rendered.contains("actual"));
         assert!(rendered.contains("Sample attachment unavailable"));
+    }
+
+    #[test]
+    fn tui_suppresses_redundant_execution_update_notices() {
+        use mint_core::{ExecutionEvidence, ExecutionState};
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let tui = TuiHandle {
+            state: Arc::clone(&state),
+            interrupted: Arc::new(AtomicBool::new(false)),
+            queued: Arc::new(Mutex::new(Vec::new())),
+        };
+        let update = mint_core::AgentProgress::ExecutionUpdate {
+            call_id: "test".into(),
+            executions: vec![ExecutionEvidence {
+                call_id: "test1".into(),
+                command: "ls -la".into(),
+                state: ExecutionState::Succeeded,
+                exit_code: Some(0),
+                job_id: None,
+                revision: 1,
+                check: false,
+                condition_verified: None,
+            }],
+        };
+        let published = crate::agent::publish_mcp_progress(Some(&tui), &update);
+        assert!(!published, "ExecutionUpdate should be suppressed in TUI");
+        let transcript = state.lock().unwrap().transcript.clone();
+        assert!(
+            !transcript.iter().any(|entry| entry.text.contains("[Command]")),
+            "TUI transcript must not receive redundant [Command] notices"
+        );
     }
 
     #[test]
