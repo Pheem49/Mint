@@ -14,11 +14,10 @@ const base: ChatMessageItemProps = {
 }
 const unchanged = (next: Partial<ChatMessageItemProps>) => (ChatMessageItem as any).compare(base, { ...base, ...next })
 
-it('keeps an unverified completion visible in saved chat with Activity collapsed', () => {
+it('does not render duplicate completion status pills in message bubble', () => {
   const progress: any[] = [{ type: 'RunCompleted', data: { summary: { outcome: 'UNVERIFIED' } } }]
   const html = renderToStaticMarkup(<ChatMessageItem {...base} interaction={{ ...base.interaction, agentActivity: progress }} />)
-  expect(html).toContain('data-completion-status="unverified"')
-  expect(html).toContain('Unverified')
+  expect(html).not.toContain('data-completion-status')
 })
 
 describe('message update isolation', () => {

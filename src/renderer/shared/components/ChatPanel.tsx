@@ -1,7 +1,6 @@
 import { SpeechPlayer } from '../speech/player'
 import McpToolResults from './McpToolResults'
 import ViewedImages from './ViewedImages'
-import ExecutionResults from './ExecutionResults'
 import { CollapsiblePasteInput } from './CollapsiblePasteInput'
 import { ContextCompactionStatus } from './ContextCompactionStatus'
 import { activeCompactionFrom } from '../utils/contextCompaction'
@@ -1408,7 +1407,6 @@ export default function ChatPanel({
               <div className="message-bubble">
                 <McpToolResults progress={agentProgress} running chatId={chatId} />
                 <ViewedImages progress={agentProgress} chatId={chatId} />
-                <ExecutionResults progress={agentProgress} />
                 <span>
                   {compaction ? (
                     <ContextCompactionStatus key={compaction.index} />
