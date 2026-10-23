@@ -296,14 +296,15 @@ mod tests {
     #[tokio::test]
     async fn a_different_passing_check_does_not_erase_failed_tests() {
         scope(async {
-            record("tests",ExecutionState::Failed,Some(1),None,"failed");
-            complete_tool("verify","tests-call",0,true);
-            let from=checkpoint();
-            record("build",ExecutionState::Succeeded,Some(0),None,"built");
-            complete_tool("verify","build-call",from,true);
-            assert_eq!(completion("", "Everything passed").unwrap(),"failed");
+            record("tests", ExecutionState::Failed, Some(1), None, "failed");
+            complete_tool("verify", "tests-call", 0, true);
+            let from = checkpoint();
+            record("build", ExecutionState::Succeeded, Some(0), None, "built");
+            complete_tool("verify", "build-call", from, true);
+            assert_eq!(completion("", "Everything passed").unwrap(), "failed");
             assert!(completion("verified", "Everything passed").is_err());
-        }).await;
+        })
+        .await;
     }
     #[tokio::test]
     async fn an_unverified_workflow_does_not_turn_an_exited_process_into_running_work() {
@@ -428,7 +429,13 @@ mod tests {
     #[tokio::test]
     async fn different_check_at_current_revision_verifies_latest_edit() {
         scope(async {
-            record("cargo test", ExecutionState::Failed, Some(1), None, "failed");
+            record(
+                "cargo test",
+                ExecutionState::Failed,
+                Some(1),
+                None,
+                "failed",
+            );
             complete_tool("verify", "check-0", 0, true);
             assert_eq!(completion("", "").unwrap(), "failed");
 

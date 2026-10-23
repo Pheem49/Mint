@@ -168,11 +168,22 @@ async fn orchestration_prunes_older_tool_images_while_preserving_recent_images()
         text: "[Image loaded — see attached image]".into(),
         status: crate::mcp_result::ToolStatus::Success,
     }];
-    append_native_tool_results(&mut messages, "view step 1", &results_1, &Default::default(), &images_1);
+    append_native_tool_results(
+        &mut messages,
+        "view step 1",
+        &results_1,
+        &Default::default(),
+        &images_1,
+    );
     prune_historic_images_from_native_messages(&mut messages, MAX_RETAINED_IMAGE_STEPS);
 
     // Step 1: Image is retained (1 step <= MAX_RETAINED_IMAGE_STEPS)
-    assert!(messages[1].content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
+    assert!(
+        messages[1]
+            .content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Image { .. }))
+    );
 
     let mut images_2 = std::collections::HashMap::new();
     images_2.insert("call-2".into(), vec!["data:image/png;base64,step2".into()]);
@@ -183,12 +194,28 @@ async fn orchestration_prunes_older_tool_images_while_preserving_recent_images()
         text: "[Image loaded — see attached image]".into(),
         status: crate::mcp_result::ToolStatus::Success,
     }];
-    append_native_tool_results(&mut messages, "view step 2", &results_2, &Default::default(), &images_2);
+    append_native_tool_results(
+        &mut messages,
+        "view step 2",
+        &results_2,
+        &Default::default(),
+        &images_2,
+    );
     prune_historic_images_from_native_messages(&mut messages, MAX_RETAINED_IMAGE_STEPS);
 
     // Step 2: Both images retained (2 steps <= MAX_RETAINED_IMAGE_STEPS)
-    assert!(messages[1].content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
-    assert!(messages[3].content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
+    assert!(
+        messages[1]
+            .content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Image { .. }))
+    );
+    assert!(
+        messages[3]
+            .content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Image { .. }))
+    );
 
     let mut images_3 = std::collections::HashMap::new();
     images_3.insert("call-3".into(), vec!["data:image/png;base64,step3".into()]);
@@ -199,14 +226,36 @@ async fn orchestration_prunes_older_tool_images_while_preserving_recent_images()
         text: "[Image loaded — see attached image]".into(),
         status: crate::mcp_result::ToolStatus::Success,
     }];
-    append_native_tool_results(&mut messages, "view step 3", &results_3, &Default::default(), &images_3);
-    let pruned = prune_historic_images_from_native_messages(&mut messages, MAX_RETAINED_IMAGE_STEPS);
+    append_native_tool_results(
+        &mut messages,
+        "view step 3",
+        &results_3,
+        &Default::default(),
+        &images_3,
+    );
+    let pruned =
+        prune_historic_images_from_native_messages(&mut messages, MAX_RETAINED_IMAGE_STEPS);
 
     // Step 3: Step 1's image is pruned! Steps 2 and 3 are retained.
     assert_eq!(pruned, 1);
-    assert!(!messages[1].content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
-    assert!(messages[3].content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
-    assert!(messages[5].content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
+    assert!(
+        !messages[1]
+            .content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Image { .. }))
+    );
+    assert!(
+        messages[3]
+            .content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Image { .. }))
+    );
+    assert!(
+        messages[5]
+            .content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Image { .. }))
+    );
     assert!(messages[1].content.iter().any(|b| matches!(b, ContentBlock::ToolResult { content, .. } if content.contains("historical image pixels pruned from context"))));
 }
 
@@ -216,10 +265,12 @@ async fn view_image_and_read_file_can_access_temp_directory_safely() {
     std::fs::create_dir_all(&workspace).unwrap();
 
     // 1. Create an image and a text file in std::env::temp_dir() outside the workspace
-    let temp_img = std::env::temp_dir().join(format!("mint-temp-test-{}.png", uuid::Uuid::new_v4()));
+    let temp_img =
+        std::env::temp_dir().join(format!("mint-temp-test-{}.png", uuid::Uuid::new_v4()));
     image::RgbImage::new(10, 10).save(&temp_img).unwrap();
 
-    let temp_txt = std::env::temp_dir().join(format!("mint-temp-note-{}.txt", uuid::Uuid::new_v4()));
+    let temp_txt =
+        std::env::temp_dir().join(format!("mint-temp-note-{}.txt", uuid::Uuid::new_v4()));
     std::fs::write(&temp_txt, "Hello from /tmp!").unwrap();
 
     let config = MintConfig::default();
@@ -230,8 +281,20 @@ async fn view_image_and_read_file_can_access_temp_directory_safely() {
         path: temp_img.to_string_lossy().to_string(),
         ..Default::default()
     };
-    let img_res = tools::project::execute("view_image", &img_input, &workspace, &config, "test-chat", &mut approve).await;
-    assert!(img_res.is_ok(), "view_image failed on temp file: {:?}", img_res.err());
+    let img_res = tools::project::execute(
+        "view_image",
+        &img_input,
+        &workspace,
+        &config,
+        "test-chat",
+        &mut approve,
+    )
+    .await;
+    assert!(
+        img_res.is_ok(),
+        "view_image failed on temp file: {:?}",
+        img_res.err()
+    );
     let img_out = img_res.unwrap();
     assert!(img_out.starts_with("data:image/png;base64,"));
 
@@ -240,8 +303,20 @@ async fn view_image_and_read_file_can_access_temp_directory_safely() {
         path: temp_txt.to_string_lossy().to_string(),
         ..Default::default()
     };
-    let txt_res = tools::files::execute("read_file", &txt_input, &workspace, &config, "test-chat", &mut approve).await;
-    assert!(txt_res.is_ok(), "read_file failed on temp file: {:?}", txt_res.err());
+    let txt_res = tools::files::execute(
+        "read_file",
+        &txt_input,
+        &workspace,
+        &config,
+        "test-chat",
+        &mut approve,
+    )
+    .await;
+    assert!(
+        txt_res.is_ok(),
+        "read_file failed on temp file: {:?}",
+        txt_res.err()
+    );
     let txt_out = txt_res.unwrap();
     assert!(txt_out.contains("Hello from /tmp!"));
 
@@ -255,8 +330,19 @@ async fn view_image_and_read_file_can_access_temp_directory_safely() {
         path: blocked_file.to_string_lossy().to_string(),
         ..Default::default()
     };
-    let blocked_res = tools::files::execute("read_file", &blocked_input, &workspace, &config, "test-chat", &mut approve).await;
-    assert!(blocked_res.is_err(), "reading .env from temp should be blocked");
+    let blocked_res = tools::files::execute(
+        "read_file",
+        &blocked_input,
+        &workspace,
+        &config,
+        "test-chat",
+        &mut approve,
+    )
+    .await;
+    assert!(
+        blocked_res.is_err(),
+        "reading .env from temp should be blocked"
+    );
 
     // 5. Test orchestration::execute_tool interception path for view_image with /tmp (regression for mod.rs:3713)
     let decision = AgentDecision {
@@ -277,7 +363,11 @@ async fn view_image_and_read_file_can_access_temp_directory_safely() {
         &mut progress_cb,
     )
     .await;
-    assert!(outcome.is_ok(), "orchestration execute_tool failed on temp image: {:?}", outcome.err());
+    assert!(
+        outcome.is_ok(),
+        "orchestration execute_tool failed on temp image: {:?}",
+        outcome.err()
+    );
     let outcome = outcome.unwrap();
     assert!(outcome.contains("Image saved:"));
 
@@ -287,4 +377,3 @@ async fn view_image_and_read_file_can_access_temp_directory_safely() {
     let _ = std::fs::remove_dir_all(temp_sub);
     let _ = std::fs::remove_dir_all(workspace);
 }
-

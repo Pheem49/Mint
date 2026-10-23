@@ -5791,7 +5791,9 @@ mod dialog_tests {
         assert!(!published, "ExecutionUpdate should be suppressed in TUI");
         let transcript = state.lock().unwrap().transcript.clone();
         assert!(
-            !transcript.iter().any(|entry| entry.text.contains("[Command]")),
+            !transcript
+                .iter()
+                .any(|entry| entry.text.contains("[Command]")),
             "TUI transcript must not receive redundant [Command] notices"
         );
     }

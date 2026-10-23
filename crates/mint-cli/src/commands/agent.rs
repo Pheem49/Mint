@@ -1286,7 +1286,11 @@ mod web_readiness_tests {
         assert!(!is_mint_root(&temp));
 
         let foreign_pkg = temp.join("package.json");
-        std::fs::write(&foreign_pkg, r#"{"name": "foreign-app", "scripts": {"test": "echo test"}}"#).unwrap();
+        std::fs::write(
+            &foreign_pkg,
+            r#"{"name": "foreign-app", "scripts": {"test": "echo test"}}"#,
+        )
+        .unwrap();
         assert!(!is_mint_root(&temp));
 
         let vite_config = temp.join("vite.config.web.ts");

@@ -1013,7 +1013,9 @@ mod tests {
     #[tokio::test]
     async fn headed_mode_does_not_hijack_running_port_9222_browser_without_explicit_flag() {
         let mut config = MintConfig::default();
-        config.extra.insert("browserAgentMode".into(), json!("headed"));
+        config
+            .extra
+            .insert("browserAgentMode".into(), json!("headed"));
         let endpoint = endpoint(&config);
         let parsed = reqwest::Url::parse(endpoint).unwrap();
         let external = config.extra.get("browserUseExisting") == Some(&json!(true))
@@ -1022,16 +1024,24 @@ mod tests {
                 Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
             )
             || parsed.port_or_known_default() != Some(9222);
-        assert!(!external, "Headed mode without browserUseExisting must not attach to port 9222");
+        assert!(
+            !external,
+            "Headed mode without browserUseExisting must not attach to port 9222"
+        );
 
-        config.extra.insert("browserUseExisting".into(), json!(true));
+        config
+            .extra
+            .insert("browserUseExisting".into(), json!(true));
         let external_with_flag = config.extra.get("browserUseExisting") == Some(&json!(true))
             || !matches!(
                 parsed.host_str(),
                 Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
             )
             || parsed.port_or_known_default() != Some(9222);
-        assert!(external_with_flag, "Explicit browserUseExisting should allow external attachment");
+        assert!(
+            external_with_flag,
+            "Explicit browserUseExisting should allow external attachment"
+        );
     }
 
     struct BrowserFixture {
@@ -1170,21 +1180,34 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore="isolated real Chrome; borrowed-browser tab ownership cleanup"]
+    #[ignore = "isolated real Chrome; borrowed-browser tab ownership cleanup"]
     async fn borrowed_session_closes_its_popup_but_keeps_the_original_tab() {
-        let fixture=BrowserFixture::start().await;
-        let originals=super::super::list_tabs(&fixture.config).await.unwrap();
-        let (main,popup)=run_session(async {
-            let opened=call(&fixture.config,"browser_open",json!({"url":fixture.url})).await;
-            let main=opened["observation"]["tabId"].as_str().unwrap().to_owned();
-            let result=call(&fixture.config,"browser_click",json!({"selector":"#popup"})).await;
-            let popup=result["newTabs"][0]["id"].as_str().unwrap().to_owned();
-            (main,popup)
-        }).await;
-        let tabs=super::super::list_tabs(&fixture.config).await.unwrap();
-        assert!(originals.iter().all(|old|tabs.iter().any(|tab|tab.id==old.id)));
-        assert!(!tabs.iter().any(|tab|tab.id==main));
-        assert!(!tabs.iter().any(|tab|tab.id==popup),"task popup leaked in the borrowed browser");
+        let fixture = BrowserFixture::start().await;
+        let originals = super::super::list_tabs(&fixture.config).await.unwrap();
+        let (main, popup) = run_session(async {
+            let opened = call(&fixture.config, "browser_open", json!({"url":fixture.url})).await;
+            let main = opened["observation"]["tabId"].as_str().unwrap().to_owned();
+            let result = call(
+                &fixture.config,
+                "browser_click",
+                json!({"selector":"#popup"}),
+            )
+            .await;
+            let popup = result["newTabs"][0]["id"].as_str().unwrap().to_owned();
+            (main, popup)
+        })
+        .await;
+        let tabs = super::super::list_tabs(&fixture.config).await.unwrap();
+        assert!(
+            originals
+                .iter()
+                .all(|old| tabs.iter().any(|tab| tab.id == old.id))
+        );
+        assert!(!tabs.iter().any(|tab| tab.id == main));
+        assert!(
+            !tabs.iter().any(|tab| tab.id == popup),
+            "task popup leaked in the borrowed browser"
+        );
     }
 
     const FIXTURE: &str = r#"<!doctype html><html><head><title>Mint Browser Fixture</title></head><body>

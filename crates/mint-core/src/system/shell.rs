@@ -410,11 +410,20 @@ fn run_in_sandbox(
         // timed-out or interrupted run be killed as a whole tree via
         // `terminate_process_group` instead of just the `bwrap` wrapper.
         let roots = writable_roots(config, cwd);
-        let has_tmp = roots.iter().any(|r| r == Path::new("/tmp") || r == &std::env::temp_dir());
+        let has_tmp = roots
+            .iter()
+            .any(|r| r == Path::new("/tmp") || r == &std::env::temp_dir());
 
-        process
-            .process_group(0)
-            .args(["--die-with-parent", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]);
+        process.process_group(0).args([
+            "--die-with-parent",
+            "--ro-bind",
+            "/",
+            "/",
+            "--dev",
+            "/dev",
+            "--proc",
+            "/proc",
+        ]);
         if !has_tmp {
             process.args(["--tmpfs", "/tmp"]);
         }
@@ -851,6 +860,10 @@ mod tests {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let roots = writable_roots(&config, &cwd);
         let temp = std::env::temp_dir();
-        assert!(roots.iter().any(|r| r == &temp || (cfg!(unix) && r == Path::new("/tmp"))));
+        assert!(
+            roots
+                .iter()
+                .any(|r| r == &temp || (cfg!(unix) && r == Path::new("/tmp")))
+        );
     }
 }

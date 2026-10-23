@@ -1067,10 +1067,9 @@ mod browser_startup_tests {
         let default_tools = tool_catalog(&config, false, Path::new("."), false);
         assert!(!default_tools.iter().any(|tool| tool.name == "browser_open"));
 
-        config.extra.insert(
-            "browserAutomationEnabled".into(),
-            json!(true),
-        );
+        config
+            .extra
+            .insert("browserAutomationEnabled".into(), json!(true));
         config.extra.insert(
             "browserDebugUrl".into(),
             json!("http://127.0.0.1:1/json/list"),

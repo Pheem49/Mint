@@ -181,14 +181,16 @@ mod tests {
         assert!(prepared.data_uri.starts_with("data:image/jpeg;base64,"));
 
         // Verify the encoded image inside data_uri is capped at MAX_MODEL_DIMENSION
-        let raw_b64 = prepared.data_uri.trim_start_matches("data:image/jpeg;base64,");
+        let raw_b64 = prepared
+            .data_uri
+            .trim_start_matches("data:image/jpeg;base64,");
         let decoded_bytes = STANDARD.decode(raw_b64).unwrap();
-        let (w, h) = image::ImageReader::with_format(Cursor::new(decoded_bytes), image::ImageFormat::Jpeg)
-            .into_dimensions()
-            .unwrap();
+        let (w, h) =
+            image::ImageReader::with_format(Cursor::new(decoded_bytes), image::ImageFormat::Jpeg)
+                .into_dimensions()
+                .unwrap();
         assert!(w <= MAX_MODEL_DIMENSION && h <= MAX_MODEL_DIMENSION);
         assert_eq!(w, MAX_MODEL_DIMENSION);
         assert_eq!(h, MAX_MODEL_DIMENSION / 2);
     }
 }
-

@@ -2029,4 +2029,3 @@ mod tests {
         assert!(should_log_api_route("/api/select-folder"));
     }
 }
-

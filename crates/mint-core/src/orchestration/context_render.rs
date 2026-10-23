@@ -373,7 +373,10 @@ mod compaction_progress_tests {
     #[test]
     fn test_prune_historic_images_empty_messages() {
         let mut messages = Vec::new();
-        assert_eq!(prune_historic_images_from_native_messages(&mut messages, 2), 0);
+        assert_eq!(
+            prune_historic_images_from_native_messages(&mut messages, 2),
+            0
+        );
     }
 
     #[test]
@@ -381,11 +384,15 @@ mod compaction_progress_tests {
         let mut messages = vec![
             ChatMessage {
                 role: ChatRole::User,
-                content: vec![ContentBlock::Text { text: "task".into() }],
+                content: vec![ContentBlock::Text {
+                    text: "task".into(),
+                }],
             },
             ChatMessage {
                 role: ChatRole::Assistant,
-                content: vec![ContentBlock::Text { text: "call 1".into() }],
+                content: vec![ContentBlock::Text {
+                    text: "call 1".into(),
+                }],
             },
             ChatMessage {
                 role: ChatRole::Tool,
@@ -402,7 +409,9 @@ mod compaction_progress_tests {
             },
             ChatMessage {
                 role: ChatRole::Assistant,
-                content: vec![ContentBlock::Text { text: "call 2".into() }],
+                content: vec![ContentBlock::Text {
+                    text: "call 2".into(),
+                }],
             },
             ChatMessage {
                 role: ChatRole::Tool,
@@ -431,12 +440,16 @@ mod compaction_progress_tests {
         let mut messages = vec![
             ChatMessage {
                 role: ChatRole::User,
-                content: vec![ContentBlock::Text { text: "task".into() }],
+                content: vec![ContentBlock::Text {
+                    text: "task".into(),
+                }],
             },
             // Step 1
             ChatMessage {
                 role: ChatRole::Assistant,
-                content: vec![ContentBlock::Text { text: "step 1".into() }],
+                content: vec![ContentBlock::Text {
+                    text: "step 1".into(),
+                }],
             },
             ChatMessage {
                 role: ChatRole::Tool,
@@ -454,7 +467,9 @@ mod compaction_progress_tests {
             // Step 2
             ChatMessage {
                 role: ChatRole::Assistant,
-                content: vec![ContentBlock::Text { text: "step 2".into() }],
+                content: vec![ContentBlock::Text {
+                    text: "step 2".into(),
+                }],
             },
             ChatMessage {
                 role: ChatRole::Tool,
@@ -472,7 +487,9 @@ mod compaction_progress_tests {
             // Step 3
             ChatMessage {
                 role: ChatRole::Assistant,
-                content: vec![ContentBlock::Text { text: "step 3".into() }],
+                content: vec![ContentBlock::Text {
+                    text: "step 3".into(),
+                }],
             },
             ChatMessage {
                 role: ChatRole::Tool,
@@ -512,4 +529,3 @@ mod compaction_progress_tests {
         assert!(matches!(messages[6].content[1], ContentBlock::Image { .. }));
     }
 }
-

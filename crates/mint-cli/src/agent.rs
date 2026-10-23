@@ -557,7 +557,10 @@ pub(crate) fn mcp_progress_notes(event: &AgentProgress) -> Option<Vec<String>> {
                 let kind = if e.check { "Check" } else { "Command" };
                 let state_str = match e.state {
                     ExecutionState::Succeeded => {
-                        format!("{}Succeeded{RESET}", crate::terminal_theme::ANSI_ACCENT_BOLD)
+                        format!(
+                            "{}Succeeded{RESET}",
+                            crate::terminal_theme::ANSI_ACCENT_BOLD
+                        )
                     }
                     ExecutionState::Failed => {
                         format!("{}Failed{RESET}", crate::terminal_theme::ANSI_ERROR_BOLD)
