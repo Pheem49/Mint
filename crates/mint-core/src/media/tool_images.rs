@@ -8,6 +8,8 @@ use std::{fs, io::Cursor};
 pub const ORIGINAL_LIMIT: usize = 20 * 1024 * 1024;
 pub const PIXEL_LIMIT: u64 = 32_000_000;
 pub const MODEL_LIMIT: usize = 2_000_000;
+pub const MAX_MODEL_DIMENSION: u32 = 1280;
+pub const MODEL_JPEG_QUALITY: u8 = 85;
 
 pub struct PreparedImage {
     pub data_uri: String,
@@ -49,7 +51,8 @@ pub fn prepare(bytes: &[u8], mime: &str) -> Result<PreparedImage, String> {
     let image = image::ImageReader::with_format(Cursor::new(bytes), format)
         .decode()
         .map_err(|e| format!("Invalid image: {e}"))?;
-    if bytes.len() <= MODEL_LIMIT {
+    let max_dim = width.max(height);
+    if bytes.len() <= MODEL_LIMIT && max_dim <= MAX_MODEL_DIMENSION {
         return Ok(PreparedImage {
             data_uri: format!("data:{mime};base64,{}", STANDARD.encode(bytes)),
             width,
@@ -57,11 +60,11 @@ pub fn prepare(bytes: &[u8], mime: &str) -> Result<PreparedImage, String> {
             reduced: false,
         });
     }
-    let mut size = 2048u32.min(width.max(height));
+    let mut size = MAX_MODEL_DIMENSION.min(max_dim);
     loop {
         let resized = image.thumbnail(size, size).to_rgb8();
         let mut encoded = Vec::new();
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, 85)
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, MODEL_JPEG_QUALITY)
             .encode_image(&resized)
             .map_err(|e| e.to_string())?;
         if encoded.len() <= MODEL_LIMIT {
@@ -147,3 +150,45 @@ pub fn view_artifact(id: &str, chat: &str) -> Result<ToolOutcome, String> {
         ..Default::default()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_images_under_max_dimension_are_not_reduced() {
+        let mut bytes = Cursor::new(Vec::new());
+        image::RgbImage::new(800, 600)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        let prepared = prepare(bytes.get_ref(), "image/png").unwrap();
+        assert_eq!(prepared.width, 800);
+        assert_eq!(prepared.height, 600);
+        assert!(!prepared.reduced);
+        assert!(prepared.data_uri.starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn large_images_exceeding_max_dimension_are_downscaled() {
+        let mut bytes = Cursor::new(Vec::new());
+        image::RgbImage::new(2000, 1000)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        let prepared = prepare(bytes.get_ref(), "image/png").unwrap();
+        assert_eq!(prepared.width, 2000);
+        assert_eq!(prepared.height, 1000);
+        assert!(prepared.reduced);
+        assert!(prepared.data_uri.starts_with("data:image/jpeg;base64,"));
+
+        // Verify the encoded image inside data_uri is capped at MAX_MODEL_DIMENSION
+        let raw_b64 = prepared.data_uri.trim_start_matches("data:image/jpeg;base64,");
+        let decoded_bytes = STANDARD.decode(raw_b64).unwrap();
+        let (w, h) = image::ImageReader::with_format(Cursor::new(decoded_bytes), image::ImageFormat::Jpeg)
+            .into_dimensions()
+            .unwrap();
+        assert!(w <= MAX_MODEL_DIMENSION && h <= MAX_MODEL_DIMENSION);
+        assert_eq!(w, MAX_MODEL_DIMENSION);
+        assert_eq!(h, MAX_MODEL_DIMENSION / 2);
+    }
+}
+

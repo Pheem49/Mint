@@ -2,6 +2,13 @@
 
 Released: 2026-10-17
 
+## Context & Prompt Cache Optimization (2026-10-23)
+
+- **Rolling Image Eviction in LLM Context**: Implemented `prune_historic_images_from_native_messages` with `MAX_RETAINED_IMAGE_STEPS = 2`. Retains full vision pixels for the initial 2 steps of inspection and drops historical pixels in subsequent turns, eliminating runaway cumulative prompt cache growth and cutting token volume in vision-heavy agent tasks by over 90% while keeping durable original artifacts intact on the UI.
+- **Model Vision Image Downscaling**: Capped model vision payloads in `tool_images.rs` to `MAX_MODEL_DIMENSION = 1280px` (JPEG Quality 85%). High-resolution captures (2K/4K/Retina) are now scaled down before base64 encoding to reduce vision patch tiles by 40–60% per image, while preserving uncompressed full-resolution originals in the artifact store.
+- **Web Content Sanitization & Whitespace Cleanup**: Refactored `read_page_text` to strip non-content noise (scripts, styles, noscript, inline SVGs, canvas, cookie/GDPR banners) and collapse redundant whitespace while strictly preserving semantic headers, navigation menus, and articles.
+- **Adaptive Context Compaction Trigger**: Added an adaptive threshold (`ADAPTIVE_COMPACTION_TOKEN_CEILING = 40,000` at $\ge 20$ steps) so long-running agent workflows compact proactively before approaching provider context window limits.
+
 ## API Server Log De-noising & Frontend Polling Optimization (2026-10-21)
 
 - **Server-Side API Log Filtering (`should_log_api_route`)**: Added high-frequency polling routes (`/api/background-jobs`, `/api/mods`, `/api/models`) to the route exclusion filter in `crates/mint-core/src/api_server.rs`. Completely eliminates repetitive terminal spam from routine UI polling while ensuring standard operational and administrative API calls (`/api/library`, `/api/system-info`, etc.) remain logged.

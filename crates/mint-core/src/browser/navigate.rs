@@ -116,7 +116,27 @@ pub async fn read_page_text(config: &MintConfig) -> Result<String, String> {
         config,
         "Runtime.evaluate",
         json!({
-            "expression": "document.body ? document.body.innerText.substring(0, 12000) : ''",
+            "expression": r#"(() => {
+                if (!document.body) return '';
+                try {
+                    const clone = document.body.cloneNode(true);
+                    const ignore = [
+                        'script', 'style', 'noscript', 'svg', 'canvas',
+                        '[aria-hidden="true"]',
+                        '.cookie-banner', '#cookie-banner',
+                        '.cookie-notice', '#cookie-notice',
+                        '.gdpr', '#gdpr'
+                    ];
+                    for (const sel of ignore) {
+                        clone.querySelectorAll(sel).forEach(el => el.remove());
+                    }
+                    const text = clone.innerText || '';
+                    const cleaned = text.replace(/[\r\n]{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim();
+                    return cleaned.substring(0, 12000);
+                } catch (_) {
+                    return (document.body.innerText || '').substring(0, 12000);
+                }
+            })()"#,
             "returnByValue": true
         }),
     )

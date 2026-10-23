@@ -155,3 +155,58 @@ async fn viewed_images_have_durable_artifacts_and_separate_model_pixels() {
     let _ = std::fs::remove_file(directory.join(&artifact.id));
     let _ = std::fs::remove_file(directory.join(format!("{}.json", artifact.id)));
 }
+
+#[tokio::test]
+async fn orchestration_prunes_older_tool_images_while_preserving_recent_images() {
+    let mut messages = Vec::new();
+    let mut images_1 = std::collections::HashMap::new();
+    images_1.insert("call-1".into(), vec!["data:image/png;base64,step1".into()]);
+    let results_1 = vec![ToolResultEntry {
+        call_id: "call-1".into(),
+        action: "view_image".into(),
+        input: serde_json::json!({ "path": "step1.png" }),
+        text: "[Image loaded — see attached image]".into(),
+        status: crate::mcp_result::ToolStatus::Success,
+    }];
+    append_native_tool_results(&mut messages, "view step 1", &results_1, &Default::default(), &images_1);
+    prune_historic_images_from_native_messages(&mut messages, MAX_RETAINED_IMAGE_STEPS);
+
+    // Step 1: Image is retained (1 step <= MAX_RETAINED_IMAGE_STEPS)
+    assert!(messages[1].content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
+
+    let mut images_2 = std::collections::HashMap::new();
+    images_2.insert("call-2".into(), vec!["data:image/png;base64,step2".into()]);
+    let results_2 = vec![ToolResultEntry {
+        call_id: "call-2".into(),
+        action: "view_image".into(),
+        input: serde_json::json!({ "path": "step2.png" }),
+        text: "[Image loaded — see attached image]".into(),
+        status: crate::mcp_result::ToolStatus::Success,
+    }];
+    append_native_tool_results(&mut messages, "view step 2", &results_2, &Default::default(), &images_2);
+    prune_historic_images_from_native_messages(&mut messages, MAX_RETAINED_IMAGE_STEPS);
+
+    // Step 2: Both images retained (2 steps <= MAX_RETAINED_IMAGE_STEPS)
+    assert!(messages[1].content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
+    assert!(messages[3].content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
+
+    let mut images_3 = std::collections::HashMap::new();
+    images_3.insert("call-3".into(), vec!["data:image/png;base64,step3".into()]);
+    let results_3 = vec![ToolResultEntry {
+        call_id: "call-3".into(),
+        action: "view_image".into(),
+        input: serde_json::json!({ "path": "step3.png" }),
+        text: "[Image loaded — see attached image]".into(),
+        status: crate::mcp_result::ToolStatus::Success,
+    }];
+    append_native_tool_results(&mut messages, "view step 3", &results_3, &Default::default(), &images_3);
+    let pruned = prune_historic_images_from_native_messages(&mut messages, MAX_RETAINED_IMAGE_STEPS);
+
+    // Step 3: Step 1's image is pruned! Steps 2 and 3 are retained.
+    assert_eq!(pruned, 1);
+    assert!(!messages[1].content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
+    assert!(messages[3].content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
+    assert!(messages[5].content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
+    assert!(messages[1].content.iter().any(|b| matches!(b, ContentBlock::ToolResult { content, .. } if content.contains("historical image pixels pruned from context"))));
+}
+

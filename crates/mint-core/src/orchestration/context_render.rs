@@ -215,6 +215,58 @@ pub(super) fn format_trajectory_step(
     s
 }
 
+/// Keeps full `ContentBlock::Image` payloads only for the most recent
+/// `max_retained_steps` tool turns. Older tool turns have their `ContentBlock::Image`
+/// removed and their tool result text updated to indicate historical pixels
+/// were pruned to reduce prompt cache and token bloat.
+///
+/// Returns the number of `ContentBlock::Image` entries pruned.
+pub(super) fn prune_historic_images_from_native_messages(
+    messages: &mut [ChatMessage],
+    max_retained_steps: usize,
+) -> usize {
+    if messages.is_empty() {
+        return 0;
+    }
+    let mut tool_count = 0;
+    let mut pruned_count = 0;
+
+    for message in messages.iter_mut().rev() {
+        if message.role == ChatRole::Tool {
+            tool_count += 1;
+            if tool_count > max_retained_steps {
+                let had_image = message
+                    .content
+                    .iter()
+                    .any(|block| matches!(block, ContentBlock::Image { .. }));
+                if had_image {
+                    message.content.retain(|block| {
+                        if matches!(block, ContentBlock::Image { .. }) {
+                            pruned_count += 1;
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                    for block in &mut message.content {
+                        if let ContentBlock::ToolResult { content, .. } = block {
+                            if content.contains("— see attached image") {
+                                *content = content.replace(
+                                    "— see attached image",
+                                    "— historical image pixels pruned from context",
+                                );
+                            } else if !content.contains("pruned from context") {
+                                content.push_str(" [historical image pixels pruned from context]");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    pruned_count
+}
+
 /// Sends a lifecycle around the actual summarizer await; callers retain the
 /// original messages on failure. Short histories do not enter this UI state.
 pub(super) async fn report_context_compaction<F>(
@@ -317,4 +369,147 @@ mod compaction_progress_tests {
             matches!(&events.borrow()[1], AgentProgress::ContextCompaction { status, message, .. } if status == "failed" && message.contains("offline") && message.contains("original context"))
         );
     }
+
+    #[test]
+    fn test_prune_historic_images_empty_messages() {
+        let mut messages = Vec::new();
+        assert_eq!(prune_historic_images_from_native_messages(&mut messages, 2), 0);
+    }
+
+    #[test]
+    fn test_prune_historic_images_keeps_within_retention_window() {
+        let mut messages = vec![
+            ChatMessage {
+                role: ChatRole::User,
+                content: vec![ContentBlock::Text { text: "task".into() }],
+            },
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::Text { text: "call 1".into() }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![
+                    ContentBlock::ToolResult {
+                        tool_use_id: "c1".into(),
+                        content: "[Image loaded — see attached image]".into(),
+                        is_error: false,
+                    },
+                    ContentBlock::Image {
+                        data_uri: "data:image/png;base64,img1".into(),
+                    },
+                ],
+            },
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::Text { text: "call 2".into() }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![
+                    ContentBlock::ToolResult {
+                        tool_use_id: "c2".into(),
+                        content: "[Image loaded — see attached image]".into(),
+                        is_error: false,
+                    },
+                    ContentBlock::Image {
+                        data_uri: "data:image/png;base64,img2".into(),
+                    },
+                ],
+            },
+        ];
+
+        // Retention is 2, and there are 2 tool messages, so none should be pruned.
+        let pruned = prune_historic_images_from_native_messages(&mut messages, 2);
+        assert_eq!(pruned, 0);
+        assert_eq!(messages[2].content.len(), 2);
+        assert_eq!(messages[4].content.len(), 2);
+    }
+
+    #[test]
+    fn test_prune_historic_images_prunes_older_than_retention_window() {
+        let mut messages = vec![
+            ChatMessage {
+                role: ChatRole::User,
+                content: vec![ContentBlock::Text { text: "task".into() }],
+            },
+            // Step 1
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::Text { text: "step 1".into() }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![
+                    ContentBlock::ToolResult {
+                        tool_use_id: "c1".into(),
+                        content: "[Image loaded — see attached image]".into(),
+                        is_error: false,
+                    },
+                    ContentBlock::Image {
+                        data_uri: "data:image/png;base64,img1".into(),
+                    },
+                ],
+            },
+            // Step 2
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::Text { text: "step 2".into() }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![
+                    ContentBlock::ToolResult {
+                        tool_use_id: "c2".into(),
+                        content: "[Image loaded — see attached image]".into(),
+                        is_error: false,
+                    },
+                    ContentBlock::Image {
+                        data_uri: "data:image/png;base64,img2".into(),
+                    },
+                ],
+            },
+            // Step 3
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::Text { text: "step 3".into() }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![
+                    ContentBlock::ToolResult {
+                        tool_use_id: "c3".into(),
+                        content: "[Image loaded — see attached image]".into(),
+                        is_error: false,
+                    },
+                    ContentBlock::Image {
+                        data_uri: "data:image/png;base64,img3".into(),
+                    },
+                ],
+            },
+        ];
+
+        // Retention is 2: Step 3 (most recent) and Step 2 are kept; Step 1 is pruned.
+        let pruned = prune_historic_images_from_native_messages(&mut messages, 2);
+        assert_eq!(pruned, 1);
+
+        // Step 1: Image removed, ToolResult updated
+        assert_eq!(messages[2].content.len(), 1);
+        match &messages[2].content[0] {
+            ContentBlock::ToolResult { content, .. } => {
+                assert!(content.contains("historical image pixels pruned from context"));
+                assert!(!content.contains("— see attached image"));
+            }
+            _ => panic!("Expected ToolResult block"),
+        }
+
+        // Step 2: Image kept
+        assert_eq!(messages[4].content.len(), 2);
+        assert!(matches!(messages[4].content[1], ContentBlock::Image { .. }));
+
+        // Step 3: Image kept
+        assert_eq!(messages[6].content.len(), 2);
+        assert!(matches!(messages[6].content[1], ContentBlock::Image { .. }));
+    }
 }
+

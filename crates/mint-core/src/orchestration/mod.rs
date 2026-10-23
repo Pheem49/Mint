@@ -651,6 +651,13 @@ const COMPACTION_TRIGGER_RATIO: f64 = 0.75;
 /// Number of most-recent Assistant/Tool step-pairs kept verbatim (uncompacted)
 /// in `native_messages`.
 const COMPACTION_KEEP_RECENT_STEPS: usize = 3;
+/// Number of most-recent Tool step-pairs that retain full `ContentBlock::Image` pixels.
+/// Older tool turns have image blocks pruned to reduce prompt cache and token usage.
+const MAX_RETAINED_IMAGE_STEPS: usize = 2;
+/// Adaptive token threshold to compact context in long-running agent tasks (>= 20 steps),
+/// preventing cumulative prompt cache and token bloat before hitting the full window ratio.
+const ADAPTIVE_COMPACTION_TOKEN_CEILING: u32 = 40_000;
+const ADAPTIVE_COMPACTION_MIN_STEPS: usize = 20;
 /// How many times a step retries after every configured provider comes back
 /// `ChatError::NetworkUnavailable` before finally giving up — swapping
 /// providers is pointless when the network itself is down, so this waits and
@@ -2879,13 +2886,19 @@ where
                     &step_thought_signatures,
                     &step_images,
                 );
+                prune_historic_images_from_native_messages(
+                    &mut native_messages,
+                    MAX_RETAINED_IMAGE_STEPS,
+                );
 
                 if let Some(total_tokens) = response.total_tokens {
                     let window = active_config.context_window_tokens();
                     last_context_pct = Some(
                         ((total_tokens as f64 / window as f64) * 100.0).clamp(0.0, 255.0) as u8,
                     );
-                    if (total_tokens as f64) >= (window as f64) * COMPACTION_TRIGGER_RATIO {
+                    let compaction_needed = (total_tokens as f64) >= (window as f64) * COMPACTION_TRIGGER_RATIO
+                        || (step >= ADAPTIVE_COMPACTION_MIN_STEPS && total_tokens >= ADAPTIVE_COMPACTION_TOKEN_CEILING);
+                    if compaction_needed {
                         let eligible = native_messages.len().saturating_sub(1) / 2 > COMPACTION_KEEP_RECENT_STEPS;
                         if let Ok(Some((compacted, _))) = run_control::run(report_context_compaction(
                             eligible,
@@ -4196,12 +4209,12 @@ fn append_native_tool_results(
 }
 
 #[derive(Debug, Clone)]
-struct ToolResultEntry {
-    call_id: String,
-    action: String,
-    input: Value,
-    text: String,
-    status: crate::mcp_result::ToolStatus,
+pub(super) struct ToolResultEntry {
+    pub(super) call_id: String,
+    pub(super) action: String,
+    pub(super) input: Value,
+    pub(super) text: String,
+    pub(super) status: crate::mcp_result::ToolStatus,
 }
 
 // Legacy tools determine their outcome once at this adapter; MCP supplies its
