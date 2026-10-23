@@ -1,4 +1,6 @@
+/// <reference path="../env.d.ts" />
 import { describe, expect, it, vi } from 'vitest'
+// @ts-ignore react-dom/server lacks types without @types/react-dom
 import { renderToStaticMarkup } from 'react-dom/server'
 import { FormattedMessage } from './FormattedMessage'
 import ChatMessageItem, { type ChatMessageItemProps } from './ChatMessageItem'
