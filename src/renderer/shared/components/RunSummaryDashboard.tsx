@@ -16,6 +16,29 @@ interface Props {
   className?: string
 }
 
+export function formatRunDuration(secs: number): { value: string; subtext?: string } {
+  if (secs < 60) {
+    return { value: `${secs.toFixed(1)}s` }
+  }
+  const mins = Math.floor(secs / 60)
+  const remSecs = secs % 60
+  const remSecsStr = remSecs < 10 ? `0${remSecs.toFixed(1)}` : remSecs.toFixed(1)
+
+  if (mins >= 60) {
+    const hours = Math.floor(mins / 60)
+    const remMins = mins % 60
+    return {
+      value: `${hours}h ${remMins}m`,
+      subtext: `${secs.toFixed(1)}s`,
+    }
+  }
+
+  return {
+    value: `${mins}m ${remSecsStr}s`,
+    subtext: `${secs.toFixed(1)}s`,
+  }
+}
+
 export function RunSummaryDashboard({ summary, className = '' }: Props) {
   const isSuccess = summary.outcome === 'SUCCESS'
   const isRolledBack = summary.outcome === 'ROLLED_BACK'
@@ -25,6 +48,8 @@ export function RunSummaryDashboard({ summary, className = '' }: Props) {
     summary.totalTokens >= 1000
       ? `${(summary.totalTokens / 1000).toFixed(1)}k`
       : summary.totalTokens.toString()
+
+  const formattedDuration = formatRunDuration(summary.durationSecs)
 
   const badgeClass = isSuccess
     ? 'run-summary-badge success'
@@ -57,7 +82,12 @@ export function RunSummaryDashboard({ summary, className = '' }: Props) {
             <Clock style={{ width: '12px', height: '12px' }} />
             <span>Duration</span>
           </div>
-          <div className="run-kpi-value">{summary.durationSecs.toFixed(1)}s</div>
+          <div className="run-kpi-value" title={`${summary.durationSecs.toFixed(1)}s`}>
+            {formattedDuration.value}
+            {formattedDuration.subtext && (
+              <span className="run-kpi-subtext"> · {formattedDuration.subtext}</span>
+            )}
+          </div>
         </div>
 
         <div className="run-kpi-box">
@@ -103,41 +133,6 @@ export function RunSummaryDashboard({ summary, className = '' }: Props) {
           </div>
         </div>
       </div>
-
-      {/* Tool call timeline */}
-      {summary.toolTimeline && summary.toolTimeline.length > 0 && (
-        <div className="run-timeline-container">
-          <div className="run-timeline-title">Tool call timeline</div>
-          <div className="run-timeline-list">
-            {summary.toolTimeline.map((item, idx) => (
-              <div key={idx} className="run-timeline-item">
-                <div className="run-timeline-left">
-                  <span className="run-timeline-step">
-                    {String(item.step).padStart(2, '0')}s
-                  </span>
-                  {!item.success ? (
-                    <XCircle style={{ width: '14px', height: '14px', color: 'var(--status-error, #ef4444)', flexShrink: 0 }} />
-                  ) : item.retried ? (
-                    <RotateCcw style={{ width: '14px', height: '14px', color: '#f59e0b', flexShrink: 0 }} />
-                  ) : (
-                    <CheckCircle2 style={{ width: '14px', height: '14px', color: 'var(--status-speaking, #22c55e)', flexShrink: 0 }} />
-                  )}
-                  <span className="run-timeline-action">{item.action}</span>
-                  {item.target && <span className="run-timeline-target">[{item.target}]</span>}
-                </div>
-                <div>
-                  {!item.success && (
-                    <span className="run-timeline-note-failed">(failed)</span>
-                  )}
-                  {item.retried && item.success && (
-                    <span className="run-timeline-note-retry">(self-corrected)</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
