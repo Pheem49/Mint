@@ -1,4 +1,14 @@
 import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import {
+  Image as ImageIcon,
+  FileCode,
+  FileText,
+  Globe,
+  Music,
+  Video,
+  File,
+  Eye,
+} from 'lucide-react'
 import { openArtifactInMintBrowser } from '../utils/artifactBrowser'
 import { runtimePlatform } from '../platform'
 import { renderFormattedMessage } from '../utils/markdown'
@@ -10,6 +20,27 @@ const WorkspacePdfPreview = lazy(() => import('./WorkspacePdfPreview'))
 
 export type ArtifactType = 'html' | 'svg' | 'markdown' | 'image' | 'code' | 'file' | 'pdf' | 'audio' | 'video'
 export type ViewportMode = 'desktop' | 'tablet' | 'mobile'
+
+function renderArtifactTypeIcon(type: ArtifactType) {
+  switch (type) {
+    case 'image':
+      return <ImageIcon size={13} strokeWidth={2.2} aria-hidden="true" />
+    case 'html':
+      return <Globe size={13} strokeWidth={2.2} aria-hidden="true" />
+    case 'svg':
+    case 'code':
+      return <FileCode size={13} strokeWidth={2.2} aria-hidden="true" />
+    case 'markdown':
+    case 'pdf':
+      return <FileText size={13} strokeWidth={2.2} aria-hidden="true" />
+    case 'audio':
+      return <Music size={13} strokeWidth={2.2} aria-hidden="true" />
+    case 'video':
+      return <Video size={13} strokeWidth={2.2} aria-hidden="true" />
+    default:
+      return <File size={13} strokeWidth={2.2} aria-hidden="true" />
+  }
+}
 
 export interface ArtifactFile {
   path: string
@@ -217,12 +248,12 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
               borderRadius: 'var(--radius-xs, 4px)',
               background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
               color: 'var(--interactive-fg)',
-              fontSize: '0.68rem',
-              fontWeight: 700,
               flexShrink: 0,
             }}
+            title={artifactType.toUpperCase()}
+            aria-label={`${artifactType} artifact`}
           >
-            {artifactType.toUpperCase().slice(0, 3)}
+            {renderArtifactTypeIcon(artifactType)}
           </span>
           <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
             <span
@@ -262,50 +293,75 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
         {/* Center: Tabs & Viewport */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           {/* Preview vs Code tab toggle */}
-          <div
-            style={{
-              display: 'inline-flex',
-              padding: '2px',
-              background: 'color-mix(in srgb, var(--text-main) 6%, transparent)',
-              borderRadius: 'var(--radius-sm, 6px)',
-              border: '1px solid var(--border)',
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setActiveTab('preview')}
+          {artifactType !== 'image' && artifactType !== 'file' && !mediaPreview ? (
+            <div
               style={{
-                background: activeTab === 'preview' ? 'var(--accent)' : 'transparent',
-                color: activeTab === 'preview' ? '#ffffff' : 'var(--text-muted)',
-                border: 'none',
-                borderRadius: 'var(--radius-xs, 4px)',
-                padding: '3px 9px',
-                fontSize: '0.75rem',
-                fontWeight: 500,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
+                display: 'inline-flex',
+                padding: '2px',
+                background: 'color-mix(in srgb, var(--text-main) 6%, transparent)',
+                borderRadius: 'var(--radius-sm, 6px)',
+                border: '1px solid var(--border)',
               }}
             >
-              {artifactType === 'file' ? 'Details' : 'Preview'}
-            </button>
-            {artifactType !== 'image' && artifactType !== 'file' && !mediaPreview && <button
-              type="button"
-              onClick={() => setActiveTab('code')}
+              <button
+                type="button"
+                onClick={() => setActiveTab('preview')}
+                style={{
+                  background: activeTab === 'preview' ? 'var(--accent)' : 'transparent',
+                  color: activeTab === 'preview' ? '#ffffff' : 'var(--text-muted)',
+                  border: 'none',
+                  borderRadius: 'var(--radius-xs, 4px)',
+                  padding: '3px 9px',
+                  fontSize: '0.75rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                Preview
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('code')}
+                style={{
+                  background: activeTab === 'code' ? 'var(--accent)' : 'transparent',
+                  color: activeTab === 'code' ? '#ffffff' : 'var(--text-muted)',
+                  border: 'none',
+                  borderRadius: 'var(--radius-xs, 4px)',
+                  padding: '3px 9px',
+                  fontSize: '0.75rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                Code
+              </button>
+            </div>
+          ) : (
+            <div
               style={{
-                background: activeTab === 'code' ? 'var(--accent)' : 'transparent',
-                color: activeTab === 'code' ? '#ffffff' : 'var(--text-muted)',
-                border: 'none',
-                borderRadius: 'var(--radius-xs, 4px)',
-                padding: '3px 9px',
-                fontSize: '0.75rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '3px 10px',
+                background: artifactType === 'image'
+                  ? 'color-mix(in srgb, var(--accent) 10%, transparent)'
+                  : 'color-mix(in srgb, var(--text-main) 6%, transparent)',
+                borderRadius: '9999px',
+                border: artifactType === 'image'
+                  ? '1px solid color-mix(in srgb, var(--accent) 25%, transparent)'
+                  : '1px solid var(--border)',
+                color: artifactType === 'image' ? 'var(--accent)' : 'var(--text-muted)',
+                fontSize: '0.72rem',
                 fontWeight: 500,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
+                letterSpacing: '0.01em',
               }}
             >
-              Code
-            </button>}
-          </div>
+              <Eye size={12} strokeWidth={2.2} aria-hidden="true" />
+              <span>{artifactType === 'file' ? 'Details' : 'Preview'}</span>
+            </div>
+          )}
 
           {/* Viewport switcher for HTML */}
           {activeTab === 'preview' && artifactType === 'html' && (

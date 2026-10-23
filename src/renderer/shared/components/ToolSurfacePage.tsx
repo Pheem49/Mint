@@ -2,11 +2,11 @@ import '../../src/css/tool-surfaces.css'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode, DragEvent as ReactDragEvent } from 'react'
 import type { ArtifactFile } from './ArtifactPreviewPanel'
-import { ArtifactPreviewPanel } from './ArtifactPreviewPanel'
+import { ArtifactPreviewPanel, detectArtifactType } from './ArtifactPreviewPanel'
 import CodeReviewPage from './CodeReviewPage'
 import TerminalDock from './TerminalDock'
 import type { FileChange } from '../types'
-import { ListTodo, Paperclip, Puzzle } from 'lucide-react'
+import { ListTodo, Paperclip, Puzzle, Image as ImageIcon, Layers, ChevronLeft, ChevronRight } from 'lucide-react'
 import { WORKSPACE_FILE_MIME, parseWorkspaceFileDrag, type WorkspaceFileDrag } from '../utils/workspaceDrag'
 
 export type ToolSurface =
@@ -47,7 +47,8 @@ interface Props {
 }
 
 
-function surfaceIcon(kind: ToolSurface['kind']) {
+function surfaceIcon(surface: ToolSurface | ToolSurface['kind']) {
+  const kind = typeof surface === 'string' ? surface : surface.kind
   if (kind === 'sources') return <Paperclip size={13} aria-hidden="true" />
   if (kind === 'mods') return <Puzzle size={13} aria-hidden="true" />
   if (kind === 'background') return <ListTodo size={13} aria-hidden="true" />
@@ -68,6 +69,12 @@ function surfaceIcon(kind: ToolSurface['kind']) {
         <circle cx="19" cy="18" r="3" />
       </svg>
     )
+  }
+  if (typeof surface === 'object' && surface.kind === 'preview') {
+    const type = surface.artifact.type || detectArtifactType(surface.artifact.path)
+    if (type === 'image') {
+      return <ImageIcon size={13} strokeWidth={2.2} aria-hidden="true" style={{ verticalAlign: '-1px' }} />
+    }
   }
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ verticalAlign: '-1px' }}>
@@ -109,6 +116,9 @@ export default function ToolSurfacePage({
 }: Props) {
   const active = surfaces.find((surface) => surface.id === activeSurfaceId) ?? surfaces[0] ?? null
   const [switcherOpen, setSwitcherOpen] = useState(false)
+  const [tabsSwitcherOpen, setTabsSwitcherOpen] = useState(false)
+  const [tabsSwitcherAlignRight, setTabsSwitcherAlignRight] = useState(false)
+  const tabsSwitcherWrapRef = useRef<HTMLDivElement>(null)
   const [tabMenuState, setTabMenuState] = useState<{ id: string; x: number; y: number } | null>(null)
   const [isMaximized, setIsMaximized] = useState(false)
   const panelRef = useRef<HTMLElement>(null)
@@ -146,16 +156,48 @@ export default function ToolSurfacePage({
   }, [active?.id])
 
   useEffect(() => {
-    const dismiss = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || !panelRef.current?.contains(event.target as Node)) return
-      event.preventDefault()
-      if (switcherOpen) { setSwitcherOpen(false); newTabWrapRef.current?.querySelector<HTMLButtonElement>('.tool-surface-dropdown-btn')?.focus() }
-      else if (tabMenuState) setTabMenuState(null)
-      else onClosePanel()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+
+      if (event.key === 'Escape') {
+        if (!panelRef.current?.contains(event.target as Node)) return
+        event.preventDefault()
+        if (tabsSwitcherOpen) {
+          setTabsSwitcherOpen(false)
+          tabsSwitcherWrapRef.current?.querySelector<HTMLButtonElement>('.tool-surface-tabs-switcher-btn')?.focus()
+        } else if (switcherOpen) {
+          setSwitcherOpen(false)
+          newTabWrapRef.current?.querySelector<HTMLButtonElement>('.tool-surface-dropdown-btn')?.focus()
+        } else if (tabMenuState) {
+          setTabMenuState(null)
+        } else {
+          onClosePanel()
+        }
+        return
+      }
+
+      if (surfaces.length > 1) {
+        const isPrev = (event.altKey && event.key === '[') || (event.ctrlKey && event.key === 'PageUp')
+        const isNext = (event.altKey && event.key === ']') || (event.ctrlKey && event.key === 'PageDown')
+        if (isPrev || isNext) {
+          const activeEl = document.activeElement
+          const isInsidePanel = panelRef.current?.contains(activeEl) || activeEl === document.body
+          if (isInsidePanel) {
+            event.preventDefault()
+            const currentIndex = surfaces.findIndex((s) => s.id === (active?.id ?? ''))
+            if (currentIndex !== -1) {
+              const targetIndex = isNext
+                ? (currentIndex + 1) % surfaces.length
+                : (currentIndex - 1 + surfaces.length) % surfaces.length
+              onSelect(surfaces[targetIndex].id)
+            }
+          }
+        }
+      }
     }
-    document.addEventListener('keydown', dismiss)
-    return () => document.removeEventListener('keydown', dismiss)
-  }, [onClosePanel, switcherOpen, tabMenuState])
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [onClosePanel, switcherOpen, tabMenuState, tabsSwitcherOpen, surfaces, active?.id, onSelect])
 
   const [isEntering, setIsEntering] = useState(true)
   const [isResizing, setIsResizing] = useState(false)
@@ -303,6 +345,17 @@ export default function ToolSurfacePage({
     })
   }
 
+  const toggleTabsSwitcher = () => {
+    setTabsSwitcherOpen((open) => {
+      const next = !open
+      if (next && tabsSwitcherWrapRef.current) {
+        const rect = tabsSwitcherWrapRef.current.getBoundingClientRect()
+        setTabsSwitcherAlignRight(window.innerWidth - rect.left < 310)
+      }
+      return next
+    })
+  }
+
   useEffect(() => {
     if (!switcherOpen) return
     const handleClickOutside = (e: MouseEvent) => {
@@ -314,6 +367,18 @@ export default function ToolSurfacePage({
     window.addEventListener('mousedown', handleClickOutside)
     return () => window.removeEventListener('mousedown', handleClickOutside)
   }, [switcherOpen])
+
+  useEffect(() => {
+    if (!tabsSwitcherOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && !target.closest('.tool-surface-tabs-switcher-wrap')) {
+        setTabsSwitcherOpen(false)
+      }
+    }
+    window.addEventListener('mousedown', handleClickOutside)
+    return () => window.removeEventListener('mousedown', handleClickOutside)
+  }, [tabsSwitcherOpen])
 
   useEffect(() => {
     if (!tabMenuState) return
@@ -328,15 +393,17 @@ export default function ToolSurfacePage({
   }, [tabMenuState])
 
   const tabListRef = useRef<HTMLDivElement>(null)
+  const [hasOverflow, setHasOverflow] = useState(false)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
 
   const checkTabScroll = useCallback(() => {
     const el = tabListRef.current
     if (!el) return
-    const hasOverflow = el.scrollWidth > el.clientWidth + 2
-    setCanScrollLeft(hasOverflow && el.scrollLeft > 2)
-    setCanScrollRight(hasOverflow && el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
+    const overflow = el.scrollWidth > el.clientWidth + 2
+    setHasOverflow(overflow)
+    setCanScrollLeft(overflow && el.scrollLeft > 2)
+    setCanScrollRight(overflow && el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
   }, [])
 
   useEffect(() => {
@@ -364,13 +431,15 @@ export default function ToolSurfacePage({
 
   const scrollTabs = (direction: 'left' | 'right') => {
     if (!tabListRef.current) return
-    const amount = direction === 'left' ? -180 : 180
+    const amount = direction === 'left' ? -200 : 200
     tabListRef.current.scrollBy({ left: amount, behavior: 'smooth' })
   }
 
   const handleTabWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     if (e.deltaY !== 0) {
       e.currentTarget.scrollLeft += e.deltaY
+    } else if (e.deltaX !== 0) {
+      e.currentTarget.scrollLeft += e.deltaX
     }
   }
 
@@ -442,17 +511,16 @@ export default function ToolSurfacePage({
       {active && (
         <header className="tool-surface-tabs">
           <div className="tool-surface-tabs-container">
-            {canScrollLeft && (
+            {hasOverflow && (
               <button
                 type="button"
-                className="tool-surface-tab-scroll-btn is-left"
+                className={`tool-surface-tab-scroll-btn is-left ${!canScrollLeft ? 'is-disabled' : ''}`}
                 onClick={() => scrollTabs('left')}
+                disabled={!canScrollLeft}
                 aria-label="Scroll tabs left"
                 title="Scroll tabs left"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="m15 18-6-6 6-6" />
-                </svg>
+                <ChevronLeft size={14} strokeWidth={2.4} aria-hidden="true" />
               </button>
             )}
             <div
@@ -476,25 +544,31 @@ export default function ToolSurfacePage({
                     })
                   }}
                 >
-                  <button type="button" role="tab" aria-selected={surface.id === active.id} onClick={() => { setTabMenuState(null); onSelect(surface.id) }}>
-                    <span className={`tool-surface-tab-icon is-${surface.kind}`} aria-hidden="true">{surfaceIcon(surface.kind)}</span>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={surface.id === active.id}
+                    title={surface.title}
+                    aria-label={surface.title}
+                    onClick={() => { setTabMenuState(null); onSelect(surface.id) }}
+                  >
+                    <span className={`tool-surface-tab-icon is-${surface.kind}`} aria-hidden="true">{surfaceIcon(surface)}</span>
                     <span className="tool-surface-tab-title">{surface.title}</span>
                   </button>
                   <button type="button" className="tool-surface-tab-close" onClick={() => onClose(surface.id)} aria-label={`Close ${surface.title}`} title="Close">×</button>
                 </div>
               ))}
             </div>
-            {canScrollRight && (
+            {hasOverflow && (
               <button
                 type="button"
-                className="tool-surface-tab-scroll-btn is-right"
+                className={`tool-surface-tab-scroll-btn is-right ${!canScrollRight ? 'is-disabled' : ''}`}
                 onClick={() => scrollTabs('right')}
+                disabled={!canScrollRight}
                 aria-label="Scroll tabs right"
                 title="Scroll tabs right"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="m9 18 6-6-6-6" />
-                </svg>
+                <ChevronRight size={14} strokeWidth={2.4} aria-hidden="true" />
               </button>
             )}
           </div>
@@ -534,6 +608,89 @@ export default function ToolSurfacePage({
               </div>
             )}
           </div>
+          {surfaces.length > 0 && (
+            <div className="tool-surface-tabs-switcher-wrap" ref={tabsSwitcherWrapRef}>
+              <button
+                type="button"
+                className={`tool-surface-tabs-switcher-btn ${tabsSwitcherOpen ? 'is-active' : ''}`}
+                onClick={(e) => { e.stopPropagation(); toggleTabsSwitcher() }}
+                title={`All open tabs (${surfaces.length})`}
+                aria-label={`All open tabs (${surfaces.length})`}
+                aria-haspopup="menu"
+                aria-expanded={tabsSwitcherOpen}
+              >
+                <Layers size={13} strokeWidth={2.2} aria-hidden="true" />
+                <span className="tool-surface-tabs-badge">{surfaces.length}</span>
+              </button>
+              {tabsSwitcherOpen && (
+                <div
+                  className={`tool-surface-tabs-dropdown-menu ${tabsSwitcherAlignRight ? 'is-align-right' : ''}`}
+                  aria-label="Open tabs list"
+                  role="menu"
+                >
+                  <div className="tool-surface-tabs-dropdown-header">
+                    <span>Open Tabs ({surfaces.length})</span>
+                    <span className="tool-surface-tabs-dropdown-hint">Alt+[ / Alt+]</span>
+                  </div>
+                  <div className="tool-surface-tabs-dropdown-list">
+                    {surfaces.map((s) => {
+                      const isActive = s.id === active.id
+                      return (
+                        <div
+                          key={s.id}
+                          className={`tool-surface-tabs-dropdown-item ${isActive ? 'is-active' : ''}`}
+                          onClick={() => {
+                            onSelect(s.id)
+                            setTabsSwitcherOpen(false)
+                          }}
+                          role="menuitem"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              onSelect(s.id)
+                              setTabsSwitcherOpen(false)
+                            }
+                          }}
+                        >
+                          <span className={`tool-surface-tab-icon is-${s.kind} tool-surface-tabs-dropdown-item-icon`} aria-hidden="true">
+                            {surfaceIcon(s)}
+                          </span>
+                          <span className="tool-surface-tabs-dropdown-item-title" title={s.title}>
+                            {s.title}
+                          </span>
+                          <button
+                            type="button"
+                            className="tool-surface-tabs-dropdown-item-close"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onClose(s.id)
+                            }}
+                            title={`Close ${s.title}`}
+                            aria-label={`Close ${s.title}`}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div className="tool-surface-tabs-dropdown-footer">
+                    <button
+                      type="button"
+                      className="tool-surface-tabs-dropdown-footer-btn"
+                      onClick={() => {
+                        onCloseAll()
+                        setTabsSwitcherOpen(false)
+                      }}
+                    >
+                      Close all tabs
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div className="tool-surface-header-right">
             <div className="tool-surface-header-actions">
               <button
@@ -566,31 +723,60 @@ export default function ToolSurfacePage({
               </button>
             </div>
           </div>
-          {tabMenuState && (
-            <div
-              className="tool-surface-tab-menu is-floating"
-              style={{
-                position: 'fixed',
-                top: `${tabMenuState.y}px`,
-                left: `${tabMenuState.x}px`,
-                zIndex: 1000,
-              }}
-              role="menu"
-            >
-              {surfaces.find(surface => surface.id === tabMenuState.id)?.kind !== 'sources' && surfaces.find(surface => surface.id === tabMenuState.id)?.kind !== 'mods' && surfaces.find(surface => surface.id === tabMenuState.id)?.kind !== 'background' && <button type="button" role="menuitem" onClick={() => { onDuplicate(tabMenuState.id); setTabMenuState(null) }}>
-                Duplicate tab
-              </button>}
-              <button type="button" role="menuitem" onClick={() => { onRename(tabMenuState.id); setTabMenuState(null) }}>
-                Rename tab
-              </button>
-              <button type="button" role="menuitem" onClick={() => { onCloseOthers(tabMenuState.id); setTabMenuState(null) }}>
-                Close other tabs
-              </button>
-              <button type="button" role="menuitem" onClick={() => { onClose(tabMenuState.id); setTabMenuState(null) }}>
-                Close tab
-              </button>
-            </div>
-          )}
+          {tabMenuState && (() => {
+            const currentIdx = surfaces.findIndex(s => s.id === tabMenuState.id)
+            const hasTabsToRight = currentIdx >= 0 && currentIdx < surfaces.length - 1
+            const targetSurface = surfaces.find(surface => surface.id === tabMenuState.id)
+            return (
+              <div
+                className="tool-surface-tab-menu is-floating"
+                style={{
+                  position: 'fixed',
+                  top: `${tabMenuState.y}px`,
+                  left: `${tabMenuState.x}px`,
+                  zIndex: 1000,
+                }}
+                role="menu"
+              >
+                {targetSurface?.kind !== 'sources' && targetSurface?.kind !== 'mods' && targetSurface?.kind !== 'background' && (
+                  <button type="button" role="menuitem" onClick={() => { onDuplicate(tabMenuState.id); setTabMenuState(null) }}>
+                    Duplicate tab
+                  </button>
+                )}
+                <button type="button" role="menuitem" onClick={() => { onRename(tabMenuState.id); setTabMenuState(null) }}>
+                  Rename tab
+                </button>
+                {hasTabsToRight && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      const tabsToRight = surfaces.slice(currentIdx + 1)
+                      tabsToRight.forEach(s => onClose(s.id))
+                      setTabMenuState(null)
+                    }}
+                  >
+                    Close tabs to the right
+                  </button>
+                )}
+                <button type="button" role="menuitem" onClick={() => { onCloseOthers(tabMenuState.id); setTabMenuState(null) }}>
+                  Close other tabs
+                </button>
+                <button type="button" role="menuitem" onClick={() => { onClose(tabMenuState.id); setTabMenuState(null) }}>
+                  Close tab
+                </button>
+                <hr />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="is-destructive"
+                  onClick={() => { onCloseAll(); setTabMenuState(null) }}
+                >
+                  Close all tabs
+                </button>
+              </div>
+            )
+          })()}
         </header>
       )}
 

@@ -49,6 +49,15 @@
   --flavor-rose: #f43f5e;
   --flavor-monochrome: #ffffff;
 
+  /* Indigo Primitive Scale */
+  --indigo-50: #eef2ff;
+  --indigo-100: #e0e7ff;
+  --indigo-200: #c7d2fe;
+  --indigo-300: #a5b4fc;
+  --indigo-400: #818cf8;
+  --indigo-500: #6366f1;
+  --indigo-600: #4f46e5;
+
   /* Functional Status Colors */
   --status-success: #10b981;
   --status-warning: #f59e0b;
@@ -121,6 +130,11 @@
   /* Glass Blur */
   --glass-blur: blur(16px);
 
+  /* Scrollbars */
+  --scrollbar-track: rgba(255, 255, 255, 0.05);
+  --scrollbar-thumb: rgba(165, 180, 252, 0.45);
+  --scrollbar-thumb-hover: rgba(165, 180, 252, 0.85);
+
   /* Code Syntax Highlighting Tokens */
   --syntax-string: #34d399;
   --syntax-flag: #fbbf24;
@@ -173,6 +187,11 @@
   /* Glass Blur */
   --glass-blur: blur(16px);
 
+  /* Scrollbars */
+  --scrollbar-track: rgba(15, 23, 42, 0.06);
+  --scrollbar-thumb: rgba(99, 102, 241, 0.4);
+  --scrollbar-thumb-hover: rgba(99, 102, 241, 0.75);
+
   /* Code Syntax Highlighting Tokens */
   --syntax-string: #047857;
   --syntax-flag: #b45309;
@@ -223,6 +242,11 @@
   --shadow-lg: 0 24px 72px rgba(0, 0, 0, 0.95);
 
   --glass-blur: none;
+
+  /* Scrollbars */
+  --scrollbar-track: rgba(255, 255, 255, 0.04);
+  --scrollbar-thumb: rgba(165, 180, 252, 0.4);
+  --scrollbar-thumb-hover: rgba(165, 180, 252, 0.85);
 
   /* Code Syntax Highlighting Tokens */
   --syntax-string: #34d399;
@@ -308,6 +332,11 @@
   --interactive-fg: var(--accent);
   --interactive-fg-hover: var(--accent-hover);
   --danger: var(--status-error);
+
+  /* Scrollbar Semantic Aliases */
+  --scrollbar-track: var(--scrollbar-track);
+  --scrollbar-thumb: var(--scrollbar-thumb);
+  --scrollbar-thumb-hover: var(--scrollbar-thumb-hover);
 }
 
 /* Pure white remains the primary surface for Dark Monochrome. Its text and
