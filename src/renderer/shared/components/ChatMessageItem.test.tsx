@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { FormattedMessage } from './FormattedMessage'
 import ChatMessageItem, { type ChatMessageItemProps } from './ChatMessageItem'
@@ -71,4 +71,18 @@ describe('view_image results on Desktop and Web', () => {
     const html = renderToStaticMarkup(<ChatMessageItem {...base} interaction={{ ...base.interaction, agentActivity: [{ type: 'ToolEnd', data: { action: 'view_image', input: { path: 'unavailable.png' }, result } }] }} />)
     expect(html).not.toContain('data-viewed-image=')
   })
+  it('forwards onOpenArtifact to viewed image preview trigger', () => {
+    const onOpenArtifact = vi.fn()
+    const saved = JSON.parse(JSON.stringify(compactAgentProgressForPersistence(progress)))
+    const html = renderToStaticMarkup(
+      <ChatMessageItem
+        {...base}
+        onOpenArtifact={onOpenArtifact}
+        interaction={{ ...base.interaction, status: 'completed', agentActivity: saved }}
+      />
+    )
+    expect(html).toContain('title="Open full image in Tools Surface"')
+    expect(html).toContain('aria-label="Expand mobile.png"')
+  })
 })
+

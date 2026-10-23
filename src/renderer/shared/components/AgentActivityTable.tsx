@@ -1,3 +1,4 @@
+import type { ArtifactFile } from './ArtifactPreviewPanel'
 import { Fragment, useState } from 'react'
 import type { AgentActivityView, AgentActivity, AgentActivityGroup, TimelineItem } from '../utils/agentActivity'
 import { groupActivities } from '../utils/agentActivity'
@@ -21,6 +22,7 @@ import {
 interface Props {
   activityView: AgentActivityView
   chatId?: string
+  onOpenArtifact?: (artifact: ArtifactFile) => void
 }
 
 function getFilename(target: string): string {
@@ -84,7 +86,7 @@ function renderStatusIndicator(state: AgentActivity['state']) {
   return <Check size={12} className="agent-activity-status-check" />
 }
 
-export function AgentActivityTable({ activityView, chatId }: Props) {
+export function AgentActivityTable({ activityView, chatId, onOpenArtifact }: Props) {
   const groups: AgentActivityGroup[] = activityView.groups || groupActivities(activityView.items)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const [expandedIndices, setExpandedIndices] = useState<Record<string, boolean>>({})
@@ -145,7 +147,7 @@ export function AgentActivityTable({ activityView, chatId }: Props) {
         </div>
         {activity.viewedImage && (
           <div className="agent-activity-inline-preview">
-            <ViewedImage image={activity.viewedImage} chatId={chatId} variant="inline" />
+            <ViewedImage image={activity.viewedImage} chatId={chatId} variant="inline" onOpenArtifact={onOpenArtifact} />
           </div>
         )}
         {isItemExpanded && output && (
@@ -229,7 +231,7 @@ export function AgentActivityTable({ activityView, chatId }: Props) {
                   </div>
                   {activity.viewedImage && (
                     <div className="agent-activity-inline-preview agent-activity-subitem-preview">
-                      <ViewedImage image={activity.viewedImage} chatId={chatId} variant="inline" />
+                      <ViewedImage image={activity.viewedImage} chatId={chatId} variant="inline" onOpenArtifact={onOpenArtifact} />
                     </div>
                   )}
                   {isItemExpanded && output && (

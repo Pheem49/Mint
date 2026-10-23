@@ -1,3 +1,4 @@
+import type { ArtifactFile } from './ArtifactPreviewPanel'
 import React, { useMemo } from 'react'
 import { renderCopyIcon, renderSpeakerIcon } from '../utils/markdown'
 import { fallbackNotice } from '../utils/providers'
@@ -32,6 +33,7 @@ export interface ChatMessageItemProps {
   showAllFileChanges?: Record<string, boolean>
   workspacePath?: string
   chatId?: string
+  onOpenArtifact?: (artifact: ArtifactFile) => void
   renderFileChanges: (interaction: any) => React.ReactNode
 }
 
@@ -52,6 +54,7 @@ const ChatMessageItem = React.memo(
       speak,
       toggleActivity,
       renderFileChanges,
+      onOpenArtifact,
     } = props
 
     const isSystemEvent = interaction.provider === 'system' && interaction.model === 'provider_change'
@@ -216,7 +219,7 @@ const ChatMessageItem = React.memo(
         <div className="message ai-message">
           <div className="bubble-wrapper">
             {interaction.status === 'completed' && <ProgressActivity progress={progress} id={String(interaction.id)}
-              historical isOpen={Boolean(openActivityIds?.[String(interaction.id)])} onToggle={toggleActivity} chatId={props.chatId || interaction.chatId} />}
+              historical isOpen={Boolean(openActivityIds?.[String(interaction.id)])} onToggle={toggleActivity} chatId={props.chatId || interaction.chatId} onOpenArtifact={onOpenArtifact} />}
             {interaction.status === 'completed' && renderFileChanges(interaction)}
             <div className="message-bubble">
               {interaction.status === 'queued' && <span>Queued for this session…</span>}
@@ -224,7 +227,7 @@ const ChatMessageItem = React.memo(
               {interaction.status === 'failed' && <span>This turn failed. Send the prompt again to retry.</span>}
               {interaction.status === 'interrupted' && <span>This turn was interrupted. Send the prompt again to retry.</span>}
               <McpToolResults progress={progress} running={interaction.status === 'running'} interrupted={interaction.status === 'interrupted'} chatId={props.chatId || interaction.chatId} />
-              <ViewedImages progress={progress} chatId={props.chatId || interaction.chatId} />
+              <ViewedImages progress={progress} chatId={props.chatId || interaction.chatId} onOpenArtifact={onOpenArtifact} />
               {fallbackWeatherData && <WeatherCard data={fallbackWeatherData} />}
               {fallbackStockData && <StockCard data={fallbackStockData} />}
               {fallbackCalcData && <CalculationCard data={fallbackCalcData} />}
@@ -316,6 +319,7 @@ const ChatMessageItem = React.memo(
       }
     }
 
+    if (prevProps.onOpenArtifact !== nextProps.onOpenArtifact) return false
     const prevSnap = prevProps.agentActivitySnapshots[String(p.id)]
     const nextSnap = nextProps.agentActivitySnapshots[String(n.id)]
     if (prevSnap !== nextSnap) return false

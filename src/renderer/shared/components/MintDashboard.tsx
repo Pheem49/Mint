@@ -1867,7 +1867,7 @@ export default function MintDashboard() {
     onSetGeminiLiveVoice: changeGeminiLiveVoice,
     onToggleMobileSidebar: () => setMobileSidebarOpen(!mobileSidebarOpen),
     onBackToCode: () => changeView('code'),
-    onOpenArtifact: isDesktopApp ? openArtifactSurface : undefined,
+    onOpenArtifact: openArtifactSurface,
     onOpenReview: isDesktopApp ? openReviewSurface : undefined,
   }
 

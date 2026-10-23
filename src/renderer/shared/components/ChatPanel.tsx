@@ -1380,6 +1380,7 @@ export default function ChatPanel({
               onToggle={toggleActivity}
               pendingApproval={!!pendingApproval}
               chatId={chatId}
+              onOpenArtifact={openArtifact}
             />
           )}
           {renderActiveFileChanges()}
@@ -1406,7 +1407,7 @@ export default function ChatPanel({
               )}
               <div className="message-bubble">
                 <McpToolResults progress={agentProgress} running chatId={chatId} />
-                <ViewedImages progress={agentProgress} chatId={chatId} />
+                <ViewedImages progress={agentProgress} chatId={chatId} onOpenArtifact={openArtifact} />
                 <span>
                   {compaction ? (
                     <ContextCompactionStatus key={compaction.index} />
@@ -1672,6 +1673,7 @@ export default function ChatPanel({
                   workspacePath={workspacePath}
                   chatId={chatId}
                   renderFileChanges={renderFileChanges}
+                  onOpenArtifact={openArtifact}
                 />
               </Fragment>
             )

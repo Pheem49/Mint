@@ -5,6 +5,7 @@
  */
 import React, { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
+import type { ArtifactFile } from './ArtifactPreviewPanel'
 import type { AgentProgress, ActivePlan, RunTelemetrySummary } from '../types'
 import type { AgentActivityView } from '../utils/agentActivity'
 import { AgentActivityTable } from './AgentActivityTable'
@@ -20,6 +21,7 @@ interface Props {
   pendingApproval?: boolean
   rawProgress?: AgentProgress[]
   chatId?: string
+  onOpenArtifact?: (artifact: ArtifactFile) => void
   key?: any
 }
 
@@ -31,6 +33,7 @@ export function AgentActivityDrawer({
   pendingApproval = false,
   rawProgress,
   chatId,
+  onOpenArtifact,
 }: Props) {
   const [viewMode, setViewMode] = useState<'list' | 'dag'>('list')
 
@@ -146,7 +149,7 @@ export function AgentActivityDrawer({
       {viewMode === 'dag' && hasSubagents ? (
         <SubagentDagView progress={rawProgress || []} isLive={!isHistorical} />
       ) : activityView.items.length > 0 || (activityView.timeline && activityView.timeline.length > 0) ? (
-        <AgentActivityTable activityView={activityView} chatId={chatId} />
+        <AgentActivityTable activityView={activityView} chatId={chatId} onOpenArtifact={onOpenArtifact} />
       ) : null}
     </>
   )

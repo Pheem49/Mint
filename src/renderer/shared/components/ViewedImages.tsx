@@ -1,3 +1,4 @@
+import type { ArtifactFile } from './ArtifactPreviewPanel'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import type { AgentProgress } from '../types'
@@ -5,7 +6,17 @@ import { viewedImagesFrom, type ViewedImageItem } from '../utils/viewedImages'
 import { mediaPlatform } from '../platform'
 import '../css/viewed-images.css'
 
-export function ViewedImage({ image, chatId, variant = 'card' }: { image: ViewedImageItem; chatId?: string; variant?: 'card' | 'inline' }) {
+export function ViewedImage({
+  image,
+  chatId,
+  variant = 'card',
+  onOpenArtifact,
+}: {
+  image: ViewedImageItem
+  chatId?: string
+  variant?: 'card' | 'inline'
+  onOpenArtifact?: (artifact: ArtifactFile) => void
+}) {
   const [src, setSrc] = useState(image.src || '')
   const [broken, setBroken] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -39,6 +50,18 @@ export function ViewedImage({ image, chatId, variant = 'card' }: { image: Viewed
     if (expanded) dialog.current?.showModal()
   }, [expanded])
 
+  const handleOpen = () => {
+    if (onOpenArtifact && src) {
+      onOpenArtifact({
+        path: image.path || image.name,
+        url: src,
+        type: 'image',
+      })
+      return
+    }
+    setExpanded(true)
+  }
+
   if (variant === 'inline') {
     return (
       <figure className="viewed-image-inline" data-activity-image={image.id}>
@@ -51,11 +74,12 @@ export function ViewedImage({ image, chatId, variant = 'card' }: { image: Viewed
             type="button"
             className="viewed-image-inline-btn"
             aria-label={`Expand ${image.name}`}
-            onClick={() => setExpanded(true)}
+            title={onOpenArtifact ? 'Open full image in Tools Surface' : `Expand ${image.name}`}
+            onClick={handleOpen}
           >
             <img src={src} alt={`Viewed image: ${image.name}`} loading="lazy" onError={() => setBroken(true)} />
             <span className="viewed-image-inline-overlay">
-              <span className="viewed-image-inline-badge">Click to zoom</span>
+              <span className="viewed-image-inline-badge">{onOpenArtifact ? 'Open in Tools' : 'Click to zoom'}</span>
             </span>
           </button>
         )}
@@ -80,7 +104,13 @@ export function ViewedImage({ image, chatId, variant = 'card' }: { image: Viewed
 
   return <figure className="viewed-image" data-viewed-image={image.id}>
     {broken || !src ? <p className="viewed-image-error" role="status">{broken ? 'Image preview unavailable' : 'Loading image…'}</p> :
-      <button type="button" className="viewed-image-button" aria-label={`Expand ${image.name}`} onClick={() => setExpanded(true)}>
+      <button
+        type="button"
+        className="viewed-image-button"
+        aria-label={`Expand ${image.name}`}
+        title={onOpenArtifact ? 'Open full image in Tools Surface' : `Expand ${image.name}`}
+        onClick={handleOpen}
+      >
         <img src={src} alt={`Viewed image: ${image.name}`} loading="lazy" onError={() => setBroken(true)} />
       </button>}
     <figcaption title={image.path}>{image.name}</figcaption>
@@ -92,11 +122,19 @@ export function ViewedImage({ image, chatId, variant = 'card' }: { image: Viewed
   </figure>
 }
 
-export default memo(function ViewedImages({ progress, chatId }: { progress: AgentProgress[]; chatId?: string }) {
+export default memo(function ViewedImages({
+  progress,
+  chatId,
+  onOpenArtifact,
+}: {
+  progress: AgentProgress[]
+  chatId?: string
+  onOpenArtifact?: (artifact: ArtifactFile) => void
+}) {
   const images = useMemo(() => viewedImagesFrom(progress), [progress])
   if (!images.length) return null
   return <section className="viewed-images" aria-label="Images viewed by Mint">
-    {images.map(image => <ViewedImage key={image.id} image={image} chatId={chatId} />)}
+    {images.map(image => <ViewedImage key={image.id} image={image} chatId={chatId} onOpenArtifact={onOpenArtifact} />)}
   </section>
 })
 
