@@ -2,6 +2,12 @@
 
 Released: 2026-10-17
 
+## Safe Temp Directory Access for Agent Tools (2026-10-23)
+
+- **Symmetric Temp Directory Read/View Access**: Added `std::env::temp_dir()` and `/tmp` to default `allowed_paths` in `MintConfig`.
+- **Decoupled Tool Inspection from Strict Workspace Root**: Updated `view_image` and `read_file` to resolve paths via `agent_read_path` instead of hard workspace-root-only bounding. Agents can now inspect screenshots, artifacts, and output files created in `/tmp` by shell tools (`chrome --headless --screenshot`, `ffmpeg`, scripts) without `path is outside workspace` errors.
+- **Preserved Strict Security Guardrails**: Sensitive files (`.env`, `~/.ssh`, `id_rsa`, `.gnupg`) remain strictly blocked by `assert_path_capability`, and code mutation tools (`write_file`, `apply_patch`) remain anchored to the project workspace root.
+
 ## Context & Prompt Cache Optimization (2026-10-23)
 
 - **Rolling Image Eviction in LLM Context**: Implemented `prune_historic_images_from_native_messages` with `MAX_RETAINED_IMAGE_STEPS = 2`. Retains full vision pixels for the initial 2 steps of inspection and drops historical pixels in subsequent turns, eliminating runaway cumulative prompt cache growth and cutting token volume in vision-heavy agent tasks by over 90% while keeping durable original artifacts intact on the UI.

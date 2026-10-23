@@ -364,9 +364,12 @@ impl Default for MintConfig {
     fn default() -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let current_directory = std::env::current_dir().unwrap_or_else(|_| home.clone());
-        let allowed_paths = vec![
+        let temp_dir = std::env::temp_dir();
+        let canonical_temp = temp_dir.canonicalize().ok();
+        let mut allowed_paths = vec![
             home.clone(),
             current_directory,
+            temp_dir.clone(),
             home.join("Desktop"),
             home.join("Documents"),
             home.join("Downloads"),
@@ -374,6 +377,25 @@ impl Default for MintConfig {
             home.join("Music"),
             home.join("Videos"),
         ];
+        if let Some(canonical) = canonical_temp {
+            if canonical != temp_dir && !allowed_paths.contains(&canonical) {
+                allowed_paths.push(canonical);
+            }
+        }
+        #[cfg(unix)]
+        {
+            let slash_tmp = PathBuf::from("/tmp");
+            if slash_tmp.exists() {
+                if !allowed_paths.contains(&slash_tmp) {
+                    allowed_paths.push(slash_tmp.clone());
+                }
+                if let Ok(canonical_slash_tmp) = slash_tmp.canonicalize() {
+                    if !allowed_paths.contains(&canonical_slash_tmp) {
+                        allowed_paths.push(canonical_slash_tmp);
+                    }
+                }
+            }
+        }
         Self {
             theme: "dark".into(),
             tui_theme: "dark".into(),

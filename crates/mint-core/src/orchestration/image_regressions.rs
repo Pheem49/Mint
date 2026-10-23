@@ -210,3 +210,58 @@ async fn orchestration_prunes_older_tool_images_while_preserving_recent_images()
     assert!(messages[1].content.iter().any(|b| matches!(b, ContentBlock::ToolResult { content, .. } if content.contains("historical image pixels pruned from context"))));
 }
 
+#[tokio::test]
+async fn view_image_and_read_file_can_access_temp_directory_safely() {
+    let workspace = std::env::temp_dir().join(format!("mint-workspace-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&workspace).unwrap();
+
+    // 1. Create an image and a text file in std::env::temp_dir() outside the workspace
+    let temp_img = std::env::temp_dir().join(format!("mint-temp-test-{}.png", uuid::Uuid::new_v4()));
+    image::RgbImage::new(10, 10).save(&temp_img).unwrap();
+
+    let temp_txt = std::env::temp_dir().join(format!("mint-temp-note-{}.txt", uuid::Uuid::new_v4()));
+    std::fs::write(&temp_txt, "Hello from /tmp!").unwrap();
+
+    let config = MintConfig::default();
+    let mut approve = |_appr: &AgentApproval| Ok(ApprovalOutcome::Approved);
+
+    // 2. Test view_image with absolute temp path
+    let img_input = AgentInput {
+        path: temp_img.to_string_lossy().to_string(),
+        ..Default::default()
+    };
+    let img_res = tools::project::execute("view_image", &img_input, &workspace, &config, "test-chat", &mut approve).await;
+    assert!(img_res.is_ok(), "view_image failed on temp file: {:?}", img_res.err());
+    let img_out = img_res.unwrap();
+    assert!(img_out.starts_with("data:image/png;base64,"));
+
+    // 3. Test read_file with absolute temp path
+    let txt_input = AgentInput {
+        path: temp_txt.to_string_lossy().to_string(),
+        ..Default::default()
+    };
+    let txt_res = tools::files::execute("read_file", &txt_input, &workspace, &config, "test-chat", &mut approve).await;
+    assert!(txt_res.is_ok(), "read_file failed on temp file: {:?}", txt_res.err());
+    let txt_out = txt_res.unwrap();
+    assert!(txt_out.contains("Hello from /tmp!"));
+
+    // 4. Test security: sensitive files like .env remain blocked even in temp
+    let temp_sub = std::env::temp_dir().join(format!("mint-sub-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_sub).unwrap();
+    let blocked_file = temp_sub.join(".env");
+    std::fs::write(&blocked_file, "SECRET=123").unwrap();
+
+    let blocked_input = AgentInput {
+        path: blocked_file.to_string_lossy().to_string(),
+        ..Default::default()
+    };
+    let blocked_res = tools::files::execute("read_file", &blocked_input, &workspace, &config, "test-chat", &mut approve).await;
+    assert!(blocked_res.is_err(), "reading .env from temp should be blocked");
+
+    // Clean up
+    let _ = std::fs::remove_file(temp_img);
+    let _ = std::fs::remove_file(temp_txt);
+    let _ = std::fs::remove_dir_all(temp_sub);
+    let _ = std::fs::remove_dir_all(workspace);
+}
+

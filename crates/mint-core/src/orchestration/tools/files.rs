@@ -41,7 +41,7 @@ pub(in crate::orchestration) async fn execute(
             let path = if let Some(skill) = known_skill {
                 PathBuf::from(skill.source_path)
             } else {
-                workspace_path(root, required(&input.path, "path")?)?
+                agent_read_path(root, required(&input.path, "path")?, config)?
             };
             let start = input.start_line.unwrap_or(1);
             let end = input.end_line.unwrap_or_else(|| start.saturating_add(239));
