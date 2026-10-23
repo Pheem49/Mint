@@ -409,11 +409,16 @@ fn run_in_sandbox(
         // Own process group, same reasoning as `shell_command`'s: lets a
         // timed-out or interrupted run be killed as a whole tree via
         // `terminate_process_group` instead of just the `bwrap` wrapper.
+        let roots = writable_roots(config, cwd);
+        let has_tmp = roots.iter().any(|r| r == Path::new("/tmp") || r == &std::env::temp_dir());
+
         process
             .process_group(0)
-            .args(["--die-with-parent", "--ro-bind", "/", "/", "--dev", "/dev"])
-            .args(["--proc", "/proc", "--tmpfs", "/tmp"]);
-        for root in writable_roots(config, cwd) {
+            .args(["--die-with-parent", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]);
+        if !has_tmp {
+            process.args(["--tmpfs", "/tmp"]);
+        }
+        for root in roots {
             process.arg("--bind").arg(&root).arg(&root);
         }
         process
@@ -526,6 +531,27 @@ pub(crate) fn writable_roots(config: &MintConfig, cwd: &Path) -> Vec<PathBuf> {
         .filter(|root| root.exists())
         .cloned()
         .collect::<Vec<_>>();
+    let temp = std::env::temp_dir();
+    if temp.exists() && !roots.iter().any(|r| r == &temp) {
+        roots.push(temp.clone());
+    }
+    if let Ok(canonical_temp) = temp.canonicalize() {
+        if !roots.iter().any(|r| r == &canonical_temp) {
+            roots.push(canonical_temp);
+        }
+    }
+    #[cfg(unix)]
+    {
+        let slash_tmp = PathBuf::from("/tmp");
+        if slash_tmp.exists() && !roots.iter().any(|r| r == &slash_tmp) {
+            roots.push(slash_tmp.clone());
+        }
+        if let Ok(canonical_slash_tmp) = slash_tmp.canonicalize() {
+            if !roots.iter().any(|r| r == &canonical_slash_tmp) {
+                roots.push(canonical_slash_tmp);
+            }
+        }
+    }
     if !roots.iter().any(|root| cwd.starts_with(root)) {
         roots.push(cwd.to_path_buf());
     }
@@ -814,5 +840,17 @@ mod tests {
             .expect("timed-out command should be tracked as a background job, not killed");
         assert!(matches!(job.status, crate::bg_shell::JobStatus::Running));
         let _ = crate::bg_shell::kill_job(&job.id);
+    }
+
+    #[test]
+    fn writable_roots_always_includes_temp_directory() {
+        let config = MintConfig {
+            allowed_write_paths: vec![],
+            ..MintConfig::default()
+        };
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let roots = writable_roots(&config, &cwd);
+        let temp = std::env::temp_dir();
+        assert!(roots.iter().any(|r| r == &temp || (cfg!(unix) && r == Path::new("/tmp"))));
     }
 }

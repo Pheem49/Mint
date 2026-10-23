@@ -3710,7 +3710,7 @@ async fn execute_tool_outcome_reviewed_inner(
                 if !artifact_id.is_empty() {
                     return crate::media::tool_images::view_artifact(&artifact_id, &chat);
                 }
-                let path = workspace_path(&root, &path).map_err(|e| e.to_string())?;
+                let path = agent_read_path(&root, &path, &config).map_err(|e| e.to_string())?;
                 let path = assert_path_capability(&path, Capability::Read, &config)
                     .map_err(|e| e.to_string())?;
                 if std::fs::metadata(&path).map_err(|e| e.to_string())?.len()

@@ -258,6 +258,29 @@ async fn view_image_and_read_file_can_access_temp_directory_safely() {
     let blocked_res = tools::files::execute("read_file", &blocked_input, &workspace, &config, "test-chat", &mut approve).await;
     assert!(blocked_res.is_err(), "reading .env from temp should be blocked");
 
+    // 5. Test orchestration::execute_tool interception path for view_image with /tmp (regression for mod.rs:3713)
+    let decision = AgentDecision {
+        thought: "view temp image".into(),
+        action: "view_image".into(),
+        input: AgentInput {
+            path: temp_img.to_string_lossy().to_string(),
+            ..Default::default()
+        },
+    };
+    let mut progress_cb = |_p: AgentProgress| {};
+    let outcome = execute_tool(
+        &workspace,
+        &config,
+        &decision,
+        "test-chat",
+        &mut approve,
+        &mut progress_cb,
+    )
+    .await;
+    assert!(outcome.is_ok(), "orchestration execute_tool failed on temp image: {:?}", outcome.err());
+    let outcome = outcome.unwrap();
+    assert!(outcome.contains("Image saved:"));
+
     // Clean up
     let _ = std::fs::remove_file(temp_img);
     let _ = std::fs::remove_file(temp_txt);

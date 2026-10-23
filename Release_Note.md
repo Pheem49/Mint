@@ -5,7 +5,9 @@ Released: 2026-10-17
 ## Safe Temp Directory Access for Agent Tools (2026-10-23)
 
 - **Symmetric Temp Directory Read/View Access**: Added `std::env::temp_dir()` and `/tmp` to default `allowed_paths` in `MintConfig`.
-- **Decoupled Tool Inspection from Strict Workspace Root**: Updated `view_image` and `read_file` to resolve paths via `agent_read_path` instead of hard workspace-root-only bounding. Agents can now inspect screenshots, artifacts, and output files created in `/tmp` by shell tools (`chrome --headless --screenshot`, `ffmpeg`, scripts) without `path is outside workspace` errors.
+- **Decoupled Tool Inspection from Strict Workspace Root**: Updated `view_image` and `read_file` to resolve paths via `agent_read_path` instead of hard workspace-root-only bounding across all tool entry points (both `tools::project` and the primary orchestration interception loop in `orchestration/mod.rs`). Agents can now inspect screenshots, artifacts, and output files created in `/tmp` by shell tools (`chrome --headless --screenshot`, `ffmpeg`, scripts) without `path is outside workspace` errors.
+- **Persistent Temp Bind Mount in Linux Sandbox**: Replaced isolated ephemeral `--tmpfs /tmp` in Bubblewrap (`bwrap`) with host bind-mounting (`--bind /tmp /tmp`), ensuring files written to `/tmp` in one shell command remain persistent across commands and can be inspected by agent tools.
+- **Safety Policy Temp Invariant**: Enhanced `assert_path_capability` and `writable_roots` to always recognize and permit `temp_dir()` for read/write even when deserializing existing user configs from disk that omit `/tmp`.
 - **Preserved Strict Security Guardrails**: Sensitive files (`.env`, `~/.ssh`, `id_rsa`, `.gnupg`) remain strictly blocked by `assert_path_capability`, and code mutation tools (`write_file`, `apply_patch`) remain anchored to the project workspace root.
 
 ## Context & Prompt Cache Optimization (2026-10-23)
