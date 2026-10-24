@@ -1402,22 +1402,32 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
     }
 }
 
+pub(crate) fn resolve_agent_root(workspace_path: Option<&str>) -> std::path::PathBuf {
+    if let Some(path_str) = workspace_path.map(str::trim).filter(|s| !s.is_empty()) {
+        let path = std::path::PathBuf::from(path_str);
+        if let Ok(canonical) = path.canonicalize() {
+            if canonical.is_dir() {
+                return canonical;
+            }
+        } else if path.is_dir() {
+            return path;
+        }
+    }
+    let current = std::env::current_dir().unwrap_or_default();
+    current.canonicalize().unwrap_or(current)
+}
+
 async fn run_web_agent_loop(
     config: &MintConfig,
     request: &ChatRequest,
 ) -> Result<ChatResponse, String> {
-    let root = std::env::current_dir().map_err(|error| error.to_string())?;
+    let root = resolve_agent_root(request.workspace_path.as_deref());
     let fast_mode = config
         .extra
         .get("enableFastMode")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    // Same pre-scoping as `/api/chat-stream`'s agent-mode branch in
-    // routes/chat.rs and for the same reason: `root` above deliberately
-    // stays this server process's own cwd (not the client's workspace), so
-    // `orchestrate_agent_loop`'s self-derivation from `root` alone can't
-    // distinguish workspaces here — scope from the client's `workspace_path`
-    // explicitly instead. Idempotent/safe either way (see `scoped_chat_id`).
+    // Resolve client's workspace path for parity with desktop. Idempotent on scoped_chat_id.
     let scoped_chat_id = crate::agent::memory::scoped_chat_id(
         request
             .chat_id

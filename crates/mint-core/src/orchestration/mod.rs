@@ -505,7 +505,7 @@ fn tool_progress_input(root: &Path, decision: &AgentDecision) -> Value {
 /// Truncates `text` to at most `max_chars` characters (not bytes, so this
 /// never splits a multi-byte UTF-8 character) for injection into a "recent
 /// context" summary. Cheap no-op for the common case of a short message.
-fn truncate_for_context(text: &str, max_chars: usize) -> String {
+pub(super) fn truncate_for_context(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_owned();
     }

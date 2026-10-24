@@ -2,6 +2,19 @@
 
 Released: 2026-10-17
 
+## Hard-Truncate Context Compaction Fallback (2026-10-24)
+
+- **Deterministic Hard-Truncate on Compaction Failure**: Added `hard_truncate_native_messages` in `crates/mint-core/src/orchestration/context_render.rs`. When LLM-based compaction summarization encounters provider errors, timeouts, rate limits (HTTP 429), or context length exceeded, the agent loop no longer retains oversized messages and crashes with a generic `This turn failed.` turn failure. Instead, it seamlessly applies a structural hard-truncation fallback that extracts key tool calls and parameters from older steps into a compact synthetic summary pair while preserving the initial user task, the most recent steps (`COMPACTION_KEEP_RECENT_STEPS`), and strict alternating role semantics.
+- **Pre-emptive Transcript Safeguard**: Bounded individual `ContentBlock::ToolResult` outputs inside the compaction summarizer prompt to `MAX_TRANSCRIPT_TOOL_RESULT_CHARS = 2,000` via `truncate_for_context`. Prevents large tool outputs (such as massive file contents, large diffs, or verbose web search results) from blowing up the summarizer prompt and causing timeouts or context rejections in the first place.
+- **Clear Lifecycle & Status Notification**: Updated `report_context_compaction` to report structural fallback completions with a transparent notification (`Context compacted ...; hard-truncate fallback (...)`) across CLI Full-Screen TUI, Desktop, and Web UI.
+- **Comprehensive Unit Testing**: Added unit tests covering oversized tool result truncation, structural role-alternation retention, and automatic fallback activation upon provider failure.
+
+## Web API Server Workspace Parity & Scoping (2026-10-24)
+
+- **Parity with Desktop Workspace Resolution**: Added `resolve_agent_root` in `crates/mint-core/src/api_server.rs` to validate and resolve `workspace_path` provided by the client, canonicalizing valid existing directories and falling back to `current_dir()`.
+- **Eliminated Involuntary CWD Overwrites**: Updated `POST /api/chat-stream` in `routes/chat.rs` and `run_web_agent_loop` in `api_server.rs` to pass the resolved client workspace root to `orchestrate_agent_loop`. Agent mode conversations started in a selected project folder (e.g. `Cosplay`) in Mint Web now correctly persist their chosen workspace and remain under their intended project in the sidebar instead of being overwritten to the server process's launch directory.
+- **Unit and Regression Test Coverage**: Added comprehensive test coverage verifying `resolve_agent_root` for `None`, empty, non-existent, and valid directories.
+
 ## Safe Temp Directory Access for Agent Tools (2026-10-23)
 
 - **Symmetric Temp Directory Read/View Access**: Added `std::env::temp_dir()` and `/tmp` to default `allowed_paths` in `MintConfig`.

@@ -7,6 +7,13 @@ use super::*;
 /// rather than reusing the parallel `trajectory: Vec<String>` log, since that
 /// log gets one entry per *tool call* while `native_messages` gets one
 /// Assistant/Tool pair per *step* (a step can batch multiple tool calls) —
+pub(super) const MAX_TRANSCRIPT_TOOL_RESULT_CHARS: usize = 2_000;
+
+/// Renders a slice of `native_messages` back into readable text for the
+/// compaction summarizer prompt. Self-contained to `ChatMessage`/`ContentBlock`
+/// rather than reusing the parallel `trajectory: Vec<String>` log, since that
+/// log gets one entry per *tool call* while `native_messages` gets one
+/// Assistant/Tool pair per *step* (a step can batch multiple tool calls) —
 /// keeping the two aligned would need extra bookkeeping for no real benefit.
 pub(super) fn render_messages_as_text(messages: &[ChatMessage]) -> String {
     messages
@@ -20,7 +27,11 @@ pub(super) fn render_messages_as_text(messages: &[ChatMessage]) -> String {
                     ContentBlock::ToolUse { name, input, .. } => {
                         format!("Called {name} with {input}")
                     }
-                    ContentBlock::ToolResult { content, .. } => format!("Result: {content}"),
+                    ContentBlock::ToolResult { content, .. } => {
+                        let truncated =
+                            truncate_for_context(content, MAX_TRANSCRIPT_TOOL_RESULT_CHARS);
+                        format!("Result: {truncated}")
+                    }
                     ContentBlock::Image { .. } => "[image]".to_string(),
                     ContentBlock::Audio { .. } => "[audio]".to_string(),
                     ContentBlock::Video { .. } => "[video]".to_string(),
@@ -45,17 +56,12 @@ pub(super) fn render_messages_as_text(messages: &[ChatMessage]) -> String {
 /// special-casing needed elsewhere.
 ///
 /// `Ok(None)` means there was nothing worth compacting yet (too little history)
-/// — not a failure, just a no-op. `Err` means compaction was attempted but the
-/// summarization call itself failed; compaction is a best-effort optimization,
-/// so callers should fall back to the uncompacted messages rather than failing
-/// the agent run, but may want to surface the failure differently than a
-/// routine no-op.
+/// — not a failure, just a no-op.
 ///
-/// `Ok(Some((_, fallback_provider)))`'s second element names the provider
-/// actually used to generate the summary when it differs from the caller's
-/// primary (`send_chat_with_fallback` silently retries on another configured
-/// provider if the primary fails) — surfaced rather than discarded so a
-/// summary quietly written by a different model isn't invisible to the user.
+/// If LLM-based summarization fails (e.g. timeout, rate limit, provider error),
+/// this function falls back to deterministic structural truncation via
+/// [`hard_truncate_native_messages`] to guarantee that context is reduced and
+/// the agent loop does not crash from context overflow.
 pub(super) async fn compact_native_messages(
     config: &MintConfig,
     messages: &[ChatMessage],
@@ -78,7 +84,7 @@ pub(super) async fn compact_native_messages(
          the log.\n\n{transcript}"
     );
 
-    let (summary_response, fallback_provider) = send_chat_with_fallback(
+    let summary_result = send_chat_with_fallback(
         config,
         &ChatRequest {
             message: summary_prompt,
@@ -99,17 +105,115 @@ pub(super) async fn compact_native_messages(
             ..Default::default()
         },
     )
-    .await?;
+    .await;
 
-    let mut compacted = Vec::with_capacity(messages.len() - compact_message_count + 3);
-    compacted.push(messages[0].clone());
+    match summary_result {
+        Ok((summary_response, fallback_provider)) => {
+            let mut compacted = Vec::with_capacity(messages.len() - compact_message_count + 3);
+            compacted.push(messages[0].clone());
+            compacted.push(ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call_compacted_summary".into(),
+                    name: "conversation_summary".into(),
+                    input: serde_json::json!({
+                        "summary": format!("Summary of steps 1-{compact_pairs}")
+                    }),
+                    thought_signature: None,
+                }],
+            });
+            compacted.push(ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call_compacted_summary".into(),
+                    content: format!(
+                        "[Summary of steps 1-{compact_pairs}, compacted to save context]\n{}",
+                        summary_response.text.trim()
+                    ),
+                    is_error: false,
+                }],
+            });
+            compacted.extend_from_slice(&messages[1 + compact_message_count..]);
+            Ok(Some((compacted, fallback_provider)))
+        }
+        Err(err) => {
+            // LLM summarization failed (timeout, rate limit 429, provider offline, or context limit).
+            // Rather than returning Err and leaving native_messages uncompacted (which causes the next
+            // agent turn to crash with context window exceeded), fall back to deterministic hard-truncation.
+            let truncated =
+                hard_truncate_native_messages(messages, compact_pairs, &err.to_string());
+            Ok(Some((
+                truncated,
+                Some(format!("hard-truncate fallback ({err})")),
+            )))
+        }
+    }
+}
+
+pub(super) fn hard_truncate_native_messages(
+    messages: &[ChatMessage],
+    compact_pairs: usize,
+    error_reason: &str,
+) -> Vec<ChatMessage> {
+    let compact_message_count = compact_pairs * 2;
+    let compacted_range = if messages.len() > 1 {
+        let end = (1 + compact_message_count).min(messages.len());
+        &messages[1..end]
+    } else {
+        &[]
+    };
+
+    let mut actions = Vec::new();
+    for chunk in compacted_range.chunks(2) {
+        if let Some(assistant_msg) = chunk.get(0) {
+            for block in &assistant_msg.content {
+                if let ContentBlock::ToolUse { name, input, .. } = block {
+                    let input_summary = match input {
+                        serde_json::Value::Object(map) => {
+                            if let Some(path) = map.get("path").and_then(|v| v.as_str()) {
+                                format!("path: {path}")
+                            } else if let Some(cmd) = map.get("command").and_then(|v| v.as_str()) {
+                                format!("command: {cmd}")
+                            } else if let Some(query) = map.get("query").and_then(|v| v.as_str()) {
+                                format!("query: {query}")
+                            } else {
+                                let s = input.to_string();
+                                truncate_for_context(&s, 60)
+                            }
+                        }
+                        _ => {
+                            let s = input.to_string();
+                            truncate_for_context(&s, 60)
+                        }
+                    };
+                    actions.push(format!("- {name} ({input_summary})"));
+                }
+            }
+        }
+    }
+
+    let actions_text = if actions.is_empty() {
+        "(no explicit tool calls recorded)".to_string()
+    } else {
+        actions.join("\n")
+    };
+
+    let summary_content = format!(
+        "[Summary of steps 1-{compact_pairs} — compacted via deterministic hard-truncation fallback due to summarization failure: {error_reason}]\nActions performed in earlier steps:\n{actions_text}\n[Detailed tool outputs omitted to preserve context window. Recent steps continue below.]"
+    );
+
+    let mut compacted =
+        Vec::with_capacity(messages.len().saturating_sub(compact_message_count) + 3);
+    if !messages.is_empty() {
+        compacted.push(messages[0].clone());
+    }
     compacted.push(ChatMessage {
         role: ChatRole::Assistant,
         content: vec![ContentBlock::ToolUse {
             id: "call_compacted_summary".into(),
             name: "conversation_summary".into(),
             input: serde_json::json!({
-                "summary": format!("Summary of steps 1-{compact_pairs}")
+                "summary": format!("Summary of steps 1-{compact_pairs} (hard-truncated)")
             }),
             thought_signature: None,
         }],
@@ -118,15 +222,14 @@ pub(super) async fn compact_native_messages(
         role: ChatRole::Tool,
         content: vec![ContentBlock::ToolResult {
             tool_use_id: "call_compacted_summary".into(),
-            content: format!(
-                "[Summary of steps 1-{compact_pairs}, compacted to save context]\n{}",
-                summary_response.text.trim()
-            ),
+            content: summary_content,
             is_error: false,
         }],
     });
-    compacted.extend_from_slice(&messages[1 + compact_message_count..]);
-    Ok(Some((compacted, fallback_provider)))
+    if messages.len() > 1 + compact_message_count {
+        compacted.extend_from_slice(&messages[1 + compact_message_count..]);
+    }
+    compacted
 }
 
 pub(super) fn initial_observation(task: &str, root: &Path, skills: &str) -> String {
@@ -292,7 +395,13 @@ where
         Ok(Some((_, fallback))) => {
             let fallback_note = fallback
                 .as_ref()
-                .map(|p| format!("; summary generated via fallback provider {p}"))
+                .map(|p| {
+                    if p.starts_with("hard-truncate") {
+                        format!("; {p}")
+                    } else {
+                        format!("; summary generated via fallback provider {p}")
+                    }
+                })
                 .unwrap_or_default();
             (
                 "completed",
@@ -528,4 +637,117 @@ mod compaction_progress_tests {
         assert_eq!(messages[6].content.len(), 2);
         assert!(matches!(messages[6].content[1], ContentBlock::Image { .. }));
     }
+
+    fn sample_step_pair(index: usize) -> [ChatMessage; 2] {
+        [
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: format!("call{index}"),
+                    name: "read_file".into(),
+                    input: serde_json::json!({"path": format!("file{index}.rs")}),
+                    thought_signature: None,
+                }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: format!("call{index}"),
+                    content: format!("contents of file{index}.rs"),
+                    is_error: false,
+                }],
+            },
+        ]
+    }
+
+    #[test]
+    fn render_messages_as_text_truncates_oversized_tool_results() {
+        let long_content = "x".repeat(10_000);
+        let messages = vec![
+            ChatMessage {
+                role: ChatRole::User,
+                content: vec![ContentBlock::Text {
+                    text: "task".into(),
+                }],
+            },
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "c1".into(),
+                    name: "cat_huge_file".into(),
+                    input: serde_json::json!({}),
+                    thought_signature: None,
+                }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "c1".into(),
+                    content: long_content,
+                    is_error: false,
+                }],
+            },
+        ];
+        let rendered = render_messages_as_text(&messages);
+        assert!(rendered.contains("... [truncated]"));
+        assert!(rendered.len() < 3000);
+    }
+
+    #[test]
+    fn hard_truncate_native_messages_preserves_task_and_role_alternation() {
+        let mut messages = vec![ChatMessage::text(ChatRole::User, "initial task")];
+        for i in 0..5 {
+            messages.extend(sample_step_pair(i));
+        }
+        // 5 step pairs total (11 messages). Compact 2 pairs (steps 0 and 1), keeping steps 2, 3, 4 (3 pairs = 6 msgs).
+        let truncated = hard_truncate_native_messages(&messages, 2, "mock provider failure");
+
+        assert_eq!(truncated.len(), 1 + 2 + 6);
+        assert_eq!(truncated[0].role, ChatRole::User);
+        assert_eq!(truncated[1].role, ChatRole::Assistant);
+        assert_eq!(truncated[2].role, ChatRole::Tool);
+
+        // Verify summary contains key info
+        match &truncated[2].content[0] {
+            ContentBlock::ToolResult { content, .. } => {
+                assert!(content.contains("mock provider failure"));
+                assert!(content.contains("read_file"));
+                assert!(content.contains("file0.rs"));
+                assert!(content.contains("file1.rs"));
+            }
+            _ => panic!("Expected ToolResult in summary"),
+        }
+
+        // Verify strict role alternation
+        for i in 1..truncated.len() {
+            let expected_role = if i % 2 == 1 {
+                ChatRole::Assistant
+            } else {
+                ChatRole::Tool
+            };
+            assert_eq!(truncated[i].role, expected_role);
+        }
+    }
+
+    #[tokio::test]
+    async fn compact_native_messages_falls_back_to_hard_truncate_on_error() {
+        let mut messages = vec![ChatMessage::text(ChatRole::User, "initial task")];
+        // 5 step pairs = 2 to compact (since KEEP_RECENT = 3)
+        for i in 0..5 {
+            messages.extend(sample_step_pair(i));
+        }
+        let config = MintConfig {
+            ai_provider: "non_existent_provider_that_will_fail".into(),
+            ..Default::default()
+        };
+        let result = compact_native_messages(&config, &messages).await.unwrap();
+        assert!(result.is_some());
+        let (compacted, fallback) = result.unwrap();
+        assert_eq!(compacted.len(), 1 + 2 + 6);
+        assert!(fallback
+            .as_deref()
+            .unwrap_or("")
+            .contains("hard-truncate"));
+    }
 }
+
