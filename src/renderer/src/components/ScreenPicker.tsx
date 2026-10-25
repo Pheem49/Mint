@@ -1,4 +1,4 @@
-import SelectField from '../../shared/components/SelectField'
+import SelectField from '../../shared/components/ui/SelectField'
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { createFrameChangeTracker, sampleFrame } from './liveTranslateFrames'

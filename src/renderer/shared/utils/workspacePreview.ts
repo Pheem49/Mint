@@ -1,4 +1,4 @@
-import { detectArtifactType, type ArtifactFile } from '../components/ArtifactPreviewPanel'
+import { detectArtifactType, type ArtifactFile } from './artifacts'
 import { parseWorkspaceFileDrag, workspacePreviewId } from './workspaceDrag'
 
 interface PreviewApi {

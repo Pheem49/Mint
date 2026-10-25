@@ -1,4 +1,4 @@
-import SelectField from '../SelectField'
+import SelectField from '../ui/SelectField'
 import React, { useState } from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
 import { GEMINI_LIVE_VOICES } from '../../constants/models'

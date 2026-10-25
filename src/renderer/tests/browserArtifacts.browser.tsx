@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import ChatMessageItem from '../shared/components/ChatMessageItem'
+import ChatMessageItem from '../shared/components/chat/ChatMessageItem'
 import { installRendererPlatform, type RendererAdapter } from '../shared/platform'
 import { compactAgentProgressForPersistence, reduceLiveAgentProgress } from '../shared/agentProgress'
 import type { AgentProgress } from '../shared/types'

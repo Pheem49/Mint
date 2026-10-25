@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import WorkspacePanel from '../src/components/WorkspacePanel'
-import ToolSurfacePage, { type ToolSurface } from '../shared/components/ToolSurfacePage'
+import ToolSurfacePage, { type ToolSurface } from '../shared/components/workspace/ToolSurfacePage'
 import { installRendererPlatform, installWorkspacePlatform, runtimePlatform, workspacePlatform } from '../shared/platform'
 import { createWorkspacePreviewOpener } from '../shared/utils/workspacePreview'
 import { WORKSPACE_FILE_MIME, workspacePreviewId } from '../shared/utils/workspaceDrag'

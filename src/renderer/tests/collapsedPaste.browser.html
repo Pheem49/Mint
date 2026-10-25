@@ -1,7 +1,7 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Collapsed paste input</title></head><body><div id="root"></div><pre id="result">RUNNING</pre><script type="module">
 import React, { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { CollapsiblePasteInput } from '../shared/components/CollapsiblePasteInput';
+import { CollapsiblePasteInput } from '../shared/components/chat/CollapsiblePasteInput';
 const desktop = new URLSearchParams(location.search).get('surface') === 'desktop';
 if (desktop) await import('../src/css/chat.css'); else await import('../src-web/css/chat.css');
 const submitted = [];

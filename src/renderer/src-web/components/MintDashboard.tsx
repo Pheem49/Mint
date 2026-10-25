@@ -2,4 +2,4 @@
 import '../css/dashboard.css'
 
 // Re-export from the shared module — edit its logic there.
-export { default } from '../../shared/components/MintDashboard'
+export { default } from '../../shared/components/app/MintDashboard'

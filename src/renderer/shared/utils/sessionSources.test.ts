@@ -3,7 +3,7 @@ import { collectSessionSources } from './sessionSources'
 import type { AgentProgress } from '../types'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import SessionSources from '../components/SessionSources'
+import SessionSources from '../components/workspace/SessionSources'
 
 const search = (url: string, title = 'Reference'): AgentProgress => ({ type: 'ToolEnd', data: { action: 'web_search', input: { query: 'example' }, result: `1. ${title}\nURL: ${url}\nA useful reference` } })
 describe('session sources', () => {

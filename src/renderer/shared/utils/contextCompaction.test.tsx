@@ -2,7 +2,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { activeCompactionFrom } from './contextCompaction'
-import { ContextCompactionStatus } from '../components/ContextCompactionStatus'
+import { ContextCompactionStatus } from '../components/chat/ContextCompactionStatus'
 import { activitiesFrom } from './agentActivity'
 import type { AgentProgress } from '../types'
 

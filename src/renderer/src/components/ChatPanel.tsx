@@ -1,3 +1,3 @@
 // Re-export from the shared module — do NOT add logic here.
 // Edit src/renderer/shared/components/ChatPanel.tsx instead.
-export { default } from '../../shared/components/ChatPanel'
+export { default } from '../../shared/components/chat/ChatPanel'

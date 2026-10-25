@@ -3,7 +3,7 @@
  * Agent activity parsing and transformation logic.
  * Shared by both Desktop and Web ChatPanel — do NOT duplicate this.
  */
-import type { AgentProgress } from '../types'
+import type { AgentProgress, ActivePlan, RunTelemetrySummary } from '../types'
 import { isInternalCot } from '../agentProgress'
 import { viewedImageDataUri, viewedImagesFrom, type ViewedImageItem } from './viewedImages'
 
@@ -524,4 +524,34 @@ export function cleanIntermediateThought(text: string): string {
   // Strip leading bullet characters
   cleaned = cleaned.replace(/^[\s•\-\*]+\s*/, '')
   return cleaned.trim() || text.trim()
+}
+
+export function extractLatestPlan(progress: AgentProgress[]): ActivePlan | undefined {
+  for (let i = progress.length - 1; i >= 0; i--) {
+    const event = progress[i]
+    if (event.type === 'PlanUpdated') {
+      return event.data.plan
+    }
+  }
+  return undefined
+}
+
+export function extractLatestRunSummary(progress: AgentProgress[]): RunTelemetrySummary | undefined {
+  for (let i = progress.length - 1; i >= 0; i--) {
+    const event = progress[i]
+    if (event.type === 'RunCompleted') {
+      return event.data.summary
+    }
+  }
+  return undefined
+}
+
+export function hasSubagentActivity(progress: AgentProgress[]): boolean {
+  return progress.some(
+    (e) =>
+      e.type === 'SubagentStarted' ||
+      e.type === 'SubagentFinished' ||
+      ((e.type === 'ToolStart' || e.type === 'ToolEnd') &&
+        (e.data.subagent || e.data.action === 'dispatch_agents' || e.data.action === 'dispatch_subagent')),
+  )
 }

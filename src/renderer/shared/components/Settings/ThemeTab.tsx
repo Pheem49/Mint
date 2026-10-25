@@ -1,4 +1,4 @@
-import SelectField from '../SelectField'
+import SelectField from '../ui/SelectField'
 import React, { useState } from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
 import { THEME_PRESETS, ACCENT_FLAVORS, ThemePreset, AccentFlavor } from '../../theme/themes'

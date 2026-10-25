@@ -1,4 +1,4 @@
-import type { ArtifactFile } from '../components/ArtifactPreviewPanel'
+import type { ArtifactFile } from './artifacts'
 
 /** Tabs own Blob URLs, so duplicates share one URL and closing the last tab releases it. */
 export class PreviewObjectUrls {

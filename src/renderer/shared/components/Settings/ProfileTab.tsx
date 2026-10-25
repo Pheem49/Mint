@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react'
-import { useAuthUser } from '../AuthGate'
+import { useAuthUser } from '../app/AuthGate'
 import { authPlatform } from '../../platform'
 import AvatarCropModal from './AvatarCropModal'
 

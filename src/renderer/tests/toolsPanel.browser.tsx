@@ -1,9 +1,9 @@
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import ToolSurfacePage, { type ToolSurface } from '../shared/components/ToolSurfacePage'
-import ToolsPanelToggle from '../shared/components/ToolsPanelToggle'
-import { ModsPanel } from '../shared/components/ModsPanel'
-import { BackgroundTerminals } from '../shared/components/BackgroundTerminals'
+import ToolSurfacePage, { type ToolSurface } from '../shared/components/workspace/ToolSurfacePage'
+import ToolsPanelToggle from '../shared/components/workspace/ToolsPanelToggle'
+import { ModsPanel } from '../shared/components/extensions/ModsPanel'
+import { BackgroundTerminals } from '../shared/components/workspace/BackgroundTerminals'
 import { installRendererPlatform, type RendererAdapter } from '../shared/platform'
 import type { BackgroundJob } from '../shared/types'
 

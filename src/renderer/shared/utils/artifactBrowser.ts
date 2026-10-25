@@ -1,4 +1,4 @@
-import type { ArtifactFile } from '../components/ArtifactPreviewPanel'
+import type { ArtifactFile } from './artifacts'
 import { runtimePlatform, workspacePlatform } from '../platform'
 
 interface BrowserApi {

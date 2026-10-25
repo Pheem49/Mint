@@ -1,6 +1,6 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import ChatPanel from '../shared/components/ChatPanel'
+import ChatPanel from '../shared/components/chat/ChatPanel'
 import { chatPanelFixture } from './chatPanelFixture'
 import { installRendererPlatform } from '../shared/platform'
 import * as webAdapter from '../src-web/tauri'

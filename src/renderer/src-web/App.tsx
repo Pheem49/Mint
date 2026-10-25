@@ -1,7 +1,7 @@
 import React, { Suspense, useEffect, useState } from 'react'
-import AuthGate from '../shared/components/AuthGate'
-import ChunkErrorBoundary from '../shared/components/ChunkErrorBoundary'
-import ModalErrorBoundary from '../shared/components/ModalErrorBoundary'
+import AuthGate from '../shared/components/app/AuthGate'
+import ChunkErrorBoundary from '../shared/components/app/ChunkErrorBoundary'
+import ModalErrorBoundary from '../shared/components/app/ModalErrorBoundary'
 import PullToRefresh from './components/PullToRefresh'
 import { lazyWithRetry } from '../shared/utils/lazyWithRetry'
 

@@ -1,4 +1,4 @@
-import SelectField from '../../shared/components/SelectField'
+import SelectField from '../../shared/components/ui/SelectField'
 import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { emitTo } from '@tauri-apps/api/event'

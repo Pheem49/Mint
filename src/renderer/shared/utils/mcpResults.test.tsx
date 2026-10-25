@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import McpToolResults from '../components/McpToolResults'
+import McpToolResults from '../components/activity/McpToolResults'
 import { reduceLiveAgentProgress, compactAgentProgressForPersistence } from '../agentProgress'
 
 it('shows screenshot origin and dimensions in saved artifact cards', () => {

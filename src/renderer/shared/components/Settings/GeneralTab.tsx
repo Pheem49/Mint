@@ -1,4 +1,4 @@
-import SelectField from '../SelectField'
+import SelectField from '../ui/SelectField'
 import React from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
 import { 

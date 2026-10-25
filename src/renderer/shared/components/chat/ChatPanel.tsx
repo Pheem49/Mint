@@ -1,0 +1,1928 @@
+import { SpeechPlayer } from '../../speech/player'
+import McpToolResults from '../activity/McpToolResults'
+import ViewedImages from '../activity/ViewedImages'
+import { CollapsiblePasteInput } from './CollapsiblePasteInput'
+import { ContextCompactionStatus } from './ContextCompactionStatus'
+import { activeCompactionFrom } from '../../utils/contextCompaction'
+import { useEffect, useMemo, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
+import { EMPTY_AGENT_PROGRESS, hasAgentToolActivity, thoughtsFrom, extendedThoughtsFrom, mergeFileChanges, parseFileChangesFromProgress } from '../../agentProgress'
+import { visibleInteractionsDuringRun } from '../../conversation/syncView'
+import {
+  GEMINI_MODELS,
+  OPENAI_MODELS,
+  ANTHROPIC_MODELS,
+  OPENROUTER_MODELS,
+  DEEPSEEK_MODELS,
+  HF_MODELS,
+  LOCAL_MODELS,
+  OLLAMA_MODELS,
+  GEMINI_LIVE_VOICES,
+} from '../../constants/models'
+import { badge, providerLabel, fallbackNotice } from '../../utils/providers'
+import { parseWebSearchSources } from '../../utils/agentActivity'
+import { useLatestCallback } from '../../utils/useLatestCallback'
+import SlashChoicePanel from './SlashChoicePanel'
+import SlashSuggestions, { type SlashSuggestionsHandle } from './SlashSuggestions'
+import { ChatCodeBlock } from './ChatCodeBlock'
+import { renderApprovalDetails, renderDiff, type ApprovalDetails } from '../../utils/approval'
+import { ApprovalCard } from './ApprovalCard'
+import { FormattedMessage, readableAssistantText, renderSpeakerIcon, renderCopyIcon } from '../../utils/markdown'
+import { ThinkingBlock } from './ThinkingBlock'
+import ChatMessageItem from './ChatMessageItem'
+import { AgentActivityDrawer } from '../activity/AgentActivityDrawer'
+import { TurnFileChanges, type RewindRequestPayload } from './TurnFileChanges'
+import { SubagentStatusStrip } from '../activity/SubagentStatusStrip'
+import { VirtualChatHistory, type VirtualChatHistoryHandle } from './VirtualChatHistory'
+import type { ArtifactFile } from '../../utils/artifacts'
+import { ArtifactPreviewPanel } from '../workspace/ArtifactPreviewPanel'
+import { RewindModal } from './RewindModal'
+import type { AgentProgress, ChatResponse, DiffHunk, FileChange, GitCheckpoint, RuntimeStatus } from '../../types'
+import { shouldShowSessionDivider, formatSessionDividerLabel } from '../../utils/ui'
+import { useVoiceInput } from '@/voiceInput'
+import VoicePill from './VoicePill'
+import { useGeminiLiveVoice } from '../../utils/useGeminiLiveVoice'
+import GeminiLiveOverlay from './GeminiLiveOverlay'
+import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../../utils/documentTypes'
+import ModelSelectorPopover from './ModelSelectorPopover'
+import GitBranchSelector from '../workspace/GitBranchSelector'
+import WorkspaceSelector from '../workspace/WorkspaceSelector'
+import ToolsPanelToggle from '../workspace/ToolsPanelToggle'
+import { ModsPanel } from '../extensions/ModsPanel'
+import CodeReviewPage from '../workspace/CodeReviewPage'
+import type { ToolSurface } from '../workspace/ToolSurfacePage'
+import '../../css/thinking-status.css'
+import '../../css/slash-choice.css'
+
+import { catalogPlatform, conversationPlatform, runtimePlatform } from '../../platform'
+
+const STREAM_MARKDOWN_UPDATE_MS = 120
+
+function useThrottledValue<T>(value: T, intervalMs: number): T {
+  const [throttledValue, setThrottledValue] = useState(value)
+  const latestValueRef = useRef(value)
+  const lastUpdateRef = useRef(0)
+  const timerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+
+  useEffect(() => {
+    latestValueRef.current = value
+    if (Object.is(value, throttledValue)) return
+
+    const flush = () => {
+      timerRef.current = null
+      lastUpdateRef.current = Date.now()
+      setThrottledValue(latestValueRef.current)
+    }
+    const remaining = intervalMs - (Date.now() - lastUpdateRef.current)
+    if (remaining <= 0) flush()
+    else if (timerRef.current === null) timerRef.current = window.setTimeout(flush, remaining)
+  }, [value, throttledValue, intervalMs])
+
+  useEffect(() => () => {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current)
+  }, [])
+
+  return throttledValue
+}
+
+const {
+  speechRequest, startGeminiLiveSession, sendGeminiLiveAudioChunk, stopGeminiLiveSession,
+  listGitCheckpoints, rollbackGitCheckpoint, undoGitCheckpoint,
+} = conversationPlatform
+const { fetchProviderModels } = catalogPlatform
+
+
+interface ChatPanelContract {
+  interactions: any[]
+  sendingInteractionId?: number | null
+  hasOlder?: boolean
+  onLoadOlder?: () => Promise<void>
+  sending: boolean
+  sendingMessage: string
+  sendingImageCount: number
+  sendingVideoCount?: number
+  streamedReply: string
+  streamedResponse: ChatResponse | null
+  agentProgress: AgentProgress[]
+  agentActivitySnapshots: Record<string, AgentProgress[]>
+  thinkingExpanded: Record<string, boolean>
+  onThinkingExpandedChange: (key: string, open: boolean) => void
+  message: string
+  imageAttachments: Array<{ dataUri: string; name: string; previewDataUri?: string; objectUrl?: string }>
+  videoAttachments: Array<{ dataUri: string; name: string }>
+  documentName: string
+  pendingApproval: any | null
+  agentMode: boolean
+  /** Desktop only — plan-mode-approval UI isn't available on web. */
+  planMode?: boolean
+  status: RuntimeStatus | null
+  /** Desktop only — web has no local workspace-folder concept to select from. */
+  workspacePath?: string
+  chatId: string
+  chatEnd: RefObject<HTMLDivElement | null>
+  welcomeInteraction: any
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onSelectImage: (event: ChangeEvent<HTMLInputElement>) => void
+  onSelectVideo: (event: ChangeEvent<HTMLInputElement>) => void
+  onSelectDocument: (event: ChangeEvent<HTMLInputElement>) => void
+  onPasteImage: (clipboardData: DataTransfer) => boolean
+  onSetMessage: (message: string) => void
+  onSendVoiceMessage: (message: string, audioDataUri?: string | null) => Promise<void>
+  onRemoveImage: (idx: number) => void
+  onRemoveVideo: (idx: number) => void
+  onRemoveDocument: () => void
+  onStartWebSearch: () => void
+  onCaptureScreen: () => void
+  onSetAgentMode: (enabled: boolean) => void
+  /** Desktop only — see `planMode`. */
+  onSetPlanMode?: (enabled: boolean) => void
+  onSetProvider: (provider: string) => void
+  /** Desktop only — see `workspacePath`. */
+  onSelectWorkspace?: (path?: string) => void
+  onWorkspaceChanged?: () => void
+  recentWorkspacePaths: string[]
+  onApproval: (approved: boolean, autoApproveSession?: boolean, answer?: string) => void
+  settingsConfig: any
+  onUpdateSettings?: (config: any) => void
+  onSetModel: (model: string) => void
+  onSelectModelAndProvider?: (provider: string, model: string) => void
+  onCancelMessage: () => void
+  onClearMessages: () => void
+  onSetGeminiLiveVoice: (voice: string) => Promise<void>
+  /** Web only — desktop's window has no mobile-width sidebar to toggle. */
+  onToggleMobileSidebar?: () => void
+  isCliSession?: boolean
+  cliSessionId?: string
+  onBackToCode?: () => void
+  conversationTitle?: string
+  slashChoice?: { command: string; title: string; options: { label: string; value: string }[] } | null
+  onOpenArtifact?: (artifact: ArtifactFile) => void
+  onOpenReview?: (review: Extract<ToolSurface, { kind: 'review' }>) => void
+  onSelectSlashChoice?: (value: string) => void
+  onDismissSlashChoice?: () => void
+}
+
+export type ConversationViewModel = Pick<ChatPanelContract,
+  | 'interactions' | 'sending' | 'sendingMessage' | 'sendingImageCount' | 'sendingVideoCount'
+  | 'streamedReply' | 'streamedResponse' | 'agentProgress' | 'agentActivitySnapshots'
+  | 'thinkingExpanded' | 'message' | 'imageAttachments' | 'videoAttachments' | 'documentName'
+  | 'pendingApproval' | 'agentMode' | 'planMode' | 'status' | 'workspacePath' | 'chatId' | 'recentWorkspacePaths'
+  | 'chatEnd' | 'welcomeInteraction' | 'settingsConfig' | 'isCliSession' | 'cliSessionId'
+  | 'conversationTitle' | 'slashChoice'
+  | 'hasOlder'
+  | 'sendingInteractionId'
+>
+export type ConversationActions = Omit<ChatPanelContract, keyof ConversationViewModel>
+
+interface ChatPanelProps {
+  conversation: ConversationViewModel
+  actions: ConversationActions
+  tools?: { modsPanelTarget: HTMLElement | null; onOpenMods: () => void; onToggle?: () => void; open: boolean; backgroundTaskCount: number }
+}
+
+export default function ChatPanel({
+  conversation,
+  actions,
+  tools,
+}: ChatPanelProps) {
+  const {
+  interactions,
+  sendingInteractionId,
+  hasOlder,
+  onLoadOlder,
+  sending,
+  sendingMessage,
+  sendingImageCount,
+  sendingVideoCount,
+  streamedReply,
+  streamedResponse,
+  agentProgress,
+  agentActivitySnapshots,
+  thinkingExpanded,
+  onThinkingExpandedChange: handleThinkingExpandedChange,
+  message,
+  imageAttachments,
+  videoAttachments,
+  documentName,
+  pendingApproval,
+  agentMode,
+  planMode,
+  status,
+  workspacePath,
+  chatId,
+  recentWorkspacePaths,
+  chatEnd,
+  welcomeInteraction,
+  onSubmit,
+  onSelectImage,
+  onSelectVideo,
+  onSelectDocument,
+  onPasteImage,
+  onSetMessage,
+  onSendVoiceMessage,
+  onRemoveImage,
+  onRemoveVideo,
+  onRemoveDocument,
+  onStartWebSearch,
+  onCaptureScreen,
+  onSetAgentMode,
+  onSetPlanMode,
+  onSetProvider,
+  onSelectWorkspace,
+  onWorkspaceChanged,
+  onApproval,
+  settingsConfig,
+  onUpdateSettings,
+  onSetModel,
+  onSelectModelAndProvider,
+  onCancelMessage,
+  onClearMessages,
+  onSetGeminiLiveVoice,
+  onToggleMobileSidebar,
+  isCliSession,
+  cliSessionId,
+  onBackToCode,
+  conversationTitle,
+  slashChoice,
+  onOpenArtifact,
+  onOpenReview,
+  onSelectSlashChoice,
+  onDismissSlashChoice,
+  } = { ...conversation, ...actions }
+  const onThinkingExpandedChange = useLatestCallback(handleThinkingExpandedChange)
+  // The initiating surface already renders a live prompt/reply pair below.
+  // Hide its matching persisted turn until the local stream settles, while
+  // still showing turns submitted from other surfaces during that time.
+  const visibleInteractions = useMemo(
+    () => visibleInteractionsDuringRun(interactions, sending, sendingInteractionId),
+    [interactions, sending, sendingInteractionId],
+  )
+  // Keep the composer summary tied to the active/latest agent run. This is cheap
+  // metadata, but memoizing it avoids parsing the activity stream while typing.
+  const composerChanges = useMemo(() => parseFileChangesFromProgress(agentProgress), [agentProgress])
+  const composerAdditions = useMemo(
+    () => composerChanges.reduce((sum, change) => sum + change.additions, 0),
+    [composerChanges],
+  )
+  const composerDeletions = useMemo(
+    () => composerChanges.reduce((sum, change) => sum + change.deletions, 0),
+    [composerChanges],
+  )
+  const composerChangeLabel = composerChanges.length === 1
+    ? '1 file changed'
+    : `${composerChanges.length} files changed`
+  const historicalChanges = useMemo(() => {
+    const historicalGroups = interactions.map((interaction) => {
+      const interactionId = String(interaction.id)
+      const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? EMPTY_AGENT_PROGRESS
+      return parseFileChangesFromProgress(progress)
+    })
+    return mergeFileChanges(historicalGroups)
+  }, [agentActivitySnapshots, interactions])
+  // Review uses current data even from a memoized historical message's button.
+  // Merge the conversation only when requested, not on each progress update.
+  const getConversationChanges = useLatestCallback(() => mergeFileChanges([historicalChanges, composerChanges]))
+
+  const projectName = useMemo(() => {
+    if (!workspacePath) return null
+    const clean = workspacePath.replace(/[\\/]+$/, '').trim()
+    if (!clean) return null
+    const parts = clean.split(/[\\/]/)
+    return parts[parts.length - 1] || clean
+  }, [workspacePath])
+
+  // Markdown parsing can be expensive for code, tables, and interactive cards.
+  // Limit it to a steady cadence instead of parsing on every stream chunk.
+  const throttledStreamedReply = useThrottledValue(streamedReply, STREAM_MARKDOWN_UPDATE_MS)
+  const liveWebSources = useMemo(() => parseWebSearchSources(agentProgress), [agentProgress])
+  const activeFallbackNotice = fallbackNotice(streamedResponse)
+  const compaction = useMemo(() => activeCompactionFrom(agentProgress), [agentProgress])
+  const liveThoughts = useMemo(() => thoughtsFrom(agentProgress), [agentProgress])
+  const liveExtendedThoughts = useMemo(() => extendedThoughtsFrom(agentProgress), [agentProgress])
+  const lastThinkingProgress = useMemo(() => [...agentProgress].reverse().find(p => p.type === 'Thinking'), [agentProgress])
+  let activeAgentName: string | null = null
+  let activeModelName: string | null = null
+  if (lastThinkingProgress && lastThinkingProgress.type === 'Thinking') {
+    activeAgentName = (lastThinkingProgress.data as any).agent_name || null
+    activeModelName = (lastThinkingProgress.data as any).model_name || null
+  }
+  const [openActivityIds, setOpenActivityIds] = useState<Record<string, boolean>>({})
+  const [reviewPage, setReviewPage] = useState<{ title: string; changes: FileChange[] } | null>(null)
+  const [activeArtifact, setActiveArtifact] = useState<ArtifactFile | null>(null)
+  const [toolMenuOpen, setToolMenuOpen] = useState(false)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
+  const toggleActivity = useCallback((id: string) => {
+    setOpenActivityIds(current => ({ ...current, [id]: !(current[id] ?? (id === 'live')) }))
+  }, [])
+
+  const openArtifact = useLatestCallback((artifact: ArtifactFile) => {
+    if (onOpenArtifact) onOpenArtifact(artifact)
+    else setActiveArtifact({ ...artifact, workspacePath: artifact.workspacePath ?? workspacePath })
+  })
+
+  const openReview = useLatestCallback((title: string, changes: FileChange[]) => {
+    if (onOpenReview) onOpenReview({ id: `review:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: title, changes })
+    else setReviewPage({ title, changes })
+  })
+
+  const openAllConversationReview = useLatestCallback(() => {
+    openReview('All conversation changes', getConversationChanges())
+  })
+
+  useEffect(() => {
+    let cancelled = false
+    const fetchOllamaModels = async () => {
+      const host = settingsConfig?.ollamaHost || 'http://localhost:11434'
+      const cleanHost = host.endsWith('/') ? host.slice(0, -1) : host
+      try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 2000)
+        const res = await fetch(`${cleanHost}/api/tags`, { signal: controller.signal })
+        clearTimeout(timer)
+        if (res.ok) {
+          const data = await res.json()
+          if (!cancelled && data && Array.isArray(data.models) && data.models.length > 0) {
+            setDynamicOllamaModels(data.models.map((m: any) => m.name))
+            return
+          }
+        }
+      } catch (err) {
+        // Direct fetch failed or timed out — try backend Tauri / API server
+      }
+
+      try {
+        const live = await fetchProviderModels('ollama', '')
+        if (!cancelled && live && live.length > 0) {
+          setDynamicOllamaModels(live)
+          return
+        }
+      } catch (err) {
+        // Fallback
+      }
+
+      if (!cancelled) {
+        if (settingsConfig?.ollamaModel) {
+          setDynamicOllamaModels([settingsConfig.ollamaModel])
+        } else {
+          setDynamicOllamaModels(OLLAMA_MODELS)
+        }
+      }
+    }
+    fetchOllamaModels()
+    return () => {
+      cancelled = true
+    }
+  }, [settingsConfig?.ollamaHost, settingsConfig?.ollamaModel])
+
+  useEffect(() => {
+    if (!sending) {
+      setElapsedSeconds(0)
+      return
+    }
+
+    const startTime = Date.now()
+    setElapsedSeconds(0)
+
+    const timer = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000)
+      setElapsedSeconds(elapsed)
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [sending])
+  const [speechError, setSpeechError] = useState('')
+  const [speakingText, setSpeakingText] = useState<string | null>(null)
+  const [copiedId, setCopiedId] = useState<string | number | null>(null)
+
+  const chatContainerRef = useRef<HTMLDivElement | null>(null)
+  const virtualHistoryRef = useRef<VirtualChatHistoryHandle | null>(null)
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const isNearBottomRef = useRef(true)
+  const scrollFrameRef = useRef<number | null>(null)
+
+  const handleChatScroll = useCallback(() => {
+    const el = chatContainerRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    const nearBottom = distanceFromBottom <= 240
+    setShowScrollToBottom(!nearBottom)
+    isNearBottomRef.current = nearBottom
+  }, [])
+
+  const scheduleScrollToLatest = useCallback(() => {
+    if (!isNearBottomRef.current || scrollFrameRef.current !== null) return
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      const element = chatContainerRef.current
+      if (element && isNearBottomRef.current) {
+        // Smooth scrolling on every token restarts animations and causes jank.
+        virtualHistoryRef.current?.scrollToEnd()
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    scheduleScrollToLatest()
+  }, [interactions, sending, streamedReply, pendingApproval, agentProgress, scheduleScrollToLatest])
+
+  useEffect(() => {
+    isNearBottomRef.current = true
+    setShowScrollToBottom(false)
+    scheduleScrollToLatest()
+  }, [chatId, scheduleScrollToLatest])
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current)
+  }, [])
+
+  useEffect(() => {
+    const el = chatContainerRef.current
+    if (!el) return
+    if (isNearBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [activeArtifact])
+
+  const scrollToBottom = useCallback(() => {
+    isNearBottomRef.current = true
+    virtualHistoryRef.current?.scrollToEnd()
+  }, [])
+
+  const [splitRatio, setSplitRatio] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('mint_preview_split_ratio')
+      if (saved) {
+        const val = parseFloat(saved)
+        if (!isNaN(val) && val >= 0.2 && val <= 0.8) {
+          return val
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return 0.5
+  })
+  const currentRatioRef = useRef(splitRatio)
+  const wrapperRef = useRef<HTMLDivElement | null>(null)
+
+  const handleResizerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const wrapper = wrapperRef.current
+    if (!wrapper) return
+
+    wrapper.classList.add('is-resizing')
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const rect = wrapper.getBoundingClientRect()
+      const totalWidth = rect.width
+      if (totalWidth <= 0) return
+
+      const previewPx = rect.right - moveEvent.clientX
+      const clampedPreviewPx = Math.max(280, Math.min(totalWidth - 340, previewPx))
+      const newRatio = clampedPreviewPx / totalWidth
+      currentRatioRef.current = newRatio
+      wrapper.style.setProperty('--preview-width', `${(newRatio * 100).toFixed(2)}%`)
+    }
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+      wrapper.classList.remove('is-resizing')
+      setSplitRatio(currentRatioRef.current)
+      try {
+        localStorage.setItem('mint_preview_split_ratio', currentRatioRef.current.toFixed(4))
+      } catch {
+        // ignore
+      }
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }, [])
+
+  const handleResizerDoubleClick = useCallback(() => {
+    const defaultRatio = 0.5
+    currentRatioRef.current = defaultRatio
+    setSplitRatio(defaultRatio)
+    if (wrapperRef.current) {
+      wrapperRef.current.style.setProperty('--preview-width', '50%')
+    }
+    try {
+      localStorage.setItem('mint_preview_split_ratio', '0.5')
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const [rewindModalState, setRewindModalState] = useState<{
+    isOpen: boolean
+    interaction: any | null
+    changes: FileChange[]
+    checkpoints: GitCheckpoint[]
+    targetCheckpoint: GitCheckpoint | null
+    isLoading: boolean
+  }>({
+    isOpen: false,
+    interaction: null,
+    changes: [],
+    checkpoints: [],
+    targetCheckpoint: null,
+    isLoading: false,
+  })
+
+  const [undoToastState, setUndoToastState] = useState<{
+    visible: boolean
+    message: string
+    canUndo: boolean
+    isUndoing: boolean
+    type: 'success' | 'error'
+  }>({
+    visible: false,
+    message: '',
+    canUndo: false,
+    isUndoing: false,
+    type: 'success',
+  })
+
+  useEffect(() => {
+    if (!undoToastState.visible) return
+    const timer = setTimeout(() => {
+      setUndoToastState((prev) => ({ ...prev, visible: false }))
+    }, 16000)
+    return () => clearTimeout(timer)
+  }, [undoToastState.visible, undoToastState.message])
+
+  const handleConfirmRewind = useCallback(async (targetStep: number) => {
+    const interaction = rewindModalState.interaction
+    if (!interaction) return
+    const chatId = interaction.chatId || 'cli'
+
+    setRewindModalState((prev) => ({ ...prev, isLoading: true }))
+    try {
+      const res = await rollbackGitCheckpoint(chatId, targetStep, workspacePath)
+      setRewindModalState((prev) => ({ ...prev, isOpen: false, isLoading: false }))
+      if (res.status === 'ok') {
+        setUndoToastState({
+          visible: true,
+          message: res.message,
+          canUndo: true,
+          isUndoing: false,
+          type: 'success',
+        })
+      } else {
+        setUndoToastState({
+          visible: true,
+          message: `Failed to rewind: ${res.message}`,
+          canUndo: false,
+          isUndoing: false,
+          type: 'error',
+        })
+      }
+    } catch (err: any) {
+      setRewindModalState((prev) => ({ ...prev, isOpen: false, isLoading: false }))
+      setUndoToastState({
+        visible: true,
+        message: `Error: ${err.message || String(err)}`,
+        canUndo: false,
+        isUndoing: false,
+        type: 'error',
+      })
+    }
+  }, [rewindModalState.interaction, workspacePath])
+
+  const handleUndoRewind = useCallback(async () => {
+    setUndoToastState((prev) => ({ ...prev, isUndoing: true }))
+    try {
+      const res = await undoGitCheckpoint(workspacePath)
+      if (res.status === 'ok') {
+        setUndoToastState({
+          visible: true,
+          message: res.message,
+          canUndo: false,
+          isUndoing: false,
+          type: 'success',
+        })
+      } else {
+        setUndoToastState({
+          visible: true,
+          message: `Failed to undo rewind: ${res.message}`,
+          canUndo: true,
+          isUndoing: false,
+          type: 'error',
+        })
+      }
+    } catch (err: any) {
+      setUndoToastState({
+        visible: true,
+        message: `Error: ${err.message || String(err)}`,
+        canUndo: true,
+        isUndoing: false,
+        type: 'error',
+      })
+    }
+  }, [workspacePath])
+
+  const handleCopyMessage = useCallback(async (id: string | number, text: string) => {
+    try {
+      const cleanText = readableAssistantText(text) || text
+      await navigator.clipboard.writeText(cleanText)
+      setCopiedId(id)
+      setTimeout(() => {
+        setCopiedId((current) => (current === id ? null : current))
+      }, 2000)
+    } catch (err) {
+      console.error('Failed to copy message:', err)
+    }
+  }, [])
+
+
+  const toolMenuRef = useRef<HTMLDivElement | null>(null)
+  const historyReadyRef = useRef(false)
+  const submittedDuringSessionRef = useRef(false)
+  const lastAutoSpokenIdRef = useRef<number | string | null>(null)
+  const speakingRef = useRef<string | null>(null)
+
+  // Drag and Drop Zone Overlay
+  const [isDragging, setIsDragging] = useState(false)
+  const dragCounter = useRef(0)
+  const lastDropTimeRef = useRef(0)
+
+  const handleDragEnter = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    if (e.dataTransfer?.types?.includes('Files')) {
+      dragCounter.current++
+      setIsDragging(true)
+    }
+  }
+
+  const handleDragLeave = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    if (e.dataTransfer?.types?.includes('Files')) {
+      dragCounter.current--
+      if (dragCounter.current === 0) {
+        setIsDragging(false)
+      }
+    }
+  }
+
+  const handleDragOver = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+  }
+
+  const handleDrop = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounter.current = 0
+    setIsDragging(false)
+
+    const now = Date.now()
+    if (now - lastDropTimeRef.current < 250) {
+      return
+    }
+    lastDropTimeRef.current = now
+
+    const files = e.dataTransfer?.files
+    if (files && files.length > 0) {
+      const file = files[0]
+      if (file.type.startsWith('image/')) {
+        const input = document.getElementById('vision-file-input') as HTMLInputElement | null
+        if (input) {
+          const dt = new DataTransfer()
+          dt.items.add(file)
+          input.files = dt.files
+          const event = { target: input } as ChangeEvent<HTMLInputElement>
+          onSelectImage(event)
+        }
+      } else if (file.type.startsWith('video/')) {
+        const input = document.getElementById('video-file-input') as HTMLInputElement | null
+        if (input) {
+          const dt = new DataTransfer()
+          dt.items.add(file)
+          input.files = dt.files
+          const event = { target: input } as ChangeEvent<HTMLInputElement>
+          onSelectVideo(event)
+        }
+      } else if (isSupportedDocument(file.name)) {
+        const input = document.getElementById('document-file-input') as HTMLInputElement | null
+        if (input) {
+          const dt = new DataTransfer()
+          dt.items.add(file)
+          input.files = dt.files
+          const event = { target: input } as ChangeEvent<HTMLInputElement>
+          onSelectDocument(event)
+        }
+      }
+    }
+  }
+
+
+  // The mic button dictates into the composer (native capture on Desktop,
+  // browser speech recognition on Web). Gemini Live has its own button and overlay.
+  const {
+    isRecording,
+    voiceMode,
+    setVoiceMode,
+    voiceTranscript,
+    setVoiceTranscript,
+    voiceAwaitingResponse,
+    voiceAwaitingResponseRef,
+    voiceModeRef,
+    startRecognition,
+    stopRecognition,
+    cancelRecognition,
+    scheduleVoiceListen,
+    clearRestartTimer
+  } = useVoiceInput({
+    chatId,
+    onSendVoiceMessage,
+    language: settingsConfig?.language,
+    message,
+    sending,
+    isSpeaking: Boolean(speakingText),
+    onSetMessage,
+  })
+
+  const geminiLiveEnabled = settingsConfig?.voiceMode === 'geminiLive'
+  const geminiLive = useGeminiLiveVoice({
+    workspacePath,
+    chatId,
+    startSession: startGeminiLiveSession,
+    sendAudioChunk: sendGeminiLiveAudioChunk,
+    stopSession: stopGeminiLiveSession
+  })
+
+  const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || videoAttachments.length > 0 || documentName)
+  const sendingImageMarkers = Array.from({ length: sendingImageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
+  const sendingVideoMarkers = Array.from({ length: sendingVideoCount || 0 }, (_, index) => `[Video #${index + 1}]`).join(' ')
+
+  const getAvailableModels = (provider: string) => {
+    switch (provider) {
+      case 'gemini':
+        return GEMINI_MODELS
+      case 'openai':
+        return OPENAI_MODELS
+      case 'openrouter':
+        return OPENROUTER_MODELS
+      case 'deepseek':
+        return DEEPSEEK_MODELS
+      case 'anthropic':
+        return ANTHROPIC_MODELS
+      case 'huggingface':
+        return HF_MODELS
+      case 'local_openai':
+        return LOCAL_MODELS
+      case 'ollama':
+        return dynamicOllamaModels
+      default:
+        if (provider.startsWith('custom:')) {
+          const id = provider.replace(/^custom:/, '')
+          const cp = (settingsConfig?.customProviders ?? []).find(p => p.id === id)
+          return cp?.models.map(m => m.modelId) ?? []
+        }
+        return []
+      }
+  }
+
+  const activeProvider = status?.activeProvider ?? ''
+  const availableModels = getAvailableModels(activeProvider)
+
+  const getActiveModel = (provider: string) => {
+    if (!settingsConfig) return ''
+    switch (provider) {
+      case 'gemini':
+        return settingsConfig.geminiModel
+      case 'openai':
+        return settingsConfig.openaiModel
+      case 'openrouter':
+        return settingsConfig.openrouterModel
+      case 'deepseek':
+        return settingsConfig.deepseekModel
+      case 'anthropic':
+        return settingsConfig.anthropicModel
+      case 'huggingface':
+        return settingsConfig.hfModel
+      case 'local_openai':
+        return settingsConfig.localModelName
+      case 'ollama':
+        return settingsConfig.ollamaModel
+      default:
+        if (provider.startsWith('custom:')) {
+          const id = provider.replace(/^custom:/, '')
+          const cp = (settingsConfig?.customProviders ?? []).find(p => p.id === id)
+          return (settingsConfig.customModelSelections ?? {})[id] ?? cp?.models[0]?.modelId ?? ''
+        }
+        return ''
+    }
+  }
+  const activeModel = getActiveModel(activeProvider)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const slashRef = useRef<SlashSuggestionsHandle>(null)
+
+  // Up/Down input history: recall previously submitted prompts (parity with the CLI).
+  // `historyIndex` counts back from the newest entry — 0 is the most recent, null
+  // means "editing the live draft". The draft is stashed the moment browsing starts.
+  const promptHistory = useMemo(() => {
+    const out: string[] = []
+    for (const it of interactions) {
+      if (it?.provider === 'system') continue
+      const text = typeof it?.userText === 'string' ? it.userText.trim() : ''
+      if (!text) continue
+      if (out[out.length - 1] === text) continue
+      out.push(text)
+    }
+    return out
+  }, [interactions])
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null)
+  const historyDraftRef = useRef('')
+
+  const applyHistoryValue = (value: string) => {
+    onSetMessage(value)
+    setTimeout(() => {
+      const el = textareaRef.current
+      if (!el) return
+      resizeInput(el)
+      const end = el.value.length
+      el.setSelectionRange(end, end)
+      el.focus()
+    }, 0)
+  }
+  const navigateHistoryPrev = () => {
+    if (promptHistory.length === 0) return false
+    if (historyIndex === null) {
+      historyDraftRef.current = message
+      setHistoryIndex(0)
+      applyHistoryValue(promptHistory[promptHistory.length - 1])
+      return true
+    }
+    if (historyIndex + 1 < promptHistory.length) {
+      const next = historyIndex + 1
+      setHistoryIndex(next)
+      applyHistoryValue(promptHistory[promptHistory.length - 1 - next])
+    }
+    return true
+  }
+  // "Edit" on a past user message: drop its text back into the composer so it
+  // can be tweaked and sent again as a new message (nothing is deleted).
+  const handleEditMessage = useLatestCallback((text: string) => {
+    setHistoryIndex(null)
+    applyHistoryValue(text)
+  })
+  const navigateHistoryNext = () => {
+    if (historyIndex === null) return false
+    if (historyIndex === 0) {
+      setHistoryIndex(null)
+      applyHistoryValue(historyDraftRef.current)
+      return true
+    }
+    const next = historyIndex - 1
+    setHistoryIndex(next)
+    applyHistoryValue(promptHistory[promptHistory.length - 1 - next])
+    return true
+  }
+
+  // Fill a menu pick into the composer (never submits — a separate Enter runs
+  // it). The <SlashSuggestions> child owns all the menu state; this only writes
+  // the completed text back and refocuses.
+  const completeSuggestion = (text: string) => {
+    onSetMessage(text)
+    setTimeout(() => {
+      const el = textareaRef.current
+      if (!el) return
+      resizeInput(el)
+      el.focus()
+    }, 0)
+  }
+
+  const submitOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    event.currentTarget.form?.requestSubmit()
+  }
+  const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const isPlainArrowNav =
+      (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
+      !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey &&
+      !event.nativeEvent.isComposing
+
+    // History browsing wins over the suggestion menu: once it's started, ↑/↓
+    // keep stepping through history even if a recalled slash/@ entry would
+    // otherwise open the menu (the menu is `suppressed` while browsing anyway).
+    if (
+      isPlainArrowNav && historyIndex !== null &&
+      event.currentTarget.selectionStart === event.currentTarget.selectionEnd
+    ) {
+      if (event.key === 'ArrowUp' ? navigateHistoryPrev() : navigateHistoryNext()) {
+        event.preventDefault()
+        return
+      }
+    }
+
+    // Let the suggestion menu claim ↑/↓/Enter/Tab/Escape when it's showing.
+    if (slashRef.current?.handleKeyDown(event)) return
+
+    if (isPlainArrowNav) {
+      const el = event.currentTarget
+      if (el.selectionStart === el.selectionEnd) {
+        if (event.key === 'ArrowUp') {
+          const onFirstLine = !el.value.slice(0, el.selectionStart).includes('\n')
+          if (onFirstLine && navigateHistoryPrev()) {
+            event.preventDefault()
+            return
+          }
+        } else {
+          const onLastLine = !el.value.slice(el.selectionEnd).includes('\n')
+          if (onLastLine && navigateHistoryNext()) {
+            event.preventDefault()
+            return
+          }
+        }
+      }
+    }
+
+    submitOnEnter(event)
+  }
+
+  const speechPlayerRef = useRef<SpeechPlayer | null>(null)
+  const speechTextRef = useRef<string | null>(null)
+  if (!speechPlayerRef.current) speechPlayerRef.current = new SpeechPlayer(speechRequest, state => {
+    setSpeakingText(state === 'idle' ? null : speechTextRef.current)
+    speakingRef.current = state === 'idle' ? null : speechTextRef.current
+    if (state === 'idle') scheduleVoiceListen(900)
+  }, message => setSpeechError(message))
+  const cancelSpeech = () => { void speechPlayerRef.current?.stop() }
+  const speak = useLatestCallback((text: string, turnId?: number, automatic = false) => {
+    if (!automatic && speakingText === text) { cancelSpeech(); return }
+    setSpeechError('')
+    speechTextRef.current = text
+    const saved = turnId ?? Number([...interactions].reverse().find(interaction => interaction.aiText === text)?.id)
+    void speechPlayerRef.current?.play({ chatId, text, turnId: Number.isFinite(saved) && saved > 0 ? saved : undefined, automatic })
+  })
+  useEffect(() => { cancelSpeech() }, [chatId, sending])
+  useEffect(() => {
+    historyReadyRef.current = false; submittedDuringSessionRef.current = false; lastAutoSpokenIdRef.current = null
+  }, [chatId])
+
+  const resizeInput = (element: HTMLTextAreaElement) => {
+    element.style.height = 'auto'
+    element.style.height = `${Math.min(element.scrollHeight, 120)}px`
+  }
+  useEffect(() => {
+    return () => {
+      void speechPlayerRef.current?.dispose()
+    }
+  }, [])
+  useEffect(() => {
+    if (sending) submittedDuringSessionRef.current = true
+  }, [sending])
+  useEffect(() => {
+    if (interactions.length === 0) return
+    const latest = interactions[interactions.length - 1]
+    if (!historyReadyRef.current) {
+      historyReadyRef.current = true
+      if (!submittedDuringSessionRef.current) {
+        lastAutoSpokenIdRef.current = latest?.id ?? null
+        return
+      }
+    }
+    if (sending) return
+    if (!latest?.aiText || latest.id === lastAutoSpokenIdRef.current) return
+
+    // Gemini Live speaks its own replies over the realtime audio stream — skip the
+    // separate browser/Google TTS pass while a live voice session is active.
+    if (!settingsConfig?.enableVoiceReply || geminiLive.voiceMode) {
+      lastAutoSpokenIdRef.current = latest.id
+      if (voiceMode) {
+        scheduleVoiceListen(350)
+      }
+      return
+    }
+
+    lastAutoSpokenIdRef.current = latest.id
+    speak(latest.aiText, Number(latest.id), true)
+  }, [interactions, sending, settingsConfig?.enableVoiceReply, geminiLive.voiceMode, voiceMode])
+  useEffect(() => {
+    if (!toolMenuOpen) return
+    const closeMenu = (event: MouseEvent) => {
+      if (toolMenuRef.current?.contains(event.target as Node)) return
+      setToolMenuOpen(false)
+    }
+    window.addEventListener('mousedown', closeMenu)
+    return () => window.removeEventListener('mousedown', closeMenu)
+  }, [toolMenuOpen])
+  useEffect(() => {
+    const handleWindowPaste = (event: globalThis.ClipboardEvent) => {
+      if (!event.clipboardData) return
+      if (onPasteImage(event.clipboardData)) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+    }
+    window.addEventListener('paste', handleWindowPaste, true)
+    return () => window.removeEventListener('paste', handleWindowPaste, true)
+  }, [onPasteImage])
+  useEffect(() => {
+    const handleEscapeKeyDown = (event: globalThis.KeyboardEvent) => {
+      const insideTools = event.target instanceof Element && event.target.closest('.tool-surface-page')
+      if (event.key === 'Escape' && sending && !event.defaultPrevented && !insideTools) {
+        onCancelMessage()
+      }
+    }
+    window.addEventListener('keydown', handleEscapeKeyDown, true)
+    return () => window.removeEventListener('keydown', handleEscapeKeyDown, true)
+  }, [sending, onCancelMessage])
+  useEffect(() => {
+    if (message) return
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
+    if (input) input.style.height = ''
+  }, [message])
+
+  const openImagePicker = () => {
+    setToolMenuOpen(false)
+    document.getElementById('vision-file-input')?.click()
+  }
+  const openVideoPicker = () => {
+    setToolMenuOpen(false)
+    document.getElementById('video-file-input')?.click()
+  }
+  const openDocumentPicker = () => {
+    setToolMenuOpen(false)
+    document.getElementById('document-file-input')?.click()
+  }
+  const startWebSearch = () => {
+    setToolMenuOpen(false)
+    onStartWebSearch()
+  }
+  const startGenerateImagePrompt = () => {
+    setToolMenuOpen(false)
+    if (!agentMode) onSetAgentMode(true)
+    onSetMessage('Generate an image of ')
+    textareaRef.current?.focus()
+  }
+  const startGenerateVideoPrompt = () => {
+    setToolMenuOpen(false)
+    if (!agentMode) onSetAgentMode(true)
+    onSetMessage('Generate a video of ')
+    textareaRef.current?.focus()
+  }
+  const appendWorkspaceReference = (reference: string) => {
+    const trimmed = reference.trim()
+    if (!trimmed) return
+    onSetMessage(message.trim() ? `${message.trimEnd()} ${trimmed} ` : `${trimmed} `)
+  }
+  const handleWorkspaceDrop = (event: DragEvent<HTMLElement>) => {
+    const reference =
+      event.dataTransfer.getData('application/x-mint-workspace-path') ||
+      event.dataTransfer.getData('text/plain')
+    if (!reference.trim().startsWith('@')) return
+    event.preventDefault()
+    appendWorkspaceReference(reference)
+  }
+  const isEmptyChat = interactions.length === 0 && !sending && !pendingApproval
+
+  const handleRewindRequest = useLatestCallback((payload: RewindRequestPayload) => {
+    setRewindModalState({
+      isOpen: true,
+      interaction: payload.interaction,
+      changes: payload.changes,
+      checkpoints: payload.checkpoints,
+      targetCheckpoint: payload.targetCheckpoint,
+      isLoading: false,
+    })
+  })
+
+  const handleRewindError = useLatestCallback((message: string) => {
+    setUndoToastState({
+      visible: true,
+      message,
+      canUndo: false,
+      isUndoing: false,
+      type: 'error',
+    })
+  })
+
+  const liveTurn = sending || pendingApproval ? (
+    <>
+      {sending && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+          <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble"><FormattedMessage text={[sendingMessage, sendingImageMarkers, sendingVideoMarkers].filter(Boolean).join(' ')} /></div></div></div>
+          {agentMode && (
+            <AgentActivityDrawer
+              progress={agentProgress}
+              id="live"
+              isOpen={openActivityIds['live'] ?? true}
+              onToggle={toggleActivity}
+              pendingApproval={!!pendingApproval}
+              chatId={chatId}
+              onOpenArtifact={openArtifact}
+            />
+          )}
+          <TurnFileChanges
+            changes={composerChanges}
+            isLive
+            onOpenArtifact={openArtifact}
+            onOpenReview={openAllConversationReview}
+          />
+          <div className="message ai-message thinking-message">
+            <div className="bubble-wrapper">
+              {!agentMode && liveExtendedThoughts.length > 0 && (
+                <ThinkingBlock
+                  blockKey="live-extended"
+                  thoughts={liveExtendedThoughts}
+                  isLive={true}
+                  variant="extended"
+                  expanded={thinkingExpanded['live-extended'] ?? true}
+                  onExpandedChange={onThinkingExpandedChange}
+                />
+              )}
+              {!agentMode && liveThoughts.length > 0 && liveExtendedThoughts.length === 0 && (
+                <ThinkingBlock
+                  blockKey="live"
+                  thoughts={liveThoughts}
+                  isLive={true}
+                  expanded={thinkingExpanded.live ?? true}
+                  onExpandedChange={onThinkingExpandedChange}
+                />
+              )}
+              <div className="message-bubble">
+                <McpToolResults progress={agentProgress} running chatId={chatId} />
+                <ViewedImages progress={agentProgress} chatId={chatId} onOpenArtifact={openArtifact} />
+                <span>
+                  {compaction ? (
+                    <ContextCompactionStatus key={compaction.index} />
+                  ) : throttledStreamedReply ? (
+                    <FormattedMessage text={throttledStreamedReply} sources={liveWebSources} />
+                  ) : (
+                    <div className="thinking-status">
+                      <span className="thinking-status-label">
+                        <span aria-hidden="true">✦ </span>
+                        {activeAgentName && activeModelName
+                          ? `${activeAgentName} (${activeModelName}) is thinking...`
+                          : 'Thinking'}
+                      </span>
+                      <span className="thinking-status-meta">
+                        {` · ${elapsedSeconds}s · Esc to cancel`}
+                      </span>
+                    </div>
+                  )}
+                </span>
+              </div>
+              {streamedResponse && (
+                <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span className="provider-model-chip" data-provider={(streamedResponse.provider || '').toLowerCase()} title={`${streamedResponse.provider} • ${streamedResponse.model}`}>
+                    <span className="provider-chip-dot" aria-hidden="true" />
+                    <span className="provider-chip-name">{streamedResponse.provider}</span>
+                    <span className="provider-chip-divider">/</span>
+                    <span className="provider-chip-model">{streamedResponse.model}</span>
+                  </span>
+                  {activeFallbackNotice && <span className="provider-fallback-notice">{activeFallbackNotice}</span>}
+                  {throttledStreamedReply && (
+                    <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
+                      <button
+                        type="button"
+                        className={`msg-action-btn copy-btn ${copiedId === 'live' ? 'is-copied' : ''}`}
+                        onClick={() => handleCopyMessage('live', throttledStreamedReply)}
+                        title={copiedId === 'live' ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
+                      >
+                        {renderCopyIcon(copiedId === 'live')}
+                      </button>
+                      <button
+                        type="button"
+                        className={`msg-action-btn tts-btn ${speakingText === throttledStreamedReply ? 'is-speaking' : ''}`}
+                        disabled={sending}
+                        onClick={() => speak(throttledStreamedReply)}
+                        title={sending ? 'Read after the reply finishes' : speakingText === throttledStreamedReply ? 'Stop reading' : 'Read aloud'}
+                      >
+                        {renderSpeakerIcon(speakingText === throttledStreamedReply)}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingApproval && (
+        <ApprovalCard
+          key={pendingApproval.id || JSON.stringify(pendingApproval)}
+          pendingApproval={pendingApproval}
+          onApproval={onApproval}
+        />
+      )}
+    </>
+  ) : null
+
+  const sectionContent = (
+    <section
+      className={`conversation-panel ${isEmptyChat ? 'is-empty' : ''}`}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={activeArtifact || reviewPage ? { flex: '0 0 calc(100% - var(--preview-width, 50%))', width: 'calc(100% - var(--preview-width, 50%))', minWidth: '320px', maxWidth: 'none', margin: 0, position: 'relative' } : undefined}
+    >
+        {speechError && <p role="status" style={{ padding: '8px 16px', fontSize: '12px', color: 'var(--text-muted)' }}>{speechError} <button type="button" onClick={() => setSpeechError('')}>Dismiss</button></p>}
+        {isDragging && (
+          <div
+            className="drag-drop-overlay"
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(15, 23, 42, 0.82)',
+              backdropFilter: 'blur(8px)',
+              border: '2px dashed var(--accent)',
+              borderRadius: '16px',
+              margin: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'white',
+              zIndex: 1000,
+              pointerEvents: 'auto',
+            }}
+          >
+            <div style={{ marginBottom: '16px', color: 'var(--interactive-fg)' }}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            </div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', letterSpacing: '0.5px' }}>Drag files to attach data</div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '8px' }}>Supports images (PNG, JPEG, WebP, GIF), videos (MP4, WebM, MOV, MKV), and PDF files</div>
+          </div>
+        )}
+        <div className="chat-header">
+          {onToggleMobileSidebar && (
+            <button
+              className="mobile-menu-btn"
+              type="button"
+              onClick={onToggleMobileSidebar}
+              aria-label="Open navigation menu"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+          )}
+          <div className="chat-header-title">
+            {isCliSession ? (
+              <div className="chat-header-breadcrumb">
+                {onBackToCode && (
+                  <button
+                    type="button"
+                    className="chat-header-back-btn"
+                    onClick={onBackToCode}
+                    title="Back to Code sessions Hub"
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M15 18l-6-6 6-6" />
+                    </svg>
+                    <span>Code</span>
+                  </button>
+                )}
+                <span className="chat-header-sep">/</span>
+                <span className="chat-header-session-tag" title={cliSessionId || 'CLI Session'}>
+                  <span>
+                    {cliSessionId ? (cliSessionId === 'cli' ? 'cli' : `cli::${cliSessionId.replace(/^cli::/, '').slice(0, 7)}`) : 'cli'}
+                  </span>
+                </span>
+              </div>
+            ) : (
+              <div className="chat-header-brand-group">
+                <img src={runtimePlatform.appIconPath()} alt="Logo" className="chat-header-logo" />
+                <span
+                  className="chat-header-title-text"
+                  title={conversationTitle && conversationTitle.trim() && conversationTitle !== 'New chat' ? conversationTitle.trim() : 'Mint Agent'}
+                >
+                  {conversationTitle && conversationTitle.trim() && conversationTitle !== 'New chat' ? conversationTitle.trim() : 'Mint Agent'}
+                </span>
+                {projectName && (
+                  <span className="chat-header-project-pill" title={`Project: ${workspacePath}`}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <span>{projectName}</span>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="chat-header-actions">
+            {tools?.onToggle && <ToolsPanelToggle open={tools.open} count={tools.backgroundTaskCount} onToggle={tools.onToggle} />}
+            {activeArtifact && (
+              <button
+                type="button"
+                className="chat-header-pill-btn"
+                title="Close Live Preview"
+                onClick={() => setActiveArtifact(null)}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                <span>Close preview</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="chat-header-action-btn"
+              title="Clear conversation"
+              onClick={onClearMessages}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+      <div className="chat-container" ref={chatContainerRef} onScroll={handleChatScroll} style={{ overflowAnchor: 'none' }}>
+        {hasOlder && onLoadOlder && (
+          <button type="button" className="load-older-messages" disabled={loadingOlder}
+            style={{ display: 'block', margin: '0 auto 20px', padding: '7px 14px', borderRadius: 8,
+              border: '1px solid var(--border-color, #3a3a3a)', background: 'var(--surface, #252525)',
+              color: 'var(--text-secondary, #c0c0c0)', cursor: loadingOlder ? 'default' : 'pointer' }}
+            onClick={async () => {
+            setLoadingOlder(true)
+            try {
+              await onLoadOlder()
+            } finally { setLoadingOlder(false) }
+          }}>
+            {loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}
+          </button>
+        )}
+        <VirtualChatHistory key={chatId} ref={virtualHistoryRef} items={visibleInteractions}
+          scrollRef={chatContainerRef} hasOlder={hasOlder}
+          renderRow={(index) => {
+            const interaction = visibleInteractions[index]
+            return (
+              <Fragment key={interaction.id}>
+                {index > 0 && shouldShowSessionDivider(visibleInteractions[index - 1].createdAt, interaction.createdAt) && (
+                  <div className="system-event-divider">
+                    <div className="system-event-line" />
+                    <div className="system-event-pill">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="9" />
+                        <polyline points="12 7 12 12 15.5 14" />
+                      </svg>
+                      <span>{formatSessionDividerLabel(interaction.createdAt)}</span>
+                    </div>
+                    <div className="system-event-line" />
+                  </div>
+                )}
+                <ChatMessageItem
+                  interaction={interaction}
+                  copiedId={copiedId}
+                  onEditMessage={handleEditMessage}
+                  speakingText={speakingText}
+                  agentActivitySnapshots={agentActivitySnapshots}
+                  openActivityIds={openActivityIds}
+                  handleCopyMessage={handleCopyMessage}
+                  speak={speak}
+                  toggleActivity={toggleActivity}
+                  chatId={chatId}
+                  onOpenArtifact={openArtifact}
+                  onOpenReview={openAllConversationReview}
+                  onRewindRequest={handleRewindRequest}
+                  onRewindError={handleRewindError}
+                />
+              </Fragment>
+            )
+          }}
+          tail={liveTurn} />
+        {showScrollToBottom && (
+          <button
+            type="button"
+            className="scroll-to-bottom-btn"
+            onClick={scrollToBottom}
+            title="Scroll to latest message"
+            aria-label="Scroll to latest message"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14"></path>
+              <path d="M6 13l6 6 6-6"></path>
+            </svg>
+          </button>
+        )}
+        <div ref={chatEnd} />
+      </div>
+
+      <div className="input-area">
+        <ModsPanel workspacePath={workspacePath} chatId={chatId} panelTarget={tools?.modsPanelTarget} onOpen={tools?.onOpenMods ?? (() => {})} />
+        <SubagentStatusStrip
+          progress={agentProgress}
+          onOpenDetails={() => toggleActivity('live')}
+        />
+        {composerChanges.length > 0 && (
+          <button
+            type="button"
+            className={`composer-change-status ${sending ? 'is-live' : ''}`}
+            onClick={() => openReview(composerChangeLabel, composerChanges)}
+            title="Review recent agent changes"
+          >
+            <span className="composer-change-status-copy">
+              {sending && <span className="composer-change-status-spinner" aria-hidden="true" />}
+              <span>{sending ? `Editing ${composerChanges.length} ${composerChanges.length === 1 ? 'file' : 'files'}…` : composerChangeLabel}</span>
+            </span>
+            <span className="composer-change-status-counts" aria-label={`${composerAdditions} additions and ${composerDeletions} deletions`}>
+              {composerAdditions > 0 && <strong>+{composerAdditions}</strong>}
+              {composerDeletions > 0 && <em>-{composerDeletions}</em>}
+            </span>
+          </button>
+        )}
+        {isEmptyChat && (
+          <div className="empty-chat-prompt-wrap">
+            <div className="empty-chat-prompt">Mint Agent is ready to work</div>
+            {projectName && (
+              <div className="empty-chat-project-badge">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span>Working in <strong>{projectName}</strong></span>
+              </div>
+            )}
+          </div>
+        )}
+        {onSelectWorkspace && (
+          <div className="project-context-row">
+            <WorkspaceSelector
+              currentPath={workspacePath || ''}
+              recentPaths={recentWorkspacePaths}
+              onSelectWorkspace={onSelectWorkspace}
+            />
+            {workspacePath && <GitBranchSelector workspacePath={workspacePath} disabled={sending} onBranchChanged={onWorkspaceChanged} />}
+          </div>
+        )}
+        <div className="smart-context-bar">
+          <label className={`smart-context-option ${agentMode ? 'is-active' : ''}`}>
+            <span className="toggle-switch">
+              <input type="checkbox" checked={agentMode} onChange={(event) => onSetAgentMode(event.target.checked)} />
+              <span className="slider round" />
+            </span>
+            <span className="smart-context-copy"><span className="smart-context-title">Agent mode</span></span>
+          </label>
+          {onSetPlanMode && (
+            <label className={`smart-context-option ${planMode ? 'is-active' : ''}`} title="Investigate read-only and require plan approval before editing files or running commands">
+              <span className="toggle-switch">
+                <input type="checkbox" checked={Boolean(planMode)} onChange={(event) => onSetPlanMode(event.target.checked)} />
+                <span className="slider round" />
+              </span>
+              <span className="smart-context-copy"><span className="smart-context-title">Plan mode</span></span>
+            </label>
+          )}
+        </div>
+        <form
+          id="chat-form"
+          className={geminiLiveEnabled ? 'has-live-btn' : ''}
+          style={{ position: 'relative' }}
+          onSubmit={(event) => {
+            setHistoryIndex(null)
+            historyDraftRef.current = ''
+            onSubmit(event)
+          }}
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes('application/x-mint-workspace-path')) {
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'copy'
+            }
+          }}
+          onDrop={handleWorkspaceDrop}
+          onPaste={(event: ClipboardEvent<HTMLElement>) => {
+            if (onPasteImage(event.clipboardData)) event.preventDefault()
+          }}
+        >
+          {slashChoice && (
+            <SlashChoicePanel
+              choice={slashChoice}
+              inputRef={textareaRef}
+              onSelect={onSelectSlashChoice}
+              onDismiss={onDismissSlashChoice}
+            />
+          )}
+          {(imageAttachments.length > 0 || videoAttachments.length > 0 || documentName) && (
+            <div className="mint-attachment">
+              {imageAttachments.map((attachment, idx) => (
+                <div className="mint-image-attachment" key={idx}>
+                  <img className="mint-image-preview" src={attachment.objectUrl || attachment.previewDataUri || attachment.dataUri} alt={attachment.name || 'Image attachment'} />
+                  <button className="mint-attachment-remove" type="button" onClick={() => onRemoveImage(idx)} aria-label="Remove image">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+              ))}
+              {videoAttachments.map((attachment, idx) => (
+                <div className="mint-image-attachment" key={idx}>
+                  <video className="mint-image-preview" src={attachment.dataUri} muted playsInline preload="metadata" />
+                  <div className="mint-video-play-indicator" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none', background: 'rgba(0,0,0,0.6)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '22px', height: '22px', border: '1.5px solid white' }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                  </div>
+                  <button className="mint-attachment-remove" type="button" onClick={() => onRemoveVideo(idx)} aria-label="Remove video">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+              ))}
+              {documentName && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--text-soft)' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                    </svg>
+                  </span>
+                  <span style={{ fontSize: '0.76rem', color: 'var(--text-soft)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}>{documentName}</span>
+                  <button type="button" onClick={onRemoveDocument} style={{ background: 'transparent', border: 0, color: '#ef4444', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {historyIndex !== null && promptHistory.length > 0 && (
+            <div
+              className="chat-history-indicator"
+              aria-live="polite"
+              style={{
+                position: 'absolute',
+                top: '-9px',
+                right: '14px',
+                padding: '1px 8px',
+                fontSize: '0.68rem',
+                fontWeight: 600,
+                letterSpacing: '0.02em',
+                color: 'var(--text-soft, #94a3b8)',
+                background: 'var(--input-bg, #1e293b)',
+                border: '1px solid var(--border, rgba(148,163,184,0.25))',
+                borderRadius: '999px',
+                pointerEvents: 'none',
+                zIndex: 2,
+              }}
+            >
+              History {historyIndex + 1}/{promptHistory.length}
+            </div>
+          )}
+          <CollapsiblePasteInput
+            id="chat-input"
+            inputRef={textareaRef}
+            value={message}
+            onValueChange={(value) => {
+              onSetMessage(value)
+              if (historyIndex !== null) setHistoryIndex(null)
+            }}
+            onResizeInput={resizeInput}
+            onChange={(event) => {
+              resizeInput(event.currentTarget)
+              onSetMessage(event.target.value)
+              // A real keystroke drops out of history browsing (recalled text kept).
+              if (historyIndex !== null) setHistoryIndex(null)
+            }}
+            onKeyDown={handleInputKeyDown}
+            onDrop={handleWorkspaceDrop}
+            placeholder="Ask anything, @ to mention, / for actions"
+            rows={1}
+          />
+          <SlashSuggestions
+            ref={slashRef}
+            message={message}
+            onComplete={completeSuggestion}
+            workspacePath={workspacePath}
+            mcpServers={settingsConfig?.mcpServers}
+            anchorRef={textareaRef}
+            suppressed={historyIndex !== null || Boolean(slashChoice)}
+          />
+          <div className="chat-tool-menu-wrap" ref={toolMenuRef}>
+              <button id="chat-tool-btn" type="button" aria-haspopup="menu" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((open) => !open)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+              {toolMenuOpen && (
+                <div className="chat-tool-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={openImagePicker}>
+                    <span aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                        <polyline points="21 15 16 10 5 21"></polyline>
+                      </svg>
+                    </span>
+                    <span>Add image</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={openVideoPicker}>
+                    <span aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                      </svg>
+                    </span>
+                    <span>Add video</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={openDocumentPicker}>
+                    <span aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                      </svg>
+                    </span>
+                    <span>Add file</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={startWebSearch}>
+                    <span aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                      </svg>
+                    </span>
+                    <span>Search web</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={startGenerateImagePrompt}>
+                    <span aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path>
+                      </svg>
+                    </span>
+                    <span>Generate image</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={startGenerateVideoPrompt}>
+                    <span aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                      </svg>
+                    </span>
+                    <span>Generate video</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          <input id="vision-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={onSelectImage} style={{ display: 'none' }} />
+          <input id="video-file-input" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" onChange={onSelectVideo} style={{ display: 'none' }} />
+          <input id="document-file-input" type="file" accept={SUPPORTED_DOCUMENT_ACCEPT} onChange={onSelectDocument} style={{ display: 'none' }} />
+          <button id="screen-capture-btn" type="button" onClick={onCaptureScreen} aria-label="Capture screen">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="2" y="3" width="20" height="15" rx="2" />
+              <path d="M8 22h8M12 18v4M7 10h10M12 5v10" />
+            </svg>
+          </button>
+          <ModelSelectorPopover
+            activeProvider={status?.activeProvider ?? ''}
+            activeModel={activeModel}
+            availableProviders={status?.availableProviders ?? []}
+            settingsConfig={settingsConfig}
+            dynamicOllamaModels={dynamicOllamaModels}
+            onSelect={(provider, model) => {
+              if (onSelectModelAndProvider) {
+                onSelectModelAndProvider(provider, model)
+              } else {
+                onSetProvider(provider)
+                onSetModel(model)
+              }
+            }}
+            onUpdateSettings={onUpdateSettings}
+          />
+          <VoicePill
+            id="voice-input-btn"
+            className="composer-voice-pill"
+            active={isRecording}
+            disabled={sending || voiceAwaitingResponse || geminiLive.voiceMode}
+            ariaLabel="Voice input"
+            title={isRecording ? 'Stop recording · Esc or slide left to cancel' : 'Tap to dictate · hold to record'}
+            accentColor="#f5f5f5"
+            iconColor="#a1a1aa"
+            background="#27272a"
+            size={28}
+            shape="pill"
+            reach={8}
+            mode="auto"
+            holdAfter={300}
+            reactive="simulated"
+            showTime
+            waveform
+            slideToCancel
+            cancelDistance={64}
+            attack={40}
+            release={240}
+            openDuration={200}
+            pressScale={0.95}
+            onStart={() => {
+              cancelSpeech()
+              return startRecognition()
+            }}
+            onStop={({ reason }) => {
+              cancelSpeech()
+              if (reason === 'release' || reason === 'tap' || reason === 'key') {
+                void stopRecognition()
+              } else {
+                void cancelRecognition()
+              }
+            }}
+          />
+          {geminiLiveEnabled && (
+            <button
+              id="gemini-live-btn"
+              type="button"
+              onClick={() => geminiLive.setVoiceMode(true)}
+              title="Start Gemini Live conversation"
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="2"></circle>
+                <path d="M8.5 8.5a5 5 0 0 0 0 7"></path>
+                <path d="M15.5 8.5a5 5 0 0 1 0 7"></path>
+                <path d="M5.5 5.5a9 9 0 0 0 0 13"></path>
+                <path d="M18.5 5.5a9 9 0 0 1 0 13"></path>
+              </svg>
+            </button>
+          )}
+          {sending ? (
+            <button
+              id="send-btn"
+              className="stop-btn"
+              type="button"
+              onClick={onCancelMessage}
+              title="Stop generating"
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+              </svg>
+            </button>
+          ) : (
+            <button id="send-btn" type="submit" disabled={!canSubmit} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          )}
+        </form>
+        {voiceMode && !isRecording && voiceTranscript && (
+          <p className="composer-voice-feedback" role="status">{voiceTranscript}</p>
+        )}
+      </div>
+      <p className="input-disclaimer">
+        Mint Agent is an AI gateway. Responses via third-party APIs. Verify critical info.
+      </p>
+      {geminiLive.voiceMode && (
+        <GeminiLiveOverlay
+          status={
+            geminiLive.errorMessage
+              ? 'error'
+              : !geminiLive.isRecording
+              ? 'connecting'
+              : geminiLive.isPaused
+              ? 'paused'
+              : geminiLive.isSpeaking
+              ? 'speaking'
+              : geminiLive.voiceAwaitingResponse
+              ? 'thinking'
+              : 'listening'
+          }
+          userTranscript={geminiLive.userTranscript}
+          assistantTranscript={geminiLive.assistantTranscript}
+          isPaused={geminiLive.isPaused}
+          analyserRef={geminiLive.analyserRef}
+          onTogglePause={geminiLive.togglePause}
+          onEndCall={() => geminiLive.setVoiceMode(false)}
+          voice={settingsConfig?.geminiLiveVoice || 'Puck'}
+          voices={GEMINI_LIVE_VOICES}
+          onChangeVoice={async (voiceName) => {
+            await onSetGeminiLiveVoice(voiceName)
+            geminiLive.restart()
+          }}
+        />
+      )}
+      {undoToastState.visible && (
+        <div className={`rewind-toast-banner ${undoToastState.type === 'error' ? 'is-error' : 'is-success'}`}>
+          <div className="rewind-toast-content">
+            {undoToastState.type === 'error' ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--status-error, #ef4444)" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+            )}
+            <span className="rewind-toast-text">{undoToastState.message}</span>
+          </div>
+
+          <div className="rewind-toast-actions">
+            {undoToastState.canUndo && (
+              <button
+                type="button"
+                className="rewind-toast-undo-btn"
+                onClick={handleUndoRewind}
+                disabled={undoToastState.isUndoing}
+                title="Restore workspace files back from safety rescue snapshot"
+              >
+                {undoToastState.isUndoing ? (
+                  'Undoing...'
+                ) : (
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <polyline points="9 14 4 9 9 4" />
+                      <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+                    </svg>
+                    Undo Rewind
+                  </>
+                )}
+              </button>
+            )}
+            <button
+              type="button"
+              className="rewind-toast-close-btn"
+              onClick={() => setUndoToastState((prev) => ({ ...prev, visible: false }))}
+              aria-label="Close notification"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+
+  return (
+    <div
+      ref={wrapperRef}
+      className={`chat-panel-split-wrapper ${activeArtifact || reviewPage ? 'has-preview' : 'no-preview'}`}
+      style={{
+        '--preview-width': `${(splitRatio * 100).toFixed(2)}%`,
+      } as React.CSSProperties}
+    >
+      {sectionContent}
+      {(activeArtifact || reviewPage) && (
+        <>
+          <div
+            className="preview-split-resizer"
+            onMouseDown={handleResizerMouseDown}
+            onDoubleClick={handleResizerDoubleClick}
+            title="Drag to resize · Double-click to reset 50/50"
+          >
+            <div className="preview-split-resizer-grip" />
+          </div>
+          {reviewPage ? (
+            <CodeReviewPage
+              title={reviewPage.title}
+              changes={reviewPage.changes}
+              workspacePath={workspacePath}
+              onBack={() => setReviewPage(null)}
+            />
+          ) : activeArtifact ? (
+            <ArtifactPreviewPanel artifact={activeArtifact} onClose={() => setActiveArtifact(null)} workspacePath={workspacePath} />
+          ) : null}
+        </>
+      )}
+      {rewindModalState.isOpen && (
+        <RewindModal
+          isOpen={rewindModalState.isOpen}
+          onClose={() => setRewindModalState((prev) => ({ ...prev, isOpen: false }))}
+          onConfirm={handleConfirmRewind}
+          checkpoints={rewindModalState.checkpoints}
+          targetCheckpoint={rewindModalState.targetCheckpoint}
+          changes={rewindModalState.changes}
+          workspacePath={workspacePath}
+          isLoading={rewindModalState.isLoading}
+        />
+      )}
+    </div>
+  )
+}

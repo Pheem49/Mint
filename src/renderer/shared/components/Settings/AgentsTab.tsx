@@ -1,4 +1,4 @@
-import SelectField from '../SelectField'
+import SelectField from '../ui/SelectField'
 import React, { useEffect, useState } from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
 import { HF_MODELS } from '../../constants/models'

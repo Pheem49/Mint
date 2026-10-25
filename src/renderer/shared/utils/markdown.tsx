@@ -3,20 +3,20 @@
  * Markdown parsing and rendering for message bubbles, built on react-markdown + remark-gfm.
  * Shared by both Desktop and Web ChatPanel — do NOT duplicate this.
  */
-import { Children, cloneElement, Fragment, isValidElement, type CSSProperties, type ReactElement, type ReactNode } from 'react'
+import { Children, cloneElement, Fragment, isValidElement, memo, type CSSProperties, type ReactElement, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ChatCodeBlock } from '../components/ChatCodeBlock'
-import WeatherCard from '../components/WeatherCard'
-import StockCard from '../components/StockCard'
-import CalculationCard from '../components/CalculationCard'
-import ImageSearchCard from '../components/ImageSearchCard'
-import ImageGenCard from '../components/ImageGenCard'
-import MermaidCard from '../components/MermaidCard'
-import UiGridCard from '../components/UiGridCard'
+import { ChatCodeBlock } from '../components/chat/ChatCodeBlock'
+import WeatherCard from '../components/cards/WeatherCard'
+import StockCard from '../components/cards/StockCard'
+import CalculationCard from '../components/cards/CalculationCard'
+import ImageSearchCard from '../components/cards/ImageSearchCard'
+import ImageGenCard from '../components/cards/ImageGenCard'
+import MermaidCard from '../components/cards/MermaidCard'
+import UiGridCard from '../components/cards/UiGridCard'
 import { parseCardJsonSafely } from './cardJson'
-import UiFeatureCard from '../components/UiFeatureCard'
-import UiMockupWidget from '../components/UiMockupWidget'
+import UiFeatureCard from '../components/cards/UiFeatureCard'
+import UiMockupWidget from '../components/cards/UiMockupWidget'
 import type { WebSearchSource } from './agentActivity'
 import {
   Info,
@@ -734,3 +734,13 @@ export function renderFormattedMessage(text: string, webSources: WebSearchSource
     </div>
   )
 }
+
+export const FormattedMessage = memo(function FormattedMessage({
+  text,
+  sources,
+}: {
+  text: string
+  sources?: WebSearchSource[]
+}) {
+  return renderFormattedMessage(text, sources)
+})
