@@ -149,6 +149,20 @@ async function run() {
   await waitFor(() => Boolean(iconFixture.querySelector('[href="https://example.com/with-icon"] .is-web svg')), 'Late favicon failure falls back')
   check(Boolean(iconFixture.querySelector('[href="https://example.com/with-icon"]')), 'favicon failure preserves the source link')
   iconRoot.unmount(); iconFixture.remove()
+  let openedArtifact: any = null
+  const artifactFixture = document.createElement('div')
+  document.body.append(artifactFixture)
+  const artifactRoot = createRoot(artifactFixture)
+  artifactRoot.render(<SessionSources sources={[
+    { id: 'img-1', kind: 'image', name: 'photo.png', detail: 'Image', thumbnailDataUri: originalImage },
+  ]} loading={false} error="" onRetry={() => {}} onOpenLibrary={() => {}} onOpenArtifact={art => { openedArtifact = art }} />)
+  await waitFor(() => Boolean(artifactFixture.querySelector('.session-source-row')), 'Image row ready')
+  const imgRow = artifactFixture.querySelector<HTMLAnchorElement>('.session-source-row')!
+  check(imgRow.getAttribute('title')?.includes('Open image preview in Tools'), 'image source row indicates tool preview')
+  imgRow.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+  await waitFor(() => Boolean(openedArtifact), 'Image opens via onOpenArtifact')
+  check(openedArtifact?.type === 'image' && openedArtifact?.path === 'sources/img-1/photo.png', 'image opens as artifact preview')
+  artifactRoot.unmount(); artifactFixture.remove()
   document.getElementById('qa-results')!.textContent = results.join('\n') + '\nALL PASSED'
 }
 run().catch(error => { document.getElementById('qa-results')!.textContent = results.join('\n') + `\nFAIL ${error.message}` })

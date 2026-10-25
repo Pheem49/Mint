@@ -2,6 +2,20 @@
 
 Released: 2026-10-17
 
+## Tools Surface Image Preview & Routine Polling Log Filter (2026-10-25)
+
+- **Tools Surface In-Panel Image Preview**:
+  - **In-Panel Image Preview (`src/renderer/shared/components/SessionSources.tsx`)**: Clicking an image attachment in the Sources list now opens the image directly in an artifact preview tab within the Tools Surface side panel instead of navigating away to `/library` and closing the panel.
+  - **High-Resolution Library Fetch**: Resolves the original full-resolution image from Library storage via `libraryPlatform.readLibraryFile` as an object URL, gracefully falling back to thumbnail data URIs if unavailable.
+  - **Unique Tab Tracking**: Formats preview artifact paths as `sources/${source.id}/${source.name}`, enabling separate preview tabs even when multiple attachments share the same filename.
+  - **Platform Parity Across Desktop and Web (`MintDashboard.tsx`)**: Wired `onOpenArtifact={openArtifactSurface}` into `SessionSources` across Desktop UI (`src/renderer/src`) and Web UI (`src/renderer/src-web`).
+- **Routine API Polling Log Suppression (`crates/mint-core/src/api_server.rs`)**:
+  - Added `/api/conversation-sources` to the `should_log_api_route` exclusion list in `mint-core`, silencing routine 2-second polling log spam in the `mint web` terminal while preserving all operational API logs.
+  - Added unit test assertion in `api_server::tests::test_should_log_api_route_exclusions`.
+- **TypeScript & CSS Standards**:
+  - Added `react-dom` module declaration in shared and environment definition files (`env.d.ts`).
+  - Added standard `line-clamp: 2;` property in `session-sources.css`.
+
 ## Plan Mode Proactive Subagent Reconnaissance (2026-10-25)
 
 - **Mandatory Proactive Subagent Reconnaissance in Plan Mode**:

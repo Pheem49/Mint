@@ -1,13 +1,15 @@
+/// <reference path="../env.d.ts" />
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Paperclip, X } from 'lucide-react'
 import type { AgentProgress } from '../types'
 import { useSessionSources } from '../utils/useSessionSources'
 import SessionSources from './SessionSources'
+import type { ArtifactFile } from './ArtifactPreviewPanel'
 import '../css/session-sources-popover.css'
 
-export default function SessionSourcesPopover({ chatId, liveProgress, open, onOpenChange }: {
-  chatId: string; liveProgress: AgentProgress[]; open: boolean; onOpenChange: (open: boolean) => void
+export default function SessionSourcesPopover({ chatId, liveProgress, open, onOpenChange, onOpenArtifact }: {
+  chatId: string; liveProgress: AgentProgress[]; open: boolean; onOpenChange: (open: boolean) => void; onOpenArtifact?: (artifact: ArtifactFile) => void
 }) {
   const [position, setPosition] = useState({ left: 12, top: 64, maxHeight: 400 })
   const trigger = useRef<HTMLButtonElement>(null)
@@ -55,7 +57,10 @@ export default function SessionSourcesPopover({ chatId, liveProgress, open, onOp
         window.history.pushState({}, '', url)
         window.dispatchEvent(new PopStateEvent('popstate'))
         close()
-      }} />
+      }} onOpenArtifact={onOpenArtifact ? artifact => {
+        onOpenArtifact(artifact)
+        close()
+      } : undefined} />
     </section>, document.body)}
   </>
 }

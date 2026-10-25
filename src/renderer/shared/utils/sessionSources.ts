@@ -10,6 +10,7 @@ export interface SessionSource {
   thumbnailDataUri?: string
   faviconUrl?: string
   url?: string
+  libraryItemId?: string
 }
 
 export function collectSessionSources(persisted: ConversationSources, liveProgress: AgentProgress[] = []): SessionSource[] {
@@ -18,6 +19,7 @@ export function collectSessionSources(persisted: ConversationSources, liveProgre
     detail: attachment.trashed ? 'In Trash · Restore in Library' : attachment.availability === 'missing' ? 'Original file missing' : attachment.kind === 'image' ? 'Image' : attachment.kind === 'video' ? 'Video' : (attachment.name.split('.').length > 1 ? attachment.name.split('.').at(-1)!.toUpperCase() : 'File'),
     url: attachment.libraryItemId ? `/library?${new URLSearchParams({ item: attachment.libraryItemId, ...(attachment.trashed ? { trash: '1' } : {}) })}` : undefined,
     interactionId: attachment.interactionId ?? undefined, thumbnailDataUri: attachment.thumbnailDataUri || undefined,
+    libraryItemId: attachment.libraryItemId || undefined,
   }))
   const seen = new Set<string>()
   const web: SessionSource[] = []

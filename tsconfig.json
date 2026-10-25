@@ -28,5 +28,19 @@
       "@shared/*": ["./src/renderer/shared/*"]
     }
   },
-  "include": ["src/renderer/src", "src/renderer/src-web", "src/renderer/src/env.d.ts"]
+  "include": [
+    "src/renderer/src",
+    "src/renderer/src-web",
+    "src/renderer/shared",
+    "src/renderer/src/env.d.ts",
+    "src/renderer/src-web/env.d.ts",
+    "src/renderer/shared/env.d.ts"
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "src/renderer/tests"
+  ]
 }

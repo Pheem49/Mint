@@ -13,12 +13,13 @@
 .session-sources-group ul { margin: 0; padding: 0; list-style: none; }
 .session-source-row { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 6px; border-radius: var(--radius-xs, 6px); color: var(--text-main); text-decoration: none; }
 a.session-source-row:hover { background: var(--bg-surface-hover, var(--surface-strong)); }
+a.session-source-row.is-opening { opacity: 0.65; cursor: wait; }
 .session-source-icon { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; overflow: hidden; color: var(--text-muted); border-radius: 5px; background: var(--bg-surface-soft, var(--surface-strong)); }
 .session-source-icon.is-file { color: var(--accent); }
 .session-source-icon img { width: 100%; height: 100%; object-fit: cover; }
 .session-source-icon.is-web img { width: 20px; height: 20px; object-fit: contain; }
 .session-source-copy { flex: 1; min-width: 0; }
-.session-source-copy strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; white-space: normal; font-size: 12px; font-weight: 400; line-height: 1.5; }
+.session-source-copy strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; white-space: normal; font-size: 12px; font-weight: 400; line-height: 1.5; }
 .session-source-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 10px; line-height: 1.4; }
 .session-sources-empty, .session-sources-error { margin: 10px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 .session-sources-error { display: flex; align-items: center; justify-content: space-between; gap: 6px; }

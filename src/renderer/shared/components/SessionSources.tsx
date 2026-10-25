@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { File, FileText, Globe, Image, Paperclip, Search, Video } from 'lucide-react'
 import type { SessionSource } from '../utils/sessionSources'
+import type { ArtifactFile } from './ArtifactPreviewPanel'
+import { libraryPlatform } from '../platform'
 import '../css/session-sources.css'
 
 function SourceIcon({ source }: { source: SessionSource }) {
@@ -12,10 +14,16 @@ function SourceIcon({ source }: { source: SessionSource }) {
   </span>
 }
 
-export default function SessionSources({ sources, loading, error, onRetry, onOpenLibrary }: {
-  sources: SessionSource[]; loading: boolean; error: string; onRetry: () => void; onOpenLibrary: (url: string) => void
+export default function SessionSources({ sources, loading, error, onRetry, onOpenLibrary, onOpenArtifact }: {
+  sources: SessionSource[]
+  loading: boolean
+  error: string
+  onRetry: () => void
+  onOpenLibrary: (url: string) => void
+  onOpenArtifact?: (artifact: ArtifactFile) => void
 }) {
   const [query, setQuery] = useState('')
+  const [openingSourceId, setOpeningSourceId] = useState<string | null>(null)
   const groups = [
     { label: 'Images', kinds: ['image'] },
     { label: 'Files', kinds: ['file', 'video'] },
@@ -23,6 +31,52 @@ export default function SessionSources({ sources, loading, error, onRetry, onOpe
   ]
   const search = query.trim().toLocaleLowerCase()
   const shown = sources.filter(source => !search || [source.name, source.detail, source.url ?? ''].some(value => value.toLocaleLowerCase().includes(search)))
+
+  const handleSourceClick = async (source: SessionSource, event: React.MouseEvent) => {
+    if (source.kind === 'web' || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+
+    if (source.kind === 'image' && onOpenArtifact) {
+      if (openingSourceId) return
+      setOpeningSourceId(source.id)
+      try {
+        let imageUrl = ''
+        let isObjectUrl = false
+
+        if (source.libraryItemId) {
+          try {
+            const blob = await libraryPlatform.readLibraryFile(source.libraryItemId, false)
+            imageUrl = URL.createObjectURL(blob)
+            isObjectUrl = true
+          } catch (err) {
+            console.warn('Could not read full library file for source, falling back to thumbnail:', err)
+          }
+        }
+
+        if (!imageUrl && source.thumbnailDataUri) {
+          imageUrl = source.thumbnailDataUri
+          isObjectUrl = false
+        }
+
+        if (imageUrl) {
+          onOpenArtifact({
+            path: `sources/${source.id}/${source.name}`,
+            url: imageUrl,
+            type: 'image',
+            objectUrl: isObjectUrl,
+          })
+          return
+        }
+      } finally {
+        setOpeningSourceId(null)
+      }
+    }
+
+    if (source.url) {
+      onOpenLibrary(source.url)
+    }
+  }
+
   return <section className="session-sources" aria-label="Session sources">
     <header className="session-sources-heading"><span><Paperclip size={13} aria-hidden="true" />Sources <small>This session</small></span><span>{sources.length}</span></header>
     {(sources.length > 8 || query) && <label className="session-sources-search">
@@ -40,11 +94,18 @@ export default function SessionSources({ sources, loading, error, onRetry, onOpe
         <h3>{group.label}<span>{search ? `${items.length} / ${sources.filter(source => group.kinds.includes(source.kind)).length}` : items.length}</span></h3>
         <ul>{items.map(source => {
           const content = <><SourceIcon source={source} /><span className="session-source-copy"><strong>{source.name}</strong><small>{source.detail}</small></span></>
-          return <li key={source.id}>{source.url ? <a className="session-source-row" href={source.url} target={source.kind === 'web' ? '_blank' : undefined} rel={source.kind === 'web' ? 'noopener noreferrer' : undefined} title={`${source.name}\n${source.url}`} onClick={event => {
-            if (source.kind === 'web' || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
-            event.preventDefault()
-            onOpenLibrary(source.url)
-          }}>{content}</a> : <div className="session-source-row" title={source.name}>{content}</div>}</li>
+          const isInteractive = Boolean(source.url || (source.kind === 'image' && onOpenArtifact && (source.libraryItemId || source.thumbnailDataUri)))
+          const isOpening = openingSourceId === source.id
+          return <li key={source.id}>{isInteractive ? <a
+            className={`session-source-row${isOpening ? ' is-opening' : ''}`}
+            href={source.url || '#'}
+            role={source.url ? undefined : 'button'}
+            aria-busy={isOpening ? 'true' : undefined}
+            target={source.kind === 'web' ? '_blank' : undefined}
+            rel={source.kind === 'web' ? 'noopener noreferrer' : undefined}
+            title={source.kind === 'image' && onOpenArtifact ? `${source.name}\nOpen image preview in Tools` : `${source.name}\n${source.url || ''}`}
+            onClick={event => void handleSourceClick(source, event)}
+          >{content}</a> : <div className="session-source-row" title={source.name}>{content}</div>}</li>
         })}</ul>
       </div>
     })}

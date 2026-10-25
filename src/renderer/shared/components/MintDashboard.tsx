@@ -2042,7 +2042,7 @@ export default function MintDashboard() {
                 window.history.pushState({}, '', url)
                 window.dispatchEvent(new PopStateEvent('popstate'))
                 setToolsPanelOpen(false)
-              }} />}
+              }} onOpenArtifact={openArtifactSurface} />}
               onOpenMods={() => openUtilitySurface('mods')}
               onOpenBackgroundTasks={() => openUtilitySurface('background')}
               onModsPanelTarget={setModsPanelTarget}
