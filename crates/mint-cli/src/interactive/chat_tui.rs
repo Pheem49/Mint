@@ -8564,4 +8564,39 @@ mod swarm_panel_tests {
         );
         assert!(state.transcript.is_empty());
     }
+
+    #[test]
+    fn swarm_panel_renders_smoothly_in_plan_mode() {
+        let mut state = ChatViewState::default();
+        state.plan_mode = true;
+        state.swarm_agents.push(SwarmAgentUiState {
+            label: "recon".to_string(),
+            profile: "explorer".to_string(),
+            task: "Investigating schema for migration".to_string(),
+            current_action: Some("Reading `schema.rs`".to_string()),
+            status: SwarmUiStatus::Running,
+            started_at: std::time::Instant::now(),
+            finished_elapsed_ms: None,
+            summary_preview: None,
+        });
+
+        let backend = ratatui::backend::TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(text.contains("Running Subagents"));
+        assert!(text.contains("[recon]"));
+        assert!(text.contains("Reading `schema.rs`"));
+        assert!(text.contains("[Plan]"));
+    }
 }

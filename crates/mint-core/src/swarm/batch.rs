@@ -56,13 +56,16 @@ fn plan(ctx: &BatchCtx<'_>, tasks: Vec<SwarmTask>) -> Vec<Planned> {
     tasks
         .into_iter()
         .map(|task| {
-            let base = task
+            let mut base = task
                 .base
                 .as_deref()
                 .map(str::trim)
                 .filter(|b| !b.is_empty())
                 .unwrap_or(DEFAULT_BASE)
                 .to_string();
+            if ctx.plan_mode {
+                base = DEFAULT_BASE.to_string();
+            }
             let role = task
                 .role
                 .as_deref()
@@ -355,6 +358,7 @@ mod tests {
             parent_chat_id: "cli::abc",
             max_parallel: max,
             profiles: &builtin,
+            plan_mode: false,
         };
         let mut events = Vec::new();
         let outcomes = run_batch(&ctx, tasks, runner, &mut |e| events.push(e)).await;
@@ -563,5 +567,24 @@ mod tests {
         assert!(out[0].text.contains("cannot be empty or 'null'"));
         assert_eq!(out[1].status, AgentStatus::Completed);
         assert_eq!(out[1].label, "explorer"); // "null" role was filtered out, fallback to explorer
+    }
+
+    #[tokio::test]
+    async fn plan_mode_forces_explorer_even_when_general_purpose_requested() {
+        let ctx = BatchCtx {
+            parent_chat_id: "cli::plan-test",
+            max_parallel: 4,
+            profiles: &builtin,
+            plan_mode: true,
+        };
+        let tasks = vec![task(Some("writer"), Some("general-purpose"), "inspect something")];
+        let planned = plan(&ctx, tasks);
+        match &planned[0] {
+            Planned::Ready(run) => {
+                assert_eq!(run.profile, "explorer");
+                assert!(!run.permissions.is_write_capable());
+            }
+            Planned::Rejected { reason, .. } => panic!("task should not be rejected: {reason}"),
+        }
     }
 }

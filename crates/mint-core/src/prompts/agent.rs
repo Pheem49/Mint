@@ -54,6 +54,8 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     // plan-mode investigation.
     "avatar_signal",
     "conversation_summary",
+    "dispatch_agents",
+    "dispatch_subagent",
 ];
 
 /// The full set of coding-agent actions before plan-mode/disabled-tools/browser
@@ -152,6 +154,11 @@ pub fn build_system_prompt(
 
     if !config.avatar_token.is_empty() {
         allowed_actions.push("avatar_signal");
+    }
+
+    if native {
+        allowed_actions.push("dispatch_agents");
+        allowed_actions.push("dispatch_subagent");
     }
 
     allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
@@ -546,10 +553,10 @@ pub fn build_system_prompt(
         rules.push("8a. Use git_status and git_diff before summarizing local code changes.");
     }
     if allowed_actions.contains(&"create_plan") || allowed_actions.contains(&"update_plan") {
-        rules.push("8b. When the user asks to plan, structure, or inspect a workflow ('วางแผน', 'plan', 'structure', 'audit'), call `create_plan` FIRST with your step checklist before doing deep execution. Keep investigation focused and concise: NEVER recursively read dozens of source files when a directory listing, symbols, search_code, or architectural overview is sufficient.");
+        rules.push("8b. Plan Mode & Pre-Planning Reconnaissance: When in plan mode or when the user asks to plan, structure, or inspect a workflow ('วางแผน', 'plan', 'structure', 'audit'), call `create_plan` FIRST with your step checklist before doing deep execution. When investigating, gathering facts across multiple files, tracing workflows, or verifying architecture, ALWAYS delegate broad exploration to parallel read-only subagents (`dispatch_agents` with base 'explorer') rather than sequentially reading dozens of files in the main turn. Subagents explore concurrently in isolated sandboxes and return concise dossiers, keeping your planning context clean and fast. Formulate your structured step checklist (`create_plan`) and final plan based on their synthesized findings.");
     }
     if allowed_actions.contains(&"dispatch_agents") {
-        rules.push("8c. Subagent Swarm Delegation (`dispatch_agents`): Delegate independent, broad, or exploratory tasks to parallel subagents to keep the main conversation context clean. Provide `tasks: [{ role, base, instruction }]`. Subagents run concurrently in isolated read-only sandboxes (default base: 'explorer') up to the parallel limit. Write tasks serialize in a single lane. Subagents return capped structured dossiers directly back into your context — you synthesize their findings and present the final answer to the user.");
+        rules.push("8c. Subagent Swarm Delegation (`dispatch_agents`): Delegate independent, broad, or exploratory tasks to parallel subagents to keep the main conversation context clean. Provide `tasks: [{ role, base, instruction }]`. In plan mode, all subagents run strictly read-only ('explorer') to gather reconnaissance without side-effects. Outside plan mode, read-only subagents run concurrently up to the parallel limit while write tasks serialize in a single lane. Subagents return capped structured dossiers directly back into your context — you synthesize their findings and present the final answer to the user.");
     }
     if allowed_actions.contains(&"note_write") {
         rules.push("9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.");

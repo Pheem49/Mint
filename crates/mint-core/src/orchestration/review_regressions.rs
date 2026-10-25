@@ -583,3 +583,10 @@ fn test_agent_loop_dispatch_swarm_nested_execution() {
         provider.abort();
     });
 }
+
+#[test]
+fn plan_mode_allows_dispatch_agents_and_subagent() {
+    assert!(plan_mode_allows("dispatch_agents", &AgentInput::default()));
+    assert!(plan_mode_allows("dispatch_subagent", &AgentInput::default()));
+}
+

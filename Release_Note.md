@@ -2,6 +2,22 @@
 
 Released: 2026-10-17
 
+## Plan Mode Proactive Subagent Reconnaissance (2026-10-25)
+
+- **Mandatory Proactive Subagent Reconnaissance in Plan Mode**:
+  - **System Prompt Rules (`crates/mint-core/src/prompts/agent.rs`)**: Updated Rules 8b and 8c instructing the agent that when in Plan Mode (or asked to plan, structure, or audit), it must ALWAYS delegate broad investigation, facts gathering across multiple files, and architecture verification to parallel read-only subagents (`dispatch_agents` with base `explorer`) instead of recursively reading dozens of files in the main turn.
+  - **Read-Only Profile Filtering (`crates/mint-core/src/prompts/tool_catalog.rs`)**: `dispatch_agents` is now enabled in Plan Mode with a curated set of read-only base profiles (`explorer`), and its description specifically directs the model to perform parallel multi-file reconnaissance before finalizing the plan.
+- **Engine-Level Zero Side-Effects Safety Clamp**:
+  - **Plan Mode Base Profile Enforcement (`crates/mint-core/src/swarm/batch.rs` & `orchestration/mod.rs`)**: In Plan Mode, the swarm batch planner automatically clamps all task base profiles to `DEFAULT_BASE` (`explorer`), guaranteeing that even if a model requests a write-capable profile, it is strictly sandboxed as read-only.
+- **Interface Parity Across CLI, Desktop, and Web**:
+  - **Full-Screen TUI (`crates/mint-cli/src/interactive/chat_tui.rs`)**: Docked `Running Subagents` panel animates and displays live reconnaissance subagents right above the `[Plan]` prompt and composer.
+  - **Desktop and Web GUI (`src/renderer/shared/`)**: `SubagentStatusStrip` and `SubagentDagView` render subagent progress and DAG inspection seamlessly while in Plan Mode.
+- **Unit and Regression Test Coverage**:
+  - Added unit test in `tool_catalog.rs` verifying `dispatch_agents` is offered in Plan Mode with read-only profiles.
+  - Added unit test in `batch.rs` verifying that Plan Mode forces `explorer` base even when `general-purpose` is requested.
+  - Added regression assertion in `review_regressions.rs` verifying `plan_mode_allows` allows `dispatch_agents`.
+  - Added TUI unit test in `chat_tui.rs` verifying swarm panel renders cleanly with the `[Plan]` indicator.
+
 ## Clean Subagent Transcript Isolation & Hallucination Guard (2026-10-25)
 
 - **Clean Isolated Transcript (Claude Code Experience)**:

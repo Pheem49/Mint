@@ -3054,12 +3054,14 @@ pub(super) async fn dispatch_swarm(
     approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
     progress: &mut (dyn FnMut(AgentProgress) + Send),
 ) -> Result<String, OrchestrationError> {
+    let (is_plan_mode, _) = crate::mods::turn_policy(root, parent_chat_id);
     let effective_cap = crate::swarm::effective_max_parallel(Some(config.swarm_max_parallel));
     let profiles = |name: &str| crate::subagents::find_subagent(name, Some(root));
     let ctx = crate::swarm::BatchCtx {
         parent_chat_id,
         max_parallel: effective_cap,
         profiles: &profiles,
+        plan_mode: is_plan_mode,
     };
 
     let approve_mutex = std::sync::Mutex::new(approve_cb);

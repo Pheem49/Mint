@@ -78,10 +78,21 @@ pub fn tool_catalog(
     // and can be streamed as the final answer.
     tools.push(finish_tool());
 
-    if allow_subagent_dispatch && !plan_mode {
+    if allow_subagent_dispatch {
         let subagents = list_subagents(Some(root));
-        if !subagents.is_empty() {
-            tools.push(dispatch_agents_tool(&subagents));
+        let available_subagents: Vec<_> = if plan_mode {
+            subagents
+                .into_iter()
+                .filter(|s| {
+                    let perms = crate::swarm::AgentPermissions::from_tools(s.tools.as_deref());
+                    !perms.is_write_capable()
+                })
+                .collect()
+        } else {
+            subagents
+        };
+        if !available_subagents.is_empty() {
+            tools.push(dispatch_agents_tool(&available_subagents, plan_mode));
         }
     }
 
@@ -92,21 +103,34 @@ pub fn tool_catalog(
     tools
 }
 
-fn dispatch_agents_tool(subagents: &[crate::subagents::SubagentDefinition]) -> ToolSpec {
+fn dispatch_agents_tool(
+    subagents: &[crate::subagents::SubagentDefinition],
+    plan_mode: bool,
+) -> ToolSpec {
     let names: Vec<String> = subagents.iter().map(|s| s.name.clone()).collect();
     let catalog_text = subagents
         .iter()
         .map(|s| format!("- {}: {}", s.name, s.description))
         .collect::<Vec<_>>()
         .join("\n");
-    tool(
-        "dispatch_agents",
-        &format!(
+    let description = if plan_mode {
+        format!(
+            "Delegate exploratory reconnaissance tasks to isolated, read-only sub-agents running \
+             concurrently in their own contexts to investigate across files, trace flows, or verify \
+             system facts before creating the plan. In plan mode, all subagents run strictly read-only.\n\
+             Available read-only base profiles (defaults to 'explorer'):\n{catalog_text}"
+        )
+    } else {
+        format!(
             "Delegate one or more focused tasks to isolated sub-agents that run concurrently in \
              their own contexts and return capped dossiers — use this to investigate across files, \
              trace flows, or check hypotheses without polluting your main context.\n\
              Base profiles decide the permissions of each agent (defaults to 'explorer'):\n{catalog_text}"
-        ),
+        )
+    };
+    tool(
+        "dispatch_agents",
+        &description,
         schema(
             json!({
                 "tasks": {
@@ -1224,9 +1248,11 @@ mod tests {
         let tools = tool_catalog(&config, false, &root, false);
         assert!(!tools.iter().any(|t| t.name == "dispatch_agents"));
 
-        // Subagents exist but plan mode is active -> never offered either.
+        // Subagents exist and plan mode is active -> offered with read-only profiles only!
         let tools = tool_catalog(&config, true, &root, true);
-        assert!(!tools.iter().any(|t| t.name == "dispatch_agents"));
+        let plan_dispatch = tools.iter().find(|t| t.name == "dispatch_agents");
+        assert!(plan_dispatch.is_some());
+        assert!(plan_dispatch.unwrap().description.contains("read-only"));
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&empty_root);

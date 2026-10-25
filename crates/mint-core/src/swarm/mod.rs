@@ -138,6 +138,8 @@ pub struct BatchCtx<'a> {
     pub max_parallel: usize,
     /// Resolves a base profile name (builtin or user-authored file).
     pub profiles: &'a (dyn Fn(&str) -> Option<SubagentDefinition> + Sync),
+    /// True if the parent turn is currently in Plan Mode.
+    pub plan_mode: bool,
 }
 
 #[cfg(test)]
