@@ -39,7 +39,7 @@
 .btn-connect {
     border: 1px solid transparent;
     background: var(--accent);
-    color: var(--accent-contrast, #ffffff);
+    color: var(--accent-contrast, var(--text-on-accent));
 }
 
 /* Provider Cards styling */
@@ -311,8 +311,8 @@
 }
 
 .model-combobox-trigger.is-open {
-    border-color: var(--accent, #10b981);
-    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 .model-combobox-trigger-content {
@@ -346,10 +346,10 @@
     left: 0;
     right: 0;
     z-index: 120;
-    background: #18181b;
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: var(--bg-overlay);
+    border: 1px solid var(--border-default);
     border-radius: 10px;
-    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    box-shadow: var(--shadow-lg);
     max-height: 380px;
     display: flex;
     flex-direction: column;
@@ -373,8 +373,8 @@
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-surface-soft);
     flex-shrink: 0;
 }
 
@@ -414,7 +414,7 @@
 
 .combobox-clear-btn:hover {
     color: var(--text-main, #f4f4f5);
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--bg-surface-hover);
 }
 
 .model-combobox-list {
@@ -429,7 +429,7 @@
 }
 
 .model-combobox-list::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.15);
+    background: var(--border-strong);
     border-radius: 4px;
 }
 
@@ -459,11 +459,11 @@
 
 .model-combobox-item:hover,
 .model-combobox-item.is-highlighted {
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--bg-surface-hover);
 }
 
 .model-combobox-item.is-selected {
-    background: rgba(16, 185, 129, 0.12);
+    background: var(--accent-subtle);
 }
 
 .combobox-item-left {
@@ -502,21 +502,21 @@
 }
 
 .custom-query-item {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--border-subtle);
     margin-bottom: 4px;
-    background: rgba(16, 185, 129, 0.06);
+    background: var(--accent-subtle);
 }
 
 .combobox-custom-badge {
     font-size: 0.65rem;
     padding: 1px 5px;
     border-radius: 4px;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--bg-surface-raised);
     color: var(--text-muted, #a1a1aa);
 }
 
 .custom-option-item {
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid var(--border-subtle);
     margin-top: 4px;
     padding-top: 8px;
 }
@@ -540,8 +540,8 @@
     justify-content: center;
     gap: 8px;
     padding: 7px 12px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px dashed rgba(255, 255, 255, 0.14);
+    background: var(--bg-surface-soft);
+    border: 1px dashed var(--border-default);
     border-radius: 6px;
     color: var(--text-muted, #a1a1aa);
     font-family: inherit;
@@ -553,8 +553,8 @@
 }
 
 .combobox-see-more-btn:hover {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.26);
+    background: var(--bg-surface-hover);
+    border-color: var(--border-strong);
     color: var(--text-main, #f4f4f5);
 }
 
@@ -564,138 +564,138 @@
 
 .combobox-see-more-btn.collapse-btn {
     background: transparent;
-    border-color: rgba(255, 255, 255, 0.08);
+    border-color: var(--border-subtle);
     font-size: 0.72rem;
     padding: 5px 8px;
 }
 
 .combobox-see-more-btn.collapse-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.18);
+    background: var(--bg-surface-soft);
+    border-color: var(--border-default);
     color: var(--text-muted, #a1a1aa);
 }
 
 /* ─── Light Mode Overrides for General Settings ──────────────────────────── */
 
 [data-theme="light"] .provider-card {
-    background: #f8fafc;
-    border: 1px solid rgba(15, 23, 42, 0.1);
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    background: var(--bg-surface-soft);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-xs);
 }
 
 [data-theme="light"] .provider-card:hover {
-    border-color: rgba(15, 23, 42, 0.22);
+    border-color: var(--border-strong);
 }
 
 [data-theme="light"] .provider-card.active-provider {
-    background: #ffffff;
+    background: var(--bg-surface);
     border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent), 0 2px 10px rgba(16, 185, 129, 0.1);
+    box-shadow: 0 0 0 1px var(--accent), 0 2px 10px var(--accent-subtle);
 }
 
 [data-theme="light"] .provider-card-header {
-    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    border-bottom: 1px solid var(--border-subtle);
 }
 
 [data-theme="light"] .provider-card-title {
-    color: #0f172a;
+    color: var(--text-primary);
 }
 
 [data-theme="light"] .provider-active-badge {
-    color: #059669;
+    color: var(--interactive-fg);
     font-weight: 700;
 }
 
 [data-theme="light"] .model-combobox-trigger {
-    background: #ffffff;
-    border: 1px solid rgba(15, 23, 42, 0.16);
-    color: #0f172a;
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    color: var(--text-primary);
 }
 
 [data-theme="light"] .model-combobox-trigger:hover {
-    background: #f8fafc;
-    border-color: rgba(15, 23, 42, 0.28);
+    background: var(--bg-surface-soft);
+    border-color: var(--border-strong);
 }
 
 [data-theme="light"] .model-combobox-dropdown {
-    background: #ffffff;
-    border: 1px solid rgba(15, 23, 42, 0.14);
-    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+    background: var(--bg-overlay);
+    border: 1px solid var(--border-default);
+    box-shadow: var(--shadow-md);
 }
 
 [data-theme="light"] .model-combobox-search-box {
-    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-    background: #f8fafc;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-surface-soft);
 }
 
 [data-theme="light"] .model-combobox-search-input {
-    color: #0f172a !important;
+    color: var(--text-primary) !important;
 }
 
 [data-theme="light"] .model-combobox-search-input::placeholder {
-    color: #64748b;
+    color: var(--text-muted);
 }
 
 [data-theme="light"] .model-combobox-group-title {
-    color: #64748b;
+    color: var(--text-muted);
 }
 
 [data-theme="light"] .model-combobox-item {
-    color: #0f172a;
+    color: var(--text-primary);
 }
 
 [data-theme="light"] .model-combobox-item:hover,
 [data-theme="light"] .model-combobox-item.is-highlighted {
-    background: #f1f5f9;
+    background: var(--bg-surface-hover);
 }
 
 [data-theme="light"] .model-combobox-item.is-selected {
-    background: rgba(16, 185, 129, 0.12);
+    background: var(--accent-subtle);
 }
 
 [data-theme="light"] .combobox-item-name {
-    color: #0f172a;
+    color: var(--text-primary);
 }
 
 [data-theme="light"] .combobox-item-repo {
-    color: #64748b;
+    color: var(--text-muted);
 }
 
 [data-theme="light"] .combobox-clear-btn {
-    color: #64748b;
+    color: var(--text-muted);
 }
 
 [data-theme="light"] .combobox-clear-btn:hover {
-    color: #0f172a;
-    background: #e2e8f0;
+    color: var(--text-primary);
+    background: var(--bg-surface-active);
 }
 
 [data-theme="light"] .combobox-see-more-btn {
-    background: #f8fafc;
-    border-color: rgba(15, 23, 42, 0.15);
-    color: #475569;
+    background: var(--bg-surface-soft);
+    border-color: var(--border-default);
+    color: var(--text-secondary);
 }
 
 [data-theme="light"] .combobox-see-more-btn:hover {
-    background: #f1f5f9;
-    border-color: rgba(15, 23, 42, 0.28);
-    color: #0f172a;
+    background: var(--bg-surface-hover);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
 }
 
 [data-theme="light"] .combobox-see-more-btn.collapse-btn {
     background: transparent;
-    border-color: rgba(15, 23, 42, 0.1);
-    color: #64748b;
+    border-color: var(--border-subtle);
+    color: var(--text-muted);
 }
 
 [data-theme="light"] .custom-query-item {
-    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-    background: rgba(16, 185, 129, 0.08);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--accent-subtle);
 }
 
 [data-theme="light"] .combobox-custom-badge {
-    background: #e2e8f0;
-    color: #475569;
+    background: var(--bg-surface-active);
+    color: var(--text-secondary);
 }
 
 /* Feature cards in settings (e.g. Temperature, Thinking) */
@@ -709,18 +709,18 @@
 }
 
 [data-theme="light"] .setting-feature-card {
-    background: #f8fafc;
-    border: 1px solid rgba(15, 23, 42, 0.1);
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+    background: var(--bg-surface-soft);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-xs);
 }
 
 [data-theme="light"] .setting-feature-card:hover {
-    border-color: rgba(15, 23, 42, 0.18);
+    border-color: var(--border-default);
 }
 
 [data-theme="light"] .setting-feature-card .btn-secondary.active {
-    background: rgba(16, 185, 129, 0.12) !important;
-    border-color: #059669 !important;
-    color: #047857 !important;
+    background: var(--accent-subtle) !important;
+    border-color: var(--accent) !important;
+    color: var(--interactive-fg) !important;
     font-weight: 600;
 }

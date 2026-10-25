@@ -1286,31 +1286,31 @@
 }
 
 .agent-activity-status[data-state="done"] {
-  border-color: rgba(16, 185, 129, 0.35);
-  color: #34d399;
-  background: rgba(16, 185, 129, 0.08);
+  border-color: var(--status-success-border);
+  color: var(--status-success-fg);
+  background: var(--status-success-bg);
 }
 
 .agent-activity-status[data-state="done"]::before {
-  background: #34d399;
-  box-shadow: 0 0 6px #34d399;
+  background: var(--status-success-fg);
+  box-shadow: 0 0 6px var(--status-success-fg);
 }
 
 .agent-activity-status[data-state="error"] {
-  border-color: rgba(239, 68, 68, 0.35);
-  color: #f87171;
-  background: rgba(239, 68, 68, 0.08);
+  border-color: var(--status-error-border);
+  color: var(--status-error-fg);
+  background: var(--status-error-bg);
 }
 
 .agent-activity-status[data-state="error"]::before {
-  background: #f87171;
-  box-shadow: 0 0 6px #f87171;
+  background: var(--status-error-fg);
+  box-shadow: 0 0 6px var(--status-error-fg);
 }
 
 .agent-activity-status[data-state="cancelled"] {
-  border-color: rgba(148, 163, 184, 0.28);
+  border-color: var(--border-default);
   color: var(--text-muted);
-  background: rgba(148, 163, 184, 0.05);
+  background: var(--bg-surface-soft);
 }
 
 .agent-activity-status[data-state="cancelled"]::before {
@@ -1318,13 +1318,13 @@
 }
 
 .agent-activity-status[data-state="approval"] {
-  border-color: rgba(245, 158, 11, 0.4);
-  color: #fbbf24;
-  background: rgba(245, 158, 11, 0.12);
+  border-color: var(--status-warning-border);
+  color: var(--status-warning-fg);
+  background: var(--status-warning-bg);
 }
 
 .agent-activity-status[data-state="approval"]::before {
-  background: #fbbf24;
+  background: var(--status-warning-fg);
   animation: pulse-ring-amber 1.8s infinite;
 }
 
@@ -1462,15 +1462,15 @@
 }
 
 .agent-activity-badge.retry {
-  background: rgba(245, 158, 11, 0.16);
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  color: #fbbf24;
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
+  color: var(--status-warning-fg);
 }
 
 .agent-activity-badge.error {
-  background: rgba(239, 68, 68, 0.16);
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  color: #f87171;
+  background: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
+  color: var(--status-error-fg);
 }
 
 .agent-activity-chevron {

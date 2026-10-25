@@ -102,15 +102,18 @@ export default function TerminalDock({ visible, page = false, size, cwd, onClose
   useEffect(() => {
     if (!terminalReady) return
     if (!hostRef.current) return
+    const style = getComputedStyle(document.documentElement)
+    const termBg = style.getPropertyValue('--bg-terminal').trim() || '#111318'
+    const accentHex = style.getPropertyValue('--accent-default').trim() || '#7dd3a7'
     const terminal = new Terminal({
       cursorBlink: true,
       convertEol: true,
       fontFamily: '"Fira Code", "Cascadia Code", monospace',
       fontSize: 13,
       theme: {
-        background: '#111318',
+        background: termBg,
         foreground: '#e5e7eb',
-        cursor: '#7dd3a7',
+        cursor: accentHex,
         selectionBackground: '#365c4a',
       },
     })

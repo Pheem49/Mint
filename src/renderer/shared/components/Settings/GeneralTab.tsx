@@ -686,9 +686,9 @@ export default function GeneralTab({
                                 padding: '0.2rem 0.6rem',
                                 fontSize: '0.75rem',
                                 fontWeight: currentEffort === eff ? 600 : 400,
-                                background: currentEffort === eff ? 'rgba(16, 185, 129, 0.15)' : undefined,
-                                borderColor: currentEffort === eff ? 'var(--accent, #10b981)' : undefined,
-                                color: currentEffort === eff ? 'var(--accent, #10b981)' : undefined,
+                                background: currentEffort === eff ? 'var(--accent-subtle)' : undefined,
+                                borderColor: currentEffort === eff ? 'var(--accent)' : undefined,
+                                color: currentEffort === eff ? 'var(--interactive-fg)' : undefined,
                               }}
                               onClick={() => handleEffortChange(eff)}
                             >

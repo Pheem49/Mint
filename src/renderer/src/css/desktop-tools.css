@@ -500,8 +500,8 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #57c78b;
-  box-shadow: 0 0 8px rgba(87, 199, 139, 0.42);
+  background: var(--status-success-fg, #57c78b);
+  box-shadow: 0 0 8px var(--status-success-border, rgba(87, 199, 139, 0.42));
 }
 
 .terminal-dock-cwd {
@@ -525,7 +525,7 @@
 
 .terminal-dock-header > button:hover {
   color: var(--text-main, #e5e7eb);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-surface-hover);
 }
 
 .terminal-dock-header-actions {
@@ -550,7 +550,7 @@
 
 .terminal-dock-header-actions > button:hover {
   color: var(--text-main, #e5e7eb);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-surface-hover);
 }
 
 .terminal-dock-surface {
@@ -560,7 +560,7 @@
   padding: 10px 12px;
   border: 1px solid var(--border-default, rgba(255, 255, 255, 0.12));
   border-radius: 0 0 10px 10px;
-  background: #111318;
+  background: var(--bg-terminal, #111318);
 }
 
 .terminal-dock-surface .xterm {

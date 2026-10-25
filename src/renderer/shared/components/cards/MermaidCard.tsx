@@ -28,7 +28,9 @@ function enqueueMermaidRender<T>(task: () => Promise<T>): Promise<T> {
 const svgCache = new Map<string, string>()
 function cacheKey(code: string): string {
   const theme = document.documentElement.getAttribute('data-theme') || 'dark'
-  return `${theme}::${code}`
+  const accent = document.documentElement.getAttribute('data-accent') || 'mint'
+  const mode = document.documentElement.getAttribute('data-accent-mode') || ''
+  return `${theme}::${accent}::${mode}::${code}`
 }
 
 function buildMermaidTheme(): Record<string, string> {
@@ -67,9 +69,6 @@ export default function MermaidCard({ code }: { code: string }) {
   const [status, setStatus] = useState<Status>('loading')
   const [svg, setSvg] = useState<string>('')
   const [copied, setCopied] = useState(false)
-  const [isDark, setIsDark] = useState(
-    () => (document.documentElement.getAttribute('data-theme') || 'dark') !== 'light'
-  )
 
   useEffect(() => {
     let cancelled = false
@@ -146,10 +145,9 @@ export default function MermaidCard({ code }: { code: string }) {
     }
 
     observer = new MutationObserver(() => {
-      setIsDark((document.documentElement.getAttribute('data-theme') || 'dark') !== 'light')
       render()
     })
-    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] })
+    observer.observe(document.documentElement, { attributeFilter: ['data-theme', 'data-accent', 'data-accent-mode'] })
 
     return () => {
       cancelled = true
@@ -190,28 +188,28 @@ export default function MermaidCard({ code }: { code: string }) {
   return (
     <div
       style={{
-        background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.04)',
+        background: 'var(--bg-surface-soft)',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
-        color: isDark ? '#f8fafc' : '#0f172a',
+        color: 'var(--text-primary)',
         borderRadius: '12px',
         padding: '16px 20px',
         margin: '12px 0',
-        boxShadow: isDark ? '0 8px 32px 0 rgba(0,0,0,0.2)' : '0 4px 20px 0 rgba(15,23,42,0.08)',
-        border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.12)'}`,
+        boxShadow: 'var(--shadow-md)',
+        border: '1px solid var(--border-subtle)',
         fontFamily: 'system-ui, -apple-system, sans-serif',
         minWidth: 0,
         maxWidth: '100%',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-        <Workflow size={16} strokeWidth={2} style={{ opacity: 0.9, color: isDark ? 'rgba(255,255,255,0.6)' : '#64748b' }} />
+        <Workflow size={16} strokeWidth={2} style={{ opacity: 0.9, color: 'var(--text-muted)' }} />
         <span
           style={{
             fontSize: '11px',
             fontWeight: 700,
             letterSpacing: '0.8px',
-            color: isDark ? 'rgba(255,255,255,0.6)' : '#64748b',
+            color: 'var(--text-muted)',
           }}
         >
           DIAGRAM
@@ -227,7 +225,7 @@ export default function MermaidCard({ code }: { code: string }) {
             </button>
             <button type="button" onClick={handleCopy} title="Copy diagram source" className="chat-code-action-btn">
               {copied ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-fg)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               ) : (
@@ -248,8 +246,8 @@ export default function MermaidCard({ code }: { code: string }) {
               width: '20px',
               height: '20px',
               borderRadius: '50%',
-              border: `2px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(15,23,42,0.12)'}`,
-              borderTopColor: 'var(--accent, #10b981)',
+              border: '2px solid var(--border-default)',
+              borderTopColor: 'var(--accent)',
               animation: 'mermaid-card-spin 0.8s linear infinite',
             }}
           />

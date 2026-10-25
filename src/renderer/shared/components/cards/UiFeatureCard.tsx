@@ -127,11 +127,11 @@ export interface UiFeatureData {
 }
 
 const BADGE_THEMES: Record<string, { bg: string; color: string; border: string }> = {
-  green: { bg: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: 'rgba(16, 185, 129, 0.3)' },
-  blue: { bg: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: 'rgba(56, 189, 248, 0.3)' },
-  purple: { bg: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: 'rgba(168, 85, 247, 0.3)' },
-  amber: { bg: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: 'rgba(245, 158, 11, 0.3)' },
-  red: { bg: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: 'rgba(239, 68, 68, 0.3)' },
+  green: { bg: 'var(--status-success-bg, var(--accent-subtle))', color: 'var(--status-success-fg, var(--interactive-fg))', border: 'var(--status-success-border, var(--accent-border))' },
+  blue: { bg: 'var(--status-info-bg)', color: 'var(--status-info-fg)', border: 'var(--status-info-border)' },
+  purple: { bg: 'var(--status-purple-bg)', color: 'var(--status-purple-fg)', border: 'var(--status-purple-border)' },
+  amber: { bg: 'var(--status-warning-bg)', color: 'var(--status-warning-fg)', border: 'var(--status-warning-border)' },
+  red: { bg: 'var(--status-error-bg)', color: 'var(--status-error-fg)', border: 'var(--status-error-border)' },
 }
 
 export default function UiFeatureCard({ data }: { data: UiFeatureData | UiFeatureItem[] | UiFeatureItem }) {

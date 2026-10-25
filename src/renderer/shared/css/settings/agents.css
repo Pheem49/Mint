@@ -49,8 +49,8 @@
 }
 
 .entity-card-badge.scope-workspace {
-    background: rgba(16, 185, 129, 0.15);
-    color: #10b981;
+    background: var(--accent-subtle);
+    color: var(--interactive-fg);
 }
 
 .entity-card-badge.scope-global {

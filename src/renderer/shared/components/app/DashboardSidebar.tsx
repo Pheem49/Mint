@@ -651,7 +651,7 @@ export default function DashboardSidebar({
                 fontWeight: 600,
                 padding: '1px 6px',
                 borderRadius: '10px',
-                background: 'rgba(255, 255, 255, 0.08)',
+                background: 'var(--bg-surface-hover)',
                 color: 'var(--text-muted, #94a3b8)',
               }}
             >

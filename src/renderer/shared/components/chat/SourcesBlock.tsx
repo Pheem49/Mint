@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo } from 'react'
 import type { WebSearchSource } from '../../utils/agentActivity'
 import { resolveMediaUrl } from '../../utils/markdown'
 import '../../css/sources-block.css'
@@ -51,17 +51,6 @@ export function groupSourcesByDomain(sources: WebSearchSource[]): DomainGroup[] 
 export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function SourcesBlock({ sources }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [openDropdownDomain, setOpenDropdownDomain] = useState<string | null>(null)
-  const [isDark, setIsDark] = useState(
-    () => (document.documentElement.getAttribute('data-theme') || 'dark') !== 'light'
-  )
-
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setIsDark((document.documentElement.getAttribute('data-theme') || 'dark') !== 'light')
-    })
-    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] })
-    return () => observer.disconnect()
-  }, [])
 
   const domainGroups = useMemo(() => {
     const groups = groupSourcesByDomain(sources)
@@ -100,11 +89,11 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          style={{ color: '#94a3b8' }}
+          style={{ color: 'var(--text-muted)' }}
         >
           <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
         </svg>
-        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: isDark ? '#f1f5f9' : '#0f172a', letterSpacing: '0.01em' }}>
+        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '0.01em' }}>
           Sources
         </span>
       </div>
@@ -134,7 +123,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                   justifyContent: 'space-between',
                   borderRadius: '16px',
                   background: 'var(--bg-surface-soft)',
-                  border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)'}`,
+                  border: '1px solid var(--border-subtle)',
                   transition: 'all 0.15s ease',
                   cursor: 'pointer',
                   minHeight: '68px',
@@ -155,13 +144,13 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                 onMouseEnter={(e) => {
                   const el = e.currentTarget
                   el.style.background = 'var(--bg-surface-hover)'
-                  el.style.borderColor = isDark ? 'rgba(255,255,255,0.16)' : 'rgba(15,23,42,0.2)'
+                  el.style.borderColor = 'var(--border-strong)'
                   el.style.transform = 'translateY(-1px)'
                 }}
                 onMouseLeave={(e) => {
                   const el = e.currentTarget
                   el.style.background = 'var(--bg-surface-soft)'
-                  el.style.borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)'
+                  el.style.borderColor = 'var(--border-subtle)'
                   el.style.transform = 'translateY(0)'
                 }}
               >
@@ -221,7 +210,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                       <span
                         style={{
                           fontSize: '0.73rem',
-                          color: '#94a3b8',
+                          color: 'var(--text-muted)',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
@@ -239,9 +228,9 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                         style={{
                           fontSize: '0.68rem',
                           fontWeight: 600,
-                          color: '#38bdf8',
-                          background: 'rgba(56, 189, 248, 0.12)',
-                          border: '1px solid rgba(56, 189, 248, 0.3)',
+                          color: 'var(--interactive-fg)',
+                          background: 'var(--accent-subtle)',
+                          border: '1px solid var(--accent-border)',
                           padding: '1px 6px',
                           borderRadius: '4px',
                           flexShrink: 0,
@@ -258,7 +247,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                         +{extraCount}
                       </button>
                     ) : (
-                      <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 500, flexShrink: 0 }}>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 500, flexShrink: 0 }}>
                         •{groupIdx + 1}
                       </span>
                     )}
@@ -278,7 +267,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                     background: 'var(--bg-overlay)',
                     border: '1px solid var(--border-default)',
                     borderRadius: '14px',
-                    boxShadow: '0 10px 25px rgba(0,0,0,0.6)',
+                    boxShadow: 'var(--shadow-lg)',
                     zIndex: 40,
                     padding: '6px',
                     display: 'flex',
@@ -303,7 +292,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                       style={{
                         background: 'none',
                         border: 'none',
-                        color: '#64748b',
+                        color: 'var(--text-muted)',
                         cursor: 'pointer',
                         fontSize: '0.8rem',
                         padding: '0 2px',
@@ -337,7 +326,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                       <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {itemIdx + 1}. {item.title}
                       </div>
-                      <div style={{ fontSize: '0.68rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {item.url}
                       </div>
                     </a>
@@ -362,7 +351,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
               padding: '10px 14px',
               borderRadius: '16px',
               background: 'var(--bg-surface-soft)',
-              border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)'}`,
+              border: '1px solid var(--border-subtle)',
               cursor: 'pointer',
               transition: 'all 0.15s ease',
               boxSizing: 'border-box',
@@ -370,13 +359,13 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
             onMouseEnter={(e) => {
               const el = e.currentTarget
               el.style.background = 'var(--bg-surface-hover)'
-              el.style.borderColor = isDark ? 'rgba(255,255,255,0.16)' : 'rgba(15,23,42,0.2)'
+              el.style.borderColor = 'var(--border-strong)'
               el.style.transform = 'translateY(-1px)'
             }}
             onMouseLeave={(e) => {
               const el = e.currentTarget
               el.style.background = 'var(--bg-surface-soft)'
-              el.style.borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)'
+              el.style.borderColor = 'var(--border-subtle)'
               el.style.transform = 'translateY(0)'
             }}
           >
@@ -391,9 +380,9 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                   height={18}
                   style={{
                     borderRadius: '50%',
-                    border: '1.5px solid #18181b',
+                    border: '1.5px solid var(--bg-surface)',
                     marginLeft: idx === 0 ? 0 : '-6px',
-                    background: '#27272a',
+                    background: 'var(--bg-surface-raised)',
                     objectFit: 'cover',
                   }}
                   onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
@@ -401,7 +390,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
               ))}
             </div>
 
-            <span style={{ fontSize: '0.78rem', fontWeight: 500, color: '#94a3b8', marginLeft: '8px' }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--text-secondary)', marginLeft: '8px' }}>
               View {remainingSourcesCount} more
             </span>
           </button>
@@ -419,10 +408,10 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
             }}
             style={{
               background: 'var(--bg-surface-soft)',
-              border: `1px solid ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(15,23,42,0.12)'}`,
+              border: '1px solid var(--border-subtle)',
               borderRadius: '8px',
               padding: '4px 10px',
-              color: '#94a3b8',
+              color: 'var(--text-secondary)',
               fontSize: '0.73rem',
               fontWeight: 500,
               cursor: 'pointer',

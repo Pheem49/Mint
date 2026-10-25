@@ -166,9 +166,9 @@ export default function UiGridCard({ data }: { data: UiGridData | UiGridItem[] }
                       fontWeight: 600,
                       padding: '2px 7px',
                       borderRadius: '999px',
-                      background: 'rgba(16, 185, 129, 0.15)',
-                      color: '#34d399',
-                      border: '1px solid rgba(16, 185, 129, 0.3)',
+                      background: 'var(--accent-subtle)',
+                      color: 'var(--interactive-fg)',
+                      border: '1px solid var(--accent-border)',
                     }}
                   >
                     {item.badge}

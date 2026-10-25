@@ -273,7 +273,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
                 onClick={() => setActiveTab('preview')}
                 style={{
                   background: activeTab === 'preview' ? 'var(--accent)' : 'transparent',
-                  color: activeTab === 'preview' ? '#ffffff' : 'var(--text-muted)',
+                  color: activeTab === 'preview' ? 'var(--text-on-accent)' : 'var(--text-muted)',
                   border: 'none',
                   borderRadius: 'var(--radius-xs, 4px)',
                   padding: '3px 9px',
@@ -290,7 +290,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
                 onClick={() => setActiveTab('code')}
                 style={{
                   background: activeTab === 'code' ? 'var(--accent)' : 'transparent',
-                  color: activeTab === 'code' ? '#ffffff' : 'var(--text-muted)',
+                  color: activeTab === 'code' ? 'var(--text-on-accent)' : 'var(--text-muted)',
                   border: 'none',
                   borderRadius: 'var(--radius-xs, 4px)',
                   padding: '3px 9px',

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React from 'react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 
 export interface StockData {
@@ -16,38 +16,24 @@ export interface StockData {
 
 export default function StockCard({ data }: { data: StockData }) {
   const isPositive = data.change >= 0
-  const accentColor = isPositive ? '#10b981' : '#ef4444'
-
-  const [isDark, setIsDark] = useState(
-    () => (document.documentElement.getAttribute('data-theme') || 'dark') !== 'light'
-  )
-
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setIsDark((document.documentElement.getAttribute('data-theme') || 'dark') !== 'light')
-    })
-    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] })
-    return () => observer.disconnect()
-  }, [])
+  const accentColor = isPositive ? 'var(--status-success, #10b981)' : 'var(--status-error, #ef4444)'
 
   // Theme-aware color tokens
   const t = {
-    cardBg: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.04)',
-    cardText: isDark ? '#ffffff' : '#0f172a',
+    cardBg: 'var(--bg-surface-soft)',
+    cardText: 'var(--text-primary)',
     cardBorder: isPositive
-      ? isDark ? 'rgba(16,185,129,0.25)' : 'rgba(16,185,129,0.45)'
-      : isDark ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.45)',
-    cardShadow: isDark
-      ? '0 8px 32px 0 rgba(0,0,0,0.2)'
-      : '0 4px 20px 0 rgba(15,23,42,0.08)',
-    tagBg: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.07)',
-    tagColor: isDark ? 'rgba(255,255,255,0.7)' : '#475569',
-    subText: isDark ? 'rgba(255,255,255,0.6)' : '#64748b',
-    divider: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.1)',
-    statBg: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.05)',
-    statBorder: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.1)',
-    statLabel: isDark ? 'rgba(255,255,255,0.55)' : '#64748b',
-    statValue: isDark ? '#ffffff' : '#0f172a',
+      ? 'color-mix(in srgb, var(--status-success, #10b981) 35%, var(--border-subtle))'
+      : 'color-mix(in srgb, var(--status-error, #ef4444) 35%, var(--border-subtle))',
+    cardShadow: 'var(--shadow-md)',
+    tagBg: 'var(--bg-surface-raised)',
+    tagColor: 'var(--text-secondary)',
+    subText: 'var(--text-muted)',
+    divider: 'var(--border-subtle)',
+    statBg: 'var(--bg-surface-raised)',
+    statBorder: 'var(--border-subtle)',
+    statLabel: 'var(--text-muted)',
+    statValue: 'var(--text-primary)',
   }
 
   const formattedPrice = data.price.toLocaleString(undefined, {

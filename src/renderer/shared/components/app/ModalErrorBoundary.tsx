@@ -74,8 +74,8 @@ export default class ModalErrorBoundary extends React.Component<Props, State> {
             <div
               style={{
                 fontSize: '0.75rem',
-                color: '#ef4444',
-                background: 'rgba(239, 68, 68, 0.1)',
+                color: 'var(--status-error, #ef4444)',
+                background: 'color-mix(in srgb, var(--status-error, #ef4444) 12%, transparent)',
                 padding: '6px 12px',
                 borderRadius: 6,
                 maxWidth: 460,
@@ -93,8 +93,8 @@ export default class ModalErrorBoundary extends React.Component<Props, State> {
                 padding: '8px 20px',
                 borderRadius: 8,
                 border: 'none',
-                background: '#10b981',
-                color: '#ffffff',
+                background: 'var(--accent, #10b981)',
+                color: 'var(--text-on-accent, #ffffff)',
                 fontWeight: 600,
                 cursor: 'pointer',
                 fontSize: '0.9rem',
@@ -108,7 +108,7 @@ export default class ModalErrorBoundary extends React.Component<Props, State> {
               style={{
                 padding: '8px 20px',
                 borderRadius: 8,
-                border: '1px solid rgba(255, 255, 255, 0.15)',
+                border: '1px solid var(--border-default, rgba(255, 255, 255, 0.15))',
                 background: 'transparent',
                 color: 'var(--text-main, #e4e4e7)',
                 cursor: 'pointer',

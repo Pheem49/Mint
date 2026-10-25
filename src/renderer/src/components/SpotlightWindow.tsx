@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import '../css/spotlight.css'
 import { evaluateArithmetic } from '../calculator'
+import { applyTheme } from '../../shared/theme/themeManager'
 
 const COMMANDS = [
     { label: 'Open YouTube', desc: 'Open YouTube website', icon: '📺', action: { type: 'open_url', target: 'https://youtube.com' } },
@@ -98,31 +99,11 @@ export default function SpotlightWindow() {
   const [selectedIndex, setSelectedIndex] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Sync theme
+  // Sync theme via centralized themeManager
   useEffect(() => {
-    const applyThemeVariables = (config: any) => {
-      if (config.systemTextColor) {
-        document.documentElement.style.setProperty('--text-main', config.systemTextColor)
-      }
-      document.documentElement.setAttribute('data-theme', config.theme || 'dark')
-      if (config.theme === 'custom') {
-        if (config.customBgStart && config.customBgEnd) {
-          const gradient = `linear-gradient(135deg, ${config.customBgStart} 0%, ${config.customBgEnd} 100%)`
-          document.documentElement.style.setProperty('--bg-gradient', gradient)
-        }
-        if (config.customPanelBg) {
-          const rgb = hexToRgb(config.customPanelBg)
-          document.documentElement.style.setProperty('--panel-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.75)`)
-        }
-      } else {
-        document.documentElement.style.removeProperty('--bg-gradient')
-        document.documentElement.style.removeProperty('--panel-bg')
-      }
-    }
-
     if (window.spotlightAPI) {
-      window.spotlightAPI.getSettings().then(applyThemeVariables)
-      window.spotlightAPI.onSettingsChanged(applyThemeVariables)
+      window.spotlightAPI.getSettings().then(applyTheme)
+      window.spotlightAPI.onSettingsChanged(applyTheme)
     }
 
     const handleFocus = () => {
@@ -134,15 +115,6 @@ export default function SpotlightWindow() {
 
     return () => window.removeEventListener('focus', handleFocus)
   }, [])
-
-  const hexToRgb = (hex: string) => {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
-    return result ? {
-        r: parseInt(result[1], 16),
-        g: parseInt(result[2], 16),
-        b: parseInt(result[3], 16)
-    } : { r: 15, g: 23, b: 42 }
-  }
 
   // Calculate matches when query text changes
   useEffect(() => {

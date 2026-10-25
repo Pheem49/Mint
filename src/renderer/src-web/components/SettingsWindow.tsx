@@ -1,4 +1,3 @@
-import '../css/settings/base.css'
 import '../css/settings/mobile.css'
 export {
   default,

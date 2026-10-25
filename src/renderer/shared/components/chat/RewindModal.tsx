@@ -80,7 +80,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
           width: '100%',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: '0 24px 48px rgba(0, 0, 0, 0.65)',
+          boxShadow: 'var(--shadow-lg)',
           border: '1px solid color-mix(in srgb, var(--status-error, #ef4444) 30%, var(--border))',
         }}
       >
@@ -226,7 +226,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
                   style={{
                     padding: '3px 7px',
                     borderRadius: '6px',
-                    background: 'var(--input-bg, rgba(0,0,0,0.3))',
+                    background: 'var(--bg-input, var(--bg-surface-soft))',
                     color: 'var(--text-main)',
                     fontSize: '12px',
                     border: '1px solid var(--border)',

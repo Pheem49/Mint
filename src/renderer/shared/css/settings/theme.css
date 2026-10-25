@@ -467,7 +467,7 @@
     height: 18px;
     border-radius: 50%;
     background: var(--accent);
-    color: var(--accent-contrast, #ffffff);
+    color: var(--accent-contrast, var(--text-on-accent));
 }
 
 .theme-preset-desc,
@@ -560,7 +560,7 @@
 
 .color-mode-card.active .mode-card-icon {
     background: var(--accent);
-    color: var(--accent-contrast, #ffffff);
+    color: var(--accent-contrast, var(--text-on-accent));
 }
 
 .mode-card-text {
@@ -588,7 +588,7 @@
     height: 18px;
     border-radius: 50%;
     background: var(--accent);
-    color: var(--accent-contrast, #ffffff);
+    color: var(--accent-contrast, var(--text-on-accent));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -747,63 +747,63 @@
 /* ─── Light Mode Overrides for Theme & Controls ─────────────────────────── */
 
 [data-theme="light"] .pill-segmented {
-    background: #f1f5f9;
-    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: var(--bg-surface-hover);
+    border: 1px solid var(--border-subtle);
 }
 
 [data-theme="light"] .pill-segmented-btn {
-    color: #475569;
+    color: var(--text-secondary);
 }
 
 [data-theme="light"] .pill-segmented-btn:hover {
-    color: #0f172a;
-    background: rgba(255, 255, 255, 0.6);
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--bg-surface) 60%, transparent);
 }
 
 [data-theme="light"] .pill-segmented-btn.active {
-    background: #ffffff;
+    background: var(--bg-surface);
     border-color: transparent;
-    color: #047857;
+    color: var(--interactive-fg);
     font-weight: 600;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1), 0 0 0 1px rgba(16, 185, 129, 0.3);
+    box-shadow: var(--shadow-sm), 0 0 0 1px var(--accent-border);
 }
 
 [data-theme="light"] .section-current-badge {
-    background: #f1f5f9;
-    color: #475569;
-    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: var(--bg-surface-hover);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
 }
 
 [data-theme="light"] .theme-preset-card {
-    background: #ffffff;
-    border: 1px solid rgba(15, 23, 42, 0.12);
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    box-shadow: var(--shadow-xs);
 }
 
 [data-theme="light"] .theme-preset-card:hover {
-    border-color: rgba(15, 23, 42, 0.24);
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
 }
 
 [data-theme="light"] .theme-preset-card.active {
     border-color: var(--accent);
-    background: #ffffff;
-    box-shadow: 0 0 0 1px var(--accent), 0 4px 14px rgba(16, 185, 129, 0.15);
+    background: var(--bg-surface);
+    box-shadow: 0 0 0 1px var(--accent), 0 4px 14px var(--accent-subtle);
 }
 
 [data-theme="light"] .surface-card {
-    background: #ffffff;
-    border: 1px solid rgba(15, 23, 42, 0.12);
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    box-shadow: var(--shadow-xs);
 }
 
 [data-theme="light"] .surface-card:hover {
-    background: #f8fafc;
-    border-color: rgba(15, 23, 42, 0.24);
+    background: var(--bg-surface-soft);
+    border-color: var(--border-strong);
 }
 
 [data-theme="light"] .surface-card.active {
     border-color: var(--accent);
-    background: #ffffff;
-    box-shadow: 0 0 0 1px var(--accent), 0 2px 8px rgba(16, 185, 129, 0.1);
+    background: var(--bg-surface);
+    box-shadow: 0 0 0 1px var(--accent), 0 2px 8px var(--accent-subtle);
 }

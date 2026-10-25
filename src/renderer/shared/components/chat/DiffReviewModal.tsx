@@ -246,8 +246,8 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                   style={{
                     fontSize: '0.75rem',
                     fontWeight: 700,
-                    color: 'var(--status-error, #f87171)',
-                    background: 'var(--hover-delete-bg, rgba(239, 68, 68, 0.15))',
+                    color: 'var(--status-error-fg)',
+                    background: 'var(--status-error-bg)',
                     padding: '1px 6px',
                     borderRadius: '4px',
                   }}
@@ -259,8 +259,8 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                     style={{
                       fontSize: '0.72rem',
                       fontWeight: 700,
-                      color: '#fbbf24',
-                      background: 'rgba(245, 158, 11, 0.15)',
+                      color: 'var(--status-warning-fg)',
+                      background: 'var(--status-warning-bg)',
                       padding: '1px 6px',
                       borderRadius: '4px',
                       textTransform: 'none',
@@ -308,7 +308,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
             padding: 0,
             overflowY: 'auto',
             flex: 1,
-            background: '#090d16',
+            background: 'var(--bg-canvas)',
             fontFamily: 'Consolas, Monaco, "JetBrains Mono", monospace',
             fontSize: '0.8rem',
             lineHeight: 1.5,
@@ -322,11 +322,11 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                   position: 'sticky',
                   top: 0,
                   zIndex: 2,
-                  background: '#0e1526',
+                  background: 'var(--bg-surface-raised)',
                   padding: '6px 12px',
-                  borderBottom: '1px solid rgba(255,255,255,0.08)',
-                  borderRight: '1px solid rgba(255,255,255,0.08)',
-                  color: '#94a3b8',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  borderRight: '1px solid var(--border-subtle)',
+                  color: 'var(--text-muted)',
                   fontWeight: 600,
                   fontSize: '0.75rem',
                 }}
@@ -339,10 +339,10 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                   position: 'sticky',
                   top: 0,
                   zIndex: 2,
-                  background: '#0e1526',
+                  background: 'var(--bg-surface-raised)',
                   padding: '6px 12px',
-                  borderBottom: '1px solid rgba(255,255,255,0.08)',
-                  color: '#94a3b8',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  color: 'var(--text-muted)',
                   fontWeight: 600,
                   fontSize: '0.75rem',
                 }}
@@ -357,13 +357,13 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                       key={idx}
                       style={{
                         gridColumn: '1 / -1',
-                        background: 'rgba(56, 189, 248, 0.08)',
-                        color: '#38bdf8',
+                        background: 'var(--status-info-bg)',
+                        color: 'var(--status-info-fg)',
                         padding: '4px 12px',
                         fontSize: '0.72rem',
                         fontWeight: 600,
-                        borderTop: '1px solid rgba(56, 189, 248, 0.2)',
-                        borderBottom: '1px solid rgba(56, 189, 248, 0.2)',
+                        borderTop: '1px solid var(--status-info-border)',
+                        borderBottom: '1px solid var(--status-info-border)',
                       }}
                     >
                       {row.hunkHeader}
@@ -381,8 +381,8 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                       style={{
                         display: 'flex',
                         borderRight: '1px solid var(--border)',
-                        background: left?.isDel ? 'color-mix(in srgb, var(--status-error, #ef4444) 14%, transparent)' : 'transparent',
-                        borderLeft: left?.isDel ? '3px solid var(--status-error, #ef4444)' : '3px solid transparent',
+                        background: left?.isDel ? 'var(--diff-del-bg)' : 'transparent',
+                        borderLeft: left?.isDel ? '3px solid var(--diff-del-border)' : '3px solid transparent',
                         minHeight: '22px',
                       }}
                     >
@@ -391,7 +391,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                           width: '44px',
                           textAlign: 'right',
                           paddingRight: '10px',
-                          color: left?.isDel ? 'var(--status-error, #f87171)' : 'var(--text-muted)',
+                          color: left?.isDel ? 'var(--diff-del-gutter)' : 'var(--text-muted)',
                           userSelect: 'none',
                           flexShrink: 0,
                         }}
@@ -403,7 +403,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-all',
                           paddingRight: '8px',
-                          color: left?.isDel ? 'var(--hover-delete, #fca5a5)' : 'var(--text-chat, var(--text-main))',
+                          color: left?.isDel ? 'var(--diff-del-text)' : 'var(--text-chat, var(--text-main))',
                         }}
                       >
                         {left ? left.content : ''}
@@ -414,8 +414,8 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                     <div
                       style={{
                         display: 'flex',
-                        background: right?.isAdd ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
-                        borderLeft: right?.isAdd ? '3px solid var(--accent)' : '3px solid transparent',
+                        background: right?.isAdd ? 'var(--diff-add-bg)' : 'transparent',
+                        borderLeft: right?.isAdd ? '3px solid var(--diff-add-border)' : '3px solid transparent',
                         minHeight: '22px',
                       }}
                     >
@@ -424,7 +424,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                           width: '44px',
                           textAlign: 'right',
                           paddingRight: '10px',
-                          color: right?.isAdd ? 'var(--accent)' : 'var(--text-muted)',
+                          color: right?.isAdd ? 'var(--diff-add-gutter)' : 'var(--text-muted)',
                           userSelect: 'none',
                           flexShrink: 0,
                         }}
@@ -436,7 +436,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-all',
                           paddingRight: '8px',
-                          color: right?.isAdd ? 'var(--accent-hover, var(--accent))' : 'var(--text-chat, var(--text-main))',
+                          color: right?.isAdd ? 'var(--diff-add-text)' : 'var(--text-chat, var(--text-main))',
                         }}
                       >
                         {right ? right.content : ''}
@@ -454,13 +454,13 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                     <div
                       key={idx}
                       style={{
-                        background: 'rgba(56, 189, 248, 0.08)',
-                        color: '#38bdf8',
+                        background: 'var(--status-info-bg)',
+                        color: 'var(--status-info-fg)',
                         padding: '4px 12px',
                         fontSize: '0.72rem',
                         fontWeight: 600,
-                        borderTop: '1px solid rgba(56, 189, 248, 0.2)',
-                        borderBottom: '1px solid rgba(56, 189, 248, 0.2)',
+                        borderTop: '1px solid var(--status-info-border)',
+                        borderBottom: '1px solid var(--status-info-border)',
                       }}
                     >
                       {line.content}
@@ -469,7 +469,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                 }
                 if (line.type === 'meta') {
                   return (
-                    <div key={idx} style={{ color: '#64748b', padding: '2px 12px', fontWeight: 600 }}>
+                    <div key={idx} style={{ color: 'var(--text-muted)', padding: '2px 12px', fontWeight: 600 }}>
                       {line.content}
                     </div>
                   )
@@ -481,14 +481,14 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                 let prefix = ' '
 
                 if (line.type === 'add') {
-                  bg = 'color-mix(in srgb, var(--accent) 14%, transparent)'
-                  borderL = '3px solid var(--accent)'
-                  textCol = 'var(--text-chat, var(--text-main))'
+                  bg = 'var(--diff-add-bg)'
+                  borderL = '3px solid var(--diff-add-border)'
+                  textCol = 'var(--diff-add-text)'
                   prefix = '+'
                 } else if (line.type === 'del') {
-                  bg = 'color-mix(in srgb, var(--status-error, #ef4444) 14%, transparent)'
-                  borderL = '3px solid var(--status-error, #ef4444)'
-                  textCol = 'var(--text-chat, var(--text-main))'
+                  bg = 'var(--diff-del-bg)'
+                  borderL = '3px solid var(--diff-del-border)'
+                  textCol = 'var(--diff-del-text)'
                   prefix = '-'
                 }
 
@@ -508,7 +508,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                     <span style={{ width: '42px', textAlign: 'right', color: 'var(--text-muted)', paddingRight: '8px', userSelect: 'none', flexShrink: 0 }}>
                       {line.newNum || ''}
                     </span>
-                    <span style={{ width: '16px', color: line.type === 'add' ? 'var(--accent)' : line.type === 'del' ? 'var(--status-error, #f87171)' : 'var(--text-muted)', userSelect: 'none' }}>
+                    <span style={{ width: '16px', color: line.type === 'add' ? 'var(--diff-add-gutter)' : line.type === 'del' ? 'var(--diff-del-gutter)' : 'var(--text-muted)', userSelect: 'none' }}>
                       {prefix}
                     </span>
                     <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: textCol }}>
@@ -531,11 +531,11 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
             justifyContent: 'space-between',
           }}
         >
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted, #94a3b8)' }}>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             <span>Shortcut: </span>
-            <kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 5px', borderRadius: 4, fontSize: '0.72rem' }}>Esc</kbd> Cancel
+            <kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '2px 5px', borderRadius: 4, fontSize: '0.72rem' }}>Esc</kbd> Cancel
             <span style={{ margin: '0 8px' }}>•</span>
-            <kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 5px', borderRadius: 4, fontSize: '0.72rem' }}>Cmd/Ctrl+Enter</kbd> Approve
+            <kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '2px 5px', borderRadius: 4, fontSize: '0.72rem' }}>Cmd/Ctrl+Enter</kbd> Approve
           </div>
 
           <div style={{ display: 'flex', gap: 10 }}>

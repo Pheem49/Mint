@@ -412,10 +412,10 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
                         }}
                         style={{
                           flex: 1,
-                          background: 'rgba(0, 0, 0, 0.4)',
-                          border: '1px solid var(--border-light, rgba(255, 255, 255, 0.2))',
+                          background: 'var(--bg-input)',
+                          border: '1px solid var(--border-default)',
                           borderRadius: 'var(--radius-xs, 6px)',
-                          color: '#fff',
+                          color: 'var(--text-primary)',
                           padding: '4px 8px',
                           fontSize: '0.88rem',
                           outline: 'none',
@@ -425,9 +425,9 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
                         type="button"
                         onClick={handleSaveRename}
                         style={{
-                          background: 'var(--surface-strong, #3f3f46)',
-                          color: '#fff',
-                          border: 'none',
+                          background: 'var(--bg-surface-hover)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border-default)',
                           borderRadius: 'var(--radius-xs, 6px)',
                           padding: '4px 10px',
                           fontSize: '0.78rem',

@@ -1,4 +1,4 @@
-/* web: settings/base.css — split from settings.css, rules kept in original order */
+/* settings/base.css — shared settings layout & controls */
 /* Scope element rules with :where() so lazy loading cannot restyle other pages
    and existing specificity relationships inside Settings remain intact. */
 
@@ -44,17 +44,6 @@
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
     opacity: 1;
-}
-
-@keyframes appEntrance {
-    from {
-        opacity: 0;
-        transform: scale(0.985) translateY(8px);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
 }
 
 .settings-header,
@@ -402,7 +391,7 @@
 
 :where(.settings-container) select option:checked {
     background: linear-gradient(var(--accent), var(--accent)) !important;
-    color: var(--accent-contrast, #ffffff) !important;
+    color: var(--accent-contrast, var(--text-on-accent)) !important;
 }
 
 [data-theme="light"] :where(.settings-container) select {
@@ -573,7 +562,7 @@
 
 :where(.settings-container) input:checked + .settings-toggle-slider::before {
     transform: translateX(20px);
-    background: var(--accent-contrast, #ffffff);
+    background: var(--accent-contrast, var(--text-on-accent));
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
@@ -953,7 +942,7 @@
 
 .bridge-status-pill.active {
     background: color-mix(in srgb, var(--accent) 15%, transparent);
-    color: var(--mint-400);
+    color: var(--interactive-fg);
     border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
@@ -999,140 +988,140 @@
 /* ─── Light Mode Overrides for Settings ───────────────────────────────────── */
 
 [data-theme="light"] .settings-container {
-    background: #ffffff;
-    color: #0f172a;
-    border: 1px solid rgba(15, 23, 42, 0.12);
-    box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+    background: var(--bg-overlay);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+    box-shadow: var(--shadow-lg);
 }
 
 [data-theme="light"] .settings-header {
-    background: #ffffff;
-    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    background: var(--bg-overlay);
+    border-bottom: 1px solid var(--border-subtle);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
 }
 
 [data-theme="light"] .settings-header h1 {
-    color: #0f172a;
+    color: var(--text-primary);
 }
 
 [data-theme="light"] .settings-header p {
-    color: #64748b;
+    color: var(--text-muted);
 }
 
 [data-theme="light"] .settings-header .settings-icon {
-    background: rgba(16, 185, 129, 0.1);
-    color: #059669;
-    border-color: rgba(16, 185, 129, 0.25);
+    background: var(--accent-subtle);
+    color: var(--interactive-fg);
+    border-color: var(--accent-border);
 }
 
 [data-theme="light"] .close-btn {
-    color: #64748b;
+    color: var(--text-muted);
 }
 
 [data-theme="light"] .close-btn:hover {
-    background: #fee2e2;
-    border-color: #fca5a5;
-    color: #dc2626;
+    background: var(--close-btn-hover-bg);
+    border-color: var(--status-error-border);
+    color: var(--close-btn-hover-color);
 }
 
 [data-theme="light"] .settings-sidebar {
-    background: #f8fafc;
-    border-right: 1px solid rgba(15, 23, 42, 0.08);
+    background: var(--bg-surface-soft);
+    border-right: 1px solid var(--border-subtle);
 }
 
 [data-theme="light"] .settings-nav-search {
-    background: #ffffff;
-    border: 1px solid rgba(15, 23, 42, 0.14);
-    color: #64748b;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    color: var(--text-muted);
+    box-shadow: var(--shadow-xs);
 }
 
 [data-theme="light"] .settings-nav-search input {
-    color: #0f172a;
+    color: var(--text-primary);
 }
 
 [data-theme="light"] .settings-nav-search input::placeholder {
-    color: #94a3b8;
+    color: var(--text-disabled);
 }
 
 [data-theme="light"] .settings-nav-group-label {
-    color: #64748b;
+    color: var(--text-muted);
     font-weight: 700;
 }
 
 [data-theme="light"] .tab-btn {
-    color: #475569;
+    color: var(--text-secondary);
 }
 
 [data-theme="light"] .tab-btn:hover {
-    background: #f1f5f9;
-    color: #0f172a;
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
 }
 
 [data-theme="light"] .tab-btn.active {
-    background: #ffffff;
-    color: #0f172a;
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-sm);
     font-weight: 600;
 }
 
 [data-theme="light"] .tab-btn.active span {
-    color: #059669;
+    color: var(--interactive-fg);
 }
 
 [data-theme="light"] .settings-content {
-    background: #ffffff;
-    color: #0f172a;
+    background: var(--bg-surface);
+    color: var(--text-primary);
 }
 
 [data-theme="light"] .web-safe-notice {
-    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    border-bottom: 1px solid var(--border-subtle);
 }
 
 [data-theme="light"] .web-safe-notice strong {
-    color: #0f172a;
+    color: var(--text-primary);
 }
 
 [data-theme="light"] .web-safe-notice span {
-    color: #64748b;
+    color: var(--text-muted);
 }
 
 [data-theme="light"] .section-kicker {
-    color: #059669;
+    color: var(--interactive-fg);
     font-weight: 700;
 }
 
 [data-theme="light"] .section-title {
-    color: #0f172a;
+    color: var(--text-primary);
     font-weight: 600;
 }
 
 [data-theme="light"] .section-description {
-    color: #475569;
+    color: var(--text-secondary);
 }
 
 [data-theme="light"] .setting-section {
-    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    border-bottom: 1px solid var(--border-subtle);
 }
 
 [data-theme="light"] .section-heading {
-    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    border-bottom: 1px solid var(--border-subtle);
 }
 
 [data-theme="light"] .setting-row {
-    border-top: 1px solid rgba(15, 23, 42, 0.08);
+    border-top: 1px solid var(--border-subtle);
 }
 
 [data-theme="light"] .setting-row label,
 [data-theme="light"] .toggle-row label {
-    color: #1e293b;
+    color: var(--text-primary);
     font-weight: 500;
 }
 
 [data-theme="light"] .hint {
-    color: #64748b;
+    color: var(--text-muted);
 }
 
 /* Form inputs */
@@ -1141,9 +1130,9 @@
 [data-theme="light"] :where(.settings-container) input[type="email"],
 [data-theme="light"] :where(.settings-container) input[type="url"],
 [data-theme="light"] :where(.settings-container) textarea {
-    background: #ffffff;
-    border: 1px solid rgba(15, 23, 42, 0.16);
-    color: #0f172a;
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    color: var(--text-primary);
 }
 
 [data-theme="light"] :where(.settings-container) input[type="text"]:focus,
@@ -1151,50 +1140,50 @@
 [data-theme="light"] :where(.settings-container) input[type="email"]:focus,
 [data-theme="light"] :where(.settings-container) input[type="url"]:focus,
 [data-theme="light"] :where(.settings-container) textarea:focus {
-    background: #ffffff;
+    background: var(--bg-input-focus);
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+    box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 [data-theme="light"] :where(.settings-container) select {
     color-scheme: light;
-    background-color: #ffffff !important;
-    color: #0f172a !important;
-    border: 1px solid rgba(15, 23, 42, 0.16);
+    background-color: var(--bg-input) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border-default);
 }
 
 [data-theme="light"] :where(.settings-container) select:focus {
-    background-color: #ffffff !important;
+    background-color: var(--bg-input-focus) !important;
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+    box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 [data-theme="light"] :where(.settings-container) select option {
-    background-color: #ffffff !important;
-    color: #0f172a !important;
+    background-color: var(--bg-surface) !important;
+    color: var(--text-primary) !important;
 }
 
 [data-theme="light"] .toggle-visibility {
-    background: #ffffff;
-    border: 1px solid rgba(15, 23, 42, 0.16);
-    color: #64748b;
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    color: var(--text-muted);
 }
 
 [data-theme="light"] .toggle-visibility:hover {
-    background: #f1f5f9;
-    border-color: rgba(15, 23, 42, 0.28);
-    color: #0f172a;
+    background: var(--bg-surface-hover);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
 }
 
 /* Toggle switch */
 [data-theme="light"] .settings-toggle-slider {
-    background: #cbd5e1;
-    border: 1px solid #94a3b8;
+    background: var(--bg-surface-active);
+    border: 1px solid var(--border-strong);
 }
 
 [data-theme="light"] .settings-toggle-slider::before {
-    background: #ffffff;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-sm);
 }
 
 [data-theme="light"] :where(.settings-container) input:checked + .settings-toggle-slider {
@@ -1203,64 +1192,64 @@
 }
 
 [data-theme="light"] :where(.settings-container) input:checked + .settings-toggle-slider::before {
-    background: #ffffff;
+    background: var(--text-on-accent, #ffffff);
 }
 
 /* Range slider */
 [data-theme="light"] .range-slider::-webkit-slider-runnable-track {
-    background: #e2e8f0;
+    background: var(--bg-surface-active);
 }
 
 [data-theme="light"] .range-slider::-webkit-slider-thumb {
     background: var(--accent);
-    border: 3px solid #ffffff;
-    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.25);
+    border: 3px solid var(--bg-surface);
+    box-shadow: var(--shadow-sm);
 }
 
 /* Buttons */
 [data-theme="light"] .btn-secondary {
-    background: #eef2f7;
-    border: 1px solid rgba(15, 23, 42, 0.22);
-    color: #1e293b;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    background: var(--bg-surface-hover);
+    border: 1px solid var(--border-strong);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-xs);
 }
 
 [data-theme="light"] .btn-secondary:hover {
-    background: #e2e8f0;
-    border-color: rgba(15, 23, 42, 0.36);
-    color: #0f172a;
-    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.1);
+    background: var(--bg-surface-active);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-sm);
 }
 
 [data-theme="light"] .btn-primary {
     background: var(--accent);
     color: var(--text-on-accent);
     border: 1px solid transparent;
-    box-shadow: 0 1px 3px rgba(16, 185, 129, 0.3);
+    box-shadow: 0 1px 3px var(--accent-glow);
 }
 
 [data-theme="light"] .btn-primary:hover {
     background: var(--accent-hover);
-    box-shadow: 0 3px 8px rgba(16, 185, 129, 0.4);
+    box-shadow: 0 3px 8px var(--accent-glow);
 }
 
 /* Footer */
 [data-theme="light"] .settings-footer {
-    background: #f8fafc;
-    border-top: 1px solid rgba(15, 23, 42, 0.08);
+    background: var(--bg-surface-soft);
+    border-top: 1px solid var(--border-subtle);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
 }
 
 [data-theme="light"] .settings-footer-version,
 [data-theme="light"] .settings-footer-link {
-    color: #64748b;
+    color: var(--text-muted);
 }
 
 [data-theme="light"] .settings-footer-link:hover {
-    color: #0f172a;
+    color: var(--text-primary);
 }
 
 [data-theme="light"] .settings-footer-separator {
-    color: rgba(15, 23, 42, 0.16);
+    color: var(--border-default);
 }

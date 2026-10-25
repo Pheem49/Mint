@@ -148,7 +148,7 @@ export const McpToolAllowlist: React.FC<McpToolAllowlistProps> = ({
       )}
 
       {error && (
-        <p className="management-plugin-desc" style={{ whiteSpace: 'normal', color: '#f87171', margin: '4px 0' }}>
+        <p className="management-plugin-desc" style={{ whiteSpace: 'normal', color: 'var(--status-error, #f87171)', margin: '4px 0' }}>
           {error}
         </p>
       )}

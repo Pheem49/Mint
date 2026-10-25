@@ -1,8 +1,8 @@
 .glide-select {
-  --gs-accent: #f5f5f5;
-  --gs-surface: #27272a;
-  --gs-highlight: #3f3f46;
-  --gs-text: #f5f5f5;
+  --gs-accent: var(--interactive-fg, #f5f5f5);
+  --gs-surface: var(--bg-surface-raised, #27272a);
+  --gs-highlight: var(--bg-surface-hover, #3f3f46);
+  --gs-text: var(--text-primary, #f5f5f5);
   --gs-radius: 10px;
   --gs-inner-radius: 6px;
   --gs-chip: 32px;
@@ -27,7 +27,7 @@
   height: var(--gs-chip);
   margin: 0;
   padding: 0 8px 0 10px;
-  border: 0;
+  border: 1px solid var(--border-default, transparent);
   border-radius: var(--gs-inner-radius);
   background: var(--gs-surface);
   color: var(--gs-text);
@@ -65,9 +65,10 @@
   box-sizing: border-box;
   width: var(--gs-menu-w);
   padding: 4px;
+  border: 1px solid var(--border-default, transparent);
   border-radius: var(--gs-radius);
   background: var(--gs-surface);
-  box-shadow: 0 4px 16px color-mix(in srgb, #000 22%, transparent);
+  box-shadow: var(--shadow-md, 0 4px 16px color-mix(in srgb, #000 22%, transparent));
   transform-origin: var(--gs-origin);
   opacity: 0;
   transform: scale(0.95);

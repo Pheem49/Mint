@@ -64,7 +64,7 @@ export function PlanChecklistWidget({ plan, className = '' }: PlanChecklistWidge
                 )}
                 {isFailed && <XCircle style={{ width: '14px', height: '14px', color: 'var(--status-error, #ef4444)' }} />}
                 {!isDone && !isRunning && !isFailed && (
-                  <Circle style={{ width: '14px', height: '14px', color: 'rgba(255, 255, 255, 0.3)' }} />
+                  <Circle style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }} />
                 )}
               </span>
               <span className="plan-task-text">{task.title}</span>

@@ -470,7 +470,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
               className="management-plugin-row"
               onClick={() => setDetailMcpName(item.name)}
             >
-              <div className="management-card-icon" style={{ background: 'rgba(255, 255, 255, 0.06)', borderColor: 'rgba(255, 255, 255, 0.08)' }}>
+              <div className="management-card-icon" style={{ background: 'var(--bg-surface-soft)', borderColor: 'var(--border-subtle)' }}>
                 {renderMcpSvgIcon(item.name, item.customIcon)}
               </div>
               <div className="management-plugin-info">
@@ -537,7 +537,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
             <div className="management-modal" onClick={(e) => e.stopPropagation()}>
               <div className="management-modal-header">
                 <div className="management-card-title-group">
-                  <div className="management-card-icon" style={{ width: 44, height: 44, background: 'rgba(255, 255, 255, 0.06)', borderColor: 'rgba(255, 255, 255, 0.08)' }}>
+                  <div className="management-card-icon" style={{ width: 44, height: 44, background: 'var(--bg-surface-soft)', borderColor: 'var(--border-subtle)' }}>
                     {renderMcpSvgIcon(item.name, item.customIcon)}
                   </div>
                   <h2 className="management-modal-title">{item.name}</h2>

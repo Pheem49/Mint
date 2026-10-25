@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { Sparkles } from 'lucide-react'
 
 export interface ImageGenHit {
@@ -68,24 +68,13 @@ function GeneratedImageTile({ url, single }: { url: string; single: boolean }) {
 export default function ImageGenCard({ data }: { data: ImageGenData }) {
   const images = (data?.images ?? []).filter((img) => img?.url)
 
-  const [isDark, setIsDark] = useState(
-    () => (document.documentElement.getAttribute('data-theme') || 'dark') !== 'light'
-  )
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setIsDark((document.documentElement.getAttribute('data-theme') || 'dark') !== 'light')
-    })
-    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] })
-    return () => observer.disconnect()
-  }, [])
-
-  const cardBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.04)'
-  const cardBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.12)'
-  const cardText = isDark ? '#f8fafc' : '#0f172a'
-  const labelColor = isDark ? 'rgba(255,255,255,0.6)' : '#64748b'
-  const metaColor = isDark ? 'rgba(255,255,255,0.5)' : '#94a3b8'
-  const promptColor = isDark ? 'rgba(255,255,255,0.7)' : '#475569'
-  const emptyColor = isDark ? 'rgba(255,255,255,0.5)' : '#94a3b8'
+  const cardBg = 'var(--bg-surface-soft)'
+  const cardBorder = 'var(--border-subtle)'
+  const cardText = 'var(--text-primary)'
+  const labelColor = 'var(--text-muted)'
+  const metaColor = 'var(--text-muted)'
+  const promptColor = 'var(--text-secondary)'
+  const emptyColor = 'var(--text-muted)'
 
   return (
     <div
@@ -97,7 +86,7 @@ export default function ImageGenCard({ data }: { data: ImageGenData }) {
         borderRadius: '12px',
         padding: '16px 20px',
         margin: '12px 0',
-        boxShadow: isDark ? '0 8px 32px 0 rgba(0,0,0,0.2)' : '0 4px 20px 0 rgba(15,23,42,0.08)',
+        boxShadow: 'var(--shadow-md)',
         border: `1px solid ${cardBorder}`,
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}

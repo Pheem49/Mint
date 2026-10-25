@@ -1,9 +1,0 @@
-.session-sources-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; min-height: 32px; padding: 5px 9px; border: 1px solid var(--border); border-radius: var(--radius-xs, 6px); background: var(--surface-bg); color: var(--text-main); font: inherit; font-size: 12px; cursor: pointer; }
-.session-sources-toggle:hover, .session-sources-toggle.is-open { background: var(--surface-strong); color: var(--accent); }
-.session-sources-popover { position: fixed; z-index: 600; width: min(360px, calc(100vw - 24px)); overflow: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-overlay, #111113); color: var(--text-main); box-shadow: var(--shadow-lg, 0 20px 60px #0007); }
-.session-sources-popover .session-sources { margin-top: 0; padding: 12px; border-top: 0; }
-.session-sources-popover .session-sources-heading { padding-right: 32px; }
-.session-sources-close { position: absolute; top: 7px; right: 7px; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
-.session-sources-close:hover { background: var(--bg-surface-hover); color: var(--text-main); }
-.session-sources-toggle:focus-visible, .session-sources-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-@media (max-width: 760px) { .session-sources-toggle { min-height: 36px; } }

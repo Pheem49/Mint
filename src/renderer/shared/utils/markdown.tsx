@@ -648,7 +648,7 @@ const mdComponents = {
           margin: '12px 0',
           padding: '8px 16px',
           borderLeft: '3px solid var(--accent, #38bdf8)',
-          background: 'rgba(255, 255, 255, 0.02)',
+          background: 'var(--bg-surface-soft)',
           borderRadius: '0 8px 8px 0',
           color: 'var(--text-muted, #94a3b8)',
           fontStyle: 'italic',

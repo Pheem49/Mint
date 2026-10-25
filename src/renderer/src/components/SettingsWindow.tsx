@@ -1,4 +1,3 @@
-import '../css/settings/base.css'
 export {
   default,
   DEFAULT_CONFIG,

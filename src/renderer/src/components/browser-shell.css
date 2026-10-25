@@ -2,7 +2,7 @@
   width: 100vw;
   height: 100%;
   overflow: hidden;
-  color: #e5e7eb;
+  color: var(--text-primary, #e5e7eb);
   background: transparent;
   font-family: var(--font-ui, 'Inter', 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif);
 }
@@ -13,8 +13,8 @@
   gap: 6px;
   height: 42px;
   padding: 7px 14px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: #151619;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  background: var(--bg-canvas, #151619);
 }
 
 .mint-browser-tab {
@@ -24,16 +24,16 @@
   width: min(250px, 42vw);
   height: 35px;
   padding: 0 9px 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  border-bottom-color: #25272c;
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.11));
+  border-bottom-color: var(--bg-surface-raised, #25272c);
   border-radius: 9px 9px 0 0;
-  color: #f3f4f6;
-  background: #24262a;
+  color: var(--text-primary, #f3f4f6);
+  background: var(--bg-surface-raised, #24262a);
   font-size: 0.78rem;
 }
 
 .mint-browser-tab-icon {
-  color: #34d399;
+  color: var(--interactive-fg, #34d399);
   font-size: 0.58rem;
 }
 
@@ -51,7 +51,7 @@
   align-items: center;
   justify-content: center;
   border: 0;
-  color: #9ca3af;
+  color: var(--text-muted, #9ca3af);
   background: transparent;
 }
 
@@ -64,8 +64,8 @@
 
 .mint-browser-tab-close:hover,
 .mint-browser-new-tab:hover {
-  color: #f9fafb;
-  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary, #f9fafb);
+  background: var(--bg-surface-hover, rgba(255, 255, 255, 0.1));
 }
 
 .mint-browser-new-tab {
@@ -83,8 +83,8 @@
   width: 100%;
   height: 50px;
   padding: 7px 14px 8px;
-  background: #1b1c20;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--bg-surface, #1b1c20);
+  border-bottom: 1px solid var(--border-default, rgba(255, 255, 255, 0.12));
 }
 
 .mint-browser-nav-group {
@@ -103,14 +103,14 @@
   flex: 0 0 auto;
   border: 0;
   border-radius: 6px;
-  color: #a7adb8;
+  color: var(--text-secondary, #a7adb8);
   background: transparent;
   font-size: 1.15rem;
 }
 
 .mint-browser-nav-button:hover {
-  color: #f1f5f9;
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary, #f1f5f9);
+  background: var(--bg-surface-hover, rgba(255, 255, 255, 0.08));
 }
 
 .mint-browser-address-input {
@@ -121,10 +121,10 @@
   height: 34px;
   gap: 8px;
   padding-left: 11px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.14));
   border-radius: 9px;
-  color: #9ca3af;
-  background: #24262b;
+  color: var(--text-muted, #9ca3af);
+  background: var(--bg-input, #24262b);
 }
 
 .mint-browser-address-wrap {
@@ -138,12 +138,12 @@
 }
 
 .mint-browser-address-input:focus-within {
-  border-color: rgba(52, 211, 153, 0.65);
-  box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.12);
+  border-color: var(--accent-border, rgba(52, 211, 153, 0.65));
+  box-shadow: 0 0 0 2px var(--accent-glow, rgba(52, 211, 153, 0.12));
 }
 
 .mint-browser-address-icon {
-  color: #9ca3af;
+  color: var(--text-muted, #9ca3af);
   font-size: 0.95rem;
 }
 
@@ -152,7 +152,7 @@
   flex: 1;
   border: 0;
   outline: 0;
-  color: #f1f5f9;
+  color: var(--text-primary, #f1f5f9);
   background: transparent;
   font: 0.8rem ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -164,14 +164,14 @@
   width: 38px;
   height: 100%;
   border: 0;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
   border-radius: 0 8px 8px 0;
-  color: #34d399;
+  color: var(--interactive-fg, #34d399);
   background: transparent;
 }
 
 .mint-browser-address-input > button:hover {
-  background: rgba(52, 211, 153, 0.12);
+  background: var(--accent-subtle, rgba(52, 211, 153, 0.12));
 }
 
 .mint-browser-address-input svg {

@@ -203,9 +203,9 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
             gap: '10px',
             padding: '10px 18px',
             borderRadius: '12px',
-            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(59, 130, 246, 0.15))',
-            border: '1px solid rgba(16, 185, 129, 0.35)',
-            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
+            background: 'linear-gradient(135deg, var(--accent-subtle), color-mix(in srgb, var(--status-info, #3b82f6) 15%, transparent))',
+            border: '1px solid var(--accent-border)',
+            boxShadow: 'var(--shadow-md)',
             zIndex: 2,
           }}
         >
@@ -214,8 +214,8 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
               width: '32px',
               height: '32px',
               borderRadius: '8px',
-              background: '#10b981',
-              color: '#ffffff',
+              background: 'var(--accent)',
+              color: 'var(--text-on-accent)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -226,14 +226,14 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
             M
           </div>
           <div>
-            <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#f3f4f6' }}>Main orchestrator</div>
-            <div style={{ fontSize: '0.72rem', color: isLive ? '#10b981' : '#9ca3af', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)' }}>Main orchestrator</div>
+            <div style={{ fontSize: '0.72rem', color: isLive ? 'var(--interactive-fg)' : 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <span
                 style={{
                   width: '6px',
                   height: '6px',
                   borderRadius: '50%',
-                  background: isLive ? '#10b981' : '#6b7280',
+                  background: isLive ? 'var(--interactive-fg)' : 'var(--text-muted)',
                   display: 'inline-block',
                 }}
               />
@@ -258,10 +258,10 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
             const isSelected = selectedSubagent === subagent.name
             const statusColor =
               subagent.status === 'running'
-                ? '#3b82f6'
+                ? 'var(--status-info, #3b82f6)'
                 : subagent.status === 'failed'
-                  ? '#ef4444'
-                  : '#10b981'
+                  ? 'var(--status-error, #ef4444)'
+                  : 'var(--interactive-fg)'
 
             return (
               <div
@@ -273,10 +273,10 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
                   width: '260px',
                   padding: '12px',
                   borderRadius: '10px',
-                  background: isSelected ? 'rgba(30, 41, 59, 0.95)' : 'rgba(15, 23, 42, 0.8)',
-                  border: `1px solid ${isSelected ? statusColor : 'rgba(255, 255, 255, 0.1)'}`,
+                  background: isSelected ? 'var(--bg-surface-raised)' : 'var(--bg-surface)',
+                  border: `1px solid ${isSelected ? statusColor : 'var(--border-default)'}`,
                   cursor: 'pointer',
-                  boxShadow: isSelected ? `0 0 16px ${statusColor}33` : '0 4px 12px rgba(0, 0, 0, 0.2)',
+                  boxShadow: isSelected ? 'var(--shadow-md)' : 'var(--shadow-sm)',
                   transition: 'all 0.2s ease',
                 }}
               >
@@ -291,7 +291,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
                         display: 'inline-block',
                       }}
                     />
-                    <span style={{ fontWeight: 600, fontSize: '0.84rem', color: '#f3f4f6' }}>{subagent.name}</span>
+                    <span style={{ fontWeight: 600, fontSize: '0.84rem', color: 'var(--text-primary)' }}>{subagent.name}</span>
                   </div>
                   <span
                     style={{
@@ -300,9 +300,9 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
                       padding: '2px 6px',
                       borderRadius: '4px',
                       textTransform: 'none',
-                      background: `${statusColor}22`,
+                      background: `color-mix(in srgb, ${statusColor} 15%, transparent)`,
                       color: statusColor,
-                      border: `1px solid ${statusColor}44`,
+                      border: `1px solid color-mix(in srgb, ${statusColor} 30%, transparent)`,
                     }}
                   >
                     {subagent.status === 'running' && subagent.currentTool
@@ -312,7 +312,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
                 </div>
 
                 {subagent.taskSnippet && (
-                  <p style={{ margin: '0 0 8px 0', fontSize: '0.74rem', color: '#94a3b8', lineHeight: 1.4 }}>
+                  <p style={{ margin: '0 0 8px 0', fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
                     {subagent.taskSnippet}
                   </p>
                 )}
@@ -323,13 +323,13 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     fontSize: '0.72rem',
-                    color: '#64748b',
+                    color: 'var(--text-muted)',
                     paddingTop: '6px',
-                    borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                    borderTop: '1px solid var(--border-subtle)',
                   }}
                 >
                   <span>{subagent.tools.length} tool {subagent.tools.length === 1 ? 'call' : 'calls'}</span>
-                  <span style={{ color: isSelected ? statusColor : '#94a3b8' }}>
+                  <span style={{ color: isSelected ? statusColor : 'var(--text-muted)' }}>
                     {isSelected ? 'Hide Details ▲' : 'View Logs ▼'}
                   </span>
                 </div>
@@ -343,8 +343,8 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
       {activeSubagent && (
         <div
           style={{
-            background: 'rgba(15, 23, 42, 0.95)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            background: 'var(--bg-surface-raised)',
+            border: '1px solid var(--border-default)',
             borderRadius: '10px',
             padding: '14px',
             marginTop: '8px',
@@ -352,10 +352,10 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontWeight: 600, fontSize: '0.86rem', color: '#10b981' }}>
+              <span style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--interactive-fg)' }}>
                 Subagent Activity: {activeSubagent.name}
               </span>
-              <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({activeSubagent.tools.length})</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>({activeSubagent.tools.length})</span>
             </div>
             <button
               type="button"
@@ -363,7 +363,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
               style={{
                 background: 'transparent',
                 border: 'none',
-                color: '#94a3b8',
+                color: 'var(--text-muted)',
                 cursor: 'pointer',
                 fontSize: '0.8rem',
               }}
@@ -377,25 +377,26 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
               <div
                 key={idx}
                 style={{
-                  background: 'rgba(0, 0, 0, 0.25)',
-                  border: '1px solid rgba(255, 255, 255, 0.05)',
+                  background: 'var(--bg-surface-soft)',
+                  border: '1px solid var(--border-subtle)',
                   borderRadius: '6px',
                   padding: '8px 10px',
                   fontSize: '0.76rem',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span style={{ fontWeight: 600, color: '#38bdf8' }}>{tool.action}</span>
-                  {tool.isError && <span style={{ color: '#f87171', fontWeight: 600 }}>Failed</span>}
+                  <span style={{ fontWeight: 600, color: 'var(--status-info, #38bdf8)' }}>{tool.action}</span>
+                  {tool.isError && <span style={{ color: 'var(--status-error, #f87171)', fontWeight: 600 }}>Failed</span>}
                 </div>
                 {tool.input && (
                   <pre
                     style={{
                       margin: '4px 0',
                       padding: '4px 6px',
-                      background: '#090d16',
+                      background: 'var(--bg-canvas)',
+                      border: '1px solid var(--border-subtle)',
                       borderRadius: '4px',
-                      color: '#cbd5e1',
+                      color: 'var(--text-secondary)',
                       fontSize: '0.72rem',
                       overflowX: 'auto',
                     }}
@@ -404,7 +405,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
                   </pre>
                 )}
                 {tool.result && (
-                  <div style={{ marginTop: '4px', color: '#94a3b8', fontSize: '0.72rem', maxHeight: '100px', overflowY: 'auto' }}>
+                  <div style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '0.72rem', maxHeight: '100px', overflowY: 'auto' }}>
                     <strong>Result:</strong> {tool.result.slice(0, 200)}
                     {tool.result.length > 200 ? '...' : ''}
                   </div>

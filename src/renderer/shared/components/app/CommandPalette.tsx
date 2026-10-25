@@ -364,7 +364,7 @@ export function CommandPalette({
         left: 0,
         right: 0,
         bottom: 0,
-        background: 'rgba(5, 7, 12, 0.72)',
+        background: 'var(--bg-backdrop)',
         backdropFilter: 'blur(8px)',
         zIndex: 9999,
         display: 'flex',
@@ -379,10 +379,10 @@ export function CommandPalette({
         style={{
           width: '100%',
           maxWidth: '620px',
-          background: 'var(--bg-primary, #111317)',
-          border: '1px solid var(--border-color, #232730)',
+          background: 'var(--bg-overlay)',
+          border: '1px solid var(--border-default)',
           borderRadius: '14px',
-          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08)',
+          boxShadow: 'var(--shadow-lg)',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
@@ -396,9 +396,9 @@ export function CommandPalette({
             display: 'flex',
             alignItems: 'center',
             padding: '14px 18px',
-            borderBottom: '1px solid var(--border-color, #232730)',
+            borderBottom: '1px solid var(--border-subtle)',
             gap: '12px',
-            background: 'var(--bg-secondary, #181a20)',
+            background: 'var(--bg-surface-raised)',
           }}
         >
           <svg
@@ -427,7 +427,7 @@ export function CommandPalette({
               background: 'transparent',
               border: 'none',
               outline: 'none',
-              color: '#f3f4f6',
+              color: 'var(--text-primary)',
               fontSize: '1rem',
               fontWeight: 500,
             }}
@@ -436,11 +436,11 @@ export function CommandPalette({
             style={{
               padding: '2px 7px',
               borderRadius: '4px',
-              background: 'rgba(255, 255, 255, 0.08)',
-              color: 'var(--text-muted, #9ca3af)',
+              background: 'var(--bg-surface-soft)',
+              color: 'var(--text-muted)',
               fontSize: '0.7rem',
               fontWeight: 600,
-              border: '1px solid rgba(255, 255, 255, 0.1)',
+              border: '1px solid var(--border-default)',
             }}
           >
             ESC
@@ -460,7 +460,7 @@ export function CommandPalette({
           }}
         >
           {filteredItems.length === 0 ? (
-            <div style={{ padding: '32px 16px', textAlign: 'center', color: '#9ca3af', fontSize: '0.88rem' }}>
+            <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
               No matching commands, models, or chats found
             </div>
           ) : (
@@ -472,7 +472,7 @@ export function CommandPalette({
                     fontWeight: 700,
                     textTransform: 'none',
                     letterSpacing: '0.06em',
-                    color: 'var(--text-muted, #6b7280)',
+                    color: 'var(--text-muted)',
                     padding: '8px 10px 4px 10px',
                   }}
                 >
@@ -495,8 +495,8 @@ export function CommandPalette({
                         padding: '9px 12px',
                         borderRadius: '8px',
                         cursor: 'pointer',
-                        background: isSelected ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
-                        border: `1px solid ${isSelected ? 'rgba(16, 185, 129, 0.3)' : 'transparent'}`,
+                        background: isSelected ? 'var(--accent-subtle)' : 'transparent',
+                        border: `1px solid ${isSelected ? 'var(--accent-border)' : 'transparent'}`,
                         transition: 'all 0.1s ease',
                       }}
                     >
@@ -507,8 +507,8 @@ export function CommandPalette({
                             fontWeight: 700,
                             padding: '2px 5px',
                             borderRadius: '4px',
-                            background: 'rgba(255, 255, 255, 0.08)',
-                            color: isSelected ? '#10b981' : '#94a3b8',
+                            background: 'var(--bg-surface-soft)',
+                            color: isSelected ? 'var(--interactive-fg)' : 'var(--text-muted)',
                             fontFamily: 'monospace',
                             flexShrink: 0,
                             minWidth: '22px',
@@ -522,7 +522,7 @@ export function CommandPalette({
                             style={{
                               fontSize: '0.85rem',
                               fontWeight: 600,
-                              color: isSelected ? '#ffffff' : '#e2e8f0',
+                              color: 'var(--text-primary)',
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
@@ -534,7 +534,7 @@ export function CommandPalette({
                             <span
                               style={{
                                 fontSize: '0.72rem',
-                                color: '#94a3b8',
+                                color: 'var(--text-muted)',
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
@@ -550,11 +550,11 @@ export function CommandPalette({
                         <span
                           style={{
                             fontSize: '0.7rem',
-                            color: '#10b981',
+                            color: 'var(--interactive-fg)',
                             fontWeight: 600,
                             padding: '2px 6px',
                             borderRadius: '4px',
-                            background: 'rgba(16, 185, 129, 0.15)',
+                            background: 'var(--accent-subtle)',
                           }}
                         >
                           ↵ Select
@@ -575,15 +575,15 @@ export function CommandPalette({
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '8px 16px',
-            borderTop: '1px solid var(--border-color, #232730)',
-            background: 'var(--bg-secondary, #181a20)',
+            borderTop: '1px solid var(--border-subtle)',
+            background: 'var(--bg-surface-raised)',
             fontSize: '0.72rem',
-            color: '#94a3b8',
+            color: 'var(--text-muted)',
           }}
         >
           <div style={{ display: 'flex', gap: '12px' }}>
-            <span><kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: '3px' }}>↑</kbd> <kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: '3px' }}>↓</kbd> to navigate</span>
-            <span><kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: '3px' }}>↵</kbd> to select</span>
+            <span><kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '1px 4px', borderRadius: '3px' }}>↑</kbd> <kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '1px 4px', borderRadius: '3px' }}>↓</kbd> to navigate</span>
+            <span><kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '1px 4px', borderRadius: '3px' }}>↵</kbd> to select</span>
           </div>
           <span>Universal command palette</span>
         </div>

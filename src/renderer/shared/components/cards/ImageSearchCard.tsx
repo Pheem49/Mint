@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { Images } from 'lucide-react'
 import { resolveMediaUrl } from '../../utils/markdown'
 
@@ -81,23 +81,12 @@ function ImageTile({ image }: { image: ImageSearchHit }) {
 export default function ImageSearchCard({ data }: { data: ImageSearchData }) {
   const images = (data?.images ?? []).filter((img) => img.thumbnailUrl || img.imageUrl)
 
-  const [isDark, setIsDark] = useState(
-    () => (document.documentElement.getAttribute('data-theme') || 'dark') !== 'light'
-  )
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setIsDark((document.documentElement.getAttribute('data-theme') || 'dark') !== 'light')
-    })
-    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] })
-    return () => observer.disconnect()
-  }, [])
-
-  const cardBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.04)'
-  const cardBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.12)'
-  const cardText = isDark ? '#f8fafc' : '#0f172a'
-  const labelColor = isDark ? 'rgba(255,255,255,0.6)' : '#64748b'
-  const queryColor = isDark ? 'rgba(255,255,255,0.8)' : '#334155'
-  const emptyColor = isDark ? 'rgba(255,255,255,0.5)' : '#94a3b8'
+  const cardBg = 'var(--bg-surface-soft)'
+  const cardBorder = 'var(--border-subtle)'
+  const cardText = 'var(--text-primary)'
+  const labelColor = 'var(--text-muted)'
+  const queryColor = 'var(--text-secondary)'
+  const emptyColor = 'var(--text-muted)'
 
   return (
     <div
@@ -109,7 +98,7 @@ export default function ImageSearchCard({ data }: { data: ImageSearchData }) {
         borderRadius: '12px',
         padding: '16px 20px',
         margin: '12px 0',
-        boxShadow: isDark ? '0 8px 32px 0 rgba(0,0,0,0.2)' : '0 4px 20px 0 rgba(15,23,42,0.08)',
+        boxShadow: 'var(--shadow-md)',
         border: `1px solid ${cardBorder}`,
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}

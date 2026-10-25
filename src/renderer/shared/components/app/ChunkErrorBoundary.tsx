@@ -80,8 +80,8 @@ export default class ChunkErrorBoundary extends React.Component<Props, State> {
             flexDirection: 'column',
             height: '100vh',
             width: '100vw',
-            background: '#09090b',
-            color: '#e4e4e7',
+            background: 'var(--bg-canvas, #09090b)',
+            color: 'var(--text-primary, #e4e4e7)',
             fontFamily: "'IBM Plex Sans Thai', 'Noto Sans Thai', 'Inter', ui-sans-serif, system-ui, sans-serif",
             boxSizing: 'border-box',
             overflow: 'hidden',
@@ -96,15 +96,15 @@ export default class ChunkErrorBoundary extends React.Component<Props, State> {
               justifyContent: 'space-between',
               height: 38,
               padding: '0 12px',
-              background: '#141416',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'var(--bg-surface, #141416)',
+              borderBottom: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))',
               userSelect: 'none',
               WebkitAppRegion: 'drag',
               flexShrink: 0,
             } as React.CSSProperties}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: '#9ca3af' }}>
-              <span style={{ color: '#10b981', fontWeight: 700 }}>✦</span> Mint Agent
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--text-muted, #9ca3af)' }}>
+              <span style={{ color: 'var(--interactive-fg, #10b981)', fontWeight: 700 }}>✦</span> Mint Agent
             </div>
             <div
               style={{
@@ -124,7 +124,7 @@ export default class ChunkErrorBoundary extends React.Component<Props, State> {
                   height: 28,
                   background: 'transparent',
                   border: 'none',
-                  color: '#9ca3af',
+                  color: 'var(--text-muted, #9ca3af)',
                   cursor: 'pointer',
                   borderRadius: 4,
                   display: 'flex',
@@ -144,7 +144,7 @@ export default class ChunkErrorBoundary extends React.Component<Props, State> {
                   height: 28,
                   background: 'transparent',
                   border: 'none',
-                  color: '#9ca3af',
+                  color: 'var(--text-muted, #9ca3af)',
                   cursor: 'pointer',
                   borderRadius: 4,
                   display: 'flex',
@@ -164,7 +164,7 @@ export default class ChunkErrorBoundary extends React.Component<Props, State> {
                   height: 28,
                   background: 'transparent',
                   border: 'none',
-                  color: '#9ca3af',
+                  color: 'var(--text-muted, #9ca3af)',
                   cursor: 'pointer',
                   borderRadius: 4,
                   display: 'flex',

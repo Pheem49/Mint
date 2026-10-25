@@ -47,7 +47,7 @@ body {
 .character-body {
     width: 50px;
     height: 50px;
-    background: linear-gradient(135deg, #1e293b, #0f172a);
+    background: var(--bg-surface-raised, linear-gradient(135deg, #1e293b, #0f172a));
     border: 2px solid var(--accent);
     border-radius: 50%;
     box-shadow: 0 0 15px var(--accent-glow);
@@ -73,10 +73,10 @@ body {
     right: 10px;
     width: 22px;
     height: 22px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    border: 1px solid var(--border-default, rgba(255, 255, 255, 0.18));
     border-radius: 50%;
-    background: rgba(15, 23, 42, 0.92);
-    color: #fff;
+    background: var(--bg-overlay, rgba(15, 23, 42, 0.92));
+    color: var(--text-primary, #fff);
     font: inherit;
     line-height: 1;
     cursor: pointer;
@@ -91,7 +91,8 @@ body {
 
 .widget-hide-btn:hover {
     transform: scale(1.08);
-    background: #ef4444;
+    background: var(--status-error, #ef4444);
+    color: #ffffff;
 }
 
 .eyes {

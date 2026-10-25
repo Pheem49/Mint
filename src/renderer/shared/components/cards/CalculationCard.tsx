@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React from 'react'
 import { Calculator } from 'lucide-react'
 
 export interface CalculationData {
@@ -11,31 +11,19 @@ export default function CalculationCard({ data }: { data: CalculationData }) {
     ? (Number.isInteger(data.result) ? data.result.toLocaleString() : data.result.toLocaleString(undefined, { maximumFractionDigits: 6 }))
     : String(data.result)
 
-  const [isDark, setIsDark] = useState(
-    () => (document.documentElement.getAttribute('data-theme') || 'dark') !== 'light'
-  )
-
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setIsDark((document.documentElement.getAttribute('data-theme') || 'dark') !== 'light')
-    })
-    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] })
-    return () => observer.disconnect()
-  }, [])
-
   const t = {
-    cardBg: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.04)',
-    cardText: isDark ? '#f8fafc' : '#0f172a',
-    cardBorder: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.12)',
-    cardShadow: isDark ? '0 8px 32px 0 rgba(0,0,0,0.2)' : '0 4px 20px 0 rgba(15,23,42,0.08)',
-    labelColor: isDark ? 'rgba(255,255,255,0.6)' : '#64748b',
-    exprBg: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.05)',
-    exprBorder: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.1)',
-    exprText: isDark ? '#cbd5e1' : '#334155',
-    dividerColor: isDark ? 'rgba(255,255,255,0.4)' : '#94a3b8',
-    resultBg: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.05)',
-    resultBorder: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.12)',
-    resultText: isDark ? '#ffffff' : '#0f172a',
+    cardBg: 'var(--bg-surface-soft)',
+    cardText: 'var(--text-primary)',
+    cardBorder: 'var(--border-subtle)',
+    cardShadow: 'var(--shadow-md)',
+    labelColor: 'var(--text-muted)',
+    exprBg: 'var(--bg-surface-raised)',
+    exprBorder: 'var(--border-subtle)',
+    exprText: 'var(--text-secondary)',
+    dividerColor: 'var(--text-muted)',
+    resultBg: 'var(--bg-surface-raised)',
+    resultBorder: 'var(--border-default)',
+    resultText: 'var(--text-primary)',
   }
 
   return (

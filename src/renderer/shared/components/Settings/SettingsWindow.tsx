@@ -1,5 +1,6 @@
 import { Bell } from 'lucide-react'
 import React, { useState, useEffect, useRef } from 'react'
+import '../../css/settings/base.css'
 import '../../css/settings/general.css'
 import '../../css/settings/profile.css'
 import '../../css/settings/automation.css'

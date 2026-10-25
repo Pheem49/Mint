@@ -38,7 +38,8 @@ const drawWave = (s,canvas,level,color,floor) => {
   s.acc=Math.max(s.acc,level);s.tick=(s.tick+1)%WAVE_EVERY;
   if(s.tick===0){s.hist.push(s.acc);s.acc=0;if(s.hist.length>WAVE_MAX)s.hist.shift();}
   const bw=2*dpr,step=3*dpr,shift=s.tick/WAVE_EVERY*step;
-  ctx.clearRect(0,0,W,H);ctx.fillStyle=color;
+  const fillColor=typeof color==='string'&&color.startsWith('var(')?(getComputedStyle(canvas).color||'#f5f5f5'):color;
+  ctx.clearRect(0,0,W,H);ctx.fillStyle=fillColor;
   for(let i=0;i<s.hist.length;i++){
     const v=s.hist[s.hist.length-1-i],x=W-(i+1)*step-shift;if(x+bw<0)break;
     const h=Math.max(bw,(floor+(1-floor)*v)*H),t=Math.min(1,Math.max(0,(x+bw/2)/(W*0.55))),fade=t*t*(3-2*t);
@@ -63,7 +64,7 @@ const closeMic=s=>{
 };
 
 export default function VoicePill({
-  accentColor='#f5f5f5',iconColor='#a1a1aa',background='#27272a',size=28,shape='pill',reach=8,
+  accentColor='var(--text-primary)',iconColor='var(--text-muted)',background='var(--bg-surface-soft)',size=28,shape='pill',reach=8,
   showTime=true,waveform=true,slideToCancel=true,cancelDistance=64,attack=40,release=240,sensitivity=1,
   floor=0.1,openDuration=200,pressScale=0.95,mode='auto',holdAfter=300,reactive='simulated',
   disabled=false,ariaLabel='Dictate',onStart,onStop,className='',active,id,title

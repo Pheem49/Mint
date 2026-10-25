@@ -36,17 +36,17 @@
   display: flex;
   flex-direction: column;
   border-radius: 18px;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  background: var(--panel-bg, rgba(24, 24, 28, 0.75));
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-sm);
   transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .chat-ui-feature-item:hover {
   transform: translateY(-1px);
-  border-color: var(--border-light, rgba(255, 255, 255, 0.18));
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.24);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
 }
 
 .chat-ui-feature-inner {
@@ -62,8 +62,8 @@
   border-radius: 12px;
   overflow: hidden;
   flex-shrink: 0;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-subtle);
 }
 
 .chat-ui-feature-thumb img {
@@ -140,7 +140,7 @@
   gap: 5px;
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .chat-ui-feature-detail-row {
@@ -173,10 +173,10 @@
   font-size: 0.7rem;
   padding: 3px 9px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bg-surface-soft);
   color: var(--text-chat, var(--text-main, #94a3b8));
   opacity: 0.8;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
 }
 
 /* --------------------------------------------------------------------------
@@ -186,11 +186,11 @@
   margin: 14px 0;
   padding: 18px;
   border-radius: 20px;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  background: var(--panel-bg, rgba(22, 22, 26, 0.75));
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-md);
   color: var(--text-chat, var(--text-main));
 }
 
@@ -224,15 +224,15 @@
   flex-direction: column;
   padding: 14px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-subtle);
   transition: all 0.2s ease;
   position: relative;
 }
 
 .chat-ui-grid-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.14);
+  background: var(--bg-surface-hover);
+  border-color: var(--border-strong);
   transform: translateY(-2px);
 }
 
@@ -274,9 +274,9 @@
 .chat-ui-mockup-container {
   margin: 18px 0;
   border-radius: 22px;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  background: linear-gradient(180deg, rgba(28, 28, 34, 0.95) 0%, rgba(18, 18, 22, 0.98) 100%);
-  box-shadow: 0 12px 36px -8px rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface-raised);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
   max-width: 560px;
   color: var(--text-chat, var(--text-main));
@@ -287,8 +287,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface-soft);
 }
 
 .chat-ui-mockup-dots {
@@ -339,8 +339,8 @@
 .chat-ui-mockup-dropzone {
   padding: 24px 16px;
   border-radius: 16px;
-  border: 2px dashed rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.02);
+  border: 2px dashed var(--border-strong);
+  background: var(--bg-surface-soft);
   cursor: pointer;
   transition: all 0.2s ease;
   margin: 0 auto 16px auto;
@@ -356,12 +356,12 @@
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-surface-hover);
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 10px auto;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
   transition: color 0.2s ease;
 }
 
@@ -388,15 +388,15 @@
   font-size: 0.8rem;
   font-weight: 600;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface-hover);
   color: var(--text-chat, var(--text-main, #f8fafc));
   cursor: pointer;
   transition: background 0.15s ease;
 }
 
 .chat-ui-mockup-dropzone-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--bg-surface-active);
 }
 
 .chat-ui-mockup-metrics {
@@ -413,8 +413,8 @@
   align-items: center;
   padding: 9px 14px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-subtle);
   font-size: 0.82rem;
 }
 
@@ -443,8 +443,8 @@
   align-items: center;
   padding: 10px 14px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-subtle);
   font-size: 0.82rem;
   text-align: left;
   user-select: none;
@@ -456,8 +456,8 @@
 }
 
 .chat-ui-mockup-option-card.is-clickable:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--bg-surface-hover);
+  border-color: var(--border-strong);
 }
 
 .chat-ui-mockup-option-label {

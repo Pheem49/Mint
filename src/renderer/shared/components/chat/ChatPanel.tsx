@@ -1237,7 +1237,7 @@ export default function ChatPanel({
               left: 0,
               right: 0,
               bottom: 0,
-              background: 'rgba(15, 23, 42, 0.82)',
+              background: 'var(--bg-backdrop)',
               backdropFilter: 'blur(8px)',
               border: '2px dashed var(--accent)',
               borderRadius: '16px',
@@ -1246,7 +1246,7 @@ export default function ChatPanel({
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              color: 'white',
+              color: 'var(--text-primary)',
               zIndex: 1000,
               pointerEvents: 'auto',
             }}
@@ -1561,7 +1561,7 @@ export default function ChatPanel({
                     </svg>
                   </span>
                   <span style={{ fontSize: '0.76rem', color: 'var(--text-soft)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}>{documentName}</span>
-                  <button type="button" onClick={onRemoveDocument} style={{ background: 'transparent', border: 0, color: '#ef4444', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+                  <button type="button" onClick={onRemoveDocument} style={{ background: 'transparent', border: 0, color: 'var(--status-error)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="18" y1="6" x2="6" y2="18"></line>
                       <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1721,9 +1721,9 @@ export default function ChatPanel({
             disabled={sending || voiceAwaitingResponse || geminiLive.voiceMode}
             ariaLabel="Voice input"
             title={isRecording ? 'Stop recording · Esc or slide left to cancel' : 'Tap to dictate · hold to record'}
-            accentColor="#f5f5f5"
-            iconColor="#a1a1aa"
-            background="#27272a"
+            accentColor="var(--text-primary)"
+            iconColor="var(--text-muted)"
+            background="var(--bg-surface-soft)"
             size={28}
             shape="pill"
             reach={8}

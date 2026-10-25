@@ -124,8 +124,8 @@ export const AgentActivityDrawer = memo(function AgentActivityDrawer({
                 setViewMode('list')
               }}
               style={{
-                background: viewMode === 'list' ? 'var(--accent, #10b981)' : 'transparent',
-                color: viewMode === 'list' ? '#ffffff' : 'var(--text-muted, #9ca3af)',
+                background: viewMode === 'list' ? 'var(--accent)' : 'transparent',
+                color: viewMode === 'list' ? 'var(--text-on-accent)' : 'var(--text-muted)',
                 border: 'none',
                 borderRadius: '4px',
                 padding: '3px 8px',
@@ -143,8 +143,8 @@ export const AgentActivityDrawer = memo(function AgentActivityDrawer({
                 setViewMode('dag')
               }}
               style={{
-                background: viewMode === 'dag' ? 'var(--accent, #10b981)' : 'transparent',
-                color: viewMode === 'dag' ? '#ffffff' : 'var(--text-muted, #9ca3af)',
+                background: viewMode === 'dag' ? 'var(--accent)' : 'transparent',
+                color: viewMode === 'dag' ? 'var(--text-on-accent)' : 'var(--text-muted)',
                 border: 'none',
                 borderRadius: '4px',
                 padding: '3px 8px',
@@ -162,7 +162,7 @@ export const AgentActivityDrawer = memo(function AgentActivityDrawer({
                   width: '6px',
                   height: '6px',
                   borderRadius: '50%',
-                  background: '#38bdf8',
+                  background: 'var(--status-listening, #38bdf8)',
                   display: 'inline-block',
                 }}
               />

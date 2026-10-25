@@ -1,5 +1,5 @@
 .voice-pill {
-  --vp-accent: #f5f5f5; --vp-icon: #a1a1aa; --vp-bg: #27272a; --vp-size: 28px; --vp-radius: 14px;
+  --vp-accent: var(--text-primary, #f5f5f5); --vp-icon: var(--text-muted, #a1a1aa); --vp-bg: var(--bg-surface-soft, #27272a); --vp-size: 28px; --vp-radius: 14px;
   --vp-reach: 8px; --vp-extra: 0px; --vp-clock-w: 0px; --vp-wave-w: 0px; --vp-slide: 0px; --vp-cancel: 0;
   --vp-stop: 9px; --vp-icon-size: 15px; --vp-time-size: 10px; --vp-open: 200ms; --vp-press: 0.95; --vp-hit: 8px;
   --vp-ease-out: cubic-bezier(0.23, 1, 0.32, 1);

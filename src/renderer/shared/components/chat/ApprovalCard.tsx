@@ -182,9 +182,9 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
                     padding: '4px 10px',
                     fontSize: '0.75rem',
                     borderRadius: '8px',
-                    background: 'rgba(56, 189, 248, 0.12)',
-                    border: '1px solid rgba(56, 189, 248, 0.3)',
-                    color: '#38bdf8',
+                    background: 'var(--accent-subtle)',
+                    border: '1px solid var(--accent-border)',
+                    color: 'var(--interactive-fg)',
                     cursor: 'pointer',
                   }}
                 >
@@ -232,7 +232,7 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
                         </div>
                         <div className="claude-choice-right">
                           {isMultiSelect ? (
-                            <span style={{ fontSize: '1.1rem', color: isSelected ? '#10b981' : 'var(--text-muted)' }}>
+                            <span style={{ fontSize: '1.1rem', color: isSelected ? 'var(--interactive-fg)' : 'var(--text-muted)' }}>
                               {isSelected ? '☑' : '☐'}
                             </span>
                           ) : (
