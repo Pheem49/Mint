@@ -134,6 +134,7 @@ pub(crate) fn should_log_api_route(route: &str) -> bool {
         || route == "/api/interactions"
         || route == "/api/conversation-snapshot"
         || route == "/api/conversation-changes"
+        || route == "/api/conversation-sources"
         || route == "/api/status"
         || route == "/api/chat-sessions"
         || route == "/api/mods"
@@ -2028,6 +2029,7 @@ mod tests {
         assert!(!should_log_api_route("/api/mods"));
         assert!(!should_log_api_route("/api/models"));
         assert!(!should_log_api_route("/api/status"));
+        assert!(!should_log_api_route("/api/conversation-sources"));
         assert!(!should_log_api_route("/api/interactions"));
         assert!(!should_log_api_route("/api/pictures/foo.png"));
         assert!(!should_log_api_route("/api/thumbnails/bar.jpg"));
