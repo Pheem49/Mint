@@ -2,6 +2,42 @@
 
 Released: 2026-10-17
 
+## Clean Subagent Transcript Isolation & Hallucination Guard (2026-10-25)
+
+- **Clean Isolated Transcript (Claude Code Experience)**:
+  - **Full-Screen TUI (`crates/mint-cli/src/interactive/chat_tui.rs`)**: Subagent micro-tool calls (`read_file`, `search_code`, errors, retries) and child context compactions are now cleanly excluded from the main conversational transcript and tool card feed. Child progress streams strictly to the dedicated docked `Running Subagents` panel, preserving a focused, calm main chat area where only parent orchestrator tools (`dispatch_agents`) and final summaries appear.
+  - **Main Timeline Live Status Scoping (`crates/mint-cli/src/agent.rs`)**: Subagent context compactions no longer hijack the main agent's thinking bar or print spurious compaction messages to the main conversation timeline.
+  - **Desktop & Web GUI Parity (`src/renderer/shared/utils/agentActivity.ts`)**: Segregated subagent tool calls and compactions from the main chat activity drawer; subagent progress and DAG inspection remain cleanly accessible via `SubagentStatusStrip` and `SubagentDagView`.
+- **Hallucination & `"null"` Argument Guard**:
+  - **Task Planning Sanitization (`crates/mint-core/src/swarm/batch.rs`)**: Pre-emptively rejects tasks where `instruction` is empty or `"null"` with a clear diagnostic reason, and sanitizes role seeds to prevent invalid agent creation.
+  - **TUI Action Formatter (`chat_tui.rs`)**: Filtered out `"null"` path and command values from subagent tool descriptions and labels, avoiding misleading `[role] null` indicators.
+- **Unit and Interface Test Coverage**:
+  - Added transcript isolation assertions in `chat_tui::swarm_panel_tests::record_tool_progress_updates_swarm_state`.
+  - Added unit test in `batch::tests::null_or_empty_instruction_is_rejected_cleanly`.
+  - Added vitest unit test in `agentActivity.test.ts` verifying subagent event isolation in renderer.
+
+## Subagent Swarm Rebuild & Live Status Strip (2026-10-24)
+
+- **Swarm Execution Engine (`crates/mint-core/src/swarm/`)**: Rebuilt subagent orchestration from scratch to support parallel multi-agent swarms via `dispatch_agents(tasks: [{ role, base, instruction }])`.
+  - **Isolated Concurrency & Lanes**: Read-only tasks run concurrently up to a configurable parallel cap (`swarm_max_parallel`, default 4, range 1–8). Write-capable tasks serialize safely in a dedicated write lane to prevent filesystem races.
+  - **Scoped Permissions & Profiles**: Subagent tasks inherit from base profiles (`explorer` by default, read-only). Child agents cannot mutate files or spawn nested swarms unless explicitly granted write permissions.
+  - **Bounded Dossiers**: Each subagent returns a compact, capped structured dossier (`status`, `steps`, `summary_preview`, `findings`, `artifacts`) to prevent context bloating in the main conversation.
+  - **Backward Compatibility**: Fully preserves historical transcript rendering and handling for older `dispatch_subagent` calls.
+- **Full-Screen TUI Swarm Panel (`crates/mint-cli/src/interactive/chat_tui.rs`)**:
+  - Added a dedicated, live swarm panel docked below the composer:
+    - Real-time animated spinner (`⠋`), agent label badges (`[recon]`, `[config]`), live action descriptions, and right-aligned elapsed timing (`· 14s`, `· done 3s`, `· failed 5s`).
+    - Handles overflow with `+N more subagents...` indicator when more than 5 agents run in parallel.
+    - Responsive compact single-line mode on short terminal displays (< 24 rows).
+    - Automatically clears when the user submits their next prompt.
+- **Desktop & Web GUI Parity (`SubagentStatusStrip.tsx` & Settings)**:
+  - Created shared `SubagentStatusStrip` docked above the composer in `ChatPanel.tsx` across Desktop and Web.
+  - Clicking any subagent row or the strip focuses and expands the subagent activity drawer and DAG view (`SubagentDagView`).
+  - Added a configurable `Max Parallel Subagents` slider (1 to 8) to `Settings > Subagents & Swarm Execution` in `AgentsTab.tsx`.
+- **Comprehensive Test Coverage**:
+  - Added 31 unit tests in `crates/mint-core/src/swarm/` covering permissions, labels, dossiers, and batch runner.
+  - Added 6 unit tests in `crates/mint-cli/src/interactive/chat_tui.rs` covering TUI rendering, overflow, compact mode, and tool progress lifecycle.
+  - Added vitest unit tests in `src/renderer/shared/components/SubagentStatusStrip.test.tsx` and `SubagentDagView.test.ts`.
+
 ## Hard-Truncate Context Compaction Fallback (2026-10-24)
 
 - **Deterministic Hard-Truncate on Compaction Failure**: Added `hard_truncate_native_messages` in `crates/mint-core/src/orchestration/context_render.rs`. When LLM-based compaction summarization encounters provider errors, timeouts, rate limits (HTTP 429), or context length exceeded, the agent loop no longer retains oversized messages and crashes with a generic `This turn failed.` turn failure. Instead, it seamlessly applies a structural hard-truncation fallback that extracts key tool calls and parameters from older steps into a compact synthetic summary pair while preserving the initial user task, the most recent steps (`COMPACTION_KEEP_RECENT_STEPS`), and strict alternating role semantics.

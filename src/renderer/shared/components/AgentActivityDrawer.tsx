@@ -53,8 +53,10 @@ export function AgentActivityDrawer({
 
   const hasSubagents = (rawProgress || []).some(
     (e) =>
-      (e.type === 'ToolStart' || e.type === 'ToolEnd') &&
-      (e.data.subagent || e.data.action === 'dispatch_subagent'),
+      e.type === 'SubagentStarted' ||
+      e.type === 'SubagentFinished' ||
+      ((e.type === 'ToolStart' || e.type === 'ToolEnd') &&
+        (e.data.subagent || e.data.action === 'dispatch_agents' || e.data.action === 'dispatch_subagent')),
   )
 
   const renderContent = () => (

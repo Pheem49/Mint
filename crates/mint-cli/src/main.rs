@@ -331,11 +331,18 @@ fn log_panic_to_file(message: &str) {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--mint-mod-host") {
         return mint_mod_runtime::worker_main().map_err(anyhow::Error::msg);
     }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
     let _background_shutdown = mint_core::bg_shell::ShutdownGuard;
     install_panic_hook();
     let mut cli = Cli::parse();

@@ -548,6 +548,9 @@ pub fn build_system_prompt(
     if allowed_actions.contains(&"create_plan") || allowed_actions.contains(&"update_plan") {
         rules.push("8b. When the user asks to plan, structure, or inspect a workflow ('วางแผน', 'plan', 'structure', 'audit'), call `create_plan` FIRST with your step checklist before doing deep execution. Keep investigation focused and concise: NEVER recursively read dozens of source files when a directory listing, symbols, search_code, or architectural overview is sufficient.");
     }
+    if allowed_actions.contains(&"dispatch_agents") {
+        rules.push("8c. Subagent Swarm Delegation (`dispatch_agents`): Delegate independent, broad, or exploratory tasks to parallel subagents to keep the main conversation context clean. Provide `tasks: [{ role, base, instruction }]`. Subagents run concurrently in isolated read-only sandboxes (default base: 'explorer') up to the parallel limit. Write tasks serialize in a single lane. Subagents return capped structured dossiers directly back into your context — you synthesize their findings and present the final answer to the user.");
+    }
     if allowed_actions.contains(&"note_write") {
         rules.push("9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.");
     }

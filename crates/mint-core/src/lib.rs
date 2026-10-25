@@ -22,6 +22,7 @@ pub mod orchestration;
 pub mod prompts;
 pub mod search;
 pub mod slash;
+pub mod swarm;
 pub mod system;
 
 pub use agent::agent_loop;

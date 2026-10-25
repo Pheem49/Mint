@@ -35,7 +35,7 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 - **Code Intelligence:** AST symbol navigation (`find_definition`, `find_references`) across Rust, TypeScript, JavaScript, Python, and Go without external LSPs.
 - **Safe Automated Verification:** Run tests, typechecks, and linters (`run_tests`, `run_typecheck`, `run_linter`) with zero-prompt pre-approval policies.
 - **Observability & Checklist:** Real-time plan progress checklists and run telemetry summary dashboards across CLI, Desktop, and Web.
-- Delegate focused sub-tasks to specialized subagents (`dispatch_subagent`), optionally isolated in a per-session Docker container (`sandboxBackend: "docker"`).
+- **Subagent Swarm & Parallel Delegation (`dispatch_agents`):** Delegate independent or exploratory sub-tasks to concurrent subagents in parallel (configurable concurrency up to 8, defaulting to 4). Read-only subagents run concurrently while write-capable tasks serialize safely in a dedicated lane. Subagents return bounded, structured dossiers to keep the main context clean, with real-time live execution status rendered below the composer in the Full-Screen TUI and Desktop/Web GUI. Optional per-session Docker container sandboxing (`sandboxBackend: "docker"`).
 > [!IMPORTANT]
 > **Safety First:** Risky actions and file writes require your explicit approval first.
 

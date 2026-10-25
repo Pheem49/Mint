@@ -41,7 +41,7 @@ fn tool(name: &str, description: &str, parameters: Value) -> ToolSpec {
 /// `base_allowed_actions`, so the two code paths can never offer a different
 /// set of tools for the same request.
 ///
-/// `dispatch_subagent` is deliberately **not** part of `base_allowed_actions`
+/// `dispatch_agents` is deliberately **not** part of `base_allowed_actions`
 /// (which also drives the legacy JSON-prompt path) — it's native-tool-calling
 /// only, same scoping as context compaction. `allow_subagent_dispatch` should
 /// be `false` when building the catalog for a subagent's own nested loop, so
@@ -81,14 +81,18 @@ pub fn tool_catalog(
     if allow_subagent_dispatch && !plan_mode {
         let subagents = list_subagents(Some(root));
         if !subagents.is_empty() {
-            tools.push(dispatch_subagent_tool(&subagents));
+            tools.push(dispatch_agents_tool(&subagents));
         }
+    }
+
+    if let Some(permissions) = crate::swarm::current_permissions() {
+        tools.retain(|t| permissions.allows(&t.name));
     }
 
     tools
 }
 
-fn dispatch_subagent_tool(subagents: &[crate::subagents::SubagentDefinition]) -> ToolSpec {
+fn dispatch_agents_tool(subagents: &[crate::subagents::SubagentDefinition]) -> ToolSpec {
     let names: Vec<String> = subagents.iter().map(|s| s.name.clone()).collect();
     let catalog_text = subagents
         .iter()
@@ -96,19 +100,40 @@ fn dispatch_subagent_tool(subagents: &[crate::subagents::SubagentDefinition]) ->
         .collect::<Vec<_>>()
         .join("\n");
     tool(
-        "dispatch_subagent",
+        "dispatch_agents",
         &format!(
-            "Delegate a focused sub-task to a specialized subagent that runs in its own \
-             isolated context and returns only its final result — use this to investigate \
-             something without filling up your own context with the intermediate steps. \
-             Available subagents:\n{catalog_text}"
+            "Delegate one or more focused tasks to isolated sub-agents that run concurrently in \
+             their own contexts and return capped dossiers — use this to investigate across files, \
+             trace flows, or check hypotheses without polluting your main context.\n\
+             Base profiles decide the permissions of each agent (defaults to 'explorer'):\n{catalog_text}"
         ),
         schema(
             json!({
-                "name": { "type": "string", "enum": names, "description": "Which subagent to dispatch." },
-                "instruction": { "type": "string", "description": "The task/question to give the subagent." }
+                "tasks": {
+                    "type": "array",
+                    "description": "List of tasks to run concurrently in isolated sub-agents.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "role": {
+                                "type": "string",
+                                "description": "Display label and focus for this agent (e.g. 'stripe-webhook-tracer')."
+                            },
+                            "base": {
+                                "type": "string",
+                                "enum": names,
+                                "description": "Profile deciding permissions. Defaults to 'explorer' (read-only)."
+                            },
+                            "instruction": {
+                                "type": "string",
+                                "description": "The task, research question, or command to execute."
+                            }
+                        },
+                        "required": ["instruction"]
+                    }
+                }
             }),
-            &["name", "instruction"],
+            &["tasks"],
         ),
     )
 }
@@ -1171,7 +1196,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_subagent_offered_only_when_allowed_and_subagents_exist() {
+    fn dispatch_agents_offered_only_when_allowed_and_subagents_exist() {
         let root = std::env::temp_dir().join("mint-tool-catalog-subagents");
         let _ = std::fs::remove_dir_all(&root);
         write_subagent(
@@ -1188,20 +1213,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&empty_root);
         std::fs::create_dir_all(&empty_root).unwrap();
         let tools = tool_catalog(&config, false, &empty_root, true);
-        assert!(tools.iter().any(|t| t.name == "dispatch_subagent"));
+        assert!(tools.iter().any(|t| t.name == "dispatch_agents"));
 
         // Subagents exist + allowed -> offered.
         let tools = tool_catalog(&config, false, &root, true);
-        assert!(tools.iter().any(|t| t.name == "dispatch_subagent"));
+        assert!(tools.iter().any(|t| t.name == "dispatch_agents"));
 
         // Subagents exist but not allowed (this is itself a nested subagent
         // call) -> the depth-limit enforcement, never offered.
         let tools = tool_catalog(&config, false, &root, false);
-        assert!(!tools.iter().any(|t| t.name == "dispatch_subagent"));
+        assert!(!tools.iter().any(|t| t.name == "dispatch_agents"));
 
         // Subagents exist but plan mode is active -> never offered either.
         let tools = tool_catalog(&config, true, &root, true);
-        assert!(!tools.iter().any(|t| t.name == "dispatch_subagent"));
+        assert!(!tools.iter().any(|t| t.name == "dispatch_agents"));
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&empty_root);

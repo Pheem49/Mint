@@ -6,11 +6,13 @@ interface Props {
   isLive?: boolean
 }
 
-interface SubagentNode {
+export interface SubagentNode {
   name: string
   taskSnippet?: string
   status: 'running' | 'completed' | 'failed' | 'idle'
   currentTool?: string
+  elapsedMs?: number
+  summaryPreview?: string
   tools: Array<{
     action: string
     input?: any
@@ -29,15 +31,61 @@ export function parseSubagentGraph(progress: AgentProgress[]): {
   for (const event of progress || []) {
     if (event.type === 'Thinking') {
       isWorking = true
+    } else if (event.type === 'SubagentStarted') {
+      isWorking = true
+      const { subagent, task } = event.data
+      let node = subagentMap.get(subagent)
+      if (!node) {
+        node = {
+          name: subagent,
+          taskSnippet: task && task.length > 80 ? `${task.slice(0, 77)}...` : task,
+          status: 'running',
+          tools: [],
+        }
+        subagentMap.set(subagent, node)
+      } else {
+        node.status = 'running'
+        if (task) {
+          node.taskSnippet = task.length > 80 ? `${task.slice(0, 77)}...` : task
+        }
+      }
+    } else if (event.type === 'SubagentFinished') {
+      const { subagent, status, elapsedMs, elapsed_ms, summaryPreview, summary_preview } = event.data as any
+      const node = subagentMap.get(subagent)
+      if (node) {
+        node.status = status === 'completed' ? 'completed' : 'failed'
+        node.currentTool = undefined
+        node.elapsedMs = elapsedMs ?? elapsed_ms
+        node.summaryPreview = summaryPreview ?? summary_preview
+      }
     } else if (event.type === 'ToolStart') {
       isWorking = true
       const action = event.data.action
       const subagentName = event.data.subagent
 
-      // Detect dispatch_subagent call from parent
-      if (action === 'dispatch_subagent') {
-        const targetName = (event.data.input as any)?.name || 'subagent'
-        const instruction = (event.data.input as any)?.instruction || ''
+      // Detect dispatch_agents or dispatch_subagent call from parent
+      if (action === 'dispatch_agents') {
+        const tasks = (event.data.input as any)?.tasks || []
+        for (const t of tasks) {
+          const roleValid = t.role && typeof t.role === 'string' && t.role.toLowerCase() !== 'null'
+          const baseValid = t.base && typeof t.base === 'string' && t.base.toLowerCase() !== 'null'
+          const targetName = roleValid ? t.role : baseValid ? t.base : 'agent'
+          const rawInst = typeof t.instruction === 'string' ? t.instruction.trim() : ''
+          const instruction = rawInst && rawInst.toLowerCase() !== 'null' ? rawInst : 'Working on task...'
+          if (!subagentMap.has(targetName)) {
+            subagentMap.set(targetName, {
+              name: targetName,
+              taskSnippet: instruction.length > 80 ? `${instruction.slice(0, 77)}...` : instruction,
+              status: 'running',
+              tools: [],
+            })
+          }
+        }
+      } else if (action === 'dispatch_subagent') {
+        const rawName = (event.data.input as any)?.name
+        const targetName = typeof rawName === 'string' && rawName.toLowerCase() !== 'null' && rawName.trim() ? rawName.trim() : 'subagent'
+        const rawInst = (event.data.input as any)?.instruction
+        const instruction = typeof rawInst === 'string' && rawInst.toLowerCase() !== 'null' && rawInst.trim() ? rawInst.trim() : 'Working on task...'
         if (!subagentMap.has(targetName)) {
           subagentMap.set(targetName, {
             name: targetName,
@@ -96,10 +144,15 @@ export function parseSubagentGraph(progress: AgentProgress[]): {
   }
 
   const subagents = Array.from(subagentMap.values())
-  // If subagents were created, mark ones with no running tool as completed if turn finished
-  for (const sub of subagents) {
-    if (!sub.currentTool && sub.status === 'running') {
-      sub.status = 'completed'
+  // Only for legacy dispatch_subagent calls without lifecycle events:
+  const hasModernLifecycle = (progress || []).some(
+    e => e.type === 'SubagentStarted' || e.type === 'SubagentFinished'
+  )
+  if (!hasModernLifecycle) {
+    for (const sub of subagents) {
+      if (!sub.currentTool && sub.status === 'running') {
+        sub.status = 'completed'
+      }
     }
   }
 

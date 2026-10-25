@@ -196,6 +196,17 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
             let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
             (false, format!("[run_plugin] Running plugin: {}...", name))
         }
+        "dispatch_agents" => {
+            let tasks_len = input
+                .get("tasks")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(1);
+            (
+                false,
+                format!("├── [{CYAN}swarm{RESET}] Dispatching {tasks_len} sub-agent(s)..."),
+            )
+        }
         "dispatch_subagent" => {
             let name = input
                 .get("name")
@@ -1136,19 +1147,21 @@ pub async fn run_code_agent_with_options(
                         subagent.as_deref(),
                         Instant::now(),
                     );
-                    if phase == "started" {
-                        status.thinking = Some(compaction_label(Duration::ZERO));
-                    } else {
-                        print_timeline_note(&mut status, &message, started_at.elapsed(), None);
-                        status.context_pct = None;
-                        status.thinking = Some(if let Some(started) = status.compaction_started {
-                            compaction_label(started.elapsed())
+                    if subagent.is_none() {
+                        if phase == "started" {
+                            status.thinking = Some(compaction_label(Duration::ZERO));
                         } else {
-                            format!(
-                                "{thinking_verb} ({} • Esc to interrupt)",
-                                format_elapsed(started_at.elapsed())
-                            )
-                        });
+                            print_timeline_note(&mut status, &message, started_at.elapsed(), None);
+                            status.context_pct = None;
+                            status.thinking = Some(if let Some(started) = status.compaction_started {
+                                compaction_label(started.elapsed())
+                            } else {
+                                format!(
+                                    "{thinking_verb} ({} • Esc to interrupt)",
+                                    format_elapsed(started_at.elapsed())
+                                )
+                            });
+                        }
                     }
                     render_live_status(&mut status);
                 }
@@ -1446,6 +1459,8 @@ pub async fn run_code_agent_with_options(
             | AgentProgress::DeviceState { .. }
             | AgentProgress::ToolProgress { .. }
             | AgentProgress::ToolArtifacts { .. }
+            | AgentProgress::SubagentStarted { .. }
+            | AgentProgress::SubagentFinished { .. }
             | AgentProgress::ExecutionUpdate { .. } => {}
             AgentProgress::PlanUpdated { plan } => {
                 if let Ok(mut status) = progress_live_status.lock() {

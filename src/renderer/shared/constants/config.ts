@@ -38,6 +38,7 @@ export const DEFAULT_CONFIG = {
   proactiveCooldown: 120,
   enableVoiceReply: true,
   enableAgentCollaboration: false,
+  swarmMaxParallel: 4,
   autoSkillWriting: false,
   ttsProvider: 'google',
   ttsVolume: 1.0,

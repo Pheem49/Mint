@@ -893,6 +893,50 @@ pub enum AgentProgress {
     RunCompleted {
         summary: RunTelemetrySummary,
     },
+    SubagentStarted {
+        subagent: String,
+        profile: String,
+        task: String,
+    },
+    SubagentFinished {
+        subagent: String,
+        status: String,
+        #[serde(default, alias = "elapsed_ms", rename = "elapsedMs")]
+        elapsed_ms: u64,
+        steps: u32,
+        #[serde(default, alias = "summary_preview", rename = "summaryPreview")]
+        summary_preview: String,
+    },
+}
+
+impl From<crate::swarm::SwarmEvent> for AgentProgress {
+    fn from(event: crate::swarm::SwarmEvent) -> Self {
+        match event {
+            crate::swarm::SwarmEvent::Started {
+                label,
+                profile,
+                task,
+            } => AgentProgress::SubagentStarted {
+                subagent: label,
+                profile,
+                task,
+            },
+            crate::swarm::SwarmEvent::Progress(p) => p,
+            crate::swarm::SwarmEvent::Finished {
+                label,
+                status,
+                elapsed_ms,
+                steps,
+                summary_preview,
+            } => AgentProgress::SubagentFinished {
+                subagent: label,
+                status: status.as_str().to_string(),
+                elapsed_ms,
+                steps,
+                summary_preview,
+            },
+        }
+    }
 }
 
 /// Determines whether a thought string represents long-form / internal chain-of-thought
@@ -1086,9 +1130,32 @@ struct AgentDecision {
     input: AgentInput,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmTaskInput {
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub base: Option<String>,
+    #[serde(default)]
+    pub instruction: String,
+}
+
+impl From<SwarmTaskInput> for crate::swarm::SwarmTask {
+    fn from(input: SwarmTaskInput) -> Self {
+        Self {
+            role: input.role,
+            base: input.base,
+            instruction: input.instruction,
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentInput {
+    #[serde(default)]
+    tasks: Vec<SwarmTaskInput>,
     #[serde(default)]
     path: String,
     #[serde(default)]
@@ -2296,22 +2363,7 @@ where
             let mut step_images: std::collections::HashMap<String, Vec<String>> =
                 std::collections::HashMap::new();
 
-            if decisions_are_parallel_subagent_batch(&decisions) {
-                let completed = run_parallel_subagent_batch(
-                    &decisions,
-                    step,
-                    &root,
-                    config,
-                    chat_id,
-                    &mut approve,
-                    &mut progress,
-                    &mut action_counts,
-                    &mut trajectory,
-                )
-                .await;
-                invalid_tool_calls.observe_completed(&completed);
-                step_tool_results.extend(completed);
-            } else if decisions_are_parallel_read_only_batch(&decisions) {
+            if decisions_are_parallel_read_only_batch(&decisions) {
                 let completed = run_parallel_read_only_batch(
                     &decisions,
                     step,
@@ -2993,315 +3045,165 @@ fn plan_mode_allows(action: &str, input: &AgentInput) -> bool {
     action == "finish" || crate::prompts::agent::PLAN_MODE_ALLOWED_ACTIONS.contains(&action)
 }
 
-/// Runs one subagent to completion and returns its formatted result text.
-/// Extracted from `execute_tool`'s `"dispatch_subagent"` arm so both the plain
-/// sequential path (a single subagent call, or one mixed in with other actions)
-/// and the parallel path (`decisions_are_parallel_subagent_batch`, driven by
-/// `buffer_unordered` in the main step loop) share one implementation. Takes
-/// the same `&mut dyn FnMut(...)` trait object as `execute_tool` — see the
-/// comment on that function for why a trait object rather than a generic —
-/// which lets the parallel path pass a small Mutex-backed adapter closure so
-/// concurrently-running subagents still share one real approval gate.
-async fn dispatch_one_subagent(
+/// Runs a swarm batch of sub-agents to completion and returns the aggregated dossier.
+pub(super) async fn dispatch_swarm(
     root: &Path,
     config: &MintConfig,
-    chat_id: &str,
-    name: &str,
-    task: &str,
+    parent_chat_id: &str,
+    tasks: Vec<crate::swarm::SwarmTask>,
     approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
     progress: &mut (dyn FnMut(AgentProgress) + Send),
 ) -> Result<String, OrchestrationError> {
-    let Some(definition) = crate::subagents::find_subagent(name, Some(root)) else {
-        return Err(OrchestrationError::Agent(format!(
-            "no subagent named '{name}' found (check .agents/subagents/ or \
-             ~/.config/mint/mint-agents/)"
-        )));
+    let effective_cap = crate::swarm::effective_max_parallel(Some(config.swarm_max_parallel));
+    let profiles = |name: &str| crate::subagents::find_subagent(name, Some(root));
+    let ctx = crate::swarm::BatchCtx {
+        parent_chat_id,
+        max_parallel: effective_cap,
+        profiles: &profiles,
     };
 
-    let mut sub_config = config.clone();
-    if let Some(provider) = &definition.provider {
-        sub_config.ai_provider = provider.clone();
-    }
-    if let Some(model) = &definition.model {
-        match sub_config.ai_provider.as_str() {
-            "anthropic" => sub_config.anthropic_model = model.clone(),
-            "openai" => sub_config.openai_model = model.clone(),
-            "openrouter" => sub_config.openrouter_model = model.clone(),
-            "deepseek" => sub_config.deepseek_model = model.clone(),
-            "huggingface" => sub_config.hf_model = model.clone(),
-            "local_openai" => sub_config.local_model_name = model.clone(),
-            "ollama" => sub_config.ollama_model = model.clone(),
-            "gemini" => sub_config.gemini_model = model.clone(),
-            _ => {}
-        }
-    }
-
-    // The subagent's own persona/instructions are folded into the task
-    // framing rather than replacing Mint's system prompt (which
-    // `orchestrate_agent_loop` builds internally and isn't a parameter),
-    // so the subagent still follows the same tool-use protocol and
-    // safety rules as any other agent run.
-    let sub_task = format!(
-        "{}\n\nTask from parent agent: {task}",
-        definition.system_prompt
-    );
-    let sub_chat_id = format!("{chat_id}::subagent::{}", definition.name);
-
-    // Docker sandbox: a subagent whose resolved backend is "docker" gets one
-    // container for its whole run, started here and torn down unconditionally
-    // below (success or failure) — never per individual `run_shell` call. See
-    // `docker_sandbox`'s module doc for why this is a session-scoped resource
-    // rather than something `run_shell_command` starts itself. Subagents with
-    // no `run_shell` in their tool list (e.g. `explorer`/`plan`) never need a
-    // container, so skip starting one for them.
-    let allows_run_shell = definition
-        .tools
-        .as_ref()
-        .is_none_or(|tools| tools.iter().any(|t| t == "run_shell"));
-    let backend = definition
-        .sandbox
-        .as_deref()
-        .unwrap_or(&config.sandbox_backend);
-    let docker_started = if backend == "docker" && allows_run_shell {
-        match crate::docker_sandbox::start_session(&sub_chat_id, root, &sub_config) {
-            Ok(()) => true,
-            Err(error) if config.sandbox_mode.trim().eq_ignore_ascii_case("enforce") => {
-                return Err(OrchestrationError::Agent(format!(
-                    "subagent '{}' requires the docker sandbox (sandboxMode=enforce) but it \
-                     failed to start: {error}",
-                    definition.name
-                )));
-            }
-            // "prefer" (or any other non-"enforce" value): fall back to the
-            // subagent's shell commands running unconfined/OS-sandboxed,
-            // matching `run_shell_command`'s own fallback semantics for a
-            // missing OS sandbox binary.
-            Err(_) => false,
-        }
-    } else {
-        false
-    };
-
-    // Recursing into `orchestrate_agent_loop` from inside `execute_tool`
-    // (which it itself calls) requires boxing this one call — Rust
-    // can't compute a finite size for a directly self-referential
-    // async fn cycle otherwise. `approve_cb` is reborrowed rather than
-    // moved so the subagent's mutating actions still go through the
-    // same approval gate as the caller's; `chunk` stays a no-op so the
-    // subagent's own streamed answer text never lands in the parent's chat
-    // — only its final summary (returned below) does. `progress` is *not*
-    // a no-op: `ToolStart`/`ToolEnd` are re-tagged with this subagent's name
-    // and forwarded to the caller's real `progress`, so the CLI/GUI can
-    // render the subagent's own tool calls nested under its
-    // `dispatch_subagent` call — this only affects what's shown in the UI,
-    // never what reaches the parent model's context (that isolation comes
-    // from `sub_chat_id`/`native_messages` staying local to this call, not
-    // from suppressing progress).
-    // `orchestrate_agent_loop` itself returns a boxed `dyn Future`
-    // (see its doc comment) specifically so this recursive call can
-    // just be awaited directly, with no manual boxing needed here.
-    let subagent_name = definition.name.clone();
-    let mut nested_progress = |event: AgentProgress| {
-        let tagged = match event {
-            AgentProgress::ToolStart {
-                action,
-                input,
-                call_id,
-                ..
-            } => AgentProgress::ToolStart {
-                call_id,
-                action,
-                input,
-                subagent: Some(subagent_name.clone()),
-            },
-            AgentProgress::ToolEnd {
-                elapsed_ms,
-                action,
-                input,
-                result,
-                call_id,
-                status,
-                ..
-            } => AgentProgress::ToolEnd {
-                elapsed_ms,
-                call_id,
-                status,
-                action,
-                input,
-                result,
-                subagent: Some(subagent_name.clone()),
-            },
-            AgentProgress::ContextCompaction {
-                status, message, ..
-            } => AgentProgress::ContextCompaction {
-                status,
-                message,
-                subagent: Some(subagent_name.clone()),
-            },
-            other => other,
-        };
-        progress(tagged);
-    };
-    let result = orchestrate_agent_loop(
-        &sub_config,
-        &sub_task,
-        root,
-        None,
-        None,
-        None,
-        Some(&sub_chat_id),
-        None,
-        None,
-        None,
-        true,
-        false,
-        &mut *approve_cb,
-        &mut nested_progress,
-        |_| {},
-    )
-    .await;
-
-    let outcome = match result {
-        Ok(agent_result) => Ok(format!(
-            "[Subagent '{}' result]\n{}",
-            definition.name, agent_result.summary
-        )),
-        Err(error) => Err(OrchestrationError::Agent(format!(
-            "subagent '{}' failed: {error}",
-            definition.name
-        ))),
-    };
-    // Unconditional teardown — runs on both the Ok and Err arms above, since
-    // an orphaned container left running after a failed subagent is exactly
-    // the failure mode a session-scoped sandbox needs to avoid.
-    if docker_started {
-        crate::docker_sandbox::stop_session(&sub_chat_id);
-    }
-    outcome
-}
-
-/// Runs subagent decisions concurrently, capped at `PARALLEL_SUBAGENT_LIMIT`.
-/// Progress and approvals use short Mutex-backed adapters during execution;
-/// action counts and trajectory are updated afterward in decision order.
-#[allow(clippy::too_many_arguments)]
-async fn run_parallel_subagent_batch(
-    decisions: &[(String, AgentDecision)],
-    step: usize,
-    root: &Path,
-    config: &MintConfig,
-    chat_id: &str,
-    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
-    progress: &mut (dyn FnMut(AgentProgress) + Send),
-    action_counts: &mut BTreeMap<String, usize>,
-    trajectory: &mut Vec<String>,
-) -> Vec<ToolResultEntry> {
-    let approve_mutex = std::sync::Mutex::new(approve);
-    // Concurrently-running subagents share one real `progress` sink the same
-    // way they share one real `approve` gate above — each gets a small
-    // Mutex-backed adapter closure so their nested `ToolStart`/`ToolEnd`
-    // events (tagged with their own subagent name in `dispatch_one_subagent`)
-    // still reach the CLI/GUI, interleaved but not corrupted, instead of the
-    // batch staying silent until every item in it finishes.
+    let approve_mutex = std::sync::Mutex::new(approve_cb);
     let progress_mutex = std::sync::Mutex::new(progress);
 
-    let mut dispatches = Vec::with_capacity(decisions.len());
-    for (index, (call_id, decision)) in decisions.iter().enumerate() {
-        let call_id = call_id.clone();
-        let thought = decision.thought.clone();
-        let action = decision.action.clone();
-        let input_val = tool_progress_input(&root, &decision);
-        let action_key = action_fingerprint(decision);
-        let name = decision.input.name.clone();
-        let task_text = decision.input.instruction.clone();
+    let runner = |run: crate::swarm::AgentRun, emitter: crate::swarm::Emitter| {
         let approve_mutex = &approve_mutex;
-        let progress_mutex = &progress_mutex;
-        dispatches.push(async move {
-            let mut progress_adapter = |event: AgentProgress| {
-                let mut guard = progress_mutex.lock().unwrap();
-                (*guard)(event);
-            };
-            progress_adapter(AgentProgress::ToolStart {
-                call_id: Some(call_id.clone()),
-                action: action.clone(),
-                input: input_val.clone(),
-                subagent: None,
-            });
-            let result: Result<String, OrchestrationError> = if name.trim().is_empty() {
-                Err(OrchestrationError::Agent("name is required".into()))
-            } else if task_text.trim().is_empty() {
-                Err(OrchestrationError::Agent("instruction is required".into()))
+        Box::pin(async move {
+            let mut sub_config = config.clone();
+            if let Some(provider) = &run.provider {
+                sub_config.ai_provider = provider.clone();
+            }
+            if let Some(model) = &run.model {
+                match sub_config.ai_provider.as_str() {
+                    "anthropic" => sub_config.anthropic_model = model.clone(),
+                    "openai" => sub_config.openai_model = model.clone(),
+                    "openrouter" => sub_config.openrouter_model = model.clone(),
+                    "deepseek" => sub_config.deepseek_model = model.clone(),
+                    "huggingface" => sub_config.hf_model = model.clone(),
+                    "local_openai" => sub_config.local_model_name = model.clone(),
+                    "ollama" => sub_config.ollama_model = model.clone(),
+                    "gemini" => sub_config.gemini_model = model.clone(),
+                    _ => {}
+                }
+            }
+
+            let allows_run_shell = run.permissions.allows("run_shell");
+            let backend = run.sandbox.as_deref().unwrap_or(&config.sandbox_backend);
+            let docker_started = if backend == "docker" && allows_run_shell {
+                match crate::docker_sandbox::start_session(&run.chat_id, root, &sub_config) {
+                    Ok(()) => true,
+                    Err(error) if config.sandbox_mode.trim().eq_ignore_ascii_case("enforce") => {
+                        return Err(format!(
+                            "agent '{}' requires docker sandbox (sandboxMode=enforce) but failed: {error}",
+                            run.label
+                        ));
+                    }
+                    Err(_) => false,
+                }
             } else {
-                let mut approve_adapter =
-                    |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
-                        let mut guard = approve_mutex.lock().unwrap();
-                        (*guard)(approval)
-                    };
-                dispatch_one_subagent(
-                    root,
-                    config,
-                    chat_id,
-                    &name,
-                    &task_text,
-                    &mut approve_adapter,
-                    &mut progress_adapter,
-                )
-                .await
+                false
             };
-            let tool_result = match result {
-                Ok(text) => text,
-                Err(error) => format!("Error: {}", error),
-            };
-            progress_adapter(AgentProgress::ToolEnd {
-                elapsed_ms: None,
-                call_id: Some(call_id.clone()),
-                status: None,
-                action: action.clone(),
-                input: input_val.clone(),
-                result: tool_result.clone(),
-                subagent: None,
-            });
-            (
-                index,
-                call_id,
-                thought,
-                action,
-                input_val,
-                action_key,
-                tool_result,
-            )
-        });
-    }
 
-    let mut results = futures_util::stream::iter(dispatches)
-        .buffer_unordered(PARALLEL_SUBAGENT_LIMIT)
-        .collect::<Vec<_>>()
-        .await;
-    results.sort_by_key(|(index, ..)| *index);
-    let mut step_tool_results = Vec::with_capacity(results.len());
-    for (_, call_id, thought, action, input_val, action_key, tool_result) in results {
-        let action_count = {
-            let count = action_counts.entry(action_key).or_insert(0);
-            *count += 1;
-            *count
-        };
-        let mut final_result = model_tool_result(&action, &tool_result);
-        if action_count >= 3 && !action.starts_with("browser_") {
-            final_result.push_str(
-                "\n\n[System Tip: You repeated the same tool action three or more times. \
-                 Stop repeating it. If you already have enough information or the requested edit is done, \
-                 use the finish action now. Otherwise choose a different necessary action.]",
+            let subagent_label = run.label.clone();
+            let sub_task = format!(
+                "{}\n\nTask from parent agent: {}",
+                run.system_prompt, run.instruction
             );
-        }
+            let run_chat_id = run.chat_id.clone();
+            let permissions = run.permissions.clone();
 
-        trajectory.push(format_trajectory_step(
-            step,
-            &thought,
-            &action,
-            &final_result,
-        ));
-        step_tool_results.push((call_id, action, input_val, final_result).into());
-    }
-    step_tool_results
+            let steps_counter = std::sync::atomic::AtomicU32::new(1);
+            let mut nested_progress = |event: AgentProgress| {
+                if matches!(event, AgentProgress::ToolStart { .. }) {
+                    steps_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                let tagged = match event {
+                    AgentProgress::ToolStart {
+                        action,
+                        input,
+                        call_id,
+                        ..
+                    } => AgentProgress::ToolStart {
+                        call_id,
+                        action,
+                        input,
+                        subagent: Some(subagent_label.clone()),
+                    },
+                    AgentProgress::ToolEnd {
+                        elapsed_ms,
+                        action,
+                        input,
+                        result,
+                        call_id,
+                        status,
+                        ..
+                    } => AgentProgress::ToolEnd {
+                        elapsed_ms,
+                        call_id,
+                        status,
+                        action,
+                        input,
+                        result,
+                        subagent: Some(subagent_label.clone()),
+                    },
+                    AgentProgress::ContextCompaction {
+                        status, message, ..
+                    } => AgentProgress::ContextCompaction {
+                        status,
+                        message,
+                        subagent: Some(subagent_label.clone()),
+                    },
+                    other => other,
+                };
+                emitter.progress(tagged);
+            };
+
+            let mut nested_approve =
+                |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+                    let mut guard = approve_mutex.lock().unwrap();
+                    (*guard)(approval)
+                };
+
+            let loop_fut = Box::pin(orchestrate_agent_loop(
+                &sub_config,
+                &sub_task,
+                root,
+                None,
+                None,
+                None,
+                Some(&run_chat_id),
+                None,
+                None,
+                None,
+                true,
+                false,
+                &mut nested_approve,
+                &mut nested_progress,
+                |_| {},
+            ));
+
+            let res = crate::swarm::scope_permissions(Some(permissions), loop_fut).await;
+
+            if docker_started {
+                crate::docker_sandbox::stop_session(&run_chat_id);
+            }
+
+            match res {
+                Ok(agent_result) => Ok(crate::swarm::RunnerOutput {
+                    text: agent_result.summary,
+                    steps: steps_counter.load(std::sync::atomic::Ordering::Relaxed),
+                }),
+                Err(err) => Err(err.to_string()),
+            }
+        })
+    };
+
+    let mut on_event = |event: crate::swarm::SwarmEvent| {
+        let mut guard = progress_mutex.lock().unwrap();
+        (*guard)(event.into());
+    };
+
+    let outcomes = crate::swarm::run_batch(&ctx, tasks, runner, &mut on_event).await;
+    Ok(crate::swarm::format_batch_result(&outcomes))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3922,6 +3824,14 @@ async fn execute_tool_text(
     approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
     progress: &mut (dyn FnMut(AgentProgress) + Send),
 ) -> Result<String, OrchestrationError> {
+    if let Some(permissions) = crate::swarm::current_permissions() {
+        if !permissions.allows(&decision.action) {
+            return Err(OrchestrationError::Agent(format!(
+                "action '{}' is not permitted by this subagent's permissions",
+                decision.action
+            )));
+        }
+    }
     let input = &decision.input;
     match decision.action.as_str() {
         "mod_help" | "mod_list" | "mod_validate" | "mod_publish" => {
@@ -4038,7 +3948,7 @@ async fn execute_tool_text(
             .await
         }
         "avatar_signal" => tools::avatar::execute(input).await,
-        "run_plugin" | "dispatch_subagent" | "mcp_tool" | "mcp_list_tools" => {
+        "run_plugin" | "dispatch_agents" | "dispatch_subagent" | "mcp_tool" | "mcp_list_tools" => {
             tools::plugins_mcp::execute(
                 decision.action.as_str(),
                 input,
@@ -5389,40 +5299,7 @@ mod tests {
     }
 
     #[test]
-    fn two_or_more_subagent_only_decisions_qualify_for_the_parallel_batch() {
-        let decisions = vec![
-            decision_with_action("dispatch_subagent"),
-            decision_with_action("dispatch_subagent"),
-        ];
-        assert!(decisions_are_parallel_subagent_batch(&decisions));
-
-        let decisions = vec![
-            decision_with_action("dispatch_subagent"),
-            decision_with_action("dispatch_subagent"),
-            decision_with_action("dispatch_subagent"),
-        ];
-        assert!(decisions_are_parallel_subagent_batch(&decisions));
-    }
-
-    #[test]
-    fn a_lone_subagent_dispatch_stays_sequential() {
-        let decisions = vec![decision_with_action("dispatch_subagent")];
-        assert!(!decisions_are_parallel_subagent_batch(&decisions));
-    }
-
-    #[test]
-    fn subagent_dispatch_mixed_with_another_action_stays_sequential() {
-        let decisions = vec![
-            decision_with_action("dispatch_subagent"),
-            decision_with_action("dispatch_subagent"),
-            decision_with_action("read_file"),
-        ];
-        assert!(!decisions_are_parallel_subagent_batch(&decisions));
-    }
-
-    #[test]
     fn empty_decisions_never_qualify_for_the_parallel_batch() {
-        assert!(!decisions_are_parallel_subagent_batch(&[]));
         assert!(!decisions_are_parallel_read_only_batch(&[]));
     }
 

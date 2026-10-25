@@ -402,7 +402,7 @@ fn resolve_tool_signal(action: &str, had_error: bool, is_start: bool) -> Option<
             }
         }),
 
-        "dispatch_subagent" => Some(if is_start {
+        "dispatch_agents" | "dispatch_subagent" => Some(if is_start {
             AvatarSignal {
                 action: Some("typing"),
                 prop: Some("keyboard"),
@@ -563,6 +563,8 @@ impl AvatarBridge {
             AgentProgress::ContextCompaction { .. } => {}
             AgentProgress::PlanUpdated { .. } => {}
             AgentProgress::RunCompleted { .. }
+            | AgentProgress::SubagentStarted { .. }
+            | AgentProgress::SubagentFinished { .. }
             | AgentProgress::ToolProgress { .. }
             | AgentProgress::ToolArtifacts { .. }
             | AgentProgress::ToolDiscovery { .. }

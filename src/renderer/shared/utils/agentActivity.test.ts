@@ -107,3 +107,20 @@ it('attaches viewedImage metadata to successful view_image activities but not fa
   expect(view.items[1].viewedImage?.name).toBe('captured.png')
 })
 
+describe('subagent event isolation', () => {
+  it('excludes subagent ToolStart, ToolEnd, and ContextCompaction from the main activity view', () => {
+    const view = activitiesFrom([
+      { type: 'ToolStart', data: { action: 'dispatch_agents', input: { tasks: [] } } },
+      { type: 'ToolStart', data: { action: 'read_file', input: { path: '/sub/file.rs' }, subagent: 'recon' } },
+      { type: 'ToolEnd', data: { action: 'read_file', input: { path: '/sub/file.rs' }, result: 'content', subagent: 'recon' } },
+      { type: 'ContextCompaction', data: { status: 'completed', message: 'Subagent context compacted', subagent: 'recon' } },
+      { type: 'ToolEnd', data: { action: 'dispatch_agents', input: { tasks: [] }, result: 'all done' } },
+    ])
+    // Only the parent dispatch_agents should be in the main activity view
+    expect(view.items).toHaveLength(1)
+    expect(view.items[0].action).toBe('dispatch_agents')
+    expect(view.timeline?.filter(t => t.kind === 'activity')).toHaveLength(1)
+    expect(view.timeline?.find(t => t.kind === 'thought' && t.thought.includes('Subagent context compacted'))).toBeUndefined()
+  })
+})
+

@@ -13,6 +13,7 @@ pub(super) fn looks_skill_worthy(step: usize, action_counts: &BTreeMap<String, u
         "browser_open",
         "browser_click",
         "browser_type",
+        "dispatch_agents",
         "dispatch_subagent",
     ];
     step >= 3

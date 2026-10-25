@@ -2743,6 +2743,130 @@ input:checked + .slider:before {
   }
 }
 
+/* Subagent Status Strip (Docked above composer) */
+.subagent-status-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: calc(100% - 28px);
+  margin: 0 auto 8px;
+  padding: 8px 12px;
+  background: var(--bg-surface-raised, #18181b);
+  border: 1px solid var(--border-subtle, #27272a);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: var(--shadow-xs, 0 1px 2px rgba(0, 0, 0, 0.1));
+  font-size: 0.75rem;
+  line-height: 1.35;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+  user-select: none;
+}
+
+.subagent-status-strip[role="button"] {
+  cursor: pointer;
+}
+
+.subagent-status-strip[role="button"]:hover {
+  border-color: var(--border-strong, #3f3f46);
+  box-shadow: var(--shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.15));
+}
+
+.subagent-status-strip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle, #27272a);
+}
+
+.subagent-status-strip-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.subagent-status-strip-title {
+  font-weight: 600;
+  color: var(--text-primary, #f4f4f5);
+}
+
+.subagent-status-strip-hint {
+  font-size: 0.7rem;
+  color: var(--flavor-mint, #10b981);
+}
+
+.subagent-status-spinner,
+.subagent-status-row-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--border-subtle, #3f3f46);
+  border-top-color: var(--flavor-mint, #10b981);
+  border-radius: 50%;
+  animation: subagent-strip-spin 700ms linear infinite;
+}
+
+@keyframes subagent-strip-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.subagent-status-icon-check,
+.subagent-status-row-check {
+  color: var(--flavor-mint, #10b981);
+  font-weight: bold;
+}
+
+.subagent-status-icon-alert,
+.subagent-status-row-cross {
+  color: #ef4444;
+  font-weight: bold;
+}
+
+.subagent-status-strip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.subagent-status-strip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-surface-subtle, rgba(255, 255, 255, 0.02));
+}
+
+.subagent-status-strip-row-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.subagent-status-strip-tag {
+  color: var(--flavor-mint, #10b981);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.subagent-status-strip-desc {
+  color: var(--text-secondary, #a1a1aa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-status-strip-timing {
+  font-size: 0.7rem;
+  color: var(--text-muted, #71717a);
+  white-space: nowrap;
+}
+
 /* Project context is the first row of the composer, not a promotional CTA. */
 .project-context-row {
   position: relative;

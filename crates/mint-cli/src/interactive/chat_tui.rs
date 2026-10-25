@@ -390,9 +390,69 @@ pub(crate) struct ThoughtModalState {
     pub scroll: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SwarmUiStatus {
+    Running,
+    Success,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SwarmAgentUiState {
+    pub label: String,
+    pub profile: String,
+    pub task: String,
+    pub current_action: Option<String>,
+    pub status: SwarmUiStatus,
+    pub started_at: std::time::Instant,
+    pub finished_elapsed_ms: Option<u64>,
+    pub summary_preview: Option<String>,
+}
+
+fn clip_text(text: &str, width: usize) -> String {
+    if UnicodeWidthStr::width(text) <= width {
+        return text.to_owned();
+    }
+    let mut used = 0;
+    let mut clipped = String::new();
+    for ch in text.chars() {
+        let next = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + next > width.saturating_sub(1) {
+            break;
+        }
+        used += next;
+        clipped.push(ch);
+    }
+    if width > 0 {
+        clipped.push('…');
+    }
+    clipped
+}
+
+fn format_subagent_tool_action(action: &str, input: &serde_json::Value) -> String {
+    for key in ["description", "command", "cmd", "path", "query", "pattern", "url"] {
+        if let Some(val) = input.get(key).and_then(|v| v.as_str()) {
+            if let Some(line) = val.lines().find(|l| !l.trim().is_empty()) {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("null") {
+                    continue;
+                }
+                return match key {
+                    "command" | "cmd" => format!("Running `{trimmed}`"),
+                    "pattern" | "query" => format!("Searching for {trimmed}"),
+                    "path" => format!("Reading {trimmed}"),
+                    _ => trimmed.to_string(),
+                };
+            }
+        }
+    }
+    action.replace('_', " ")
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct ChatViewState {
     pub(crate) transcript: Vec<TranscriptEntry>,
+    pub(crate) swarm_agents: Vec<SwarmAgentUiState>,
     chat_id: String,
     mods: Vec<serde_json::Value>,
     mods_open: bool,
@@ -1321,6 +1381,89 @@ impl TuiHandle {
 impl ChatViewState {
     fn record_tool_progress(&mut self, progress: &mint_core::AgentProgress) -> Option<usize> {
         use mint_core::AgentProgress;
+        match progress {
+            AgentProgress::SubagentStarted {
+                subagent,
+                profile,
+                task,
+            } => {
+                if let Some(existing) = self.swarm_agents.iter_mut().find(|a| a.label == *subagent)
+                {
+                    existing.profile = profile.clone();
+                    existing.task = task.clone();
+                    existing.status = SwarmUiStatus::Running;
+                    existing.started_at = std::time::Instant::now();
+                } else {
+                    self.swarm_agents.push(SwarmAgentUiState {
+                        label: subagent.clone(),
+                        profile: profile.clone(),
+                        task: task.clone(),
+                        current_action: None,
+                        status: SwarmUiStatus::Running,
+                        started_at: std::time::Instant::now(),
+                        finished_elapsed_ms: None,
+                        summary_preview: None,
+                    });
+                }
+                return None;
+            }
+            AgentProgress::SubagentFinished {
+                subagent,
+                status,
+                elapsed_ms,
+                summary_preview,
+                ..
+            } => {
+                let ui_status = if status == "failed" {
+                    SwarmUiStatus::Failed
+                } else {
+                    SwarmUiStatus::Success
+                };
+                if let Some(existing) = self.swarm_agents.iter_mut().find(|a| a.label == *subagent)
+                {
+                    existing.status = ui_status;
+                    existing.finished_elapsed_ms = Some(*elapsed_ms);
+                    if !summary_preview.is_empty() {
+                        existing.summary_preview = Some(summary_preview.clone());
+                    }
+                } else {
+                    self.swarm_agents.push(SwarmAgentUiState {
+                        label: subagent.clone(),
+                        profile: String::new(),
+                        task: String::new(),
+                        current_action: None,
+                        status: ui_status,
+                        started_at: std::time::Instant::now(),
+                        finished_elapsed_ms: Some(*elapsed_ms),
+                        summary_preview: if summary_preview.is_empty() {
+                            None
+                        } else {
+                            Some(summary_preview.clone())
+                        },
+                    });
+                }
+                return None;
+            }
+            AgentProgress::ToolStart {
+                subagent: Some(agent_label),
+                action,
+                input,
+                ..
+            } => {
+                if let Some(agent) = self.swarm_agents.iter_mut().find(|a| a.label == *agent_label)
+                {
+                    agent.current_action = Some(format_subagent_tool_action(action, input));
+                }
+                return None;
+            }
+            AgentProgress::ToolEnd {
+                subagent: Some(_),
+                ..
+            } => {
+                return None;
+            }
+            _ => {}
+        }
         let (call_id, action, input, subagent, end) = match progress {
             AgentProgress::ToolStart {
                 call_id,
@@ -1904,6 +2047,10 @@ impl ChatViewState {
                             self.refresh_tool_card(index);
                         }
                     }
+                    mint_core::AgentProgress::SubagentStarted { .. }
+                    | mint_core::AgentProgress::SubagentFinished { .. } => {
+                        self.record_tool_progress(&event);
+                    }
                     mint_core::AgentProgress::ExtendedThinking {
                         id,
                         thought,
@@ -2168,6 +2315,7 @@ impl ChatViewState {
         self.transcript
             .push(TranscriptEntry::new(TranscriptRole::User, text));
         self.scroll_from_bottom = 0;
+        self.swarm_agents.clear();
     }
     pub fn push_notice(&mut self, text: impl Into<String>) {
         self.transcript
@@ -2182,6 +2330,7 @@ impl ChatViewState {
     pub fn clear_transcript(&mut self) {
         self.transcript.clear();
         self.tools.clear();
+        self.swarm_agents.clear();
         if self
             .dialog
             .as_ref()
@@ -2717,6 +2866,25 @@ impl ChatViewState {
         let composer_scroll = cursor_row
             .saturating_add(1)
             .saturating_sub(visible_composer_rows);
+        let swarm_height = if self.swarm_agents.is_empty()
+            || self.dialog.is_some()
+            || self.thought_modal.is_some()
+        {
+            0
+        } else {
+            let max_avail = main_area.height.saturating_sub(
+                6 + 3 + status_height + suggestion_height + composer_height + 1,
+            );
+            if max_avail == 0 {
+                0
+            } else if main_area.height < 24 || max_avail < 3 {
+                1
+            } else {
+                let needed = (self.swarm_agents.len().min(5) as u16) + 2;
+                needed.min(max_avail)
+            }
+        };
+
         let rows = if dialog_height > 0 {
             let dialog_status_height =
                 status_height.min(main_area.height.saturating_sub(6 + 1 + dialog_height));
@@ -2748,6 +2916,7 @@ impl ChatViewState {
                     Constraint::Length(status_height),
                     Constraint::Length(suggestion_height),
                     Constraint::Length(composer_height),
+                    Constraint::Length(swarm_height),
                     Constraint::Length(1),
                 ])
                 .split(main_area)
@@ -3619,6 +3788,213 @@ impl ChatViewState {
                 rows[4],
             );
 
+            if rows[5].height > 0 {
+                if rows[5].height == 1 {
+                    let running_count = self
+                        .swarm_agents
+                        .iter()
+                        .filter(|a| a.status == SwarmUiStatus::Running)
+                        .count();
+                    const SPINNER_CHARS: &[char] =
+                        &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+                    let spinner = SPINNER_CHARS[tick % SPINNER_CHARS.len()];
+                    let line = if running_count > 0 {
+                        Line::from(vec![
+                            Span::styled(
+                                format!(" {spinner} "),
+                                Style::default()
+                                    .fg(crate::terminal_theme::BLUE)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!(
+                                    "Running {running_count} subagent{} ({}/{} completed)",
+                                    if running_count == 1 { "" } else { "s" },
+                                    self.swarm_agents.len() - running_count,
+                                    self.swarm_agents.len(),
+                                ),
+                                Style::default().fg(crate::terminal_theme::TEXT),
+                            ),
+                        ])
+                    } else {
+                        Line::from(vec![
+                            Span::styled(
+                                " ✓ ",
+                                Style::default()
+                                    .fg(crate::terminal_theme::ACCENT)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!("{} subagents finished", self.swarm_agents.len()),
+                                Style::default().fg(crate::terminal_theme::MUTED),
+                            ),
+                        ])
+                    };
+                    frame.render_widget(Paragraph::new(line), rows[5]);
+                } else {
+                    let any_running = self
+                        .swarm_agents
+                        .iter()
+                        .any(|a| a.status == SwarmUiStatus::Running);
+                    let block = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(crate::terminal_theme::MUTED))
+                        .title(Span::styled(
+                            if any_running {
+                                " Running Subagents "
+                            } else {
+                                " Subagents "
+                            },
+                            Style::default()
+                                .fg(if any_running {
+                                    crate::terminal_theme::BLUE
+                                } else {
+                                    crate::terminal_theme::TEXT
+                                })
+                                .add_modifier(Modifier::BOLD),
+                        ));
+
+                    const SPINNER_CHARS: &[char] =
+                        &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+                    let spinner = SPINNER_CHARS[tick % SPINNER_CHARS.len()];
+                    let inner_width = (rows[5].width as usize).saturating_sub(2);
+                    let max_items = (rows[5].height as usize).saturating_sub(2);
+                    let total_agents = self.swarm_agents.len();
+                    let has_overflow = total_agents > max_items;
+                    let take_count = if has_overflow {
+                        max_items.saturating_sub(1)
+                    } else {
+                        max_items.min(total_agents)
+                    };
+
+                    let mut lines = Vec::new();
+                    for a in self.swarm_agents.iter().take(take_count) {
+                        let (icon_span, icon_width) = match a.status {
+                            SwarmUiStatus::Running => (
+                                Span::styled(
+                                    format!("  {spinner} "),
+                                    Style::default()
+                                        .fg(crate::terminal_theme::BLUE)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                4,
+                            ),
+                            SwarmUiStatus::Success => (
+                                Span::styled(
+                                    "  ✓ ",
+                                    Style::default()
+                                        .fg(crate::terminal_theme::ACCENT)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                4,
+                            ),
+                            SwarmUiStatus::Failed => (
+                                Span::styled(
+                                    "  ✗ ",
+                                    Style::default()
+                                        .fg(Color::Red)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                4,
+                            ),
+                        };
+
+                        let label_str = format!("[{}] ", a.label);
+                        let label_width = UnicodeWidthStr::width(label_str.as_str());
+                        let label_span = Span::styled(
+                            label_str,
+                            Style::default()
+                                .fg(crate::terminal_theme::ACCENT)
+                                .add_modifier(Modifier::BOLD),
+                        );
+
+                        let suffix_str = match a.status {
+                            SwarmUiStatus::Running => {
+                                let secs = a.started_at.elapsed().as_secs();
+                                if secs < 60 {
+                                    format!(" · {secs}s")
+                                } else {
+                                    format!(" · {}m {}s", secs / 60, secs % 60)
+                                }
+                            }
+                            SwarmUiStatus::Success => {
+                                let ms = a.finished_elapsed_ms.unwrap_or(0);
+                                let secs = (ms / 1000).max(1);
+                                if secs < 60 {
+                                    format!(" · done {secs}s")
+                                } else {
+                                    format!(" · done {}m {}s", secs / 60, secs % 60)
+                                }
+                            }
+                            SwarmUiStatus::Failed => {
+                                let ms = a.finished_elapsed_ms.unwrap_or(0);
+                                let secs = (ms / 1000).max(1);
+                                if secs < 60 {
+                                    format!(" · failed {secs}s")
+                                } else {
+                                    format!(" · failed {}m {}s", secs / 60, secs % 60)
+                                }
+                            }
+                        };
+                        let suffix_width = UnicodeWidthStr::width(suffix_str.as_str());
+
+                        let desc = if a.status == SwarmUiStatus::Success
+                            && a.summary_preview
+                                .as_deref()
+                                .is_some_and(|p| !p.is_empty())
+                        {
+                            a.summary_preview.as_deref().unwrap()
+                        } else if let Some(act) = a
+                            .current_action
+                            .as_deref()
+                            .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("null"))
+                        {
+                            act
+                        } else if !a.task.is_empty() && !a.task.eq_ignore_ascii_case("null") {
+                            &a.task
+                        } else {
+                            "Working on task..."
+                        };
+
+                        let prefix_width = icon_width + label_width;
+                        let avail_for_desc =
+                            inner_width.saturating_sub(prefix_width + suffix_width + 1);
+                        let clipped_desc = clip_text(desc, avail_for_desc);
+                        let used_width = prefix_width
+                            + UnicodeWidthStr::width(clipped_desc.as_str())
+                            + suffix_width;
+                        let gap = inner_width.saturating_sub(used_width);
+
+                        lines.push(Line::from(vec![
+                            icon_span,
+                            label_span,
+                            Span::styled(
+                                clipped_desc,
+                                Style::default().fg(crate::terminal_theme::TEXT),
+                            ),
+                            Span::raw(" ".repeat(gap)),
+                            Span::styled(
+                                suffix_str,
+                                Style::default().fg(crate::terminal_theme::MUTED),
+                            ),
+                        ]));
+                    }
+
+                    if has_overflow {
+                        let overflow_count = total_agents - take_count;
+                        lines.push(Line::from(vec![
+                            Span::raw("      "),
+                            Span::styled(
+                                format!("+{overflow_count} more subagents..."),
+                                Style::default().fg(crate::terminal_theme::MUTED),
+                            ),
+                        ]));
+                    }
+
+                    frame.render_widget(Paragraph::new(lines).block(block), rows[5]);
+                }
+            }
+
             let mode_label = if self.plan_mode {
                 " [Plan] "
             } else {
@@ -3631,7 +4007,7 @@ impl ChatViewState {
                 + thinking_text.chars().count()
                 + 1;
             let right_len = path_text.chars().count();
-            let available = rows[5].width as usize;
+            let available = rows[6].width as usize;
             let gap = available.saturating_sub(left_len + right_len);
             let footer = if let Some(notice) = self.active_notice() {
                 Line::styled(
@@ -3666,7 +4042,7 @@ impl ChatViewState {
                     Span::styled(path_text, Style::default().fg(crate::terminal_theme::MUTED)),
                 ])
             };
-            frame.render_widget(Paragraph::new(footer), rows[5]);
+            frame.render_widget(Paragraph::new(footer), rows[6]);
 
             if !self.selection_mode {
                 let row_start = self.cursor.saturating_sub(cursor_col);
@@ -3698,7 +4074,7 @@ impl ChatViewState {
                 main_area.x,
                 main_area.y + 6,
                 main_area.width,
-                main_area.height.saturating_sub(6 + composer_height + 1),
+                main_area.height.saturating_sub(6 + composer_height + swarm_height + 1),
             ));
             frame.render_widget(ratatui::widgets::Clear, area);
             let mut lines = crate::mods_ui::slot_lines(&self.mods, "side_panel");
@@ -7962,5 +8338,230 @@ mod mod_surface_tests {
             .collect::<String>();
         assert!(text.contains("123 tokens"));
         assert!(text.contains("Write tests"));
+    }
+}
+
+#[cfg(test)]
+mod swarm_panel_tests {
+    use super::*;
+
+    #[test]
+    fn swarm_panel_is_hidden_when_empty() {
+        let state = ChatViewState::default();
+        let backend = ratatui::backend::TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(!text.contains("Subagents"));
+    }
+
+    #[test]
+    fn swarm_panel_renders_running_and_completed_subagents() {
+        let mut state = ChatViewState::default();
+        state.swarm_agents.push(SwarmAgentUiState {
+            label: "recon".to_string(),
+            profile: "explorer".to_string(),
+            task: "Searching for payment webhook endpoints...".to_string(),
+            current_action: None,
+            status: SwarmUiStatus::Running,
+            started_at: std::time::Instant::now(),
+            finished_elapsed_ms: None,
+            summary_preview: None,
+        });
+        state.swarm_agents.push(SwarmAgentUiState {
+            label: "config".to_string(),
+            profile: "explorer".to_string(),
+            task: "Checking config files".to_string(),
+            current_action: None,
+            status: SwarmUiStatus::Success,
+            started_at: std::time::Instant::now(),
+            finished_elapsed_ms: Some(3000),
+            summary_preview: Some("Checked stripe API keys in .env".to_string()),
+        });
+
+        let backend = ratatui::backend::TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(text.contains("Running Subagents"));
+        assert!(text.contains("[recon]"));
+        assert!(text.contains("Searching for payment webhook endpoints..."));
+        assert!(text.contains("[config]"));
+        assert!(text.contains("Checked stripe API keys in .env"));
+        assert!(text.contains("done 3s"));
+    }
+
+    #[test]
+    fn swarm_panel_handles_more_than_5_subagents_with_overflow() {
+        let mut state = ChatViewState::default();
+        for i in 1..=7 {
+            state.swarm_agents.push(SwarmAgentUiState {
+                label: format!("agent-{}", i),
+                profile: "explorer".to_string(),
+                task: format!("Task description for agent {}", i),
+                current_action: None,
+                status: SwarmUiStatus::Running,
+                started_at: std::time::Instant::now(),
+                finished_elapsed_ms: None,
+                summary_preview: None,
+            });
+        }
+
+        let backend = ratatui::backend::TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(text.contains("+3 more subagents..."));
+    }
+
+    #[test]
+    fn swarm_panel_compact_mode_on_short_screen() {
+        let mut state = ChatViewState::default();
+        state.swarm_agents.push(SwarmAgentUiState {
+            label: "recon".to_string(),
+            profile: "explorer".to_string(),
+            task: "Searching files".to_string(),
+            current_action: None,
+            status: SwarmUiStatus::Running,
+            started_at: std::time::Instant::now(),
+            finished_elapsed_ms: None,
+            summary_preview: None,
+        });
+
+        let backend = ratatui::backend::TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                state.render(frame);
+            })
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(text.contains("Running 1 subagent"));
+    }
+
+    #[test]
+    fn swarm_agents_cleared_on_user_input_and_clear() {
+        let mut state = ChatViewState::default();
+        state.swarm_agents.push(SwarmAgentUiState {
+            label: "recon".to_string(),
+            profile: "explorer".to_string(),
+            task: "Searching files".to_string(),
+            current_action: None,
+            status: SwarmUiStatus::Running,
+            started_at: std::time::Instant::now(),
+            finished_elapsed_ms: None,
+            summary_preview: None,
+        });
+        assert_eq!(state.swarm_agents.len(), 1);
+
+        state.push_user("hello".to_string());
+        assert!(state.swarm_agents.is_empty());
+
+        state.swarm_agents.push(SwarmAgentUiState {
+            label: "recon".to_string(),
+            profile: "explorer".to_string(),
+            task: "Searching files".to_string(),
+            current_action: None,
+            status: SwarmUiStatus::Running,
+            started_at: std::time::Instant::now(),
+            finished_elapsed_ms: None,
+            summary_preview: None,
+        });
+        state.clear_transcript();
+        assert!(state.swarm_agents.is_empty());
+    }
+
+    #[test]
+    fn record_tool_progress_updates_swarm_state() {
+        let mut state = ChatViewState::default();
+        let start_event = mint_core::AgentProgress::SubagentStarted {
+            subagent: "worker".to_string(),
+            profile: "explorer".to_string(),
+            task: "Investigate database queries".to_string(),
+        };
+        state.record_tool_progress(&start_event);
+        assert_eq!(state.swarm_agents.len(), 1);
+        assert_eq!(state.swarm_agents[0].label, "worker");
+        assert_eq!(state.swarm_agents[0].status, SwarmUiStatus::Running);
+
+        let tool_start = mint_core::AgentProgress::ToolStart {
+            call_id: Some("call-1".to_string()),
+            action: "run_shell".to_string(),
+            input: serde_json::json!({"command": "cargo test"}),
+            subagent: Some("worker".to_string()),
+        };
+        state.record_tool_progress(&tool_start);
+        assert_eq!(
+            state.swarm_agents[0].current_action.as_deref(),
+            Some("Running `cargo test`")
+        );
+        // Subagent tools must NOT be pushed to the main transcript or tools list!
+        assert!(state.transcript.is_empty(), "transcript must stay clean without subagent tool spam");
+        assert!(state.tools.is_empty(), "tools list must not include subagent micro-tools");
+
+        let tool_end = mint_core::AgentProgress::ToolEnd {
+            call_id: Some("call-1".to_string()),
+            action: "run_shell".to_string(),
+            input: serde_json::json!({"command": "cargo test"}),
+            result: "test result ok".to_string(),
+            status: Some(mint_core::integrations::mcp_result::ToolStatus::Success),
+            subagent: Some("worker".to_string()),
+            elapsed_ms: Some(120),
+        };
+        state.record_tool_progress(&tool_end);
+        assert!(state.transcript.is_empty());
+        assert!(state.tools.is_empty());
+
+        let finish_event = mint_core::AgentProgress::SubagentFinished {
+            subagent: "worker".to_string(),
+            status: "completed".to_string(),
+            elapsed_ms: 4500,
+            steps: 3,
+            summary_preview: "All queries optimized".to_string(),
+        };
+        state.record_tool_progress(&finish_event);
+        assert_eq!(state.swarm_agents[0].status, SwarmUiStatus::Success);
+        assert_eq!(state.swarm_agents[0].finished_elapsed_ms, Some(4500));
+        assert_eq!(
+            state.swarm_agents[0].summary_preview.as_deref(),
+            Some("All queries optimized")
+        );
+        assert!(state.transcript.is_empty());
     }
 }

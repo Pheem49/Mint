@@ -405,45 +405,181 @@ async fn parallel_dispatch_shows_parent_calls_before_provider_finishes() {
         semantic_fact_recall: false,
         ..Default::default()
     };
-    let decisions: Vec<_> = ["dispatch-a", "dispatch-b"]
-        .into_iter()
-        .map(|id| {
-            (
-                id.into(),
-                AgentDecision {
-                    thought: String::new(),
-                    action: "dispatch_subagent".into(),
-                    input: AgentInput {
-                        name: "explorer".into(),
-                        instruction: "inspect".into(),
-                        ..Default::default()
-                    },
-                },
-            )
-        })
-        .collect();
+    let tasks = vec![
+        crate::swarm::SwarmTask {
+            role: Some("dispatch-a".into()),
+            base: Some("explorer".into()),
+            instruction: "inspect".into(),
+        },
+        crate::swarm::SwarmTask {
+            role: Some("dispatch-b".into()),
+            base: Some("explorer".into()),
+            instruction: "inspect".into(),
+        },
+    ];
     let mut events = Vec::new();
     let _ = tokio::time::timeout(
         std::time::Duration::from_millis(500),
-        run_parallel_subagent_batch(
-            &decisions,
-            1,
+        dispatch_swarm(
             &root,
             &cfg,
             "review-live-dispatch",
+            tasks,
             &mut |_| Ok(ApprovalOutcome::Approved),
             &mut |event| events.push(event),
-            &mut BTreeMap::new(),
-            &mut Vec::new(),
         ),
     )
     .await;
     for id in ["dispatch-a", "dispatch-b"] {
-        assert!(events.iter().any(|e| matches!(e, AgentProgress::ToolStart { call_id: Some(found), .. } if found == id)), "missing live {id}");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentProgress::SubagentStarted { subagent, .. } if subagent == id)),
+            "missing live {id}"
+        );
     }
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, AgentProgress::ToolEnd { subagent: None, .. }))
-    );
+}
+
+#[test]
+fn test_agent_loop_dispatch_swarm_nested_execution() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+
+    rt.block_on(async {
+        let config_dir = std::env::temp_dir().join(format!("mint-cfg-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(config_dir.join("mint")).unwrap();
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", &config_dir);
+            std::env::set_var("NO_PROXY", "127.0.0.1,localhost");
+            std::env::set_var("no_proxy", "127.0.0.1,localhost");
+        }
+
+        let workspace = std::env::temp_dir().join(format!("mint-swarm-ws-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let cfg = MintConfig {
+            ai_provider: "ollama".into(),
+            ollama_host: format!("http://127.0.0.1:{port}"),
+            ollama_model: "qwen2.5".into(),
+            semantic_fact_recall: false,
+            memory_recall: false,
+            swarm_max_parallel: 4,
+            ..Default::default()
+        };
+
+        let provider = tokio::spawn(async move {
+            // Step 1: Parent agent requests completion. We return tool_calls: dispatch_agents with 3 tasks.
+            // Steps 2, 3, 4: Each of the 3 subagents requests completion. We return finish.
+            // Step 5: Parent agent finishes with summary.
+            for step in 0..10 {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut bytes = Vec::new();
+                let mut chunk = [0; 4096];
+                let (end, length) = loop {
+                    let n = socket.read(&mut chunk).await.unwrap();
+                    if n == 0 {
+                        return;
+                    }
+                    bytes.extend_from_slice(&chunk[..n]);
+                    if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let header = String::from_utf8_lossy(&bytes[..end]);
+                        let length = header
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .and_then(|v| v.trim().parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        break (end + 4, length);
+                    }
+                };
+                while bytes.len() < end + length {
+                    let n = socket.read(&mut chunk).await.unwrap();
+                    if n == 0 {
+                        return;
+                    }
+                    bytes.extend_from_slice(&chunk[..n]);
+                }
+
+                let req_body_str = String::from_utf8_lossy(&bytes[end..end + length]);
+                let is_subagent = req_body_str.contains("Task from parent agent");
+
+                let (action, args) = if is_subagent {
+                    (
+                        "finish",
+                        json!({"summary": "Subagent findings: all good", "verification": "verified"}),
+                    )
+                } else if step == 0 {
+                    (
+                        "dispatch_agents",
+                        json!({
+                            "tasks": [
+                                {"role": "recon", "instruction": "survey files in swarm"},
+                                {"role": "tui-tracer", "instruction": "trace tui swarm"},
+                                {"role": "gui-tracer", "instruction": "trace gui strip"}
+                            ]
+                        }),
+                    )
+                } else {
+                    (
+                        "finish",
+                        json!({"summary": "All 3 subagents finished successfully", "verification": "done"}),
+                    )
+                };
+
+                let body = format!(
+                    "{}\n",
+                    json!({
+                        "model": "qwen2.5",
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [{"function": {"name": action, "arguments": args}}]
+                        },
+                        "done": true
+                    })
+                );
+                let _ = socket.write_all(format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                ).as_bytes()).await;
+            }
+        });
+
+        let chat = format!("parent-agent-turn-{}", uuid::Uuid::new_v4());
+        let agent_task = tokio::spawn(async move {
+            orchestrate_agent_loop(
+                &cfg,
+                "dispatch 3 subagents",
+                &workspace,
+                None,
+                None,
+                None,
+                Some(&chat),
+                None,
+                None,
+                None,
+                true,
+                false,
+                |_| Ok(ApprovalOutcome::Approved),
+                |_| {},
+                |_| {},
+            )
+            .await
+        });
+
+        let res = tokio::time::timeout(std::time::Duration::from_secs(10), agent_task).await;
+        let agent_res = res.unwrap().unwrap().unwrap();
+        assert!(agent_res.summary.contains("All 3 subagents finished successfully") || agent_res.summary.contains("Subagent"));
+        provider.abort();
+    });
 }

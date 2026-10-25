@@ -107,6 +107,8 @@ export type AgentProgress =
   | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string; subagent?: string; callId?: string; status?: ToolStatus } }
   | { type: 'PlanUpdated'; data: { plan: ActivePlan } }
   | { type: 'RunCompleted'; data: { summary: RunTelemetrySummary } }
+  | { type: 'SubagentStarted'; data: { subagent: string; profile: string; task: string } }
+  | { type: 'SubagentFinished'; data: { subagent: string; status: 'completed' | 'failed' | 'cancelled'; elapsed_ms?: number; elapsedMs?: number; steps: number; summary_preview?: string; summaryPreview?: string } }
 
 export interface InteractionMemory {
   id: number

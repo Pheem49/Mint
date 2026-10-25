@@ -137,6 +137,10 @@ pub struct MintConfig {
     pub disabled_tools: Vec<String>,
     pub agents: Vec<AgentConfig>,
     pub enable_agent_collaboration: bool,
+    /// Maximum number of sub-agents run concurrently within a swarm batch
+    /// (1..=8, default 4). Clamped when used.
+    #[serde(default = "default_swarm_max_parallel")]
+    pub swarm_max_parallel: usize,
     /// When true, reflection after a reusable task proposes a new or refined
     /// workspace skill. Every proposal needs interactive approval before saving.
     /// Off by default; `/autoskill on` enables proposals, not unattended writes.
@@ -189,6 +193,10 @@ fn default_true() -> bool {
 
 fn default_thinking_effort() -> String {
     "medium".into()
+}
+
+fn default_swarm_max_parallel() -> usize {
+    crate::swarm::DEFAULT_MAX_PARALLEL
 }
 
 /// Thinking/reasoning configuration for a specific model.
@@ -456,6 +464,7 @@ impl Default for MintConfig {
             disabled_tools: Vec::new(),
             agents: default_agents(),
             enable_agent_collaboration: false,
+            swarm_max_parallel: crate::swarm::DEFAULT_MAX_PARALLEL,
             auto_skill_writing: false,
             memory_recall: true,
             auto_fact_extraction: true,

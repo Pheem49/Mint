@@ -31,6 +31,7 @@ import { ThinkingBlock } from './ThinkingBlock'
 import ChatMessageItem from './ChatMessageItem'
 import { FormattedMessage } from './FormattedMessage'
 import { ProgressActivity } from './ProgressActivity'
+import { SubagentStatusStrip } from './SubagentStatusStrip'
 import { VirtualChatHistory, type VirtualChatHistoryHandle } from './VirtualChatHistory'
 import { ArtifactPreviewPanel, type ArtifactFile } from './ArtifactPreviewPanel'
 import { RewindModal } from './RewindModal'
@@ -1698,6 +1699,10 @@ export default function ChatPanel({
 
       <div className="input-area">
         <ModsPanel workspacePath={workspacePath} chatId={chatId} panelTarget={tools?.modsPanelTarget} onOpen={tools?.onOpenMods ?? (() => {})} />
+        <SubagentStatusStrip
+          progress={agentProgress}
+          onOpenDetails={() => toggleActivity('live')}
+        />
         {composerChanges.length > 0 && (
           <button
             type="button"

@@ -282,6 +282,7 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
 
   for (const event of progress) {
     if (event.type === 'ToolStart') {
+      if (event.data.subagent) continue
       const item = describeTool(event.data.action, event.data.input)
       item.callId = event.data.callId
       activities.push(item)
@@ -314,6 +315,7 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
         }
       }
     } else if (event.type === 'ToolEnd') {
+      if (event.data.subagent) continue
       const finished = describeTool(event.data.action, event.data.input)
       for (let index = activities.length - 1; index >= 0; index -= 1) {
         if (activities[index].state !== 'active') continue
@@ -345,9 +347,10 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
         currentGroup.state = hasActive ? 'active' : hasDone ? 'done' : hasRetry ? 'retry' : hasError ? 'error' : 'done'
       }
     } else if (event.type === 'ContextCompaction') {
+      if (event.data.subagent) continue
       if (event.data.status !== 'started') {
         flushGroup()
-        timeline.push({ id: `context-${nextId++}`, kind: 'thought', thought: event.data.subagent ? `[${event.data.subagent}] ${event.data.message}` : event.data.message })
+        timeline.push({ id: `context-${nextId++}`, kind: 'thought', thought: event.data.message })
       }
     } else if (event.type === 'Thought') {
       const text = event.data?.thought?.trim()
