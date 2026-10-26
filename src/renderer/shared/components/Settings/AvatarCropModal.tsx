@@ -5,6 +5,8 @@ interface AvatarCropModalProps {
   fileName: string
   onClose: () => void
   onConfirm: (croppedDataUri: string) => Promise<void> | void
+  title?: string
+  outputFormat?: 'image/jpeg' | 'image/png' | 'image/webp'
 }
 
 const CROP_SIZE = 280
@@ -15,6 +17,8 @@ export default function AvatarCropModal({
   fileName,
   onClose,
   onConfirm,
+  title,
+  outputFormat = 'image/jpeg',
 }: AvatarCropModalProps) {
   const [zoom, setZoom] = useState(1)
   const [rotation, setRotation] = useState(0) // in degrees (0, 90, 180, 270)
@@ -211,7 +215,9 @@ export default function AvatarCropModal({
         imgNaturalSize.height
       )
 
-      const croppedDataUri = canvas.toDataURL('image/jpeg', 0.95)
+      const croppedDataUri = outputFormat === 'image/png'
+        ? canvas.toDataURL('image/png')
+        : canvas.toDataURL(outputFormat, 0.95)
       await onConfirm(croppedDataUri)
     } catch (err) {
       console.error('Failed to crop image:', err)
@@ -231,21 +237,21 @@ export default function AvatarCropModal({
             className="crop-modal-back-btn"
             onClick={onClose}
             aria-label="Back"
-            title="ย้อนกลับ / ยกเลิก"
+            title="Back / Cancel"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="19" y1="12" x2="5" y2="12"></line>
               <polyline points="12 19 5 12 12 5"></polyline>
             </svg>
           </button>
-          <h3 className="crop-modal-title">ครอบตัดและหมุน</h3>
+          <h3 className="crop-modal-title">{title || 'Crop & Rotate'}</h3>
           <button
             type="button"
             className="crop-modal-reset-btn"
             onClick={handleReset}
-            title="รีเซ็ตตำแหน่งและการหมุน"
+            title="Reset position and rotation"
           >
-            รีเซ็ต
+            Reset
           </button>
         </div>
 
@@ -283,7 +289,7 @@ export default function AvatarCropModal({
             <div className="crop-bracket crop-bracket-bl" />
             <div className="crop-bracket crop-bracket-br" />
           </div>
-          <p className="crop-hint-drag">ลากเพื่อเลื่อนตำแหน่ง · เลื่อนล้อเมาส์เพื่อซูม</p>
+          <p className="crop-hint-drag">Drag to reposition · Scroll wheel to zoom</p>
         </div>
 
         {/* Toolbar & Controls */}
@@ -294,7 +300,7 @@ export default function AvatarCropModal({
               type="button"
               className="crop-zoom-btn"
               onClick={() => updateZoom(zoom - 0.15)}
-              title="ซูมออก"
+              title="Zoom out"
               disabled={zoom <= 1}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -315,7 +321,7 @@ export default function AvatarCropModal({
               type="button"
               className="crop-zoom-btn"
               onClick={() => updateZoom(zoom + 0.15)}
-              title="ซูมเข้า"
+              title="Zoom in"
               disabled={zoom >= 3}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -331,14 +337,14 @@ export default function AvatarCropModal({
               type="button"
               className="crop-rotate-btn"
               onClick={handleRotate}
-              title="หมุน 90 องศา"
+              title="Rotate 90 degrees"
             >
               <div className="crop-rotate-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
                 </svg>
               </div>
-              <span className="crop-rotate-label">หมุน</span>
+              <span className="crop-rotate-label">Rotate</span>
             </button>
           </div>
 
@@ -350,7 +356,7 @@ export default function AvatarCropModal({
               onClick={onClose}
               disabled={isProcessing}
             >
-              ยกเลิก
+              Cancel
             </button>
             <button
               type="button"
@@ -358,7 +364,7 @@ export default function AvatarCropModal({
               onClick={handleSave}
               disabled={isProcessing}
             >
-              {isProcessing ? 'กำลังบันทึก…' : 'ถัดไป'}
+              {isProcessing ? 'Saving…' : 'Done'}
             </button>
           </div>
         </div>
