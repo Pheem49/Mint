@@ -358,6 +358,7 @@ pub(crate) async fn finish_evidence() -> bool {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) async fn last_state() -> String {
     SESSION
         .try_with(|s| {

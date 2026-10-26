@@ -30,7 +30,7 @@ pub use session::{
     run_session, with_tab,
 };
 pub(crate) use session::{
-    finish_evidence as session_finish_evidence, last_state as session_last_state, selected_tab,
+    finish_evidence as session_finish_evidence, selected_tab,
 };
 
 use serde::Serialize;

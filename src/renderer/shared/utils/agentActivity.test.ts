@@ -124,3 +124,26 @@ describe('subagent event isolation', () => {
   })
 })
 
+describe('fault-tolerant run_shell command extraction', () => {
+  it('extracts command from alias script or code', () => {
+    expect(describeTool('run_shell', { script: 'curl -s https://example.com' }).target).toBe('curl -s https://example.com')
+    expect(describeTool('run_shell', { code: 'pytest tests/' }).target).toBe('pytest tests/')
+  })
+
+  it('unpacks command from stringified arguments', () => {
+    expect(describeTool('run_shell', { arguments: '{"command": "git status"}' }).target).toBe('git status')
+  })
+
+  it('unpacks command from object arguments', () => {
+    expect(describeTool('run_shell', { arguments: { cmd: 'cargo check' } }).target).toBe('cargo check')
+  })
+
+  it('extracts raw string command', () => {
+    expect(describeTool('run_shell', 'echo hello' as unknown as Record<string, unknown>).target).toBe('echo hello')
+  })
+
+  it('falls back to (empty command) when no command is provided anywhere', () => {
+    expect(describeTool('run_shell', {}).target).toBe('(empty command)')
+  })
+})
+

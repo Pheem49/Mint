@@ -132,7 +132,11 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
             )
         }
         "run_shell" => {
-            let command = get_field_alias(input, &["command", "cmd"]).unwrap_or("");
+            let command = get_field_alias(
+                input,
+                &["command", "cmd", "script", "exec", "code", "bash", "sh"],
+            )
+            .unwrap_or("");
             let background = input
                 .get("background")
                 .and_then(|v| v.as_bool())

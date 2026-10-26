@@ -73,7 +73,50 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     activityDetail(input, 'prompt') ||
     activityDetail(input, 'searchTerm') ||
     activityDetail(input, 'search_term')
-  const command = activityDetail(input, 'command') || activityDetail(input, 'cmd')
+  let command =
+    activityDetail(input, 'command') ||
+    activityDetail(input, 'cmd') ||
+    activityDetail(input, 'script') ||
+    activityDetail(input, 'exec') ||
+    activityDetail(input, 'code') ||
+    activityDetail(input, 'bash') ||
+    activityDetail(input, 'sh')
+
+  if (!command && input && typeof input === 'object') {
+    if (typeof input.arguments === 'object' && input.arguments !== null) {
+      const nested = input.arguments as Record<string, unknown>
+      command =
+        activityDetail(nested, 'command') ||
+        activityDetail(nested, 'cmd') ||
+        activityDetail(nested, 'script') ||
+        activityDetail(nested, 'exec') ||
+        activityDetail(nested, 'code') ||
+        activityDetail(nested, 'bash') ||
+        activityDetail(nested, 'sh')
+    } else if (typeof input.arguments === 'string') {
+      try {
+        const parsed = JSON.parse(input.arguments)
+        if (parsed && typeof parsed === 'object') {
+          command =
+            activityDetail(parsed, 'command') ||
+            activityDetail(parsed, 'cmd') ||
+            activityDetail(parsed, 'script') ||
+            activityDetail(parsed, 'exec') ||
+            activityDetail(parsed, 'code') ||
+            activityDetail(parsed, 'bash') ||
+            activityDetail(parsed, 'sh')
+        }
+      } catch {
+        // best-effort
+      }
+    }
+  }
+
+  if (!command && typeof (input as unknown) === 'string') {
+    const raw = (input as unknown as string).trim()
+    if (raw && !raw.startsWith('{')) command = raw
+  }
+
   const name = activityDetail(input, 'name')
   const tool = activityDetail(input, 'tool')
   const symbol = activityDetail(input, 'symbol') || activityDetail(input, 'ticker')

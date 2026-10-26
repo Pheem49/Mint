@@ -856,11 +856,10 @@ pub fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Re
     Ok(())
 }
 pub fn load_all_available_skills(current_dir: &Path) -> Vec<mint_core::LearnedSkill> {
-    MemoryStore::open_default()
-        .ok()
-        .and_then(|memory| {
-            mint_core::skill_inventory::list_available_skills(&memory, Some(current_dir)).ok()
-        })
+    let memory = MemoryStore::open_default().unwrap_or_else(|_| {
+        MemoryStore::open(std::env::temp_dir().join(format!("mint-fallback-memory-{}.sqlite", std::process::id())))
+    });
+    mint_core::skill_inventory::list_available_skills(&memory, Some(current_dir))
         .unwrap_or_default()
         .into_iter()
         .map(|entry| entry.skill)

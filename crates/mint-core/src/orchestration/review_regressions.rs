@@ -444,6 +444,7 @@ async fn parallel_dispatch_shows_parent_calls_before_provider_finishes() {
 fn test_agent_loop_dispatch_swarm_nested_execution() {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
+        .thread_stack_size(8 * 1024 * 1024)
         .enable_all()
         .build()
         .unwrap();

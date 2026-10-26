@@ -75,6 +75,7 @@
   { "token": "/subagent add", "usage": "", "description": "Create a subagent — walks through a wizard", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/release-notes", "usage": "", "description": "Show release notes for the current version", "category": "system", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/stats", "usage": "", "description": "Show session statistics", "category": "system", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/steps", "usage": "[<10-200>|reset|status]", "description": "Configure maximum steps per agent turn (default 40, range 10-200)", "category": "system", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/exit", "usage": "", "description": "Exit Mint", "category": "system", "surfaces": ["cli"] },
   { "token": "/code", "usage": "<task>", "description": "Run in code-agent mode", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/n8n", "usage": "[task]", "description": "Open n8n in your browser, or trigger a workflow via the n8n MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },

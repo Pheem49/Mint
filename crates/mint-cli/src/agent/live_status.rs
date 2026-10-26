@@ -1494,6 +1494,11 @@ pub(super) fn ran_command_labels(action: &str, input: &serde_json::Value) -> Opt
         "run_shell" => input
             .get("command")
             .or_else(|| input.get("cmd"))
+            .or_else(|| input.get("script"))
+            .or_else(|| input.get("exec"))
+            .or_else(|| input.get("code"))
+            .or_else(|| input.get("bash"))
+            .or_else(|| input.get("sh"))
             .and_then(|v| v.as_str())
             .filter(|command| !command.trim().is_empty())
             .map(|command| vec![command.trim().to_owned()]),

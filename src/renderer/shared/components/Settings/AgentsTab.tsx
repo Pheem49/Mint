@@ -361,6 +361,8 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
       <SubagentsSection
         swarmMaxParallel={config.swarmMaxParallel ?? 4}
         onUpdateSwarmMaxParallel={val => updateField('swarmMaxParallel', val)}
+        agentMaxSteps={config.agentMaxSteps ?? 40}
+        onUpdateAgentMaxSteps={val => updateField('agentMaxSteps', val)}
       />
     </div>
   )
@@ -384,9 +386,13 @@ const emptySubagentForm = {
 function SubagentsSection({
   swarmMaxParallel = 4,
   onUpdateSwarmMaxParallel,
+  agentMaxSteps = 40,
+  onUpdateAgentMaxSteps,
 }: {
   swarmMaxParallel?: number
   onUpdateSwarmMaxParallel?: (val: number) => void
+  agentMaxSteps?: number
+  onUpdateAgentMaxSteps?: (val: number) => void
 }) {
   const [subagents, setSubagents] = useState<SubagentDefinition[]>([])
   const [loading, setLoading] = useState(true)
@@ -520,6 +526,31 @@ function SubagentsSection({
             />
             <span style={{ fontWeight: 600, minWidth: '24px', textAlign: 'center', color: 'var(--text-primary)' }}>
               {swarmMaxParallel}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '20px', padding: '12px 16px', background: 'var(--panel-soft, rgba(255,255,255,0.03))', borderRadius: '8px', border: '1px solid var(--border-subtle, rgba(255,255,255,0.08))' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <strong style={{ fontSize: '14px', color: 'var(--text-primary)' }}>Agent Step Limit</strong>
+            <p className="hint" style={{ margin: '2px 0 0 0', fontSize: '12px' }}>
+              Maximum tool execution steps per turn (10 to 200, default 40). Warns 5 steps before limit and enforces graceful wrap-up on the final step.
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              type="range"
+              min={10}
+              max={200}
+              step={5}
+              value={agentMaxSteps}
+              onChange={e => onUpdateAgentMaxSteps?.(parseInt(e.target.value, 10))}
+              style={{ width: '100px', accentColor: 'var(--accent-color, #10b981)' }}
+            />
+            <span style={{ fontWeight: 600, minWidth: '28px', textAlign: 'center', color: 'var(--text-primary)' }}>
+              {agentMaxSteps}
             </span>
           </div>
         </div>

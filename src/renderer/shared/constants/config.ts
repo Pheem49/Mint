@@ -39,6 +39,7 @@ export const DEFAULT_CONFIG = {
   enableVoiceReply: true,
   enableAgentCollaboration: false,
   swarmMaxParallel: 4,
+  agentMaxSteps: 40,
   autoSkillWriting: false,
   ttsProvider: 'google',
   ttsVolume: 1.0,

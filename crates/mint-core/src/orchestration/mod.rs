@@ -640,8 +640,7 @@ use workspace_helpers::*;
 /// whole accumulated conversation, so total tokens for one task scale
 /// roughly with step count. Was lowered from 32 to 24 to cap runaway/looping
 /// tasks earlier, but 24 turned out too tight for legitimate multi-file
-/// work, cutting it off mid-task — raised to 40 as a middle ground.
-const MAX_STEPS: usize = 40;
+/// work, cutting it off mid-task — now configurable via `MintConfig::agent_max_steps` (default 40).
 // A tool gets its own correction budget, renewed after successful execution.
 const MAX_TOOL_ARGUMENT_RETRIES: usize = 5;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
@@ -1190,7 +1189,15 @@ struct AgentInput {
     city: String,
     #[serde(default, alias = "expr", alias = "math")]
     expression: String,
-    #[serde(default, alias = "cmd")]
+    #[serde(
+        default,
+        alias = "cmd",
+        alias = "script",
+        alias = "exec",
+        alias = "code",
+        alias = "bash",
+        alias = "sh"
+    )]
     command: String,
     #[serde(default)]
     background: bool,
@@ -1384,9 +1391,78 @@ where
         .map(|input| input.unwrap_or_default())
 }
 
-// Some providers encode the structured patch twice. Decode only that field;
-// retain strict typing for all other arguments and never infer a target file.
+fn prune_null_values(value: &mut Value) {
+    if let Value::Object(map) = value {
+        map.retain(|k, v| !(v.is_null() && k != "path"));
+        for v in map.values_mut() {
+            prune_null_values(v);
+        }
+    } else if let Value::Array(arr) = value {
+        for v in arr.iter_mut() {
+            prune_null_values(v);
+        }
+    }
+}
+
+// Some providers encode the structured patch twice or double-wrap arguments.
+// Decode those fields, prune nulls for robust serde defaults, and retain strict
+// typing for all other arguments.
 fn decode_agent_input(mut value: Value) -> Result<AgentInput, String> {
+    // 1. If value is a string, check if it's an encoded JSON object
+    if let Value::String(s) = &value {
+        let trimmed = s.trim();
+        if trimmed.starts_with('{') && trimmed.ends_with('}') {
+            if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+                if parsed.is_object() {
+                    value = parsed;
+                }
+            }
+        }
+    }
+
+    // 2. Prune null fields so serde default values apply for missing keys
+    prune_null_values(&mut value);
+
+    // 3. Unpack nested "arguments" if top-level command is missing
+    if let Value::Object(map) = &mut value {
+        let has_command = map
+            .get("command")
+            .or_else(|| map.get("cmd"))
+            .or_else(|| map.get("script"))
+            .or_else(|| map.get("exec"))
+            .or_else(|| map.get("code"))
+            .or_else(|| map.get("bash"))
+            .or_else(|| map.get("sh"))
+            .and_then(Value::as_str)
+            .is_some_and(|s| !s.trim().is_empty());
+
+        if !has_command {
+            if let Some(args_val) = map.get("arguments").cloned() {
+                let inner_obj = match args_val {
+                    Value::Object(inner_map) => Some(inner_map),
+                    Value::String(inner_str) => serde_json::from_str::<Value>(&inner_str)
+                        .ok()
+                        .and_then(|v| match v {
+                            Value::Object(m) => Some(m),
+                            _ => None,
+                        }),
+                    _ => None,
+                };
+                if let Some(inner) = inner_obj {
+                    let mut wrapped = Value::Object(inner);
+                    prune_null_values(&mut wrapped);
+                    if let Value::Object(cleaned) = wrapped {
+                        for (k, v) in cleaned {
+                            if !map.contains_key(&k) && !v.is_null() {
+                                map.insert(k, v);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let outer_path = value.get("path").and_then(Value::as_str).map(str::to_owned);
     if let Some(patch) = value.get_mut("patch").filter(|patch| !patch.is_null()) {
         if let Value::String(encoded) = patch {
@@ -1994,8 +2070,10 @@ where
         let mut files_created: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
         let mut repetition_guard = loop_guard::RepetitionGuard::default();
+        let max_steps = config.resolved_agent_max_steps();
+        let warning_threshold = max_steps.saturating_sub(5);
 
-        'steps: for step in 1..=MAX_STEPS {
+        'steps: for step in 1..=max_steps {
             crate::mods::set_turn_policy(&root, chat_id, plan_mode, pinned_mcp_server);
             let _ = execute_mod_requests(&root, chat_id, config, plan_mode, &mut approve, &mut progress, None).await;
             if run_control::cancelled() { turn.interrupt(); return Err(OrchestrationError::Agent("Agent turn canceled by user".into())); }
@@ -2043,6 +2121,27 @@ where
                     "\n\nYour Current Role & System Instructions:\n{}",
                     agent_instruction
                 ));
+            }
+
+            if step >= warning_threshold {
+                let remaining = max_steps.saturating_sub(step);
+                if remaining == 0 {
+                    active_system_prompt.push_str(&format!(
+                        "\n\n[CRITICAL STEP LIMIT REACHED - FINAL STEP]\n\
+                         You are at step {step} of {max_steps} (the absolute final step). \
+                         Do NOT execute any new tool calls or start new exploration. \
+                         You MUST call 'finish' right now, synthesize all findings, results, and links discovered so far, \
+                         and provide a complete, clear, and comprehensive answer to the user."
+                    ));
+                } else {
+                    active_system_prompt.push_str(&format!(
+                        "\n\n[STEP BUDGET WARNING]\n\
+                         You are at step {step} of {max_steps} ({remaining} step{} remaining). \
+                         Do not initiate new broad exploratory tasks or repeat failed attempts. \
+                         Consolidate your findings and call 'finish' with your final report before the budget is exhausted.",
+                        if remaining == 1 { "" } else { "s" }
+                    ));
+                }
             }
 
             let tool_mode = active_config.tool_calling_mode();
@@ -2823,6 +2922,17 @@ where
                                         if let loop_guard::LoopGuardDecision::WarnConsecutiveRepeat { ref notice, .. } = loop_decision {
                                             tool_result.push_str(&format!("\n\n{notice}"));
                                         }
+                                        if step >= warning_threshold {
+                                            let remaining = max_steps.saturating_sub(step);
+                                            if remaining == 0 {
+                                                tool_result.push_str("\n\n[CRITICAL STEP LIMIT REACHED - FINAL STEP]: Step budget exhausted. Do not call more tools. Call 'finish' now with your summary.");
+                                            } else {
+                                                tool_result.push_str(&format!(
+                                                    "\n\n[Step Budget Warning]: Step {}/{} ({} step{} remaining). Please begin consolidating your findings and call 'finish'.",
+                                                    step, max_steps, remaining, if remaining == 1 { "" } else { "s" }
+                                                ));
+                                            }
+                                        }
                                         let hook_messages = crate::hooks::run_post_tool_hooks(
                                             &hooks,
                                             &decision.action,
@@ -3084,8 +3194,114 @@ where
             rebuild_observation(task, &root, &trajectory, &mut observation);
         }
 
+        progress(AgentProgress::Thought {
+            thought: format!(
+                "[Step Limit Reached] Reached maximum allowed steps ({max_steps}). Synthesizing final findings for user..."
+            ),
+        });
+
+        let (wrapup_config, _, _, _) = resolve_agent_config(config, agent_id, &trajectory);
+        let mut final_streamed_summary = String::new();
+        let mut emit_wrapup_chunk = |chunk| match chunk {
+            AgentStreamChunk::DirectText(delta) | AgentStreamChunk::FinalSummary(delta) => {
+                final_streamed_summary.push_str(&delta);
+                on_chunk(delta);
+            }
+        };
+
+        let synthesis_instruction = format!(
+            "You are an AI assistant completing a multi-step task. The step limit of {max_steps} steps has been reached. \
+             Synthesize all findings, observations, errors encountered, and links discovered so far. \
+             Provide a comprehensive, direct, and well-structured final answer to the user in their requested language."
+        );
+
+        let synthesis_succeeded = if wrapup_config.tool_calling_mode() == ToolCallingMode::Native {
+            let mut final_native = native_messages.clone();
+            final_native.push(ChatMessage {
+                role: ChatRole::User,
+                content: vec![ContentBlock::Text {
+                    text: format!(
+                        "Maximum step limit of {max_steps} reached. Do not call any tools. Please output your final answer and summary of findings now."
+                    ),
+                }],
+            });
+            let wrapup_req = ChatRequest {
+                message: String::new(),
+                system_instruction: synthesis_instruction,
+                chat_id: Some(chat_id.to_owned()),
+                image_data_uri: None,
+                audio_data_uri: None,
+                video_data_uri: None,
+                document_attachment: None,
+                workspace_path: None,
+                agent_id: None,
+                plan_mode: false,
+                pinned_mcp_server: None,
+                messages: Some(final_native),
+                tools: None,
+                temperature: wrapup_config.temperature,
+                ..Default::default()
+            };
+            run_control::run(stream_chat_with_network_retry(
+                &wrapup_config,
+                &wrapup_req,
+                &format!("step-limit-wrapup-{chat_id}"),
+                Instant::now(),
+                fast_mode,
+                &mut progress,
+                false,
+                true,
+                &mut emit_wrapup_chunk,
+            ))
+            .await
+            .is_ok()
+        } else {
+            let wrapup_req = ChatRequest {
+                message: format!(
+                    "Observation: Maximum step limit of {max_steps} reached. Please synthesize your findings and output your final answer now.\nPrevious observation:\n{observation}"
+                ),
+                system_instruction: synthesis_instruction,
+                chat_id: Some(chat_id.to_owned()),
+                image_data_uri: None,
+                audio_data_uri: None,
+                video_data_uri: None,
+                document_attachment: None,
+                workspace_path: None,
+                agent_id: None,
+                plan_mode: false,
+                pinned_mcp_server: None,
+                messages: None,
+                tools: None,
+                temperature: wrapup_config.temperature,
+                ..Default::default()
+            };
+            run_control::run(stream_chat_with_network_retry(
+                &wrapup_config,
+                &wrapup_req,
+                &format!("step-limit-wrapup-{chat_id}"),
+                Instant::now(),
+                fast_mode,
+                &mut progress,
+                false,
+                true,
+                &mut emit_wrapup_chunk,
+            ))
+            .await
+            .is_ok()
+        };
+
+        let summary = if synthesis_succeeded && !final_streamed_summary.trim().is_empty() {
+            final_streamed_summary
+        } else {
+            format!(
+                "Task concluded after reaching the step limit ({} steps). Recent activity:\n{}",
+                max_steps,
+                trajectory.iter().rev().take(5).cloned().collect::<Vec<_>>().join("\n")
+            )
+        };
+
         trajectory_run.finish(
-            "FAILED",
+            "COMPLETED",
             turn_total_tokens,
             started_at.elapsed().as_secs_f64(),
             files_created.iter().cloned().collect(),
@@ -3094,7 +3310,7 @@ where
         let run_summary = RunTelemetrySummary {
             run_id: run_id.clone(),
             task: task.to_string(),
-            outcome: "FAILED".to_string(),
+            outcome: "COMPLETED".to_string(),
             total_tokens: turn_total_tokens as usize,
             tool_calls_count: executed_tools.len(),
             files_changed: files_created
@@ -3112,11 +3328,25 @@ where
             summary: run_summary,
         });
 
-        turn.fail();
-        Err(OrchestrationError::Agent(format!(
-            "code agent reached the limit of {} steps; task incomplete. Last browser state: {}",
-            MAX_STEPS, crate::browser::session_last_state().await
-        )))
+        turn.complete_with_summary(
+            &summary,
+            &final_provider,
+            &final_model,
+            final_fallback.as_deref(),
+        )?;
+
+        return Ok(AgentResult {
+            provider: final_provider,
+            model: final_model,
+            summary,
+            verification: String::new(),
+            completion_status: "step_limit_reached".to_string(),
+            fallback: final_fallback,
+            fallback_reason: final_fallback_reason,
+            total_tokens: turn_total_tokens,
+            input_tokens: last_input_tokens,
+            generated_tokens: turn_generated_tokens,
+        });
         }))).await;
             if agent_result.is_err() && !turn.finished {
                 if run_control::cancelled() {
@@ -4164,7 +4394,21 @@ where
 }
 
 fn parse_tool_input(action: &str, input: Value) -> Result<AgentInput, OrchestrationError> {
-    decode_agent_input(input).map_err(|error| {
+    let normalized = if action == "run_shell" {
+        match &input {
+            Value::String(cmd) if !cmd.trim().is_empty() => {
+                if let Ok(val) = serde_json::from_str::<Value>(cmd) && val.is_object() {
+                    val
+                } else {
+                    serde_json::json!({ "command": cmd.trim() })
+                }
+            }
+            _ => input,
+        }
+    } else {
+        input
+    };
+    decode_agent_input(normalized).map_err(|error| {
         OrchestrationError::Agent(format!("invalid arguments for tool '{action}': {error}"))
     })
 }
@@ -6270,5 +6514,62 @@ for line in sys.stdin:
         );
         assert!(result.contains("render failed"));
         crate::mcp::close_mcp_session(&server);
+    }
+
+    #[test]
+    fn test_fault_tolerant_null_handling() {
+        let input = serde_json::json!({
+            "command": "curl -sL https://example.com",
+            "city": null,
+            "columns": null,
+            "verification": null,
+            "filter": null
+        });
+        let parsed = decode_agent_input(input).unwrap();
+        assert_eq!(parsed.command, "curl -sL https://example.com");
+        assert_eq!(parsed.city, "");
+        assert_eq!(parsed.verification, "");
+    }
+
+    #[test]
+    fn test_unpack_nested_arguments() {
+        // Stringified JSON arguments
+        let str_args = serde_json::json!({
+            "action": "run_shell",
+            "arguments": "{\"command\": \"ls -la\", \"city\": null}"
+        });
+        let parsed_str = decode_agent_input(str_args).unwrap();
+        assert_eq!(parsed_str.command, "ls -la");
+
+        // Object arguments
+        let obj_args = serde_json::json!({
+            "action": "run_shell",
+            "arguments": { "command": "pwd" }
+        });
+        let parsed_obj = decode_agent_input(obj_args).unwrap();
+        assert_eq!(parsed_obj.command, "pwd");
+    }
+
+    #[test]
+    fn test_shell_command_aliases() {
+        for (alias, expected) in [
+            ("cmd", "echo 1"),
+            ("script", "echo 2"),
+            ("exec", "echo 3"),
+            ("code", "echo 4"),
+            ("bash", "echo 5"),
+            ("sh", "echo 6"),
+        ] {
+            let input = serde_json::json!({ alias: expected });
+            let parsed = decode_agent_input(input).unwrap();
+            assert_eq!(parsed.command, expected, "Failed for alias {alias}");
+        }
+    }
+
+    #[test]
+    fn test_parse_tool_input_raw_shell_string() {
+        let raw = Value::String("curl -sL --max-time 25 https://sndiary02.com".into());
+        let parsed = parse_tool_input("run_shell", raw).unwrap();
+        assert_eq!(parsed.command, "curl -sL --max-time 25 https://sndiary02.com");
     }
 }

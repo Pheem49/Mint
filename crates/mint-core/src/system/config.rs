@@ -141,6 +141,9 @@ pub struct MintConfig {
     /// (1..=8, default 4). Clamped when used.
     #[serde(default = "default_swarm_max_parallel")]
     pub swarm_max_parallel: usize,
+    /// Maximum steps allowed per agent turn (default 40, clamped to 10..=200).
+    #[serde(default = "default_agent_max_steps")]
+    pub agent_max_steps: usize,
     /// When true, reflection after a reusable task proposes a new or refined
     /// workspace skill. Every proposal needs interactive approval before saving.
     /// Off by default; `/autoskill on` enables proposals, not unattended writes.
@@ -197,6 +200,12 @@ fn default_thinking_effort() -> String {
 
 fn default_swarm_max_parallel() -> usize {
     crate::swarm::DEFAULT_MAX_PARALLEL
+}
+
+pub const DEFAULT_AGENT_MAX_STEPS: usize = 40;
+
+fn default_agent_max_steps() -> usize {
+    DEFAULT_AGENT_MAX_STEPS
 }
 
 /// Thinking/reasoning configuration for a specific model.
@@ -292,6 +301,15 @@ impl MintConfig {
         project_root: &Path,
     ) -> Option<PermissionDecision> {
         permission_decision_for(&self.permission_rules, tool, subject, project_root)
+    }
+
+    /// Resolved maximum steps per turn, clamped between 10 and 200 (defaults to 40).
+    pub fn resolved_agent_max_steps(&self) -> usize {
+        if self.agent_max_steps == 0 {
+            DEFAULT_AGENT_MAX_STEPS
+        } else {
+            self.agent_max_steps.clamp(10, 200)
+        }
     }
 }
 
@@ -465,6 +483,7 @@ impl Default for MintConfig {
             agents: default_agents(),
             enable_agent_collaboration: false,
             swarm_max_parallel: crate::swarm::DEFAULT_MAX_PARALLEL,
+            agent_max_steps: DEFAULT_AGENT_MAX_STEPS,
             auto_skill_writing: false,
             memory_recall: true,
             auto_fact_extraction: true,
@@ -1842,5 +1861,34 @@ mod tests {
         config.openai_model = "gpt-4o".into();
         let (enabled, _) = config.resolved_thinking();
         assert!(!enabled);
+    }
+
+    #[test]
+    fn test_agent_max_steps_config_and_clamping() {
+        let mut config = MintConfig::default();
+        assert_eq!(config.agent_max_steps, DEFAULT_AGENT_MAX_STEPS);
+        assert_eq!(config.resolved_agent_max_steps(), 40);
+
+        // Clamping to min 10
+        config.agent_max_steps = 3;
+        assert_eq!(config.resolved_agent_max_steps(), 10);
+
+        // Clamping to max 200
+        config.agent_max_steps = 500;
+        assert_eq!(config.resolved_agent_max_steps(), 200);
+
+        // Zero defaults to 40
+        config.agent_max_steps = 0;
+        assert_eq!(config.resolved_agent_max_steps(), 40);
+
+        // Custom in-range value
+        config.agent_max_steps = 75;
+        assert_eq!(config.resolved_agent_max_steps(), 75);
+
+        // Deserialization with camelCase agentMaxSteps
+        let json_str = r#"{"agentMaxSteps": 60}"#;
+        let deserialized: MintConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(deserialized.agent_max_steps, 60);
+        assert_eq!(deserialized.resolved_agent_max_steps(), 60);
     }
 }

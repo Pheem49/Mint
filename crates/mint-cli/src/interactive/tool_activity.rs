@@ -127,6 +127,11 @@ impl ToolActivity {
             "description",
             "command",
             "cmd",
+            "script",
+            "exec",
+            "code",
+            "bash",
+            "sh",
             "path",
             "query",
             "pattern",
@@ -135,6 +140,17 @@ impl ToolActivity {
             if let Some(value) = self.input.get(key).and_then(Value::as_str) {
                 if let Some(line) = value.lines().find(|line| !line.trim().is_empty()) {
                     return line.trim().to_owned();
+                }
+            }
+        }
+        if let Some(args) = self.input.get("arguments") {
+            if let Some(obj) = args.as_object() {
+                for key in ["command", "cmd", "script", "exec", "code", "bash", "sh"] {
+                    if let Some(value) = obj.get(key).and_then(Value::as_str) {
+                        if let Some(line) = value.lines().find(|line| !line.trim().is_empty()) {
+                            return line.trim().to_owned();
+                        }
+                    }
                 }
             }
         }
@@ -151,6 +167,11 @@ impl ToolActivity {
             .input
             .get("command")
             .or_else(|| self.input.get("cmd"))
+            .or_else(|| self.input.get("script"))
+            .or_else(|| self.input.get("exec"))
+            .or_else(|| self.input.get("code"))
+            .or_else(|| self.input.get("bash"))
+            .or_else(|| self.input.get("sh"))
             .and_then(Value::as_str)
             .is_some()
             || self.shell();

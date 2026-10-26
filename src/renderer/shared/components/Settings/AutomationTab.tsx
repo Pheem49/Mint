@@ -110,6 +110,35 @@ export default function AutomationTab({
               <span className="settings-toggle-slider"></span>
             </label>
           </div>
+          <div className="toggle-row" style={{ alignItems: 'center' }}>
+            <div>
+              <label>Agent step limit</label>
+              <p className="hint">Maximum tool execution steps per agent turn (10 to 200, default: 40). Warns 5 steps before limit and enforces graceful wrap-up on the final step.</p>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input
+                type="range"
+                min={10}
+                max={200}
+                step={5}
+                value={config.agentMaxSteps ?? 40}
+                onChange={(e) => updateField('agentMaxSteps', parseInt(e.target.value, 10))}
+                style={{ width: '120px', accentColor: 'var(--accent-color, #10b981)' }}
+              />
+              <input
+                type="number"
+                min={10}
+                max={200}
+                className="bridge-input"
+                value={config.agentMaxSteps ?? 40}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  if (!isNaN(val)) updateField('agentMaxSteps', Math.max(10, Math.min(200, val)));
+                }}
+                style={{ width: '64px', textAlign: 'center', padding: '4px 6px' }}
+              />
+            </div>
+          </div>
         </div>
       </section>
 
