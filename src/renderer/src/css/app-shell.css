@@ -236,7 +236,10 @@ h1 {
 
 .settings-modal-overlay {
   position: fixed;
-  inset: 0;
+  top: 38px;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -249,7 +252,8 @@ h1 {
 
 .settings-modal {
   width: min(1180px, 95vw);
-  height: min(780px, 88vh);
+  height: min(780px, calc(100vh - 38px - 48px));
+  max-height: calc(100vh - 38px - 48px);
   overflow: hidden;
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);

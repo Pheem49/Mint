@@ -1,6 +1,6 @@
 .mint-titlebar {
   position: relative;
-  z-index: 300;
+  z-index: 1001;
   display: grid;
   grid-template-columns: auto minmax(24px, 1fr) auto auto;
   align-items: center;

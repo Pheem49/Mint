@@ -2,6 +2,14 @@
 
 Released: 2026-10-17
 
+## Settings UI Topbar Visibility & Navigation Tab Ordering (2026-10-26)
+
+- **Desktop Window Titlebar Visibility in Settings Modal (`src/renderer/src/css/app-shell.css`, `desktop-tools.css`)**:
+  - Adjusted `.settings-modal-overlay` on Desktop to position from `top: 38px` with `z-index: 1000` and elevated `.mint-titlebar` to `z-index: 1001`, keeping the Desktop titlebar (window minimize/maximize/close controls, drag region, and application menus) visible, accessible, and functional while configuring settings.
+  - Constrained `.settings-modal` max-height to `calc(100vh - 38px - 48px)` so the modal fits neatly below the titlebar across all screen resolutions without viewport clipping.
+- **Settings Navigation Order Parity (`src/renderer/shared/components/Settings/SettingsWindow.tsx`)**:
+  - Repositioned `General` above `Notifications` under the `Workspace` section in `SETTINGS_NAV`, ensuring the primary default settings pane appears first in the navigation hierarchy across both Desktop and Web interfaces.
+
 ## Desktop & Web Frontend Rendering, Bundle Splitting & Transport Optimization (2026-10-26)
 
 - **Phase 1 — Frontend Rendering, Memoization & Code Splitting**:

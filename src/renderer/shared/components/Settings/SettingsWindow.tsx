@@ -65,7 +65,6 @@ interface SettingsNavItem {
 }
 
 const SETTINGS_NAV: SettingsNavItem[] = [
-  { id: 'sect-notifications', label: 'Notifications', group: 'Workspace', icon: <Bell size={14} aria-hidden="true" /> },
   {
     id: 'sect-general',
     label: 'General',
@@ -77,6 +76,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
       </svg>
     ),
   },
+  { id: 'sect-notifications', label: 'Notifications', group: 'Workspace', icon: <Bell size={14} aria-hidden="true" /> },
   {
     id: 'sect-profile',
     label: 'Profile',
