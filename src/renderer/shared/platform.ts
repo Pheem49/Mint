@@ -180,6 +180,7 @@ export interface MintPlatformApi {
   readWorkspaceFile(path: string, workspacePath?: string): Promise<string>
   readWorkspaceImage(path: string, workspacePath: string): Promise<string>
   readWorkspaceMedia(path: string, workspacePath: string): Promise<import('./types').WorkspaceMediaSource>
+  openExternal(url: string): Promise<any>
   testMcpConnection(
     url: string,
     headers?: Record<string, string>,
@@ -321,6 +322,7 @@ export const runtimePlatform = {
   getRuntimeStatus: operation('getRuntimeStatus'), setActiveModel: operation('setActiveModel'),
   selectWorkspaceDirectory: operation('selectWorkspaceDirectory'), selectLinkedFolderPath: operation('selectLinkedFolderPath'),
   isTauriRuntime: operation('isTauriRuntime'), readWorkspaceFile: operation('readWorkspaceFile'), readWorkspaceImage: operation('readWorkspaceImage'), readWorkspaceMedia: operation('readWorkspaceMedia'),
+  openExternal: operation('openExternal'),
 }
 
 /** Install the Desktop or Web adapter before rendering the application. */

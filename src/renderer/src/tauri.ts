@@ -1307,7 +1307,92 @@ export function convertFileSrc(filePath: string, protocol = 'asset'): string {
   return `https://asset.localhost/${encodeURIComponent(path)}`;
 }
 
+/**
+ * Opens an external URL in the system's default browser (via Tauri desktop action in Tauri runtime,
+ * or window.open in fallback browser environments).
+ */
+export async function openExternal(url: string): Promise<any> {
+  if (isTauriRuntime()) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke('run_desktop_action', { action: { type: 'open_url', target: url } })
+  }
+  if (typeof window !== 'undefined') {
+    return window.open(url, '_blank', 'noopener,noreferrer')
+  }
+}
+
+let activeLinkInterceptorCleanup: (() => void) | null = null
+
+/**
+ * Global link interceptor: Catches clicks on anchor tags pointing to external URLs
+ * (http:, https:, or target="_blank") and opens them in the system default browser
+ * via Tauri desktop actions (or window.open in browser / webview fallbacks).
+ */
+export function installExternalLinkInterceptor(
+  targetDocument: Document | null = typeof document !== 'undefined' ? document : null
+): () => void {
+  if (!targetDocument) return () => {}
+
+  const handleClick = (event: MouseEvent) => {
+    // Only handle primary click (left) or auxiliary click (middle)
+    if (event.defaultPrevented || (event.button !== 0 && event.button !== 1)) {
+      return
+    }
+
+    const target = event.target as HTMLElement | null
+    if (!target || typeof target.closest !== 'function') return
+
+    const anchor = target.closest('a') as HTMLAnchorElement | null
+    if (!anchor) return
+
+    const rawHref = anchor.getAttribute('href') || ''
+    if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) {
+      return
+    }
+
+    let resolvedUrl = ''
+    try {
+      resolvedUrl = anchor.href || rawHref
+    } catch {
+      resolvedUrl = rawHref
+    }
+
+    const isHttpOrHttps = /^https?:\/\//i.test(rawHref) || /^https?:\/\//i.test(resolvedUrl)
+    const isBlank = anchor.target === '_blank'
+
+    if (isHttpOrHttps || (isBlank && !rawHref.startsWith('/') && /^https?:\/\//i.test(resolvedUrl))) {
+      event.preventDefault()
+      event.stopPropagation()
+      void openExternal(resolvedUrl)
+    }
+  }
+
+  targetDocument.addEventListener('click', handleClick, true)
+  return () => {
+    targetDocument.removeEventListener('click', handleClick, true)
+  }
+}
+
 export function installTauriAdapters() {
+  if (typeof document !== 'undefined') {
+    if (activeLinkInterceptorCleanup) {
+      activeLinkInterceptorCleanup()
+    }
+    activeLinkInterceptorCleanup = installExternalLinkInterceptor(document)
+  }
+
+  if (typeof window !== 'undefined' && isTauriRuntime()) {
+    const originalWindowOpen = window.open.bind(window)
+    window.open = (url?: string | URL, target?: string, features?: string): Window | null => {
+      const urlStr = url ? String(url) : ''
+      if (/^https?:\/\//i.test(urlStr) && target === '_blank') {
+        void openExternal(urlStr)
+        return null
+      }
+      return originalWindowOpen(url, target, features)
+    }
+  }
+
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();
     console.warn(`Not running inside Tauri. Connecting to local API server fallback at ${API_BASE}.`);
@@ -1342,7 +1427,7 @@ export function installTauriAdapters() {
         window.location.hash = '#/';
       },
       quitApp: () => {},
-      openExternal: () => {},
+      openExternal: (url: string) => openExternal(url),
       openFolder: () => {},
     };
 
@@ -1523,6 +1608,7 @@ export function installTauriAdapters() {
       clearAiNotifications: clearBrowserNotifications,
       getTtsUrls: async () => [],
       setAiState: () => {},
+      openExternal: (url: string) => openExternal(url),
     };
     return;
   }
@@ -1566,10 +1652,7 @@ export function installTauriAdapters() {
       const { invoke } = await import('@tauri-apps/api/core')
       return void invoke('exit_app')
     },
-    openExternal: async (url) => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('run_desktop_action', { action: { type: 'open_url', target: url } })
-    },
+    openExternal: (url: string) => openExternal(url),
     openFolder: async (path) => {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('open_folder', { path })
@@ -1728,6 +1811,7 @@ export function installTauriAdapters() {
       const { invoke } = await import('@tauri-apps/api/core')
       return void invoke('set_ai_state', { state })
     },
+    openExternal: (url: string) => openExternal(url),
   }
 }
 
@@ -2243,6 +2327,7 @@ const _apiCheck: MintPlatformApi = {
   rollbackGitCheckpoint,
   undoGitCheckpoint,
   readWorkspaceFile, readWorkspaceImage, readWorkspaceMedia,
+  openExternal,
   testMcpConnection,
 }
 

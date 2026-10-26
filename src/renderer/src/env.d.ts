@@ -49,6 +49,7 @@ interface Window {
     clearAiNotifications: () => void;
     getTtsUrls: (text: string) => Promise<Array<{ shortText: string; url: string }>>;
     setAiState: (state: string) => void;
+    openExternal: (url: string) => Promise<any>;
   };
   settingsApi: {
     getSettings: () => Promise<any>;

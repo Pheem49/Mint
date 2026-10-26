@@ -139,7 +139,13 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                     return
                   }
                   // Otherwise open primary link
-                  window.open(primaryItem.url, '_blank', 'noopener,noreferrer')
+                  if (typeof window !== 'undefined' && (window as any).api?.openExternal) {
+                    void (window as any).api.openExternal(primaryItem.url)
+                  } else if (typeof window !== 'undefined' && (window as any).settingsApi?.openExternal) {
+                    void (window as any).settingsApi.openExternal(primaryItem.url)
+                  } else {
+                    window.open(primaryItem.url, '_blank', 'noopener,noreferrer')
+                  }
                 }}
                 onMouseEnter={(e) => {
                   const el = e.currentTarget

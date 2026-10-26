@@ -4,6 +4,7 @@
 - **Titlebar Visibility**: Preserved Desktop titlebar, window controls (minimize/maximize/close), drag region, and application menus while Settings modal is open.
 - **Settings Hierarchy**: Reordered navigation tabs to position General directly above Notifications in the Workspace section across Desktop and Web.
 - **Streamlined Composer**: Removed static AI gateway disclaimer text and lowered the chat input closer to the bottom edge.
+- **External Link Interceptor**: Added global link interception for Desktop to open image previews, search source citations, and chat URLs directly in the system default browser.
 - **Activity & Preview Cards**: Added inline viewed image previews with click-to-zoom modals, and enabled in-panel image viewing inside the Tools Surface without navigating away.
 - **TUI & Terminal Polish**: Unified command status badges (`[Command]`, `[Check]`, exit codes) with mint-green accents and suppressed duplicate command output blocks in chat.
 

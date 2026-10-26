@@ -88,3 +88,83 @@ describe.each([['Desktop fallback', desktopAdapter], ['Web', webAdapter]] as con
     expect(body).toEqual({ workspacePath: '/project', chatId: 'chat-a', action: 'action', id: 'checklist', instanceId: 'revision-instance', command: 'add', value: 'Test' })
   })
 })
+
+describe.each([['Desktop fallback', desktopAdapter], ['Web', webAdapter]] as const)('%s openExternal', (_name, adapter) => {
+  it('exports openExternal function and invokes window.open in browser fallback', async () => {
+    const openMock = vi.fn()
+    vi.stubGlobal('window', { open: openMock })
+    expect(adapter.openExternal).toBeTypeOf('function')
+    await adapter.openExternal('https://example.com/test')
+    expect(openMock).toHaveBeenCalledWith('https://example.com/test', '_blank', 'noopener,noreferrer')
+  })
+})
+
+describe('desktop external link interceptor', () => {
+  it('intercepts clicks on external http/https links and prevents default', async () => {
+    const openMock = vi.fn()
+    vi.stubGlobal('window', { open: openMock })
+
+    let clickHandler: ((e: any) => void) | null = null
+    const mockDocument: any = {
+      addEventListener: vi.fn((event: string, handler: any) => {
+        if (event === 'click') clickHandler = handler
+      }),
+      removeEventListener: vi.fn((event: string, handler: any) => {
+        if (event === 'click' && clickHandler === handler) clickHandler = null
+      }),
+    }
+
+    const cleanup = desktopAdapter.installExternalLinkInterceptor(mockDocument)
+    expect(mockDocument.addEventListener).toHaveBeenCalledWith('click', expect.any(Function), true)
+    expect(clickHandler).toBeTypeOf('function')
+
+    const externalAnchor: any = {
+      getAttribute: (attr: string) => (attr === 'href' ? 'https://example.com/search-result' : null),
+      href: 'https://example.com/search-result',
+      target: '_blank',
+    }
+    const imgInsideAnchor: any = {
+      closest: (selector: string) => (selector === 'a' ? externalAnchor : null),
+    }
+
+    const clickEvent: any = {
+      defaultPrevented: false,
+      button: 0,
+      target: imgInsideAnchor,
+      preventDefault: vi.fn(() => { clickEvent.defaultPrevented = true }),
+      stopPropagation: vi.fn(),
+    }
+
+    clickHandler!(clickEvent)
+
+    expect(clickEvent.preventDefault).toHaveBeenCalledOnce()
+    expect(clickEvent.stopPropagation).toHaveBeenCalledOnce()
+    expect(openMock).toHaveBeenCalledWith('https://example.com/search-result', '_blank', 'noopener,noreferrer')
+
+    // Internal hash link should not be intercepted
+    openMock.mockClear()
+    const internalAnchor: any = {
+      getAttribute: (attr: string) => (attr === 'href' ? '#/settings' : null),
+      href: '#/settings',
+      target: '',
+    }
+    const internalClickEvent: any = {
+      defaultPrevented: false,
+      button: 0,
+      target: {
+        closest: (selector: string) => (selector === 'a' ? internalAnchor : null),
+      },
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    }
+
+    clickHandler!(internalClickEvent)
+
+    expect(internalClickEvent.preventDefault).not.toHaveBeenCalled()
+    expect(internalClickEvent.stopPropagation).not.toHaveBeenCalled()
+    expect(openMock).not.toHaveBeenCalled()
+
+    cleanup()
+    expect(mockDocument.removeEventListener).toHaveBeenCalledWith('click', expect.any(Function), true)
+  })
+})
