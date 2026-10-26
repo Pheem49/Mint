@@ -12,8 +12,8 @@
   --color-input: var(--border-default);
   --color-accent: var(--bg-surface-hover);
   --color-accent-foreground: var(--text-main);
-  --color-secondary: var(--bg-surface-soft);
-  --color-secondary-foreground: var(--text-main);
+  --color-secondary: var(--btn-gray-bg, var(--bg-surface-soft));
+  --color-secondary-foreground: var(--btn-gray-fg, var(--text-main));
   --color-muted-foreground: var(--text-muted);
   --color-ring: var(--accent);
 }

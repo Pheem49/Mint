@@ -97,6 +97,18 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
         </svg>
       ),
     },
+    {
+      id: 'studio',
+      name: 'Studio Dark',
+      description: '#101010 neutral',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="3" y1="9" x2="21" y2="9"></line>
+          <line x1="9" y1="21" x2="9" y2="9"></line>
+        </svg>
+      ),
+    },
   ]
 
   const currentAccent = (config.accentColor || '').toLowerCase()

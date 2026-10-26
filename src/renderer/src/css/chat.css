@@ -650,16 +650,16 @@
 
 #chat-tool-btn,
 #screen-capture-btn {
-  background: transparent;
-  color: var(--text-muted);
-  border: 1px solid var(--border);
+  background: var(--btn-gray-bg, transparent);
+  color: var(--btn-gray-fg, var(--text-muted));
+  border: 1px solid var(--btn-gray-border, var(--border));
 }
 
 #chat-tool-btn:hover,
 #screen-capture-btn:hover {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--interactive-fg);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--btn-gray-bg-hover, color-mix(in srgb, var(--accent) 15%, transparent));
+  color: var(--interactive-fg, #ffffff);
+  border-color: var(--accent-border, color-mix(in srgb, var(--accent) 40%, transparent));
 }
 
 .action-card {
@@ -3766,15 +3766,43 @@ input:checked + .slider:before {
   box-shadow: none;
 }
 
-#send-btn:hover,
-#chat-tool-btn:hover,
-#screen-capture-btn:hover {
-  background: var(--panel-raised);
-  transform: none;
+:root[data-accent-mode="monochrome"] #send-btn,
+:root[data-accent-mode="gray"] #send-btn {
+  background: var(--btn-gray-bg, #17171a);
+  color: #ffffff;
+  border: 1px solid var(--btn-gray-border, rgba(255, 255, 255, 0.12));
+}
+
+:root[data-accent-mode="monochrome"] #send-btn:hover,
+:root[data-accent-mode="gray"] #send-btn:hover {
+  background: var(--btn-gray-bg-hover, #222227);
+  color: #ffffff;
+}
+
+[data-theme="light"][data-accent-mode="monochrome"] #send-btn,
+[data-theme="light"][data-accent-mode="gray"] #send-btn {
+  background: var(--btn-gray-bg, #334155);
+  color: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.2);
+}
+
+[data-theme="light"][data-accent-mode="monochrome"] #send-btn:hover,
+[data-theme="light"][data-accent-mode="gray"] #send-btn:hover {
+  background: var(--btn-gray-bg-hover, #1e293b);
+  color: #ffffff;
 }
 
 #send-btn:hover {
   background: var(--accent-hover);
+  transform: none;
+}
+
+#chat-tool-btn:hover,
+#screen-capture-btn:hover {
+  background: var(--btn-gray-bg-hover, var(--panel-raised));
+  border-color: var(--accent-border, var(--btn-gray-border-hover));
+  color: #ffffff;
+  transform: none;
 }
 
 #chat-tool-btn {
@@ -4222,3 +4250,10 @@ input:checked + .slider:before {
   background: #e2e8f0;
   color: #0f172a;
 }
+
+[data-theme="studio"] .user-message .message-bubble {
+  background: #1c1c1c;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e1e1e1;
+}
+

@@ -1146,17 +1146,17 @@
   border-radius: var(--radius-md);
   font-size: 0.82rem;
   font-weight: 500;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  background: var(--bg-surface-soft);
-  color: var(--text-main, #cbd5e1);
+  border: 1px solid var(--btn-gray-border, var(--border, rgba(255, 255, 255, 0.1)));
+  background: var(--btn-gray-bg, var(--bg-surface-soft));
+  color: var(--btn-gray-fg, var(--text-main, #f8fafc));
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .management-action-btn:hover {
-  background: var(--bg-surface-hover);
-  color: var(--text-main);
-  border-color: var(--border-strong);
+  background: var(--btn-gray-bg-hover, var(--bg-surface-hover));
+  color: var(--btn-gray-fg, var(--text-main));
+  border-color: var(--accent-border, var(--btn-gray-border-hover));
 }
 
 .management-action-btn.danger {

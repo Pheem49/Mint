@@ -945,6 +945,26 @@
   color: var(--text-main);
 }
 
+[data-theme="studio"] .sidebar-project.active,
+[data-theme="studio"] .sidebar-project.is-active,
+[data-theme="studio"] .sidebar-chat-item.active {
+  background: #323232;
+  color: #e1e1e1;
+}
+
+[data-theme="studio"] .sidebar-project:hover,
+[data-theme="studio"] .sidebar-chat-item:hover {
+  background: #262626;
+  color: #ffffff;
+}
+
+[data-theme="studio"] .sidebar-project.active:hover,
+[data-theme="studio"] .sidebar-project.is-active:hover,
+[data-theme="studio"] .sidebar-chat-item.active:hover {
+  background: #383838;
+  color: #ffffff;
+}
+
 .sidebar-pictures-btn {
   cursor: pointer;
 }

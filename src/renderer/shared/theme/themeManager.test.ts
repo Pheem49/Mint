@@ -40,4 +40,24 @@ describe('theme surface settings', () => {
     expect(attributes.get('data-surface')).toBe('opaque')
     expect(properties.get('--glass-blur')).toBe('none')
   })
+
+  it('sets data-accent-mode to monochrome for pure white accent', () => {
+    applyTheme({ theme: 'dark', accentColor: '#ffffff' })
+    expect(attributes.get('data-accent-mode')).toBe('monochrome')
+  })
+
+  it('sets data-accent-mode to gray for neutral gray accents', () => {
+    applyTheme({ theme: 'dark', accentColor: '#52525b' })
+    expect(attributes.get('data-accent-mode')).toBe('gray')
+  })
+
+  it('sets data-accent-mode to color for standard color accents', () => {
+    applyTheme({ theme: 'dark', accentColor: '#10b981' })
+    expect(attributes.get('data-accent-mode')).toBe('color')
+  })
+
+  it('correctly sets data-theme to studio when studio theme is selected', () => {
+    applyTheme({ theme: 'studio' })
+    expect(attributes.get('data-theme')).toBe('studio')
+  })
 })

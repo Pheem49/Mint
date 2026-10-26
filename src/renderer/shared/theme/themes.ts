@@ -3,7 +3,7 @@
  * TypeScript constants and types for the Mint GUI Theme System.
  */
 
-export type ColorMode = 'system' | 'dark' | 'light' | 'midnight'
+export type ColorMode = 'system' | 'dark' | 'light' | 'midnight' | 'studio'
 export type SurfaceStyle = 'opaque' | 'glass'
 
 export interface AccentFlavor {
@@ -63,7 +63,7 @@ export interface ThemePreset {
   id: string
   name: string
   description: string
-  theme: 'dark' | 'light' | 'midnight'
+  theme: 'dark' | 'light' | 'midnight' | 'studio'
   accentColor: string
   systemTextColor: string
   chatTextColor: string
@@ -77,7 +77,7 @@ export const THEME_PRESETS: ThemePreset[] = [
   {
     id: 'preset-dark-mint',
     name: 'Dark Mint',
-    description: 'Black background · Green elements · White text',
+    description: 'Black background · Mint green & slate gray elements',
     theme: 'dark',
     accentColor: '#10b981',
     systemTextColor: '#f8fafc',
@@ -101,9 +101,22 @@ export const THEME_PRESETS: ThemePreset[] = [
     textPreview: '#0f172a',
   },
   {
+    id: 'preset-studio-dark',
+    name: 'Studio Dark',
+    description: '#101010 canvas · #1c1c1c surfaces · #323232 active',
+    theme: 'studio',
+    accentColor: '#10b981',
+    systemTextColor: '#e1e1e1',
+    chatTextColor: '#e1e1e1',
+    bgPreview: '#101010',
+    panelPreview: '#161616',
+    accentPreview: '#10b981',
+    textPreview: '#e1e1e1',
+  },
+  {
     id: 'preset-dark-mono',
     name: 'Dark Monochrome',
-    description: 'Black background · White elements · White text',
+    description: 'Black background · Slate gray surfaces · White text',
     theme: 'dark',
     accentColor: '#ffffff',
     systemTextColor: '#f8fafc',

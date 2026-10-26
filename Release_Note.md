@@ -1,6 +1,16 @@
 # Release Notes - Mint Agent v1.17.0
 
 ## Desktop & Web UI / UX Enhancements
+- **Studio Dark Theme (Antigravity Studio Palette)**: Introduced the new "Studio Dark" theme preset and core color mode across Desktop and Web UI, modeled directly after modern dark IDEs like Google Antigravity and Cursor:
+  - **Base Canvas**: `#101010` (RGB: 16, 16, 16) ultra-deep black for main chat area.
+  - **Sidebar & Panels**: `#161616` (RGB: 22, 22, 22) muted charcoal for navigation bar and side drawer.
+  - **Surfaces, Inputs & Message Bubbles**: `#1c1c1c` (RGB: 28, 28, 28) for the composer input container and user chat bubbles with high legibility.
+  - **Active Items & Focus Highlights**: `#323232` (RGB: 50, 50, 50) for selected sidebar projects/sessions and hover interactions.
+  - **Typography**: `#e1e1e1` primary text with `#8e8e8e` secondary/muted labels and icons.
+  - **Accent**: `#10b981` mint green highlights for focal points, badges, and status indicators.
+- **Charcoal Onyx 60/30/10 Theme Architecture**: Refined dark themes (Dark Mint, Midnight, Dark Monochrome) across Desktop and Web to adopt the deep Charcoal Onyx palette (`#17171a` / `#222227` / `#121215`): 60% deep black base canvas (`#0a0a0c`, `#000000`), 30% deep charcoal surfaces (`#121215` – `#17171a`) for textboxes, cards, dialogs, and secondary buttons, and 10% mint green (`#10b981`) accent highlights for focused elements, active indicators, and primary CTA buttons.
+- **Sleek Gray Buttons with Mint Hover Affordance**: Secondary and action buttons (`.btn-secondary`, `.management-action-btn`, `#chat-tool-btn`, `#screen-capture-btn`) feature neutral gray backgrounds with white text and a subtle mint-glow border upon hover, preventing visual fatigue while maintaining brand coherence.
+- **Removed Standalone Dark Slate Gray Preset**: Streamlined the theme catalog by removing the separate `Dark Slate Gray` preset in favor of embedding the sleek slate-gray surface layer directly into all dark themes.
 - **Configurable Agent Step Limit & `/steps`**: Added `/steps` slash command and graphical step budget controls in Settings across Desktop, Web, and CLI (Full-Screen TUI), allowing users to adjust maximum tool execution steps per turn (10–200, default 40).
 - **Trajectory Export & SWE-bench Parity**: Added one-click "Export Trajectory" capability in the Run Summary Dashboard across Desktop and Web UI, downloading canonical SWE-bench / Agent Protocol v1.0 execution transcripts (`{runId}-trajectory.json`) containing complete step sequences, thoughts, observations, token metrics, and duration.
 - **Diagnostic Self-Correction Visuals**: Enhanced the activity drawer to detect and render `[Self-Correction Guidance]` blocks with dedicated high-contrast callout styling, making the agent's self-healing loop clearly visible to developers.

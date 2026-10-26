@@ -92,19 +92,19 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  /* Surfaces */
+  /* Surfaces: 60% Canvas, 30% Charcoal Onyx Surfaces & Secondary Buttons */
   --bg-canvas: #0a0a0c;
-  --bg-surface: rgba(24, 24, 27, 0.76);
-  --bg-surface-raised: #18181b;
-  --bg-surface-soft: rgba(255, 255, 255, 0.045);
-  --bg-surface-subtle: rgba(255, 255, 255, 0.025);
-  --bg-surface-hover: rgba(255, 255, 255, 0.075);
-  --bg-surface-active: rgba(255, 255, 255, 0.12);
-  --bg-overlay: #111113; /* Solid opaque modal/dialog surface */
-  --bg-backdrop: rgba(5, 7, 12, 0.65); /* Modal / drawer dim backdrop */
-  --bg-terminal: #111318;
-  --bg-input: rgba(255, 255, 255, 0.05);
-  --bg-input-focus: rgba(255, 255, 255, 0.09);
+  --bg-surface: #121215;
+  --bg-surface-raised: #17171a;
+  --bg-surface-soft: #17171a;
+  --bg-surface-subtle: #101013;
+  --bg-surface-hover: #222227;
+  --bg-surface-active: #2d2d34;
+  --bg-overlay: #121215; /* Solid opaque modal/dialog surface */
+  --bg-backdrop: rgba(5, 7, 12, 0.72); /* Modal / drawer dim backdrop */
+  --bg-terminal: #0f0f12;
+  --bg-input: #121215;
+  --bg-input-focus: #1a1a1f;
 
   /* Typography */
   --text-primary: #f8fafc;
@@ -117,6 +117,14 @@
   --border-default: rgba(255, 255, 255, 0.12);
   --border-strong: rgba(255, 255, 255, 0.22);
   --border-focus: var(--accent-default);
+
+  /* Buttons: Charcoal Onyx Button Tokens */
+  --btn-gray-bg: #17171a;
+  --btn-gray-bg-hover: #222227;
+  --btn-gray-bg-active: #2d2d34;
+  --btn-gray-fg: #f8fafc;
+  --btn-gray-border: rgba(255, 255, 255, 0.10);
+  --btn-gray-border-hover: rgba(255, 255, 255, 0.20);
 
   /* Shadows */
   --shadow-xs: 0 2px 8px rgba(0, 0, 0, 0.18);
@@ -226,6 +234,14 @@
   --border-strong: rgba(15, 23, 42, 0.24);
   --border-focus: var(--accent-default);
 
+  /* Buttons: Neutral Slate/Gray in Light Mode */
+  --btn-gray-bg: #334155;
+  --btn-gray-bg-hover: #1e293b;
+  --btn-gray-bg-active: #0f172a;
+  --btn-gray-fg: #ffffff;
+  --btn-gray-border: rgba(15, 23, 42, 0.18);
+  --btn-gray-border-hover: rgba(15, 23, 42, 0.32);
+
   /* Shadows: Soft natural elevation */
   --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
   --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
@@ -308,19 +324,19 @@
 [data-theme="midnight"] {
   color-scheme: dark;
 
-  /* Surfaces */
+  /* Surfaces: 60% OLED Canvas, 30% Charcoal Onyx Surfaces & Secondary Buttons */
   --bg-canvas: #000000;
-  --bg-surface: #050508;
-  --bg-surface-raised: #0d0d12;
-  --bg-surface-soft: #121218;
-  --bg-surface-subtle: #0a0a0e;
-  --bg-surface-hover: #1a1a22;
-  --bg-surface-active: #24242e;
-  --bg-overlay: #050508;
-  --bg-backdrop: rgba(0, 0, 0, 0.76);
+  --bg-surface: #0a0a0d;
+  --bg-surface-raised: #141417;
+  --bg-surface-soft: #121215;
+  --bg-surface-subtle: #08080b;
+  --bg-surface-hover: #1c1c21;
+  --bg-surface-active: #25252b;
+  --bg-overlay: #0d0d10;
+  --bg-backdrop: rgba(0, 0, 0, 0.80);
   --bg-terminal: #050508;
-  --bg-input: #0a0a0e;
-  --bg-input-focus: #121218;
+  --bg-input: #0e0e11;
+  --bg-input-focus: #17171b;
 
   /* Typography */
   --text-primary: #f8fafc;
@@ -333,6 +349,14 @@
   --border-default: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.2);
   --border-focus: var(--accent-default);
+
+  /* Buttons: OLED Charcoal Onyx Button Tokens */
+  --btn-gray-bg: #141417;
+  --btn-gray-bg-hover: #1f1f25;
+  --btn-gray-bg-active: #2a2a32;
+  --btn-gray-fg: #f8fafc;
+  --btn-gray-border: rgba(255, 255, 255, 0.10);
+  --btn-gray-border-hover: rgba(255, 255, 255, 0.20);
 
   /* Shadows */
   --shadow-xs: none;
@@ -411,15 +435,141 @@
   --diff-del-text: #fee2e2;
 }
 
+/* ── Studio Dark Theme (Antigravity Style Pure Neutral Palette) ────────── */
+[data-theme="studio"] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg-canvas: #101010;
+  --sidebar-bg: #161616;
+  --bg-surface: #161616;
+  --bg-surface-raised: #1c1c1c;
+  --bg-surface-soft: #1c1c1c;
+  --bg-surface-subtle: #131313;
+  --bg-surface-hover: #323232;
+  --bg-surface-active: #3c3c3c;
+  --bg-overlay: #161616;
+  --bg-backdrop: rgba(0, 0, 0, 0.75);
+  --bg-terminal: #101010;
+  --bg-input: #1c1c1c;
+  --bg-input-focus: #262626;
+
+  /* Typography */
+  --text-primary: #e1e1e1;
+  --text-secondary: #8e8e8e;
+  --text-muted: #8e8e8e;
+  --text-disabled: #5a5a5a;
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.22);
+  --border-focus: var(--accent-default);
+
+  /* Buttons: Studio Neutral Tokens */
+  --btn-gray-bg: #1c1c1c;
+  --btn-gray-bg-hover: #323232;
+  --btn-gray-bg-active: #3e3e3e;
+  --btn-gray-fg: #e1e1e1;
+  --btn-gray-border: rgba(255, 255, 255, 0.12);
+  --btn-gray-border-hover: rgba(255, 255, 255, 0.24);
+
+  /* Shadows */
+  --shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.25);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.8);
+
+  --glass-blur: none;
+
+  /* Scrollbars */
+  --scrollbar-track: rgba(255, 255, 255, 0.04);
+  --scrollbar-thumb: rgba(142, 142, 142, 0.35);
+  --scrollbar-thumb-hover: rgba(142, 142, 142, 0.65);
+
+  /* Semantic Status & Interactive States */
+  --status-listening: #7dd3fc;
+  --status-thinking: var(--accent-default);
+  --status-speaking: #22c55e;
+  --status-success: #10b981;
+  --status-success-fg: #34d399;
+  --status-success-bg: rgba(16, 185, 129, 0.12);
+  --status-success-border: rgba(16, 185, 129, 0.3);
+  --status-warning: #f59e0b;
+  --status-warning-fg: #fbbf24;
+  --status-warning-bg: rgba(245, 158, 11, 0.14);
+  --status-warning-border: rgba(245, 158, 11, 0.32);
+  --status-error: #ef4444;
+  --status-error-fg: #f87171;
+  --status-error-bg: rgba(239, 68, 68, 0.12);
+  --status-error-border: rgba(239, 68, 68, 0.3);
+  --status-info: #38bdf8;
+  --status-info-fg: #38bdf8;
+  --status-info-bg: rgba(56, 189, 248, 0.12);
+  --status-info-border: rgba(56, 189, 248, 0.28);
+  --status-purple-fg: #c084fc;
+  --status-purple-bg: rgba(168, 85, 247, 0.14);
+  --status-purple-border: rgba(168, 85, 247, 0.3);
+
+  /* Action Hover States */
+  --hover-delete: #fca5a5;
+  --hover-delete-bg: rgba(248, 113, 113, 0.12);
+  --hover-edit: #c7d2fe;
+  --hover-edit-bg: rgba(99, 102, 241, 0.12);
+  --close-btn-hover-bg: #2d1818;
+  --close-btn-hover-color: #ff8a8a;
+
+  /* Tool Surface & Category Icon Palette */
+  --icon-review: #8ab4ff;
+  --icon-terminal: #34d399;
+  --icon-browser: #c4a7ff;
+  --icon-files: #fbbf24;
+
+  /* Code Syntax Highlighting Tokens */
+  --syntax-command: #38bdf8;
+  --syntax-keyword: #818cf8;
+  --syntax-string: #34d399;
+  --syntax-flag: #fbbf24;
+  --syntax-comment: #8e8e8e;
+  --syntax-number: #fb923c;
+  --syntax-variable: #f472b6;
+  --syntax-property: #60a5fa;
+  --syntax-function: #38bdf8;
+  --syntax-type: #a78bfa;
+  --syntax-boolean: #fb7185;
+  --syntax-operator: #cbd5e1;
+  --syntax-punctuation: #cbd5e1;
+
+  /* Diff Semantic Tokens */
+  --diff-add-bg: rgba(16, 185, 129, 0.12);
+  --diff-add-border: #10b981;
+  --diff-add-gutter: #34d399;
+  --diff-add-text: #d1fae5;
+  --diff-del-bg: rgba(239, 68, 68, 0.12);
+  --diff-del-border: #ef4444;
+  --diff-del-gutter: #f87171;
+  --diff-del-text: #fee2e2;
+}
+
+[data-theme="studio"][data-surface="opaque"] {
+  --glass-blur: none !important;
+  --bg-surface: #161616;
+  --bg-surface-raised: #1c1c1c;
+  --bg-surface-soft: #1c1c1c;
+  --bg-surface-subtle: #131313;
+  --bg-surface-hover: #323232;
+  --bg-surface-active: #3c3c3c;
+}
+
 /* ── Surface Style Modes ─────────────────────────────────────────────────── */
 [data-surface="opaque"] {
   --glass-blur: none !important;
   --bg-surface: #121215;
-  --bg-surface-raised: #18181c;
-  --bg-surface-soft: #1b1b20;
-  --bg-surface-subtle: #151519;
-  --bg-surface-hover: #25252b;
-  --bg-surface-active: #2e2e36;
+  --bg-surface-raised: #17171a;
+  --bg-surface-soft: #17171a;
+  --bg-surface-subtle: #101013;
+  --bg-surface-hover: #222227;
+  --bg-surface-active: #2d2d34;
 }
 
 [data-theme="light"][data-surface="opaque"] {
@@ -432,12 +582,12 @@
 }
 
 [data-theme="midnight"][data-surface="opaque"] {
-  --bg-surface: #050508;
-  --bg-surface-raised: #0d0d12;
-  --bg-surface-soft: #121218;
-  --bg-surface-subtle: #0a0a0e;
-  --bg-surface-hover: #1a1a22;
-  --bg-surface-active: #24242e;
+  --bg-surface: #0a0a0d;
+  --bg-surface-raised: #141417;
+  --bg-surface-soft: #121215;
+  --bg-surface-subtle: #08080b;
+  --bg-surface-hover: #1c1c21;
+  --bg-surface-active: #25252b;
 }
 
 [data-surface="glass"] {
@@ -495,6 +645,10 @@
   /* Accent is a surface color; interactive text needs its own semantic role. */
   --interactive-fg: var(--accent);
   --interactive-fg-hover: var(--accent-hover);
+  --btn-bg: var(--btn-gray-bg);
+  --btn-fg: var(--btn-gray-fg);
+  --btn-border: var(--btn-gray-border);
+  --btn-hover-bg: var(--btn-gray-bg-hover);
   --danger: var(--status-error);
   --error: var(--status-error);
   --color-danger: var(--status-error);
@@ -504,12 +658,53 @@
 
 /* Pure white remains the primary surface for Dark Monochrome. Its text and
  * icon affordances use zinc so they stay legible on light selected states. */
-:root[data-accent-mode="monochrome"] {
+:root[data-accent-mode="monochrome"],
+:root[data-accent-mode="gray"] {
   --interactive-fg: #a1a1aa;
   --interactive-fg-hover: #f4f4f5;
 }
 
-:root[data-theme="light"][data-accent-mode="monochrome"] {
+:root[data-theme="light"][data-accent-mode="monochrome"],
+:root[data-theme="light"][data-accent-mode="gray"] {
   --interactive-fg: #18181b;
   --interactive-fg-hover: #3f3f46;
+}
+
+/* Primary buttons in Monochrome and Gray modes adopt sleek gray with white text */
+:root[data-accent-mode="monochrome"] .btn-primary,
+:root[data-accent-mode="monochrome"] .management-primary-btn,
+:root[data-accent-mode="gray"] .btn-primary,
+:root[data-accent-mode="gray"] .management-primary-btn {
+  background: var(--btn-gray-bg, #17171a);
+  color: var(--btn-gray-fg, #ffffff);
+  border: 1px solid var(--btn-gray-border, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+:root[data-accent-mode="monochrome"] .btn-primary:hover,
+:root[data-accent-mode="monochrome"] .management-primary-btn:hover,
+:root[data-accent-mode="gray"] .btn-primary:hover,
+:root[data-accent-mode="gray"] .management-primary-btn:hover {
+  background: var(--btn-gray-bg-hover, #222227);
+  color: #ffffff;
+  border-color: var(--btn-gray-border-hover, rgba(255, 255, 255, 0.20));
+}
+
+[data-theme="light"][data-accent-mode="monochrome"] .btn-primary,
+[data-theme="light"][data-accent-mode="monochrome"] .management-primary-btn,
+[data-theme="light"][data-accent-mode="gray"] .btn-primary,
+[data-theme="light"][data-accent-mode="gray"] .management-primary-btn {
+  background: var(--btn-gray-bg, #334155);
+  color: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.2);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+[data-theme="light"][data-accent-mode="monochrome"] .btn-primary:hover,
+[data-theme="light"][data-accent-mode="monochrome"] .management-primary-btn:hover,
+[data-theme="light"][data-accent-mode="gray"] .btn-primary:hover,
+[data-theme="light"][data-accent-mode="gray"] .management-primary-btn:hover {
+  background: var(--btn-gray-bg-hover, #1e293b);
+  color: #ffffff;
+  border-color: rgba(15, 23, 42, 0.35);
 }
