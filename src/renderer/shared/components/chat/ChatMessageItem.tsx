@@ -11,6 +11,7 @@ import { AgentActivityDrawer } from '../activity/AgentActivityDrawer'
 import SourcesBlock from './SourcesBlock'
 import { TurnFileChanges, type RewindRequestPayload } from './TurnFileChanges'
 import { ToolResultCards } from '../cards/ToolResultCards'
+import ProviderBrandIcon from '../ui/ProviderBrandIcon'
 
 export interface ChatMessageItemProps {
   interaction: any
@@ -23,6 +24,7 @@ export interface ChatMessageItemProps {
   speak: (text: string) => void
   toggleActivity: (id: string) => void
   chatId?: string
+  customProviders?: Array<{ id: string; displayName?: string; logoDataUrl?: string }>
   onOpenArtifact?: (artifact: ArtifactFile) => void
   onOpenReview?: () => void
   onRewindRequest?: (payload: RewindRequestPayload) => void
@@ -151,7 +153,7 @@ const ChatMessageItem = React.memo(
             {webSources.length > 0 && <SourcesBlock sources={webSources} />}
             <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {interaction.status === 'completed' && <span className="provider-model-chip" data-provider={(interaction.provider || '').toLowerCase()} title={`${interaction.provider} • ${interaction.model}`}>
-                <span className="provider-chip-dot" aria-hidden="true" />
+                <ProviderBrandIcon provider={interaction.provider} model={interaction.model} customProviders={props.customProviders} size={13} />
                 <span className="provider-chip-name">{interaction.provider}</span>
                 <span className="provider-chip-divider">/</span>
                 <span className="provider-chip-model">{interaction.model}</span>

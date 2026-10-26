@@ -170,6 +170,34 @@
   color: var(--text-primary);
 }
 
+.provider-chip-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.provider-chip-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.provider-chip-logo.is-monochrome {
+  background-color: var(--provider-brand-color, currentColor);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+  display: inline-block;
+}
+
 .provider-chip-dot {
   width: 6px;
   height: 6px;

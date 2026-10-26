@@ -26,6 +26,25 @@ it('does not render duplicate completion status pills in message bubble', () => 
   expect(html).not.toContain('data-completion-status')
 })
 
+it('renders provider brand logo instead of a plain colored dot in provider-model-chip', () => {
+  const html = renderToStaticMarkup(
+    <ChatMessageItem
+      {...base}
+      interaction={{
+        ...base.interaction,
+        status: 'completed',
+        provider: 'deepseek',
+        model: 'deepseek-flash',
+      }}
+    />
+  )
+  expect(html).toContain('provider-model-chip')
+  expect(html).toContain('provider-chip-logo')
+  expect(html).toContain('deepseek')
+  expect(html).toContain('deepseek-flash')
+  expect(html).not.toContain('provider-chip-dot')
+})
+
 describe('message update isolation and TurnFileChanges deep module', () => {
   it('updates only the message whose activity drawer state or snapshot changed', () => {
     expect(unchanged({ openActivityIds: { '8': true } })).toBe(true)

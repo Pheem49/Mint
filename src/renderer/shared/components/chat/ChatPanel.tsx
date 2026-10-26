@@ -29,6 +29,7 @@ import { ApprovalCard } from './ApprovalCard'
 import { FormattedMessage, readableAssistantText, renderSpeakerIcon, renderCopyIcon } from '../../utils/markdown'
 import { ThinkingBlock } from './ThinkingBlock'
 import ChatMessageItem from './ChatMessageItem'
+import ProviderBrandIcon from '../ui/ProviderBrandIcon'
 import { AgentActivityDrawer } from '../activity/AgentActivityDrawer'
 import { TurnFileChanges, type RewindRequestPayload } from './TurnFileChanges'
 import { SubagentStatusStrip } from '../activity/SubagentStatusStrip'
@@ -1193,7 +1194,7 @@ export default function ChatPanel({
               {streamedResponse && (
                 <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span className="provider-model-chip" data-provider={(streamedResponse.provider || '').toLowerCase()} title={`${streamedResponse.provider} • ${streamedResponse.model}`}>
-                    <span className="provider-chip-dot" aria-hidden="true" />
+                    <ProviderBrandIcon provider={streamedResponse.provider} model={streamedResponse.model} customProviders={settingsConfig?.customProviders} size={13} />
                     <span className="provider-chip-name">{streamedResponse.provider}</span>
                     <span className="provider-chip-divider">/</span>
                     <span className="provider-chip-model">{streamedResponse.model}</span>
@@ -1428,6 +1429,7 @@ export default function ChatPanel({
                   speak={speak}
                   toggleActivity={toggleActivity}
                   chatId={chatId}
+                  customProviders={settingsConfig?.customProviders}
                   onOpenArtifact={openArtifact}
                   onOpenReview={openAllConversationReview}
                   onRewindRequest={handleRewindRequest}

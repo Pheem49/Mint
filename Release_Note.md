@@ -1,6 +1,12 @@
 # Release Notes - Mint Agent v1.17.0
 
 ## Desktop & Web UI / UX Enhancements
+- **Provider Brand Badges in Chat Message Footer**: Replaced the static colored dot in the message footer provider chip (`{provider} / {model}`, e.g. `deepseek / deepseek-flash`) with crisp 13px vector brand logos (DeepSeek whale, Gemini sparkle, Anthropic mark, OpenAI vortex, Groq, Ollama, OpenRouter, Mistral, Perplexity, Together, Qwen, Hugging Face, LM Studio) and full custom provider logo/emoji support across both Desktop and Web UI.
+- **Compact Tabbed Custom Provider Logo Picker & Crop Integration**: Redesigned the Custom Provider Logo setting in General Tab with a modern 3-tab picker across Desktop and Web:
+  - **AI Presets Tab**: One-click selection of 13 official vector SVG marks (DeepSeek, Ollama, OpenRouter, Groq, Mistral AI, Together AI, Perplexity, LM Studio, Hugging Face, OpenAI, Anthropic, Gemini, Qwen) bundled locally and stored as resilient SVG data URLs.
+  - **Upload & Crop Tab**: Full support for SVG, PNG, WebP, and JPEG files with drag-and-drop dropzone, client-side auto-downscaling, direct native file input trigger, and integrated **Crop & Rotate popup modal** (`AvatarCropModal`) allowing users to zoom, pan, rotate, and crop custom provider badges.
+  - **URL & Emoji Tab**: Supports direct image web URLs (`https://...`) and quick-pick emoji badges (🤖, 🧠, ⚡, 🐋, 🦙, etc.) converted into crisp vector SVG data URLs.
+  - **Direct Index-based State Updates**: Resolved silent saving failures by updating custom providers directly by index instead of fragile real-time slug ID lookups.
 - **Studio Dark Theme (Antigravity Studio Palette)**: Introduced the new "Studio Dark" theme preset and core color mode across Desktop and Web UI, modeled directly after modern dark IDEs like Google Antigravity and Cursor:
   - **Base Canvas**: `#101010` (RGB: 16, 16, 16) ultra-deep black for main chat area.
   - **Sidebar & Panels**: `#161616` (RGB: 22, 22, 22) muted charcoal for navigation bar and side drawer.
