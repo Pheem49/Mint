@@ -860,7 +860,7 @@ h1 {
   .assistant-workspace .conversation-panel.is-empty .input-area {
     position: absolute;
     top: auto;
-    bottom: 44px;
+    bottom: 16px;
     left: 50%;
     width: min(840px, calc(100% - 64px));
     margin: 0;
@@ -868,16 +868,8 @@ h1 {
   }
 
   .assistant-workspace .conversation-panel.is-empty .empty-chat-prompt {
-    top: calc(100% + 44px - 50vh);
+    top: calc(100% + 16px - 50vh);
     transform: translateY(-50%);
-  }
-
-  .assistant-workspace .conversation-panel.is-empty .input-disclaimer {
-    position: absolute;
-    right: 32px;
-    bottom: 8px;
-    left: 32px;
-    margin: 0;
   }
 }
 

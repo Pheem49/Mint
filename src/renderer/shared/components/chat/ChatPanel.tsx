@@ -1817,9 +1817,6 @@ export default function ChatPanel({
           <p className="composer-voice-feedback" role="status">{voiceTranscript}</p>
         )}
       </div>
-      <p className="input-disclaimer">
-        Mint Agent is an AI gateway. Responses via third-party APIs. Verify critical info.
-      </p>
       {geminiLive.voiceMode && (
         <GeminiLiveOverlay
           status={

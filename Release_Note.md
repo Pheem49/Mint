@@ -9,6 +9,9 @@ Released: 2026-10-17
   - Constrained `.settings-modal` max-height to `calc(100vh - 38px - 48px)` so the modal fits neatly below the titlebar across all screen resolutions without viewport clipping.
 - **Settings Navigation Order Parity (`src/renderer/shared/components/Settings/SettingsWindow.tsx`)**:
   - Repositioned `General` above `Notifications` under the `Workspace` section in `SETTINGS_NAV`, ensuring the primary default settings pane appears first in the navigation hierarchy across both Desktop and Web interfaces.
+- **Chat Input Disclaimer Removal & Bottom Spacing (`src/renderer/shared/components/chat/ChatPanel.tsx`, `chat.css`, `app-shell.css`)**:
+  - Removed the static AI gateway disclaimer text from underneath the chat composer.
+  - Decreased conversation panel and empty-state bottom offsets, shifting the message input box lower and closer to the bottom edge.
 
 ## Desktop & Web Frontend Rendering, Bundle Splitting & Transport Optimization (2026-10-26)
 
