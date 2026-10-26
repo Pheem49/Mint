@@ -336,8 +336,8 @@ impl MemoryStore {
         Ok(())
     }
 
-    fn expire_abandoned_turns(&self, chat_id: &str) -> Result<(), MemoryError> {
-        self.connection()?.execute(
+    fn expire_abandoned_turns(connection: &Connection, chat_id: &str) -> Result<(), MemoryError> {
+        connection.execute(
             "UPDATE interaction_memories SET status = 'interrupted', lease_until = 0
              WHERE chat_id = ?1 AND status IN ('queued', 'running') AND lease_until < unixepoch()",
             params![normalized_chat_id(chat_id)],
@@ -385,8 +385,8 @@ impl MemoryStore {
         limit: usize,
     ) -> Result<ConversationChanges, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
-        self.expire_abandoned_turns(&chat_id)?;
         let connection = self.connection()?;
+        Self::expire_abandoned_turns(&connection, &chat_id)?;
         let mut statement = connection.prepare(
             "SELECT c.sequence, c.interaction_id,
                     m.id, m.chat_id, m.user_text, m.ai_text, m.provider, m.model,
@@ -441,8 +441,8 @@ impl MemoryStore {
     }
 
     pub fn latest_conversation_sequence(&self, chat_id: &str) -> Result<i64, MemoryError> {
-        self.expire_abandoned_turns(chat_id)?;
         let connection = self.connection()?;
+        Self::expire_abandoned_turns(&connection, chat_id)?;
         Ok(connection.query_row(
             "SELECT coalesce(max(sequence), 0) FROM conversation_changes WHERE chat_id = ?1",
             params![normalized_chat_id(chat_id)],
@@ -457,8 +457,8 @@ impl MemoryStore {
         limit: usize,
     ) -> Result<ConversationSnapshot, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
-        self.expire_abandoned_turns(&chat_id)?;
         let mut connection = self.connection()?;
+        Self::expire_abandoned_turns(&connection, &chat_id)?;
         let tx = connection.transaction()?;
         let cursor: i64 = tx.query_row(
             "SELECT coalesce(max(sequence), 0) FROM conversation_changes WHERE chat_id = ?1",

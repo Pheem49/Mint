@@ -176,6 +176,31 @@ pub async fn shutdown_on_signal(on_shutdown: impl FnOnce()) {
     on_shutdown();
 }
 
+fn parse_http_request_framing(buf: &[u8]) -> Option<(usize, usize)> {
+    let header_end = buf.windows(4).position(|window| window == b"\r\n\r\n")?;
+    let headers_str = String::from_utf8_lossy(&buf[..header_end]);
+    let content_len = headers_str
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                value.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    Some((header_end, header_end + 4 + content_len))
+}
+
+fn parse_request_line(headers: &str) -> Option<(&str, &str)> {
+    let first_line = headers.split("\r\n").next().unwrap_or(headers);
+    let mut parts = first_line.split_whitespace();
+    let method = parts.next()?;
+    let path = parts.next()?;
+    Some((method, path))
+}
+
 pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
     start_api_server_on(SocketAddr::from(([0, 0, 0, 0], port))).await
 }
@@ -232,7 +257,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
             let outcome = std::panic::AssertUnwindSafe(async move {
             let mut request_bytes = Vec::with_capacity(8192);
             let mut chunk = [0_u8; 8192];
-            let mut expected_len: Option<usize> = None;
+            let mut framing: Option<(usize, usize)> = None;
 
             loop {
                 let n = match socket.read(&mut chunk).await {
@@ -250,31 +275,28 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                     return;
                 }
 
-                let headers_str = String::from_utf8_lossy(&request_bytes);
-                if expected_len.is_none() && headers_str.contains("\r\n\r\n") {
-                    expected_len = headers_str
-                        .to_lowercase()
-                        .find("content-length:")
-                        .and_then(|content_length_pos| {
-                            let sub = &headers_str[content_length_pos..];
-                            let line_end = sub.find("\r\n")?;
-                            sub["content-length:".len()..line_end]
-                                .trim()
-                                .parse::<usize>()
-                                .ok()
-                        })
-                        .and_then(|content_len| {
-                            let header_len = headers_str.find("\r\n\r\n")? + 4;
-                            Some(header_len + content_len)
-                        });
+                if framing.is_none() {
+                    if let Some((header_end, total_len)) = parse_http_request_framing(&request_bytes) {
+                        if total_len > MAX_API_REQUEST_BYTES {
+                            send_json_response(
+                                socket,
+                                "413 Payload Too Large",
+                                "{\"provider\":\"error\",\"model\":\"error\",\"text\":\"Request is too large. Try a smaller image or fewer images.\"}",
+                            )
+                            .await;
+                            return;
+                        }
+                        if total_len > request_bytes.capacity() {
+                            request_bytes.reserve(total_len - request_bytes.len());
+                        }
+                        framing = Some((header_end, total_len));
+                    }
                 }
 
-                if let Some(total_len) = expected_len {
+                if let Some((_, total_len)) = framing {
                     if request_bytes.len() >= total_len {
                         break;
                     }
-                } else if headers_str.contains("\r\n\r\n") {
-                    break;
                 }
             }
 
@@ -282,25 +304,21 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                 return;
             }
 
-            let request_str = String::from_utf8_lossy(&request_bytes);
-            let lines: Vec<&str> = request_str.split("\r\n").collect();
-            if lines.is_empty() {
+            let Some((header_end, total_len)) = framing.or_else(|| parse_http_request_framing(&request_bytes)) else {
                 return;
-            }
-
-            let req_line: Vec<&str> = lines[0].split_whitespace().collect();
-            if req_line.len() < 2 {
-                return;
-            }
-
-            let method = req_line[0];
-            let path = req_line[1];
-
-            let header_end = match request_str.find("\r\n\r\n") {
-                Some(idx) => idx,
-                None => return,
             };
-            let body = &request_str[header_end + 4..];
+            if request_bytes.len() > total_len {
+                request_bytes.truncate(total_len);
+            }
+
+            let request_str = String::from_utf8_lossy(&request_bytes);
+            let Some(str_header_end) = request_str.find("\r\n\r\n") else {
+                return;
+            };
+            let Some((method, path)) = parse_request_line(&request_str[..str_header_end]) else {
+                return;
+            };
+            let body = &request_str[str_header_end + 4..];
 
             if method == "OPTIONS" {
                 let response = "HTTP/1.1 200 OK\r\n\
@@ -323,7 +341,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
             {
                 let request = crate::webhooks::Request {
                     method: method.into(), path: path.into(),
-                    headers: request_str[..header_end].into(),
+                    headers: request_str[..str_header_end].into(),
                     body: request_bytes[header_end + 4..].to_vec(),
                 };
                 crate::webhooks::handle(socket, service, config, request).await;
@@ -2039,5 +2057,22 @@ mod tests {
         assert!(should_log_api_route("/api/library"));
         assert!(should_log_api_route("/api/system-info"));
         assert!(should_log_api_route("/api/select-folder"));
+    }
+
+    #[test]
+    fn http_request_framing_parses_headers_once_without_utf8_scanning_binary_or_large_body() {
+        let mut raw = b"POST /api/chat-stream HTTP/1.1\r\nHost: localhost:3000\r\nContent-Length: 10\r\n\r\n1234".to_vec();
+        // Even if the body contains invalid UTF-8 bytes, header framing only inspects the header slice.
+        raw.extend_from_slice(&[0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa]);
+        let (header_end, total_len) = parse_http_request_framing(&raw).expect("headers complete");
+        assert_eq!(&raw[header_end..header_end + 4], b"\r\n\r\n");
+        assert_eq!(total_len, header_end + 4 + 10);
+        assert_eq!(raw.len(), total_len);
+
+        let header_str = std::str::from_utf8(&raw[..header_end]).unwrap();
+        assert_eq!(
+            parse_request_line(header_str),
+            Some(("POST", "/api/chat-stream"))
+        );
     }
 }
