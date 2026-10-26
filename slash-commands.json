@@ -27,6 +27,7 @@
   { "token": "/plugin enable", "usage": "<name>", "description": "Enable a native plugin for the agent", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/plugin disable", "usage": "<name>", "description": "Disable a native plugin", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/remember", "usage": "[here] <text>", "description": "Save a durable fact to long-term memory (\"here\" = this project only)", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/trajectory", "usage": "[export [path]|status]", "description": "Inspect or export SWE-bench compliant execution trajectory for current run", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/memory", "usage": "", "description": "Manage long-term memory store", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/memory list", "usage": "", "description": "Show recent interactions", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/memory facts", "usage": "", "description": "List stored long-term facts", "category": "tools", "surfaces": ["cli", "web", "desktop"] },

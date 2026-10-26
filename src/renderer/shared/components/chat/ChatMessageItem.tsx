@@ -117,7 +117,7 @@ const ChatMessageItem = React.memo(
         )}
         <div className="message ai-message">
           <div className="bubble-wrapper">
-            {interaction.status === 'completed' && (
+            {interaction.status !== 'queued' && interaction.status !== 'running' && (
               <AgentActivityDrawer
                 progress={progress}
                 id={String(interaction.id)}
@@ -128,7 +128,7 @@ const ChatMessageItem = React.memo(
                 onOpenArtifact={onOpenArtifact}
               />
             )}
-            {interaction.status === 'completed' && (
+            {interaction.status !== 'queued' && interaction.status !== 'running' && (
               <TurnFileChanges
                 progress={progress}
                 interaction={interaction}

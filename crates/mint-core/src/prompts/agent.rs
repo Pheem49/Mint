@@ -53,7 +53,6 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     // Cosmetic/non-mutating — no reason to block it during read-only
     // plan-mode investigation.
     "avatar_signal",
-    "conversation_summary",
     "dispatch_agents",
     "dispatch_subagent",
 ];
@@ -64,7 +63,6 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
 /// two paths can never drift on which actions exist.
 pub(crate) fn base_allowed_actions() -> Vec<&'static str> {
     vec![
-        "conversation_summary",
         "list_files",
         "read_file",
         "search_code",

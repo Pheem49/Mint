@@ -7,13 +7,6 @@ use super::*;
 /// rather than reusing the parallel `trajectory: Vec<String>` log, since that
 /// log gets one entry per *tool call* while `native_messages` gets one
 /// Assistant/Tool pair per *step* (a step can batch multiple tool calls) —
-pub(super) const MAX_TRANSCRIPT_TOOL_RESULT_CHARS: usize = 2_000;
-
-/// Renders a slice of `native_messages` back into readable text for the
-/// compaction summarizer prompt. Self-contained to `ChatMessage`/`ContentBlock`
-/// rather than reusing the parallel `trajectory: Vec<String>` log, since that
-/// log gets one entry per *tool call* while `native_messages` gets one
-/// Assistant/Tool pair per *step* (a step can batch multiple tool calls) —
 /// keeping the two aligned would need extra bookkeeping for no real benefit.
 pub(super) fn render_messages_as_text(messages: &[ChatMessage]) -> String {
     messages
@@ -29,7 +22,7 @@ pub(super) fn render_messages_as_text(messages: &[ChatMessage]) -> String {
                     }
                     ContentBlock::ToolResult { content, .. } => {
                         let truncated =
-                            truncate_for_context(content, MAX_TRANSCRIPT_TOOL_RESULT_CHARS);
+                            super::truncation::head_tail_truncate(content, super::truncation::TruncationConfig::COMPACT);
                         format!("Result: {truncated}")
                     }
                     ContentBlock::Image { .. } => "[image]".to_string(),
@@ -113,24 +106,17 @@ pub(super) async fn compact_native_messages(
             compacted.push(messages[0].clone());
             compacted.push(ChatMessage {
                 role: ChatRole::Assistant,
-                content: vec![ContentBlock::ToolUse {
-                    id: "call_compacted_summary".into(),
-                    name: "conversation_summary".into(),
-                    input: serde_json::json!({
-                        "summary": format!("Summary of steps 1-{compact_pairs}")
-                    }),
-                    thought_signature: None,
+                content: vec![ContentBlock::Text {
+                    text: format!(
+                        "[Summary of earlier steps 1-{compact_pairs}, compacted to save context]\n{}",
+                        summary_response.text.trim()
+                    ),
                 }],
             });
             compacted.push(ChatMessage {
-                role: ChatRole::Tool,
-                content: vec![ContentBlock::ToolResult {
-                    tool_use_id: "call_compacted_summary".into(),
-                    content: format!(
-                        "[Summary of steps 1-{compact_pairs}, compacted to save context]\n{}",
-                        summary_response.text.trim()
-                    ),
-                    is_error: false,
+                role: ChatRole::User,
+                content: vec![ContentBlock::Text {
+                    text: "Continue the task using the summary above and the recent steps below.".into(),
                 }],
             });
             compacted.extend_from_slice(&messages[1 + compact_message_count..]);
@@ -209,21 +195,14 @@ pub(super) fn hard_truncate_native_messages(
     }
     compacted.push(ChatMessage {
         role: ChatRole::Assistant,
-        content: vec![ContentBlock::ToolUse {
-            id: "call_compacted_summary".into(),
-            name: "conversation_summary".into(),
-            input: serde_json::json!({
-                "summary": format!("Summary of steps 1-{compact_pairs} (hard-truncated)")
-            }),
-            thought_signature: None,
+        content: vec![ContentBlock::Text {
+            text: summary_content,
         }],
     });
     compacted.push(ChatMessage {
-        role: ChatRole::Tool,
-        content: vec![ContentBlock::ToolResult {
-            tool_use_id: "call_compacted_summary".into(),
-            content: summary_content,
-            is_error: false,
+        role: ChatRole::User,
+        content: vec![ContentBlock::Text {
+            text: "Continue the task using the summary above and the recent steps below.".into(),
         }],
     });
     if messages.len() > 1 + compact_message_count {
@@ -689,7 +668,7 @@ mod compaction_progress_tests {
             },
         ];
         let rendered = render_messages_as_text(&messages);
-        assert!(rendered.contains("... [truncated]"));
+        assert!(rendered.contains("Truncated"));
         assert!(rendered.len() < 3000);
     }
 
@@ -705,27 +684,31 @@ mod compaction_progress_tests {
         assert_eq!(truncated.len(), 1 + 2 + 6);
         assert_eq!(truncated[0].role, ChatRole::User);
         assert_eq!(truncated[1].role, ChatRole::Assistant);
-        assert_eq!(truncated[2].role, ChatRole::Tool);
+        assert_eq!(truncated[2].role, ChatRole::User);
 
         // Verify summary contains key info
-        match &truncated[2].content[0] {
-            ContentBlock::ToolResult { content, .. } => {
-                assert!(content.contains("mock provider failure"));
-                assert!(content.contains("read_file"));
-                assert!(content.contains("file0.rs"));
-                assert!(content.contains("file1.rs"));
+        match &truncated[1].content[0] {
+            ContentBlock::Text { text } => {
+                assert!(text.contains("mock provider failure"));
+                assert!(text.contains("read_file"));
+                assert!(text.contains("file0.rs"));
+                assert!(text.contains("file1.rs"));
             }
-            _ => panic!("Expected ToolResult in summary"),
+            _ => panic!("Expected Text block in summary"),
         }
 
-        // Verify strict role alternation
-        for i in 1..truncated.len() {
+        // Verify role sequence after compaction:
+        // [0] User (initial task)
+        // [1] Assistant (compacted summary)
+        // [2] User (continuation prompt)
+        // [3..] Alternating Assistant (ToolUse) and Tool (ToolResult)
+        for (i, msg) in truncated.iter().enumerate().skip(3) {
             let expected_role = if i % 2 == 1 {
                 ChatRole::Assistant
             } else {
                 ChatRole::Tool
             };
-            assert_eq!(truncated[i].role, expected_role);
+            assert_eq!(msg.role, expected_role);
         }
     }
 
@@ -744,6 +727,8 @@ mod compaction_progress_tests {
         assert!(result.is_some());
         let (compacted, fallback) = result.unwrap();
         assert_eq!(compacted.len(), 1 + 2 + 6);
+        assert_eq!(compacted[1].role, ChatRole::Assistant);
+        assert_eq!(compacted[2].role, ChatRole::User);
         assert!(fallback
             .as_deref()
             .unwrap_or("")

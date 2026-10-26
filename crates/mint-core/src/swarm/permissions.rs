@@ -26,7 +26,6 @@ pub const READ_ONLY_ACTIONS: &[&str] = &[
     "read_diagnostics",
     "view_image",
     "mcp_list_tools",
-    "conversation_summary",
     "finish",
 ];
 

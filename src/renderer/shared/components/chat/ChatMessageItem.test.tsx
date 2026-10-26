@@ -97,4 +97,30 @@ describe('view_image results on Desktop and Web', () => {
     expect(html).toContain('title="Open full image in Tools Surface"')
     expect(html).toContain('aria-label="Expand mobile.png"')
   })
+
+  it.each(['completed', 'failed', 'interrupted'] as const)(
+    'renders activity drawer for %s turns when progress exists',
+    (status) => {
+      const html = renderToStaticMarkup(
+        <ChatMessageItem
+          {...base}
+          interaction={{ ...base.interaction, status, agentActivity: progress }}
+        />
+      )
+      expect(html).toContain('agent-activity-history')
+      expect(html).toContain('agent-activity-toggle')
+    }
+  )
+
+  it('does not render historical activity drawer when queued or running', () => {
+    for (const status of ['queued', 'running'] as const) {
+      const html = renderToStaticMarkup(
+        <ChatMessageItem
+          {...base}
+          interaction={{ ...base.interaction, status, agentActivity: progress }}
+        />
+      )
+      expect(html).not.toContain('agent-activity-history')
+    }
+  })
 })

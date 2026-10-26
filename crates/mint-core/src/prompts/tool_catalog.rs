@@ -215,16 +215,6 @@ fn all_tools() -> Vec<ToolSpec> {
             ),
         ),
         tool(
-            "conversation_summary",
-            "Internal tool representing a compacted conversation history summary from previous steps.",
-            schema(
-                json!({
-                    "summary": { "type": "string", "description": "Compacted summary text." }
-                }),
-                &[],
-            ),
-        ),
-        tool(
             "list_files",
             "List files and directories under a workspace path, ~/path, or an allowed user folder (Downloads, Documents, Desktop, Pictures, Music, Videos).",
             schema(

@@ -20,6 +20,11 @@ mod mod_authoring_regressions;
 mod progress_clock;
 pub mod reliability;
 pub use reliability::{ExecutionEvidence, ExecutionState};
+pub mod truncation;
+pub mod loop_guard;
+pub mod diagnostics;
+pub mod trajectory_schema;
+pub use trajectory_schema::{StandardTrajectoryRun, StandardTrajectoryStep, StepTokens};
 mod repeated_failures;
 #[cfg(all(test, unix))]
 mod review_regressions;
@@ -483,7 +488,7 @@ fn model_tool_result(action: &str, result: &str) -> String {
     {
         result.to_owned()
     } else {
-        truncate(result)
+        truncation::head_tail_truncate(result, truncation::TruncationConfig::default())
     }
 }
 
@@ -1069,6 +1074,8 @@ pub struct RunTelemetrySummary {
     pub duration_secs: f64,
     pub tool_timeline: Vec<ToolExecutionRecord>,
     pub retries_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trajectory: Option<trajectory_schema::StandardTrajectoryRun>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1936,6 +1943,14 @@ where
         let mut streamed_direct_text = String::new();
         // Used only for retry telemetry; finish validation uses the typed ledger.
         let mut last_verify_failed: Option<bool> = None;
+        let run_id = format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S"));
+        let mut trajectory_run = trajectory_schema::StandardTrajectoryRun::new(
+            &run_id,
+            chat_id,
+            &resolved_task,
+            config.active_model(),
+            &config.ai_provider,
+        );
         let mut trajectory: Vec<String> = Vec::new();
         // Structured history for native tool-calling providers, maintained alongside
         // `trajectory`/`observation` (which remain the source of truth for the
@@ -1978,6 +1993,7 @@ where
             std::collections::BTreeSet::new();
         let mut files_created: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
+        let mut repetition_guard = loop_guard::RepetitionGuard::default();
 
         'steps: for step in 1..=MAX_STEPS {
             crate::mods::set_turn_policy(&root, chat_id, plan_mode, pinned_mcp_server);
@@ -2250,6 +2266,20 @@ where
                             progress(AgentProgress::ToolStart { call_id: None, action: action.clone(), input: input.clone(), subagent: None });
                             progress(AgentProgress::ToolEnd { elapsed_ms: None, call_id: None, status: None, action: action.clone(), input: input.clone(), result: error.clone(), subagent: None });
                             trajectory.push(format_trajectory_step(step, "", action, error));
+                            trajectory_run.record_step(StandardTrajectoryStep {
+                                step,
+                                timestamp: chrono::Utc::now().to_rfc3339(),
+                                thought: String::new(),
+                                action: action.clone(),
+                                input: input.clone(),
+                                observation: error.clone(),
+                                status: "failed".to_string(),
+                                duration_ms: thought_started.elapsed().as_millis() as u64,
+                                tokens: StepTokens {
+                                    input_tokens: last_input_tokens,
+                                    generated_tokens: response.output_tokens.unwrap_or(0) as u64,
+                                },
+                            });
                         }
                         step_tool_results.extend(errors);
                         decisions
@@ -2508,8 +2538,15 @@ where
                             summary.clone(),
                             turn.id,
                         );
+                        trajectory_run.finish(
+                            completion_status.to_ascii_uppercase(),
+                            turn_total_tokens,
+                            started_at.elapsed().as_secs_f64(),
+                            files_created.iter().cloned().collect(),
+                            files_modified.iter().cloned().collect(),
+                        );
                         let run_summary = RunTelemetrySummary {
-                            run_id: format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
+                            run_id: run_id.clone(),
                             task: task.to_string(),
                             outcome: completion_status.to_ascii_uppercase(),
                             total_tokens: turn_total_tokens as usize,
@@ -2523,6 +2560,7 @@ where
                             duration_secs: started_at.elapsed().as_secs_f64(),
                             tool_timeline: executed_tools.clone(),
                             retries_count: executed_tools.iter().filter(|t| t.retried).count(),
+                            trajectory: Some(trajectory_run),
                         };
                         let _ = execute_mod_requests(&root, chat_id, config, plan_mode, &mut approve, &mut progress, None).await;
                         progress(AgentProgress::RunCompleted {
@@ -2553,6 +2591,20 @@ where
                     if decision.action == "mcp_tool" && mcp_review.blocks_repeat(&decision.input.server,&decision.input.tool,&decision.input.arguments) {
                         let message="Error: Automatic repeat blocked: this Device command's completion is unconfirmed. Read its status or wait for a new user instruction; do not send the command again this turn.".to_string();
                         trajectory.push(format_trajectory_step(step,&decision.thought,&decision.action,&message));
+                        trajectory_run.record_step(StandardTrajectoryStep {
+                            step,
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                            thought: decision.thought.clone(),
+                            action: decision.action.clone(),
+                            input: tool_progress_input(&root,&decision),
+                            observation: message.clone(),
+                            status: "intercepted".to_string(),
+                            duration_ms: thought_started.elapsed().as_millis() as u64,
+                            tokens: StepTokens {
+                                input_tokens: last_input_tokens,
+                                generated_tokens: response.output_tokens.unwrap_or(0) as u64,
+                            },
+                        });
                         step_tool_results.push((call_id.clone(),decision.action.clone(),tool_progress_input(&root,&decision),message).into());
                         continue;
                     }
@@ -2567,6 +2619,20 @@ where
                                 turn.interrupt();return Err(OrchestrationError::Agent(preparation.text));
                             }
                             trajectory.push(format_trajectory_step(step,&decision.thought,&decision.action,&preparation.text));
+                            trajectory_run.record_step(StandardTrajectoryStep {
+                                step,
+                                timestamp: chrono::Utc::now().to_rfc3339(),
+                                thought: decision.thought.clone(),
+                                action: decision.action.clone(),
+                                input: tool_progress_input(&root,&decision),
+                                observation: preparation.text.clone(),
+                                status: "intercepted".to_string(),
+                                duration_ms: thought_started.elapsed().as_millis() as u64,
+                                tokens: StepTokens {
+                                    input_tokens: last_input_tokens,
+                                    generated_tokens: response.output_tokens.unwrap_or(0) as u64,
+                                },
+                            });
                             step_tool_results.push(ToolResultEntry{call_id:call_id.clone(),action:decision.action.clone(),input:tool_progress_input(&root,&decision),text:preparation.text,status:preparation.status});
                             continue;
                     }
@@ -2680,89 +2746,105 @@ where
                     } else {
                         let input_val =
                             tool_progress_input(&root, &decision);
+                        let loop_decision = repetition_guard.check(&decision.action, &input_val);
                         progress(AgentProgress::ToolStart { call_id: Some(activity_call_id.clone()),
                             action: decision.action.clone(),
                             input: input_val.clone(),
                             subagent: None,
                         });
 
-                        match crate::hooks::run_pre_tool_hooks(
-                            &hooks,
-                            &decision.action,
-                            &input_val,
-                            &root,
-                        ) {
-                            crate::hooks::PreHookOutcome::Blocked(reason) => {
-                                format!(
-                                    "Blocked by hook: {}\n\n[System Tip: A configured PreToolUse hook rejected this action. Adjust your approach or ask the user for guidance.]",
-                                    reason
-                                )
+                        match loop_decision {
+                            loop_guard::LoopGuardDecision::InterceptStuckLoop { ref action, ref reason, ref instruction } => {
+                                outcome_status = Some(crate::integrations::mcp_result::ToolStatus::Failed);
+                                action_succeeded = false;
+                                progress(AgentProgress::Thought {
+                                    thought: format!("[Stuck-Loop Guard] Intercepted repeated call to '{action}': {reason}"),
+                                });
+                                instruction.clone()
                             }
-                            crate::hooks::PreHookOutcome::Allowed => {
-                                if matches!(
-                                    decision.action.as_str(),
-                                    "write_file" | "apply_patch" | "note_write"
-                                ) {
-                                    let target_path = if !decision.input.path.is_empty() {
-                                        Some(decision.input.path.as_str())
-                                    } else {
-                                        None
-                                    };
-                                    let _ = crate::git::create_checkpoint(
-                                        &root,
-                                        chat_id,
-                                        step,
-                                        &decision.action,
-                                        target_path,
-                                        &format!("Before Step {step}: {}", decision.action),
-                                    );
-                                }
-
-                                let (tool_result, success) = match execute_tool_outcome_reviewed(
-                                    &root,
-                                    config,
-                                    &decision,
-                                    chat_id,
-                                    &mut approve,
-                                    &mut progress,
-                                    &activity_call_id,
-                                    Some(&mcp_review),
-                                )
-                                .await
-                                {
-                                    Ok(outcome) => {
-                                        if decision.action=="mcp_tool" {mcp_review.record_result(&decision.input.server,&decision.input.tool,&decision.input.arguments,&outcome);}
-                                        outcome_status = Some(outcome.status);
-                                        if !outcome.images.is_empty() { step_images.insert(call_id.clone(), outcome.images); }
-                                        let success = outcome.status == crate::integrations::mcp_result::ToolStatus::Success;
-                                        (outcome.text, success)
-                                    },
-                                    Err(error) => (format!("Error: {}", error), false),
-                                };
-                                action_succeeded = success;
-                                if success {
-                                    invalid_tool_calls.succeeded(&decision.action);
-                                }
-                                let hook_messages = crate::hooks::run_post_tool_hooks(
+                            _ => {
+                                match crate::hooks::run_pre_tool_hooks(
                                     &hooks,
                                     &decision.action,
                                     &input_val,
-                                    &tool_result,
-                                    success,
                                     &root,
-                                );
-                                if hook_messages.is_empty() {
-                                    tool_result
-                                } else {
-                                    format!(
-                                        "{}\n\n{}",
-                                        tool_result,
-                                        hook_messages
-                                            .iter()
-                                            .map(|message| format!("[Hook] {}", message))
-                                            .collect::<Vec<_>>()
-                                            .join("\n")
-                                    )
+                                ) {
+                                    crate::hooks::PreHookOutcome::Blocked(reason) => {
+                                        format!(
+                                            "Blocked by hook: {}\n\n[System Tip: A configured PreToolUse hook rejected this action. Adjust your approach or ask the user for guidance.]",
+                                            reason
+                                        )
+                                    }
+                                    crate::hooks::PreHookOutcome::Allowed => {
+                                        if matches!(
+                                            decision.action.as_str(),
+                                            "write_file" | "apply_patch" | "note_write"
+                                        ) {
+                                            let target_path = if !decision.input.path.is_empty() {
+                                                Some(decision.input.path.as_str())
+                                            } else {
+                                                None
+                                            };
+                                            let _ = crate::git::create_checkpoint(
+                                                &root,
+                                                chat_id,
+                                                step,
+                                                &decision.action,
+                                                target_path,
+                                                &format!("Before Step {step}: {}", decision.action),
+                                            );
+                                        }
+
+                                        let (mut tool_result, success) = match execute_tool_outcome_reviewed(
+                                            &root,
+                                            config,
+                                            &decision,
+                                            chat_id,
+                                            &mut approve,
+                                            &mut progress,
+                                            &activity_call_id,
+                                            Some(&mcp_review),
+                                        )
+                                        .await
+                                        {
+                                            Ok(outcome) => {
+                                                if decision.action=="mcp_tool" {mcp_review.record_result(&decision.input.server,&decision.input.tool,&decision.input.arguments,&outcome);}
+                                                outcome_status = Some(outcome.status);
+                                                if !outcome.images.is_empty() { step_images.insert(call_id.clone(), outcome.images); }
+                                                let success = outcome.status == crate::integrations::mcp_result::ToolStatus::Success;
+                                                (outcome.text, success)
+                                            },
+                                            Err(error) => (format!("Error: {}", error), false),
+                                        };
+                                        action_succeeded = success;
+                                        if success {
+                                            invalid_tool_calls.succeeded(&decision.action);
+                                        }
+                                        if let loop_guard::LoopGuardDecision::WarnConsecutiveRepeat { ref notice, .. } = loop_decision {
+                                            tool_result.push_str(&format!("\n\n{notice}"));
+                                        }
+                                        let hook_messages = crate::hooks::run_post_tool_hooks(
+                                            &hooks,
+                                            &decision.action,
+                                            &input_val,
+                                            &tool_result,
+                                            success,
+                                            &root,
+                                        );
+                                        if hook_messages.is_empty() {
+                                            tool_result
+                                        } else {
+                                            format!(
+                                                "{}\n\n{}",
+                                                tool_result,
+                                                hook_messages
+                                                    .iter()
+                                                    .map(|message| format!("[Hook] {}", message))
+                                                    .collect::<Vec<_>>()
+                                                    .join("\n")
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2812,6 +2894,7 @@ where
                     if action_succeeded {
                         match decision.action.as_str() {
                             "apply_patch" | "write_file" | "note_write" => {
+                                repetition_guard.notify_state_change();
                                 let path = if let Some(patch) = &decision.input.patch {
                                     patch.path.to_string_lossy().into_owned()
                                 } else if !decision.input.path.is_empty() {
@@ -2869,12 +2952,16 @@ where
                         "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter"
                     ) {
                         if shell_result_failed(&result) {
-                            final_result.push_str(
-                        "\n\n[System Tip: The command failed with a non-zero exit code. \
-                         Analyze the stdout/stderr above to locate the error, read the offending files, \
-                         apply corrected edits (using apply_patch), and run the verification command again. \
-                         If checks cannot pass, finish with completionStatus=blocked/failed/unverified and explain the actual result; never claim they passed.]"
-                    );
+                            if let Some(diag) = diagnostics::diagnose_command_failure(&decision.input.command, &result, None) {
+                                final_result.push_str(&format!("\n\n{diag}"));
+                            } else {
+                                final_result.push_str(
+                                    "\n\n[System Tip: The command failed with a non-zero exit code. \
+                                     Analyze the stdout/stderr above to locate the error, read the offending files, \
+                                     apply corrected edits (using apply_patch), and run the verification command again. \
+                                     If checks cannot pass, finish with completionStatus=blocked/failed/unverified and explain the actual result; never claim they passed.]"
+                                );
+                            }
                         }
                     }
                     if decision.action == "apply_patch" || decision.action == "write_file" {
@@ -2901,6 +2988,30 @@ where
                         &decision.action,
                         &final_result,
                     ));
+
+                    let step_input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+                    let step_status_str = match outcome_status {
+                        Some(crate::integrations::mcp_result::ToolStatus::Success) => "success",
+                        Some(crate::integrations::mcp_result::ToolStatus::Failed) => "failed",
+                        Some(crate::integrations::mcp_result::ToolStatus::TimedOut) => "timed_out",
+                        Some(crate::integrations::mcp_result::ToolStatus::Cancelled) => "cancelled",
+                        Some(crate::integrations::mcp_result::ToolStatus::Skipped) => "skipped",
+                        _ => if success { "success" } else { "failed" },
+                    };
+                    trajectory_run.record_step(StandardTrajectoryStep {
+                        step,
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        thought: decision.thought.clone(),
+                        action: decision.action.clone(),
+                        input: step_input_val,
+                        observation: final_result.clone(),
+                        status: step_status_str.to_string(),
+                        duration_ms: thought_started.elapsed().as_millis() as u64,
+                        tokens: StepTokens {
+                            input_tokens: last_input_tokens,
+                            generated_tokens: response.output_tokens.unwrap_or(0) as u64,
+                        },
+                    });
 
                     step_tool_results.push(ToolResultEntry {
                         call_id, action:decision.action.clone(), input:serde_json::to_value(&decision.input).unwrap_or(Value::Null),
@@ -2973,8 +3084,15 @@ where
             rebuild_observation(task, &root, &trajectory, &mut observation);
         }
 
+        trajectory_run.finish(
+            "FAILED",
+            turn_total_tokens,
+            started_at.elapsed().as_secs_f64(),
+            files_created.iter().cloned().collect(),
+            files_modified.iter().cloned().collect(),
+        );
         let run_summary = RunTelemetrySummary {
-            run_id: format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
+            run_id: run_id.clone(),
             task: task.to_string(),
             outcome: "FAILED".to_string(),
             total_tokens: turn_total_tokens as usize,
@@ -2988,6 +3106,7 @@ where
             duration_secs: started_at.elapsed().as_secs_f64(),
             tool_timeline: executed_tools.clone(),
             retries_count: executed_tools.iter().filter(|t| t.retried).count(),
+            trajectory: Some(trajectory_run),
         };
         progress(AgentProgress::RunCompleted {
             summary: run_summary,
@@ -3884,11 +4003,6 @@ async fn execute_tool_text(
             )
             .await
         }
-        "conversation_summary" => Ok(serde_json::json!({
-            "status": "acknowledged",
-            "message": "Previous steps summary is already recorded in context."
-        })
-        .to_string()),
         "browser_open"
         | "browser_click"
         | "browser_type"

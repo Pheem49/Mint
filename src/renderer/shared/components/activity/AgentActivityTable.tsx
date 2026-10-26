@@ -163,7 +163,21 @@ export function AgentActivityTable({ activityView, chatId, onOpenArtifact }: Pro
         )}
         {isItemExpanded && output && (
           <div className="agent-activity-output">
-            <pre>{output}</pre>
+            {output.includes('[Self-Correction Guidance]') ? (
+              <>
+                {output.split('[Self-Correction Guidance]')[0]?.trim() && (
+                  <pre>{output.split('[Self-Correction Guidance]')[0]?.trim()}</pre>
+                )}
+                <div className="diagnostic-guidance-card">
+                  <div className="diagnostic-guidance-header">
+                    <span>💡 Self-Correction Guidance</span>
+                  </div>
+                  <pre>{output.split('[Self-Correction Guidance]')[1]?.trim()}</pre>
+                </div>
+              </>
+            ) : (
+              <pre>{output}</pre>
+            )}
           </div>
         )}
       </Fragment>

@@ -2791,6 +2791,10 @@ fn openai_native_messages(messages: &[ChatMessage]) -> Result<Vec<Value>, ChatEr
                 };
                 if !tool_calls.is_empty() {
                     entry["tool_calls"] = json!(tool_calls);
+                    // DeepSeek and other reasoning-enabled OpenAI-compatible APIs enforce that
+                    // any assistant message containing `tool_calls` must include `reasoning_content`
+                    // when reasoning/thinking mode is active. Providing `""` prevents HTTP 400 rejection.
+                    entry["reasoning_content"] = json!("");
                 }
                 result.push(entry);
             }
@@ -3419,6 +3423,24 @@ mod tests {
             built[1]["content"][0]["image_url"]["url"],
             "data:image/png;base64,QUJD"
         );
+    }
+
+    #[test]
+    fn openai_native_messages_attaches_reasoning_content_for_tool_calls() {
+        let messages = vec![ChatMessage {
+            role: ChatRole::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "call_abc".into(),
+                name: "read_file".into(),
+                input: json!({"path": "src/main.rs"}),
+                thought_signature: None,
+            }],
+        }];
+        let built = openai_native_messages(&messages).unwrap();
+        assert_eq!(built.len(), 1);
+        assert_eq!(built[0]["role"], "assistant");
+        assert_eq!(built[0]["reasoning_content"], json!(""));
+        assert_eq!(built[0]["tool_calls"][0]["function"]["name"], "read_file");
     }
 
     #[test]

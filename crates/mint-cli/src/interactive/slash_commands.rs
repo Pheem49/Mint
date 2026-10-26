@@ -2257,6 +2257,77 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
+        "/trajectory" => {
+            let memory = match MemoryStore::open_default() {
+                Ok(m) => m,
+                Err(e) => {
+                    println!("{ERROR}Memory error:{RESET} {e}\n");
+                    return Some(SlashResult::Handled);
+                }
+            };
+            let chat_id = mint_core::scoped_chat_id(
+                CHAT_CLI_ID,
+                Some(&session.current_dir.to_string_lossy()),
+            );
+            let (subcmd, args) = rest
+                .split_once(char::is_whitespace)
+                .map(|(c, a)| (c, a.trim()))
+                .unwrap_or((rest, ""));
+
+            match subcmd {
+                "export" => {
+                    let (run_id_opt, path_opt) = if args.is_empty() {
+                        (None, None)
+                    } else if args.starts_with("run-") {
+                        let mut parts = args.split_whitespace();
+                        let r = parts.next();
+                        let p = parts.next();
+                        (r, p)
+                    } else {
+                        (None, Some(args))
+                    };
+
+                    match memory.export_trajectory_json(&chat_id, run_id_opt) {
+                        Ok(json) => {
+                            let default_path = format!("trajectory-{}.json", chrono::Local::now().format("%Y%m%d%H%M%S"));
+                            let dest_path = path_opt.unwrap_or(&default_path);
+                            match std::fs::write(dest_path, &json) {
+                                Ok(_) => println!("{MINT}Exported SWE-bench trajectory to {dest_path}{RESET}\n"),
+                                Err(err) => println!("{ERROR}Failed to write trajectory to {dest_path}:{RESET} {err}\n"),
+                            }
+                        }
+                        Err(e) => println!("{ERROR}Failed to export trajectory:{RESET} {e}\n"),
+                    }
+                }
+                _ => {
+                    match memory.export_trajectory_json(&chat_id, None) {
+                        Ok(json) => {
+                            if let Ok(run) = mint_core::orchestration::trajectory_schema::StandardTrajectoryRun::from_json(&json) {
+                                println!("\n{BLUE}Execution Trajectory (v{}){RESET}", run.schema_version);
+                                println!("  {DIM}Run ID:{RESET} {}", run.run_id);
+                                println!("  {DIM}Task:{RESET} {}", run.task);
+                                println!("  {DIM}Model:{RESET} {} ({})", run.model, run.provider);
+                                println!("  {DIM}Outcome:{RESET} {}", run.outcome);
+                                println!("  {DIM}Metrics:{RESET} {} steps | {} tokens | {:.1}s", run.total_steps, run.total_tokens, run.duration_secs);
+                                if !run.trajectory.is_empty() {
+                                    println!("\n  {BLUE}Step Timeline:{RESET}");
+                                    for s in &run.trajectory {
+                                        let status_color = if s.status == "success" { MINT } else { ERROR };
+                                        println!("    {DIM}Step {:>2}:{RESET} {:<15} {status_color}{:<10}{RESET} ({}ms)", s.step, s.action, s.status, s.duration_ms);
+                                    }
+                                }
+                                println!("\n{DIM}Use '/trajectory export [path.json]' to save SWE-bench JSON.{RESET}\n");
+                            } else {
+                                println!("{DIM}Trajectory JSON ({} bytes). Use '/trajectory export' to save.{RESET}\n", json.len());
+                            }
+                        }
+                        Err(e) => println!("{DIM}No recorded trajectory for this session:{RESET} {e}\n"),
+                    }
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
         "/cron" => {
             let cron_jobs = match mint_core::CronStore::open_default() {
                 Ok(store) => store,

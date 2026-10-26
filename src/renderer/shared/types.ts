@@ -68,6 +68,41 @@ export interface ToolExecutionRecord {
   retried: boolean
 }
 
+export interface StepTokens {
+  inputTokens: number
+  generatedTokens: number
+}
+
+export interface StandardTrajectoryStep {
+  step: number
+  timestamp: string
+  thought: string
+  action: string
+  input: Record<string, unknown> | unknown
+  observation: string
+  status: string
+  durationMs: number
+  tokens: StepTokens
+}
+
+export interface StandardTrajectoryRun {
+  schemaVersion: string
+  runId: string
+  chatId: string
+  task: string
+  model: string
+  provider: string
+  startedAt: string
+  completedAt: string
+  outcome: string
+  totalSteps: number
+  totalTokens: number
+  durationSecs: number
+  filesCreated: string[]
+  filesModified: string[]
+  trajectory: StandardTrajectoryStep[]
+}
+
 export interface RunTelemetrySummary {
   runId: string
   task: string
@@ -79,6 +114,7 @@ export interface RunTelemetrySummary {
   durationSecs: number
   toolTimeline: ToolExecutionRecord[]
   retriesCount: number
+  trajectory?: StandardTrajectoryRun
 }
 
 export type ToolStatus = 'success' | 'failed' | 'timed_out' | 'cancelled' | 'running' | 'unknown' | 'skipped'

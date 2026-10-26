@@ -96,8 +96,36 @@ pub(in crate::orchestration) async fn execute(
                     "apply_patch requires at least one hunk".into(),
                 ));
             }
-            let edit = build_code_patch(root, patch.path.clone(), &patch.hunks, config)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            let edit = match build_code_patch(root, patch.path.clone(), &patch.hunks, config) {
+                Ok(edit) => edit,
+                Err(e) => {
+                    let target_full_path = root.join(&patch.path);
+                    if let Ok(file_content) = std::fs::read_to_string(&target_full_path) {
+                        for (idx, hunk) in patch.hunks.iter().enumerate() {
+                            let occurrences = file_content.matches(hunk.old_text.as_str()).count();
+                            if occurrences == 0 {
+                                let guidance = crate::orchestration::diagnostics::format_patch_not_found_guidance(
+                                    &file_content,
+                                    &hunk.old_text,
+                                    idx + 1,
+                                    &patch.path,
+                                );
+                                return Err(OrchestrationError::Agent(guidance));
+                            } else if occurrences > 1 && !hunk.replace_all {
+                                let guidance = crate::orchestration::diagnostics::format_ambiguous_patch_guidance(
+                                    &file_content,
+                                    &hunk.old_text,
+                                    idx + 1,
+                                    &patch.path,
+                                    occurrences,
+                                );
+                                return Err(OrchestrationError::Agent(guidance));
+                            }
+                        }
+                    }
+                    return Err(OrchestrationError::Agent(e.to_string()));
+                }
+            };
             let proposal = propose_code_edits(root, std::slice::from_ref(&edit), config)
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
             let diff = proposal

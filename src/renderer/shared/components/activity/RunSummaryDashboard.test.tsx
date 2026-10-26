@@ -50,4 +50,78 @@ describe('RunSummaryDashboard and formatRunDuration', () => {
     expect(html).toContain('Success')
     expect(html).not.toContain('Tool call timeline')
   })
+
+  it('renders Completed badge with success class for PARTIAL outcome', () => {
+    const summary: RunTelemetrySummary = {
+      runId: 'r3',
+      task: 'casual chat',
+      outcome: 'PARTIAL',
+      durationSecs: 2.1,
+      totalTokens: 1200,
+      toolCallsCount: 0,
+      retriesCount: 0,
+      filesChanged: [],
+      filesCreated: [],
+      toolTimeline: [],
+    }
+    const html = renderToStaticMarkup(<RunSummaryDashboard summary={summary} />)
+    expect(html).toContain('run-summary-badge success')
+    expect(html).toContain('Completed')
+    expect(html).not.toContain('Failure')
+  })
+
+  it('renders Verified badge with success class for VERIFIED outcome', () => {
+    const summary: RunTelemetrySummary = {
+      runId: 'r4',
+      task: 'verified task',
+      outcome: 'VERIFIED',
+      durationSecs: 15.0,
+      totalTokens: 5000,
+      toolCallsCount: 2,
+      retriesCount: 0,
+      filesChanged: [],
+      filesCreated: [],
+      toolTimeline: [],
+    }
+    const html = renderToStaticMarkup(<RunSummaryDashboard summary={summary} />)
+    expect(html).toContain('run-summary-badge success')
+    expect(html).toContain('Verified')
+  })
+
+  it('renders Failure badge with failure class for FAILED outcome', () => {
+    const summary: RunTelemetrySummary = {
+      runId: 'r5',
+      task: 'failed task',
+      outcome: 'FAILED',
+      durationSecs: 5.0,
+      totalTokens: 2000,
+      toolCallsCount: 1,
+      retriesCount: 0,
+      filesChanged: [],
+      filesCreated: [],
+      toolTimeline: [],
+    }
+    const html = renderToStaticMarkup(<RunSummaryDashboard summary={summary} />)
+    expect(html).toContain('run-summary-badge failure')
+    expect(html).toContain('Failure')
+  })
+
+  it('renders Export Trajectory action button in header', () => {
+    const summary: RunTelemetrySummary = {
+      runId: 'run-traj-42',
+      task: 'export trajectory test',
+      outcome: 'SUCCESS',
+      durationSecs: 3.2,
+      totalTokens: 1500,
+      toolCallsCount: 2,
+      retriesCount: 0,
+      filesChanged: ['src/app.ts'],
+      filesCreated: [],
+      toolTimeline: [],
+    }
+    const html = renderToStaticMarkup(<RunSummaryDashboard summary={summary} />)
+    expect(html).toContain('run-summary-export-btn')
+    expect(html).toContain('Export Trajectory')
+    expect(html).toContain('title="Export SWE-bench / Agent Protocol compliant trajectory JSON"')
+  })
 })
