@@ -2,6 +2,30 @@
 
 Released: 2026-10-17
 
+## Desktop & Web Frontend Rendering, Bundle Splitting & Transport Optimization (2026-10-26)
+
+- **Phase 1 — Frontend Rendering, Memoization & Code Splitting**:
+  - **Isolated Thinking Timer (`src/renderer/shared/components/chat/ChatPanel.tsx`)**: Extracted the 1-second elapsed-time counter (`elapsedSeconds`) into a dedicated `<ThinkingElapsedMeta />` leaf component so the 1,900-line `ChatPanel` no longer re-renders every second while streaming.
+  - **Conditional Ollama Probing (`src/renderer/shared/components/chat/ChatPanel.tsx`)**: Added `shouldProbeOllamaModels` so `ChatPanel` only probes `http://localhost:11434/api/tags` and `fetchProviderModels('ollama', '')` when `status?.activeProvider === 'ollama'` or an Ollama host/model is configured in settings.
+  - **Dashboard Render Cleanup & Sidebar Memoization (`src/renderer/shared/components/app/MintDashboard.tsx`, `DashboardSidebar.tsx`)**: Computed `conversationReviewChanges` on-demand when opening Code Review instead of on every render, removed dead per-render session date-grouping calculations (`filteredSessions`, `groupSessionsByDate`, `groupedSearchSessions`), wrapped `DashboardSidebar` in `React.memo`, and stabilized sidebar callbacks via `useLatestCallback`.
+  - **Adaptive Background Polling (`BackgroundTerminals.tsx`, `ModsPanel.tsx`, `useSessionSources.ts`, `MintDashboard.tsx`)**:
+    - Added `shouldPollSessionSources` so `/api/conversation-sources` only polls when the Tools panel is on the launcher or the `sources` tab.
+    - Added `backgroundPollIntervalMs` (3s active / 10s idle) in `BackgroundTerminals.tsx` and `modsPollIntervalMs` (3s active / 12s idle) in `ModsPanel.tsx`.
+  - **Markdown & Tool Card Hot-Path Optimization (`src/renderer/shared/utils/markdown.tsx`, `src/renderer/shared/components/cards/ToolResultCards.tsx`, `src/renderer/shared/components/cards/MermaidCard.tsx`)**:
+    - Added an O(1) character-presence fast-path to `sanitizeLatex` so plain prose skips 22 sequential regex passes.
+    - Consolidated 5 separate `useMemo` loops over `progress` in `ToolResultCards` into a single-pass `extractToolCardPayloads` helper.
+    - Multiplexed `MermaidCard` theme-change `MutationObserver` instances on `document.documentElement` through a single shared `subscribeThemeChanges` observer.
+  - **On-Demand Lazy Chunk Splitting (`markdown.tsx`, `ToolResultCards.tsx`, `ChatPanel.tsx`, `ToolSurfacePage.tsx`, `src/App.tsx`, `src-web/App.tsx`)**:
+    - Converted specialized rich cards (`WeatherCard`, `StockCard`, `CalculationCard`, `ImageSearchCard`, `ImageGenCard`, `MermaidCard`, `UiGridCard`, `UiFeatureCard`, `UiMockupWidget`) and secondary surfaces (`CodeReviewPage`, `RewindModal`, `ArtifactPreviewPanel`) to `React.lazy` wrapped in `<Suspense fallback={null}>`.
+    - Deferred background preloading of `SettingsWindow` to `requestIdleCallback` (with a 3.5s fallback timer) across both Desktop (`src/renderer/src/App.tsx`) and Web (`src/renderer/src-web/App.tsx`).
+- **Phase 2 — Conversation Transport, Web API Framing & SQLite IPC Optimization**:
+  - **Zero-Allocation 32 MiB Request Validation (`src/renderer/shared/conversation/transport.ts`)**: Replaced `new TextEncoder().encode(JSON.stringify(request))` with an in-place UTF-8 byte-size estimator (`utf8ByteLength` / `assertWithinLimit`), eliminating a redundant 32 MiB `Uint8Array` allocation on Web and eliminating double `JSON.stringify` before Tauri `invoke()` on Desktop.
+  - **Lightweight Submission Deduplication Fingerprinting (`src/renderer/shared/conversation/lifecycle.ts`)**: Replaced `JSON.stringify([prompt, images, videos, options.documentAttachment])` in `sendPrompt` with a compact head/tail + byte-length `uriFingerprint` signature.
+  - **O(1) Per-Chunk HTTP Request Framing (`crates/mint-core/src/api_server.rs`)**: Added `parse_http_request_framing` and `parse_request_line` so the Web API server parses `\r\n\r\n` and `Content-Length` once on the header slice (`&request_bytes[..header_end]`) instead of running `String::from_utf8_lossy` across the accumulated body on every 8 KB socket read.
+  - **Non-Blocking Async SQLite IPC & Single-Connection Expiry (`src-tauri/src/commands/conversation.rs`, `crates/mint-core/src/agent/memory.rs`)**: Converted Desktop SQLite Tauri commands (`get_conversation_snapshot`, `get_conversation_changes`, `list_chat_sessions`, `save_interaction_agent_activity`, etc.) to `async fn` backed by `tokio::task::spawn_blocking`, and reused the open SQLite `Connection` for `expire_abandoned_turns` inside `conversation_changes`, `latest_conversation_sequence`, and `conversation_snapshot`.
+- **Unit Test Coverage**:
+  - Added tests in `transport.test.ts`, `lifecycle.test.ts`, `ChatPanel.test.tsx`, `markdown.webImages.test.tsx`, `BackgroundTerminals.test.tsx`, `ModUi.test.tsx`, and `crates/mint-core/src/api_server.rs`.
+
 ## Tools Surface Image Preview & Routine Polling Log Filter (2026-10-25)
 
 - **Tools Surface In-Panel Image Preview**:

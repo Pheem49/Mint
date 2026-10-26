@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { filterScopedJobs } from './BackgroundTerminals'
+import { backgroundPollIntervalMs, filterScopedJobs } from './BackgroundTerminals'
+import { shouldPollSessionSources } from '../../utils/useSessionSources'
 import type { BackgroundJob } from '../../types'
 
 describe('BackgroundTerminals scoping and polling optimization', () => {
@@ -42,5 +43,21 @@ describe('BackgroundTerminals scoping and polling optimization', () => {
     expect(filterScopedJobs(sampleJobs, null)).toEqual([])
     expect(filterScopedJobs(sampleJobs, undefined)).toEqual([])
     expect(filterScopedJobs(sampleJobs, '')).toEqual([])
+  })
+
+  it('uses adaptive polling interval when background panel is closed and no jobs are running', () => {
+    const idleJobs = sampleJobs.filter(j => j.status === 'completed')
+    expect(backgroundPollIntervalMs(false, [])).toBe(10000)
+    expect(backgroundPollIntervalMs(false, idleJobs)).toBe(10000)
+    expect(backgroundPollIntervalMs(true, idleJobs)).toBe(3000)
+    expect(backgroundPollIntervalMs(false, sampleJobs)).toBe(3000)
+  })
+
+  it('polls session sources only when the Tools launcher or Sources tab is active', () => {
+    expect(shouldPollSessionSources(false, null)).toBe(false)
+    expect(shouldPollSessionSources(true, null)).toBe(true)
+    expect(shouldPollSessionSources(true, 'sources')).toBe(true)
+    expect(shouldPollSessionSources(true, 'term-1')).toBe(false)
+    expect(shouldPollSessionSources(true, 'review:1')).toBe(false)
   })
 })

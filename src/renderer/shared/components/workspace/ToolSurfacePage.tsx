@@ -1,13 +1,14 @@
 import '../../../src/css/tool-surfaces.css'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode, DragEvent as ReactDragEvent } from 'react'
 import { detectArtifactType, type ArtifactFile } from '../../utils/artifacts'
-import { ArtifactPreviewPanel } from './ArtifactPreviewPanel'
-import CodeReviewPage from './CodeReviewPage'
 import TerminalDock from './TerminalDock'
 import type { FileChange } from '../../types'
 import { ListTodo, Paperclip, Puzzle, Image as ImageIcon, Layers, ChevronLeft, ChevronRight } from 'lucide-react'
 import { WORKSPACE_FILE_MIME, parseWorkspaceFileDrag, type WorkspaceFileDrag } from '../../utils/workspaceDrag'
+
+const ArtifactPreviewPanel = lazy(() => import('./ArtifactPreviewPanel').then(m => ({ default: m.ArtifactPreviewPanel })))
+const CodeReviewPage = lazy(() => import('./CodeReviewPage'))
 
 export type ToolSurface =
   | { id: string; kind: 'preview'; title: string; artifact: ArtifactFile }
@@ -785,15 +786,21 @@ export default function ToolSurfacePage({
         {active?.kind === 'sources' && <div className="tool-surface-sources">{sourcesContent}</div>}
         {active?.kind === 'mods' && <div key="mods" className="tool-surface-panel-host" ref={onModsPanelTarget} />}
         {active?.kind === 'background' && <div key="background" className="tool-surface-panel-host" ref={onBackgroundPanelTarget} />}
-        {active?.kind === 'preview' && <ArtifactPreviewPanel key={active.id} artifact={active.artifact} onClose={() => active && onClose(active.id)} workspacePath={workspacePath || undefined} />}
+        {active?.kind === 'preview' && (
+          <Suspense fallback={null}>
+            <ArtifactPreviewPanel key={active.id} artifact={active.artifact} onClose={() => active && onClose(active.id)} workspacePath={workspacePath || undefined} />
+          </Suspense>
+        )}
         {active?.kind === 'review' && (
-          <CodeReviewPage
-            title={active.reviewTitle}
-            changes={active.changes}
-            workspacePath={workspacePath}
-            onBack={() => active && onClose(active.id)}
-            onOpenFiles={onOpenFiles}
-          />
+          <Suspense fallback={null}>
+            <CodeReviewPage
+              title={active.reviewTitle}
+              changes={active.changes}
+              workspacePath={workspacePath}
+              onBack={() => active && onClose(active.id)}
+              onOpenFiles={onOpenFiles}
+            />
+          </Suspense>
         )}
         {surfaces.filter((surface): surface is Extract<ToolSurface, { kind: 'terminal' }> => surface.kind === 'terminal').map((surface) => (
           <TerminalDock

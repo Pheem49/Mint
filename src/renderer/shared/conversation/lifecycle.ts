@@ -271,7 +271,15 @@ export function createConversationLifecycle(
     update({ ...transitionConversation(state, { type: 'run_started', message: prompt, imageCount: images.length, videoCount: videos.length }),
       streamingConversationId: origin.chatId, activeTurnId: null, sessionAutoApproved: false })
     const draft = { message: state.message, images: state.imageAttachments, videos: state.videoAttachments, document: state.documentAttachment }
-    const signature = JSON.stringify([prompt, images, videos, options.documentAttachment])
+    const uriFingerprint = (name: string, dataUri: string) =>
+      `${name}:${dataUri.length}:${dataUri.slice(0, 64)}:${dataUri.slice(-32)}`
+    const doc = options.documentAttachment
+    const signature = [
+      prompt,
+      images.map(i => uriFingerprint(i.name, i.dataUri)).join('|'),
+      videos.map(v => uriFingerprint(v.name, v.dataUri)).join('|'),
+      doc ? uriFingerprint(doc.filename, doc.dataUri) : '',
+    ].join('\u0000')
     let submission = pendingSubmissions.get(origin.chatId)
     if (submission?.signature !== signature) {
       submission = { signature, requestId: globalThis.crypto?.randomUUID?.() ?? `submission-${Date.now().toString(36)}-${Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')}` }

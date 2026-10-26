@@ -12,12 +12,19 @@ const workspaceName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop(
 export const filterScopedJobs = (jobs: BackgroundJob[], workspacePath?: string | null): BackgroundJob[] =>
   workspacePath ? jobs.filter(job => job.workspacePath === workspacePath) : []
 
+export const backgroundPollIntervalMs = (open: boolean, jobs: BackgroundJob[]): number =>
+  open || jobs.some(active) ? 3000 : 10000
+
 export function BackgroundTerminals({ workspacePath, panelTarget, onCountChange }: {
   workspacePath?: string | null; panelTarget: HTMLElement | null; onCountChange: (count: number) => void
 }) {
   const [jobs, setJobs] = useState<BackgroundJob[]>([])
   const [scope, setScope] = useState<{ workspace: string | null | undefined; ids: Set<string> }>({ workspace: undefined, ids: new Set() })
   const open = Boolean(panelTarget)
+  const openRef = useRef(open)
+  openRef.current = open
+  const jobsRef = useRef(jobs)
+  jobsRef.current = jobs
   const [all, setAll] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [output, setOutput] = useState<BackgroundJobOutput | null>(null)
@@ -33,13 +40,24 @@ export function BackgroundTerminals({ workspacePath, panelTarget, onCountChange 
   useEffect(() => {
     let disposed = false
     let busy = false
+    let timer: ReturnType<typeof window.setTimeout> | undefined
     setLoading(true)
+    const scheduleNext = (latestJobs: BackgroundJob[]) => {
+      if (disposed) return
+      if (timer !== undefined) window.clearTimeout(timer)
+      timer = window.setTimeout(() => void refresh(), backgroundPollIntervalMs(openRef.current, latestJobs))
+    }
     const refresh = async () => {
-      if (busy || document.hidden) return
+      if (busy || document.hidden) {
+        scheduleNext(jobsRef.current)
+        return
+      }
       busy = true
+      let latestJobs = jobsRef.current
       try {
         const next = await backgroundPlatform.list()
         if (disposed) return
+        latestJobs = next
         const scoped = filterScopedJobs(next, workspacePath)
         let message = ''
         for (const job of next) {
@@ -57,16 +75,25 @@ export function BackgroundTerminals({ workspacePath, panelTarget, onCountChange 
         if (!disposed) {
           const message = String(cause)
           setError(`Status unavailable · ${message}`)
-          if (/401:|403:/.test(message)) { setJobs([]); setOutput(null); statuses.current.clear() }
+          if (/401:|403:/.test(message)) { latestJobs = []; setJobs([]); setOutput(null); statuses.current.clear() }
         }
-      } finally { busy = false; if (!disposed) setLoading(false) }
+      } finally {
+        busy = false
+        if (!disposed) {
+          setLoading(false)
+          scheduleNext(latestJobs)
+        }
+      }
     }
     void refresh()
-    const timer = window.setInterval(() => void refresh(), 3000)
     const resume = () => { if (!document.hidden) void refresh() }
     document.addEventListener('visibilitychange', resume)
-    return () => { disposed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', resume) }
-  }, [workspacePath])
+    return () => {
+      disposed = true
+      if (timer !== undefined) window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', resume)
+    }
+  }, [workspacePath, open])
 
   useEffect(() => {
     if (!open || !selected) { setOutput(null); return }

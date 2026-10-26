@@ -66,6 +66,32 @@ describe('Conversation lifecycle through the renderer interface', () => {
     results[1].resolve(reply); await retried
   })
 
+  it('fingerprints attachments for retry deduplication without calling JSON.stringify on attachment payloads', async () => {
+    const received: any[] = []
+    const results = [deferred<ChatResponse>(), deferred<ChatResponse>(), deferred<ChatResponse>()]
+    const { lifecycle } = setup({ streamChatMessage: (...args) => {
+      received.push(args[15])
+      return results[received.length - 1].promise
+    } })
+    const stringifySpy = vi.spyOn(JSON, 'stringify')
+    const img1 = { name: 'photo.png', dataUri: 'data:image/png;base64,AAAA1111' }
+    const img2 = { name: 'photo.png', dataUri: 'data:image/png;base64,BBBB2222' }
+
+    const attempt1 = lifecycle.sendPrompt('Analyze', { imageAttachments: [img1] })
+    results[0].reject(new Error('Network error')); await attempt1
+
+    const attempt2 = lifecycle.sendPrompt('Analyze', { imageAttachments: [img1] })
+    results[1].reject(new Error('Network error')); await attempt2
+
+    const attempt3 = lifecycle.sendPrompt('Analyze', { imageAttachments: [img2] })
+    results[2].resolve(reply); await attempt3
+
+    expect(stringifySpy).not.toHaveBeenCalled()
+    expect(received[0]?.requestId).toBeTruthy()
+    expect(received[1]?.requestId).toBe(received[0]?.requestId)
+    expect(received[2]?.requestId).not.toBe(received[0]?.requestId)
+  })
+
   it('rejects old A snapshots after A → B → A, including an old failure', async () => {
     const reads = [deferred<ConversationSnapshot>(), deferred<ConversationSnapshot>(), deferred<ConversationSnapshot>()]
     let next = 0

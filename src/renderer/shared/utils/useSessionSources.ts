@@ -3,6 +3,10 @@ import { conversationPlatform } from '../platform'
 import type { AgentProgress, ConversationSources } from '../types'
 import { collectSessionSources } from './sessionSources'
 
+export function shouldPollSessionSources(toolsPanelOpen: boolean, activeSurfaceId: string | null): boolean {
+  return toolsPanelOpen && (activeSurfaceId === null || activeSurfaceId === 'sources')
+}
+
 /** Shared session ownership and polling for the Desktop and Web source panels. */
 export function useSessionSources(chatId: string, liveProgress: AgentProgress[], enabled: boolean) {
   const [state, setState] = useState<{ chatId: string; value: ConversationSources | null; error: string; loading: boolean } | null>(null)

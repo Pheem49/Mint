@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, type MouseEvent as ReactMouseEvent, type DragEvent as ReactDragEvent } from 'react'
+import { memo, useState, useEffect, useRef, useMemo, type MouseEvent as ReactMouseEvent, type DragEvent as ReactDragEvent } from 'react'
 import { Check, ChevronDown, Folder, FolderInput, FolderMinus, Pencil, Plus, Trash2 } from 'lucide-react'
 import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon, renderScheduledTasksSvgIcon, renderLinkedFoldersSvgIcon } from '../../constants/plugins'
 import { useAuthUser } from './AuthGate'
@@ -48,7 +48,7 @@ interface DashboardSidebarProps {
   onNewChatInProject?: (workspacePath: string) => void
 }
 
-export default function DashboardSidebar({
+function DashboardSidebar({
   view,
   sidebarCollapsed,
   sending,
@@ -1226,3 +1226,5 @@ export default function DashboardSidebar({
     </aside>
   )
 }
+
+export default memo(DashboardSidebar)

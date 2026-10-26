@@ -65,6 +65,28 @@ function cleanupOrphanMermaidNodes(): void {
 
 type Status = 'loading' | 'ready' | 'error'
 
+let sharedThemeObserver: MutationObserver | null = null
+const themeSubscribers = new Set<() => void>()
+
+export function subscribeThemeChanges(listener: () => void): () => void {
+  themeSubscribers.add(listener)
+  if (!sharedThemeObserver && typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && document.documentElement) {
+    sharedThemeObserver = new MutationObserver(() => {
+      themeSubscribers.forEach((fn) => fn())
+    })
+    sharedThemeObserver.observe(document.documentElement, {
+      attributeFilter: ['data-theme', 'data-accent', 'data-accent-mode'],
+    })
+  }
+  return () => {
+    themeSubscribers.delete(listener)
+    if (themeSubscribers.size === 0 && sharedThemeObserver) {
+      sharedThemeObserver.disconnect()
+      sharedThemeObserver = null
+    }
+  }
+}
+
 export default function MermaidCard({ code }: { code: string }) {
   const [status, setStatus] = useState<Status>('loading')
   const [svg, setSvg] = useState<string>('')
@@ -72,7 +94,6 @@ export default function MermaidCard({ code }: { code: string }) {
 
   useEffect(() => {
     let cancelled = false
-    let observer: MutationObserver | null = null
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
     async function render() {
@@ -144,15 +165,14 @@ export default function MermaidCard({ code }: { code: string }) {
       debounceTimer = setTimeout(render, 400)
     }
 
-    observer = new MutationObserver(() => {
+    const unsubscribeTheme = subscribeThemeChanges(() => {
       render()
     })
-    observer.observe(document.documentElement, { attributeFilter: ['data-theme', 'data-accent', 'data-accent-mode'] })
 
     return () => {
       cancelled = true
       if (debounceTimer) clearTimeout(debounceTimer)
-      observer?.disconnect()
+      unsubscribeTheme()
       cleanupOrphanMermaidNodes()
     }
   }, [code])

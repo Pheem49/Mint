@@ -31,7 +31,8 @@ import DesktopTitlebar from './DesktopTitlebar'
 import ErrorNotice from './ErrorNotice'
 import type { ToolSurface } from '../workspace/ToolSurfacePage'
 import SessionSources from '../workspace/SessionSources'
-import { useSessionSources } from '../../utils/useSessionSources'
+import { shouldPollSessionSources, useSessionSources } from '../../utils/useSessionSources'
+import { useLatestCallback } from '../../utils/useLatestCallback'
 import { PreviewObjectUrls } from '../../utils/previewObjectUrls'
 import {
   errorMessage,
@@ -40,7 +41,6 @@ import {
   createTrimmedImagePreview,
   createObjectUrlPreview,
   applyThemeStyles,
-  parseUtcDate,
 } from '../../utils/ui'
 import { workspacePaths } from '../../utils/workspaces'
 import { workspaceListPreferences } from '../../utils/workspaceListPreferences'
@@ -563,7 +563,11 @@ export default function MintDashboard() {
   }, [toolSurfaces])
   const [activeSurfaceId, setActiveSurfaceId] = useState<string | null>(null)
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
-  const sessionSources = useSessionSources(conversationId, streamingConversationId === conversationId ? agentProgress : [], toolsPanelOpen)
+  const sessionSources = useSessionSources(
+    conversationId,
+    streamingConversationId === conversationId ? agentProgress : [],
+    shouldPollSessionSources(toolsPanelOpen, activeSurfaceId),
+  )
   const [modsPanelTarget, setModsPanelTarget] = useState<HTMLDivElement | null>(null)
   const [backgroundPanelTarget, setBackgroundPanelTarget] = useState<HTMLDivElement | null>(null)
   const [backgroundTaskCount, setBackgroundTaskCount] = useState(0)
@@ -576,13 +580,6 @@ export default function MintDashboard() {
     const saved = Number(window.localStorage.getItem('mint:sidebar-width'))
     return saved >= SIDEBAR_MIN_WIDTH && saved <= SIDEBAR_MAX_WIDTH ? saved : SIDEBAR_DEFAULT_WIDTH
   })
-  const conversationReviewChanges = mergeFileChanges([
-    ...interactions.map((interaction) => {
-      const interactionId = String(interaction.id)
-      return parseFileChangesFromProgress(agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? [])
-    }),
-    parseFileChangesFromProgress(agentProgress),
-  ])
 
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
   const [planMode, setPlanMode] = useState(() => window.localStorage.getItem('mint:plan-mode') === 'true')
@@ -635,7 +632,6 @@ export default function MintDashboard() {
   const [pendingSlashChoice, setPendingSlashChoice] = useState<
     { command: string; title: string; options: { label: string; value: string }[] } | null
   >(null)
-  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -649,62 +645,6 @@ export default function MintDashboard() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
-
-  useEffect(() => {
-    if (!isSearchOpen) {
-      setSearchQuery('')
-    }
-  }, [isSearchOpen])
-
-  const filteredSessions = chatSessions.filter((session) => {
-    if (session.kind === 'cli' || session.id === 'conversation-default') return false
-    return session.title.toLowerCase().includes(searchQuery.toLowerCase())
-  })
-
-  const groupSessionsByDate = (sessions: ChatSession[]) => {
-    const groups: { [key: string]: ChatSession[] } = {}
-    
-    sessions.forEach((session) => {
-      const dateStr = session.updatedAt || session.createdAt
-      if (!dateStr) {
-        const groupName = 'Other'
-        if (!groups[groupName]) groups[groupName] = []
-        groups[groupName].push(session)
-        return
-      }
-
-      const date = parseUtcDate(dateStr)
-      const today = new Date()
-      const yesterday = new Date()
-      yesterday.setDate(today.getDate() - 1)
-
-      let groupName = ''
-      if (date.toDateString() === today.toDateString()) {
-        groupName = 'Today'
-      } else if (date.toDateString() === yesterday.toDateString()) {
-        groupName = 'Yesterday'
-      } else {
-        const diffTime = Math.abs(today.getTime() - date.getTime())
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-        if (diffDays <= 7) {
-          groupName = 'Previous 7 days'
-        } else if (diffDays <= 30) {
-          groupName = 'Previous 30 days'
-        } else {
-          groupName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-        }
-      }
-
-      if (!groups[groupName]) {
-        groups[groupName] = []
-      }
-      groups[groupName].push(session)
-    })
-
-    return groups
-  }
-
-  const groupedSearchSessions = groupSessionsByDate(filteredSessions)
 
 
   const refreshHistory = conversationActions.refreshHistory
@@ -965,6 +905,13 @@ export default function MintDashboard() {
   }
 
   const openConversationReview = () => {
+    const conversationReviewChanges = mergeFileChanges([
+      ...interactions.map((interaction) => {
+        const interactionId = String(interaction.id)
+        return parseFileChangesFromProgress(agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? [])
+      }),
+      parseFileChangesFromProgress(agentProgress),
+    ])
     setToolsPanelOpen(true)
     setToolSurfaces((current) => {
       const reviewCount = current.filter((surface) => surface.kind === 'review').length
@@ -1807,6 +1754,17 @@ export default function MintDashboard() {
     onOpenReview: isDesktopApp ? openReviewSurface : undefined,
   }
 
+  const stableToggleSidebar = useLatestCallback(toggleSidebar)
+  const stableSidebarResize = useLatestCallback(handleSidebarResize)
+  const stableSidebarResizeEnd = useLatestCallback(handleSidebarResizeEnd)
+  const stableClearHistory = useLatestCallback(clearHistory)
+  const stableSelectConversation = useLatestCallback(selectConversation)
+  const stableDeleteConversation = useLatestCallback(deleteConversation)
+  const stableRenameConversation = useLatestCallback(renameConversation)
+  const stableChangeView = useLatestCallback(changeView)
+  const stableBrowseFolderForMove = useLatestCallback(handleBrowseFolderForMove)
+  const stableNewChatInProject = useLatestCallback(handleNewChatInProject)
+
   return (
     <div className={`app-container ${startupReady ? '' : 'is-loading'}`}>
       {screenCaptureOpen && (
@@ -1898,25 +1856,25 @@ export default function MintDashboard() {
           view={view}
           sidebarCollapsed={sidebarCollapsed}
           sending={sending}
-          onToggleSidebar={toggleSidebar}
-          onSidebarResize={handleSidebarResize}
-          onSidebarResizeEnd={handleSidebarResizeEnd}
-          onClearHistory={clearHistory}
+          onToggleSidebar={stableToggleSidebar}
+          onSidebarResize={stableSidebarResize}
+          onSidebarResizeEnd={stableSidebarResizeEnd}
+          onClearHistory={stableClearHistory}
           chatSessions={chatSessions}
           activeConversationId={conversationId}
-          onSelectConversation={selectConversation}
-          onDeleteConversation={deleteConversation}
-          onRenameConversation={renameConversation}
-          onSetView={changeView}
+          onSelectConversation={stableSelectConversation}
+          onDeleteConversation={stableDeleteConversation}
+          onRenameConversation={stableRenameConversation}
+          onSetView={stableChangeView}
           isSearchOpen={isSearchOpen}
           onSetSearchOpen={setIsSearchOpen}
           showWorkspaceTab={isDesktopApp}
           promoteMediaStudios={!isDesktopApp}
           activeWorkspacePath={workspacePath}
           recentWorkspacePaths={recentWorkspacePaths}
-          onBrowseFolder={isDesktopApp ? handleBrowseFolderForMove : undefined}
+          onBrowseFolder={isDesktopApp ? stableBrowseFolderForMove : undefined}
           onUpdateSessionWorkspace={handleUpdateSessionWorkspace}
-          onNewChatInProject={handleNewChatInProject}
+          onNewChatInProject={stableNewChatInProject}
         />
         <main className={`assistant-workspace ${view === 'workspace' ? '' : 'chat-only'} ${view === 'workspace' ? 'workspace-open' : ''}`} style={(view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' || view === 'pictures' || view === 'imagine' || view === 'veo' || view === 'code') ? { display: 'none' } : undefined}>
           {proactiveSuggestion && (

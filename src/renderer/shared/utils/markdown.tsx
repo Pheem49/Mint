@@ -3,21 +3,22 @@
  * Markdown parsing and rendering for message bubbles, built on react-markdown + remark-gfm.
  * Shared by both Desktop and Web ChatPanel — do NOT duplicate this.
  */
-import { Children, cloneElement, Fragment, isValidElement, memo, type CSSProperties, type ReactElement, type ReactNode } from 'react'
+import { Children, cloneElement, Fragment, isValidElement, lazy, memo, Suspense, type CSSProperties, type ReactElement, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ChatCodeBlock } from '../components/chat/ChatCodeBlock'
-import WeatherCard from '../components/cards/WeatherCard'
-import StockCard from '../components/cards/StockCard'
-import CalculationCard from '../components/cards/CalculationCard'
-import ImageSearchCard from '../components/cards/ImageSearchCard'
-import ImageGenCard from '../components/cards/ImageGenCard'
-import MermaidCard from '../components/cards/MermaidCard'
-import UiGridCard from '../components/cards/UiGridCard'
 import { parseCardJsonSafely } from './cardJson'
-import UiFeatureCard from '../components/cards/UiFeatureCard'
-import UiMockupWidget from '../components/cards/UiMockupWidget'
 import type { WebSearchSource } from './agentActivity'
+
+const WeatherCard = lazy(() => import('../components/cards/WeatherCard'))
+const StockCard = lazy(() => import('../components/cards/StockCard'))
+const CalculationCard = lazy(() => import('../components/cards/CalculationCard'))
+const ImageSearchCard = lazy(() => import('../components/cards/ImageSearchCard'))
+const ImageGenCard = lazy(() => import('../components/cards/ImageGenCard'))
+const MermaidCard = lazy(() => import('../components/cards/MermaidCard'))
+const UiGridCard = lazy(() => import('../components/cards/UiGridCard'))
+const UiFeatureCard = lazy(() => import('../components/cards/UiFeatureCard'))
+const UiMockupWidget = lazy(() => import('../components/cards/UiMockupWidget'))
 import {
   Info,
   Lightbulb,
@@ -89,7 +90,10 @@ export function readableAssistantText(text: string): string {
 }
 
 /** Replace common LaTeX math symbols with their Unicode equivalents */
-function sanitizeLatex(text: string): string {
+export function sanitizeLatex(text: string): string {
+  if (!text.includes('\\') && !text.includes('$') && !text.includes('arrow')) {
+    return text
+  }
   return text
     // arrows
     .replace(/\$\\rightarrow\$|\\\(\\rightarrow\\\)|\\rightarrow|\bightarrow\b/g, '→')
@@ -265,7 +269,7 @@ function renderJsonCard(
 ): ReactNode {
   const parsed = parseJsonSafely(codeText)
   return parsed
-    ? render(parsed)
+    ? <Suspense fallback={null}>{render(parsed)}</Suspense>
     : <ChatCodeBlock code={codeText} language={lang} />
 }
 
@@ -287,7 +291,7 @@ function renderCodeCard(lang: string, codeText: string): ReactNode {
     case 'image-gen-json':
       return renderJsonCard(codeText, lang, (data) => <ImageGenCard data={data} />)
     case 'mermaid':
-      return <MermaidCard code={codeText} />
+      return <Suspense fallback={null}><MermaidCard code={codeText} /></Suspense>
     case 'ui_grid':
     case 'ui-grid':
     case 'ui_grid_json':
@@ -297,7 +301,7 @@ function renderCodeCard(lang: string, codeText: string): ReactNode {
         clean = clean.replace(/^ui[-_]grid(?:[-_]json)?\s*/i, '')
       }
       const parsed = parseJsonSafely(clean)
-      if (parsed) return <UiGridCard data={parsed} />
+      if (parsed) return <Suspense fallback={null}><UiGridCard data={parsed} /></Suspense>
       return <ChatCodeBlock code={codeText} language={lang} />
     }
     case 'ui_card':
@@ -311,7 +315,7 @@ function renderCodeCard(lang: string, codeText: string): ReactNode {
         clean = clean.replace(/^ui[-_](?:card|feature)(?:[-_]json)?\s*/i, '')
       }
       const parsed = parseJsonSafely(clean)
-      if (parsed) return <UiFeatureCard data={parsed} />
+      if (parsed) return <Suspense fallback={null}><UiFeatureCard data={parsed} /></Suspense>
       return <ChatCodeBlock code={codeText} language={lang} />
     }
     case 'ui_mockup':
@@ -323,7 +327,7 @@ function renderCodeCard(lang: string, codeText: string): ReactNode {
         clean = clean.replace(/^ui[-_]mockup(?:[-_]json)?\s*/i, '')
       }
       const parsed = parseJsonSafely(clean)
-      if (parsed) return <UiMockupWidget data={parsed} />
+      if (parsed) return <Suspense fallback={null}><UiMockupWidget data={parsed} /></Suspense>
       return <ChatCodeBlock code={codeText} language={lang} />
     }
     default:
@@ -526,9 +530,9 @@ const mdComponents = {
         const lang = match[1].replace(/_/g, '-').toLowerCase()
         const parsed = parseJsonSafely(match[2].trim())
         if (parsed) {
-          if (lang.startsWith('ui-grid')) return <UiGridCard data={parsed} />
-          if (lang.startsWith('ui-card') || lang.startsWith('ui-feature')) return <UiFeatureCard data={parsed} />
-          if (lang.startsWith('ui-mockup')) return <UiMockupWidget data={parsed} />
+          if (lang.startsWith('ui-grid')) return <Suspense fallback={null}><UiGridCard data={parsed} /></Suspense>
+          if (lang.startsWith('ui-card') || lang.startsWith('ui-feature')) return <Suspense fallback={null}><UiFeatureCard data={parsed} /></Suspense>
+          if (lang.startsWith('ui-mockup')) return <Suspense fallback={null}><UiMockupWidget data={parsed} /></Suspense>
         }
       }
     }

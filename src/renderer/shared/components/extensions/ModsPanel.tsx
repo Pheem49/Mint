@@ -38,6 +38,9 @@ export function ModTestResults({ report }: { report: ModTestReport }) {
   return <section aria-label="Mod test results"><p role="status">{report.passed} passed · {report.failed} failed</p>{report.tests.map((test, i) => <div key={i}><strong>{test.passed ? '✓' : '✗'} {test.name}</strong><p className="mod-hint">{test.file}</p>{test.error && <pre className="mod-error">{test.error}</pre>}</div>)}</section>
 }
 
+export const modsPollIntervalMs = (open: boolean, mods?: ModRecord[]): number =>
+  open || Boolean(mods?.some(m => m.enabled)) ? 3000 : 12000
+
 export function ModsPanel({ workspacePath, chatId, panelTarget, onOpen }: { workspacePath?: string | null; chatId: string; panelTarget?: HTMLElement | null; onOpen: () => void }) {
   const [data, setData] = useState<ModResponse>({ mods: [] })
   const open = Boolean(panelTarget)
@@ -49,12 +52,15 @@ export function ModsPanel({ workspacePath, chatId, panelTarget, onOpen }: { work
   const [reports, setReports] = useState<Record<string, ModTestReport>>({})
   const rootRef = useRef<HTMLDivElement>(null)
   const openRef = useRef(open); openRef.current = open
+  const modsRef = useRef<ModRecord[]>(data.mods)
+  modsRef.current = data.mods
   const currentScope = useRef('')
   currentScope.current = `${workspacePath}\0${chatId}`
   const [scope, setScope] = useState<'chat' | 'workspace' | 'global'>('chat')
   const generation = useRef(0)
   const importRef = useRef<HTMLInputElement>(null)
   const seen = useRef(new Set<string>())
+  const refreshRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     const current = ++generation.current
@@ -63,30 +69,39 @@ export function ModsPanel({ workspacePath, chatId, panelTarget, onOpen }: { work
     setData({ mods: [] }); setLoading(Boolean(workspacePath && chatId)); setBusy(false); setError(''); setTab('manage'); seen.current.clear(); setReports({})
     async function refresh() {
       if (!workspacePath || !chatId || stopped) return
+      clearTimeout(timer)
       if (document.hidden) {
-        if (!stopped) timer = setTimeout(refresh, 3000)
+        if (!stopped) timer = setTimeout(refresh, modsPollIntervalMs(openRef.current, modsRef.current))
         return
       }
+      let latestMods = modsRef.current
       try {
         const value = await modsPlatform.operation({ workspacePath, chatId, action: 'list' })
         if (!stopped && generation.current === current) {
+          latestMods = value.mods ?? []
           setData(value); setLoading(false)
           const fresh = value.mods?.find(m => m.enabled && m.snapshot?.ui.side_panel && !seen.current.has(m.id))
           value.mods?.filter(m => m.enabled).forEach(m => seen.current.add(m.id))
           if (fresh) { onOpenRef.current(); setTab(fresh.id) }
         }
       } catch (e) { if (!stopped && generation.current === current) { setError(String(e)); setLoading(false) } }
-      if (!stopped) timer = setTimeout(refresh, 3000)
+      if (!stopped) timer = setTimeout(refresh, modsPollIntervalMs(openRef.current, latestMods))
     }
+    refreshRef.current = () => { void refresh() }
     void refresh()
     const resume = () => { if (!document.hidden && !stopped) void refresh() }
     document.addEventListener('visibilitychange', resume)
     return () => {
       stopped = true; clearTimeout(timer)
+      refreshRef.current = null
       document.removeEventListener('visibilitychange', resume)
       if (workspacePath && chatId) void modsPlatform.operation({ workspacePath, chatId, action: 'close' }).catch(() => {})
     }
   }, [workspacePath, chatId])
+
+  useEffect(() => {
+    if (open) refreshRef.current?.()
+  }, [open])
 
   useEffect(() => {
     const element=rootRef.current

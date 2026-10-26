@@ -57,3 +57,16 @@ export function lazyWithRetry<T extends React.ComponentType<any>>(
   )
 }
 
+export function scheduleIdlePreload(preload: () => void): () => void {
+  const win = window as Window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+    cancelIdleCallback?: (id: number) => void
+  }
+  if (typeof win.requestIdleCallback === 'function') {
+    const idleId = win.requestIdleCallback(preload, { timeout: 4000 })
+    return () => win.cancelIdleCallback?.(idleId)
+  }
+  const timer = setTimeout(preload, 3500)
+  return () => clearTimeout(timer)
+}
+

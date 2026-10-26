@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import ChatPanel from './ChatPanel'
+import ChatPanel, { shouldProbeOllamaModels, ThinkingElapsedMeta } from './ChatPanel'
 import { chatPanelFixture } from '../../../tests/chatPanelFixture'
 import { installRendererPlatform } from '../../platform'
 import * as webAdapter from '../../../src-web/tauri'
@@ -17,5 +17,15 @@ describe('Shared Tools entry point', () => {
     installRendererPlatform(webAdapter)
     const html = renderToStaticMarkup(createElement(ChatPanel, chatPanelFixture() as any))
     expect(html).not.toContain('Open session sources')
+  })
+  it('isolates thinking elapsed timer markup and gates Ollama probing to Ollama configurations', () => {
+    installRendererPlatform(webAdapter)
+    const elapsedHtml = renderToStaticMarkup(createElement(ThinkingElapsedMeta))
+    expect(elapsedHtml).toContain('thinking-status-meta')
+    expect(elapsedHtml).toContain('· 0s · Esc to cancel')
+
+    expect(shouldProbeOllamaModels({ activeProvider: 'gemini' } as any, {})).toBe(false)
+    expect(shouldProbeOllamaModels({ activeProvider: 'ollama' } as any, {})).toBe(true)
+    expect(shouldProbeOllamaModels({ activeProvider: 'gemini' } as any, { ollamaHost: 'http://localhost:11434' })).toBe(true)
   })
 })

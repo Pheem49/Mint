@@ -4,7 +4,7 @@ import ViewedImages from '../activity/ViewedImages'
 import { CollapsiblePasteInput } from './CollapsiblePasteInput'
 import { ContextCompactionStatus } from './ContextCompactionStatus'
 import { activeCompactionFrom } from '../../utils/contextCompaction'
-import { useEffect, useMemo, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback, Fragment, lazy, Suspense, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
 import { EMPTY_AGENT_PROGRESS, hasAgentToolActivity, thoughtsFrom, extendedThoughtsFrom, mergeFileChanges, parseFileChangesFromProgress } from '../../agentProgress'
 import { visibleInteractionsDuringRun } from '../../conversation/syncView'
 import {
@@ -34,8 +34,6 @@ import { TurnFileChanges, type RewindRequestPayload } from './TurnFileChanges'
 import { SubagentStatusStrip } from '../activity/SubagentStatusStrip'
 import { VirtualChatHistory, type VirtualChatHistoryHandle } from './VirtualChatHistory'
 import type { ArtifactFile } from '../../utils/artifacts'
-import { ArtifactPreviewPanel } from '../workspace/ArtifactPreviewPanel'
-import { RewindModal } from './RewindModal'
 import type { AgentProgress, ChatResponse, DiffHunk, FileChange, GitCheckpoint, RuntimeStatus } from '../../types'
 import { shouldShowSessionDivider, formatSessionDividerLabel } from '../../utils/ui'
 import { useVoiceInput } from '@/voiceInput'
@@ -48,12 +46,35 @@ import GitBranchSelector from '../workspace/GitBranchSelector'
 import WorkspaceSelector from '../workspace/WorkspaceSelector'
 import ToolsPanelToggle from '../workspace/ToolsPanelToggle'
 import { ModsPanel } from '../extensions/ModsPanel'
-import CodeReviewPage from '../workspace/CodeReviewPage'
 import type { ToolSurface } from '../workspace/ToolSurfacePage'
 import '../../css/thinking-status.css'
 import '../../css/slash-choice.css'
 
 import { catalogPlatform, conversationPlatform, runtimePlatform } from '../../platform'
+
+const ArtifactPreviewPanel = lazy(() => import('../workspace/ArtifactPreviewPanel').then(m => ({ default: m.ArtifactPreviewPanel })))
+const RewindModal = lazy(() => import('./RewindModal').then(m => ({ default: m.RewindModal })))
+const CodeReviewPage = lazy(() => import('../workspace/CodeReviewPage'))
+
+export function shouldProbeOllamaModels(status?: RuntimeStatus | null, settingsConfig?: any): boolean {
+  return status?.activeProvider === 'ollama' || Boolean(settingsConfig?.ollamaHost || settingsConfig?.ollamaModel)
+}
+
+export function ThinkingElapsedMeta() {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  useEffect(() => {
+    const startTime = Date.now()
+    const timer = setInterval(() => {
+      setElapsedSeconds(Math.round((Date.now() - startTime) / 1000))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
+  return (
+    <span className="thinking-status-meta">
+      {` · ${elapsedSeconds}s · Esc to cancel`}
+    </span>
+  )
+}
 
 const STREAM_MARKDOWN_UPDATE_MS = 120
 
@@ -309,7 +330,6 @@ export default function ChatPanel({
   const [reviewPage, setReviewPage] = useState<{ title: string; changes: FileChange[] } | null>(null)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactFile | null>(null)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
-  const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
   const toggleActivity = useCallback((id: string) => {
     setOpenActivityIds(current => ({ ...current, [id]: !(current[id] ?? (id === 'live')) }))
@@ -330,6 +350,7 @@ export default function ChatPanel({
   })
 
   useEffect(() => {
+    if (!shouldProbeOllamaModels(status, settingsConfig)) return
     let cancelled = false
     const fetchOllamaModels = async () => {
       const host = settingsConfig?.ollamaHost || 'http://localhost:11434'
@@ -372,24 +393,7 @@ export default function ChatPanel({
     return () => {
       cancelled = true
     }
-  }, [settingsConfig?.ollamaHost, settingsConfig?.ollamaModel])
-
-  useEffect(() => {
-    if (!sending) {
-      setElapsedSeconds(0)
-      return
-    }
-
-    const startTime = Date.now()
-    setElapsedSeconds(0)
-
-    const timer = setInterval(() => {
-      const elapsed = Math.round((Date.now() - startTime) / 1000)
-      setElapsedSeconds(elapsed)
-    }, 1000)
-
-    return () => clearInterval(timer)
-  }, [sending])
+  }, [status?.activeProvider, settingsConfig?.ollamaHost, settingsConfig?.ollamaModel])
   const [speechError, setSpeechError] = useState('')
   const [speakingText, setSpeakingText] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | number | null>(null)
@@ -1160,9 +1164,7 @@ export default function ChatPanel({
                           ? `${activeAgentName} (${activeModelName}) is thinking...`
                           : 'Thinking'}
                       </span>
-                      <span className="thinking-status-meta">
-                        {` · ${elapsedSeconds}s · Esc to cancel`}
-                      </span>
+                      <ThinkingElapsedMeta />
                     </div>
                   )}
                 </span>
@@ -1899,29 +1901,33 @@ export default function ChatPanel({
           >
             <div className="preview-split-resizer-grip" />
           </div>
-          {reviewPage ? (
-            <CodeReviewPage
-              title={reviewPage.title}
-              changes={reviewPage.changes}
-              workspacePath={workspacePath}
-              onBack={() => setReviewPage(null)}
-            />
-          ) : activeArtifact ? (
-            <ArtifactPreviewPanel artifact={activeArtifact} onClose={() => setActiveArtifact(null)} workspacePath={workspacePath} />
-          ) : null}
+          <Suspense fallback={null}>
+            {reviewPage ? (
+              <CodeReviewPage
+                title={reviewPage.title}
+                changes={reviewPage.changes}
+                workspacePath={workspacePath}
+                onBack={() => setReviewPage(null)}
+              />
+            ) : activeArtifact ? (
+              <ArtifactPreviewPanel artifact={activeArtifact} onClose={() => setActiveArtifact(null)} workspacePath={workspacePath} />
+            ) : null}
+          </Suspense>
         </>
       )}
       {rewindModalState.isOpen && (
-        <RewindModal
-          isOpen={rewindModalState.isOpen}
-          onClose={() => setRewindModalState((prev) => ({ ...prev, isOpen: false }))}
-          onConfirm={handleConfirmRewind}
-          checkpoints={rewindModalState.checkpoints}
-          targetCheckpoint={rewindModalState.targetCheckpoint}
-          changes={rewindModalState.changes}
-          workspacePath={workspacePath}
-          isLoading={rewindModalState.isLoading}
-        />
+        <Suspense fallback={null}>
+          <RewindModal
+            isOpen={rewindModalState.isOpen}
+            onClose={() => setRewindModalState((prev) => ({ ...prev, isOpen: false }))}
+            onConfirm={handleConfirmRewind}
+            checkpoints={rewindModalState.checkpoints}
+            targetCheckpoint={rewindModalState.targetCheckpoint}
+            changes={rewindModalState.changes}
+            workspacePath={workspacePath}
+            isLoading={rewindModalState.isLoading}
+          />
+        </Suspense>
       )}
     </div>
   )

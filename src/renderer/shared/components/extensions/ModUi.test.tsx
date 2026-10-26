@@ -1,7 +1,7 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, it, expect } from 'vitest'
-import { ModUi, ModSessionControls, ModTestResults } from './ModsPanel'
+import { ModUi, ModSessionControls, ModTestResults, modsPollIntervalMs } from './ModsPanel'
 import type { ModNode } from '../../mods'
 import { modViewport } from '../../utils/modViewport'
 
@@ -60,5 +60,11 @@ describe('Mod UI', () => {
     expect(html).toContain('value="20"')
     expect(html).toContain('<th>Task</th>')
     expect(html).toContain('<td>Write tests</td>')
+  })
+  it('backs off Mods polling when panel is closed and no mods are enabled', () => {
+    expect(modsPollIntervalMs(false, [])).toBe(12000)
+    expect(modsPollIntervalMs(false, [{ id: 'm1', enabled: false } as any])).toBe(12000)
+    expect(modsPollIntervalMs(true, [])).toBe(3000)
+    expect(modsPollIntervalMs(false, [{ id: 'm1', enabled: true } as any])).toBe(3000)
   })
 })
