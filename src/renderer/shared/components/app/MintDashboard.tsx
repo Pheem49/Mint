@@ -1008,7 +1008,7 @@ export default function MintDashboard() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const trimmed = message.trim()
+    const trimmed = conversationActions.getSnapshot().message.trim()
     const currentImages = imageAttachments
     const currentVideos = videoAttachments
     const currentDocument = documentAttachment
@@ -1253,7 +1253,8 @@ export default function MintDashboard() {
 
   function startWebSearch() {
     updateAgentMode(true)
-    conversationActions.compose(message.trim() ? `Search web: ${message.trim()}` : 'Search web: ')
+    const currentMessage = conversationActions.getSnapshot().message.trim()
+    conversationActions.compose(currentMessage ? `Search web: ${currentMessage}` : 'Search web: ')
   }
 
   async function selectWorkspace(path?: string, showWorkspace = false) {
@@ -1730,6 +1731,8 @@ export default function MintDashboard() {
     onSelectDocument: selectDocument,
     onPasteImage: pasteImage,
     onSetMessage: conversationActions.compose,
+    subscribeMessage: conversationActions.subscribe,
+    getMessage: () => conversationActions.getSnapshot().message,
     onSendVoiceMessage: sendVoiceMessage,
     onRemoveImage: conversationActions.removeImage,
     onRemoveVideo: conversationActions.removeVideo,

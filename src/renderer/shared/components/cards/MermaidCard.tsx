@@ -209,8 +209,6 @@ export default function MermaidCard({ code }: { code: string }) {
     <div
       style={{
         background: 'var(--bg-surface-soft)',
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
         color: 'var(--text-primary)',
         borderRadius: '12px',
         padding: '16px 20px',

@@ -92,8 +92,6 @@ export default function ImageSearchCard({ data }: { data: ImageSearchData }) {
     <div
       style={{
         background: cardBg,
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
         color: cardText,
         borderRadius: '12px',
         padding: '16px 20px',

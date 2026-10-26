@@ -30,8 +30,6 @@ export default function CalculationCard({ data }: { data: CalculationData }) {
     <div
       style={{
         background: t.cardBg,
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
         color: t.cardText,
         borderRadius: '12px',
         padding: '16px 20px',

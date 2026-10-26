@@ -60,6 +60,12 @@ export interface ConversationBrowser {
   document: Pick<Document, 'visibilityState' | 'addEventListener' | 'removeEventListener'>
 }
 
+export function conversationPollIntervalsMs(activeRun: boolean): { historyMs: number; sessionsMs: number } {
+  return activeRun
+    ? { historyMs: 1500, sessionsMs: 5000 }
+    : { historyMs: 5000, sessionsMs: 15000 }
+}
+
 /** Owns ordering and lifecycle; callers never handle generations or cursors. */
 export function createConversationLifecycle(
   conversationId: string,
@@ -337,10 +343,11 @@ export function createConversationLifecycle(
     } finally {
       flushProgress(run)
       if (runs.get(origin.chatId) === run) {
+        const isCurrent = currentRun(run)
         removeApproval(origin.chatId)
-        if (currentRun(run)) update({ ...transitionConversation(state, { type: 'run_finished' }),
-          streamingConversationId: null, activeTurnId: null, sessionAutoApproved: false })
         runs.delete(origin.chatId)
+        if (isCurrent) update({ ...transitionConversation(state, { type: 'run_finished' }),
+          streamingConversationId: null, activeTurnId: null, sessionAutoApproved: false })
       }
     }
   }
@@ -389,19 +396,48 @@ export function createConversationLifecycle(
 
   function watch(browser: ConversationBrowser, historyVisible: boolean) {
     let active = true
+    let activeRun = state.sending || runs.size > 0
+    let historyTimer: number | undefined
+    let sessionsTimer: number | undefined
+
     const visible = () => active && browser.document.visibilityState === 'visible'
     const sync = () => { if (historyVisible && visible()) void syncHistory(visible) }
     const refresh = () => { if (visible()) void refreshSessions().catch(() => {}) }
     const focus = () => { sync(); refresh() }
+
+    const scheduleTimers = () => {
+      if (historyTimer !== undefined) browser.window.clearInterval(historyTimer)
+      if (sessionsTimer !== undefined) browser.window.clearInterval(sessionsTimer)
+      if (!active) return
+
+      const intervals = conversationPollIntervalsMs(activeRun)
+      historyTimer = historyVisible ? browser.window.setInterval(sync, intervals.historyMs) : undefined
+      sessionsTimer = browser.window.setInterval(refresh, intervals.sessionsMs)
+    }
+
+    const checkActiveRunTransition = () => {
+      const currentActive = state.sending || runs.size > 0
+      if (currentActive !== activeRun) {
+        activeRun = currentActive
+        scheduleTimers()
+        if (activeRun) {
+          sync()
+          refresh()
+        }
+      }
+    }
+
+    subscribers.add(checkActiveRunTransition)
     sync()
-    const historyTimer = historyVisible ? browser.window.setInterval(sync, 1500) : undefined
-    const sessionsTimer = browser.window.setInterval(refresh, 5000)
+    scheduleTimers()
+
     browser.window.addEventListener('focus', focus)
     browser.document.addEventListener('visibilitychange', focus)
     return () => {
       active = false
+      subscribers.delete(checkActiveRunTransition)
       if (historyTimer !== undefined) browser.window.clearInterval(historyTimer)
-      browser.window.clearInterval(sessionsTimer)
+      if (sessionsTimer !== undefined) browser.window.clearInterval(sessionsTimer)
       browser.window.removeEventListener('focus', focus)
       browser.document.removeEventListener('visibilitychange', focus)
     }

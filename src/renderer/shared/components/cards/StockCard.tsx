@@ -59,8 +59,6 @@ export default function StockCard({ data }: { data: StockData }) {
     <div
       style={{
         background: t.cardBg,
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
         color: t.cardText,
         borderRadius: '12px',
         padding: '16px 20px',

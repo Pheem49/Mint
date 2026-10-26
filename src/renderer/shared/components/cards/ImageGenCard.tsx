@@ -80,8 +80,6 @@ export default function ImageGenCard({ data }: { data: ImageGenData }) {
     <div
       style={{
         background: cardBg,
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
         color: cardText,
         borderRadius: '12px',
         padding: '16px 20px',

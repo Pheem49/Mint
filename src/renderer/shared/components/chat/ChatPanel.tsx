@@ -4,7 +4,7 @@ import ViewedImages from '../activity/ViewedImages'
 import { CollapsiblePasteInput } from './CollapsiblePasteInput'
 import { ContextCompactionStatus } from './ContextCompactionStatus'
 import { activeCompactionFrom } from '../../utils/contextCompaction'
-import { useEffect, useMemo, useRef, useState, useCallback, Fragment, lazy, Suspense, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback, Fragment, lazy, Suspense, useSyncExternalStore, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
 import { EMPTY_AGENT_PROGRESS, hasAgentToolActivity, thoughtsFrom, extendedThoughtsFrom, mergeFileChanges, parseFileChangesFromProgress } from '../../agentProgress'
 import { visibleInteractionsDuringRun } from '../../conversation/syncView'
 import {
@@ -180,6 +180,8 @@ interface ChatPanelContract {
   onOpenReview?: (review: Extract<ToolSurface, { kind: 'review' }>) => void
   onSelectSlashChoice?: (value: string) => void
   onDismissSlashChoice?: () => void
+  subscribeMessage?: (notify: () => void) => () => void
+  getMessage?: () => string
 }
 
 export type ConversationViewModel = Pick<ChatPanelContract,
@@ -192,7 +194,23 @@ export type ConversationViewModel = Pick<ChatPanelContract,
   | 'hasOlder'
   | 'sendingInteractionId'
 >
-export type ConversationActions = Omit<ChatPanelContract, keyof ConversationViewModel>
+export type ConversationActions = Omit<ChatPanelContract, keyof ConversationViewModel> & {
+  subscribeMessage?: (notify: () => void) => () => void
+  getMessage?: () => string
+}
+
+export function useComposerDraft(
+  fallbackMessage: string,
+  subscribe?: (notify: () => void) => () => void,
+  getMessage?: () => string,
+): string {
+  const getSnapshot = () => (getMessage ? getMessage() : fallbackMessage)
+  return useSyncExternalStore(
+    subscribe ?? (() => () => {}),
+    getSnapshot,
+    getSnapshot,
+  )
+}
 
 interface ChatPanelProps {
   conversation: ConversationViewModel
@@ -220,7 +238,7 @@ export default function ChatPanel({
   agentActivitySnapshots,
   thinkingExpanded,
   onThinkingExpandedChange: handleThinkingExpandedChange,
-  message,
+  message: initialMessage,
   imageAttachments,
   videoAttachments,
   documentName,
@@ -269,6 +287,7 @@ export default function ChatPanel({
   onSelectSlashChoice,
   onDismissSlashChoice,
   } = { ...conversation, ...actions }
+  const message = useComposerDraft(initialMessage, actions.subscribeMessage, actions.getMessage)
   const onThinkingExpandedChange = useLatestCallback(handleThinkingExpandedChange)
   // The initiating surface already renders a live prompt/reply pair below.
   // Hide its matching persisted turn until the local stream settles, while
