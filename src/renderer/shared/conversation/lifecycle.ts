@@ -346,8 +346,12 @@ export function createConversationLifecycle(
         const isCurrent = currentRun(run)
         removeApproval(origin.chatId)
         runs.delete(origin.chatId)
-        if (isCurrent) update({ ...transitionConversation(state, { type: 'run_finished' }),
-          streamingConversationId: null, activeTurnId: null, sessionAutoApproved: false })
+        if (isCurrent) {
+          update({ ...transitionConversation(state, { type: 'run_finished' }),
+            streamingConversationId: null, activeTurnId: null, sessionAutoApproved: false })
+        } else {
+          subscribers.forEach(notify => notify())
+        }
       }
     }
   }

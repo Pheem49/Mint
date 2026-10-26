@@ -78,7 +78,11 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
         ("GET", "/api/oauth/start") => {
             let provider = query_param(query, "provider").unwrap_or_else(|| "google".to_string());
             let redirect_uri = format!("http://localhost:3000/api/oauth/callback");
-            let config = load_config().unwrap_or_default();
+            let config = tokio::task::spawn_blocking(crate::load_config)
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
 
             let custom_client_id = match provider.as_str() {
                 "google" | "gmail" | "google_calendar" | "youtube_music" => config
@@ -129,7 +133,11 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
             let state = query_param(query, "state").unwrap_or_default();
             let provider = state.split('-').next().unwrap_or("google");
             let redirect_uri = format!("http://localhost:3000/api/oauth/callback");
-            let config = load_config().unwrap_or_default();
+            let config = tokio::task::spawn_blocking(crate::load_config)
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
 
             let (custom_client_id, custom_client_secret) = match provider {
                 "google" | "gmail" | "google_calendar" | "youtube_music" => (

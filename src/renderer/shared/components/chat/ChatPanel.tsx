@@ -199,6 +199,8 @@ export type ConversationActions = Omit<ChatPanelContract, keyof ConversationView
   getMessage?: () => string
 }
 
+const NOOP_SUBSCRIBE = () => () => {}
+
 export function useComposerDraft(
   fallbackMessage: string,
   subscribe?: (notify: () => void) => () => void,
@@ -206,7 +208,7 @@ export function useComposerDraft(
 ): string {
   const getSnapshot = () => (getMessage ? getMessage() : fallbackMessage)
   return useSyncExternalStore(
-    subscribe ?? (() => () => {}),
+    subscribe ?? NOOP_SUBSCRIBE,
     getSnapshot,
     getSnapshot,
   )
