@@ -20,13 +20,17 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 .filter(|path| !path.trim().is_empty())
                 .map(std::path::PathBuf::from)
                 .or_else(|| std::env::current_dir().ok());
-            let list = MemoryStore::open_default()
-                .ok()
-                .and_then(|memory| {
-                    crate::skill_inventory::list_available_skills(&memory, workspace.as_deref())
-                        .ok()
-                })
-                .unwrap_or_default();
+            let list = tokio::task::spawn_blocking(move || {
+                MemoryStore::open_default()
+                    .ok()
+                    .and_then(|memory| {
+                        crate::skill_inventory::list_available_skills(&memory, workspace.as_deref())
+                            .ok()
+                    })
+                    .unwrap_or_default()
+            })
+            .await
+            .unwrap_or_default();
             send_json_response(
                 socket,
                 "200 OK",

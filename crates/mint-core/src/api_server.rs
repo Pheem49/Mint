@@ -238,6 +238,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
             Ok(val) => val,
             Err(_) => continue,
         };
+        let _ = socket.set_nodelay(true);
         // Some routes (the native folder picker) only make sense for, and are
         // only safe for, a browser on this same machine — capture that now
         // while we still have the peer address.
