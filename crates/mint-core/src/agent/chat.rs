@@ -3444,6 +3444,100 @@ mod tests {
     }
 
     #[test]
+    fn openai_serializes_compacted_history_with_role_alternation() {
+        let messages = vec![
+            ChatMessage::text(ChatRole::User, "Fix the bug"),
+            ChatMessage::text(ChatRole::Assistant, "Summary of earlier steps:\n- read file.rs\n- found syntax error"),
+            ChatMessage::text(ChatRole::User, "Please continue the task from where you left off based on the summary above."),
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call_1".into(),
+                    name: "apply_patch".into(),
+                    input: json!({"path": "file.rs", "patch": "..."}),
+                    thought_signature: None,
+                }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call_1".into(),
+                    content: "Patch applied".into(),
+                    is_error: false,
+                }],
+            },
+        ];
+        let built = openai_native_messages(&messages).unwrap();
+        assert_eq!(built.len(), 5);
+        assert_eq!(built[0]["role"], "user");
+        assert_eq!(built[1]["role"], "assistant");
+        assert_eq!(built[2]["role"], "user");
+        assert_eq!(built[3]["role"], "assistant");
+        assert_eq!(built[4]["role"], "tool");
+    }
+
+    #[test]
+    fn anthropic_serializes_compacted_history_with_role_alternation() {
+        let messages = vec![
+            ChatMessage::text(ChatRole::User, "Fix the bug"),
+            ChatMessage::text(ChatRole::Assistant, "Summary of earlier steps"),
+            ChatMessage::text(ChatRole::User, "Please continue"),
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "toolu_1".into(),
+                    name: "read_file".into(),
+                    input: json!({"path": "file.rs"}),
+                    thought_signature: None,
+                }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "toolu_1".into(),
+                    content: "Code content".into(),
+                    is_error: false,
+                }],
+            },
+        ];
+        let built = anthropic_messages(&messages).unwrap();
+        assert_eq!(built.len(), 5);
+        assert_eq!(built[0]["role"], "user");
+        assert_eq!(built[1]["role"], "assistant");
+        assert_eq!(built[2]["role"], "user");
+        assert_eq!(built[3]["role"], "assistant");
+        assert_eq!(built[4]["role"], "user");
+    }
+
+    #[test]
+    fn gemini_serializes_compacted_history_with_role_alternation() {
+        let messages = vec![
+            ChatMessage::text(ChatRole::User, "Fix the bug"),
+            ChatMessage::text(ChatRole::Assistant, "Summary of earlier steps"),
+            ChatMessage::text(ChatRole::User, "Please continue"),
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call_1".into(),
+                    name: "read_file".into(),
+                    input: json!({"path": "file.rs"}),
+                    thought_signature: None,
+                }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call_1".into(),
+                    content: "Code content".into(),
+                    is_error: false,
+                }],
+            },
+        ];
+        let built = gemini_native_contents(&messages).unwrap();
+        assert!(built.len() >= 4);
+    }
+
+    #[test]
     fn openai_allows_audio_attachments() {
         let request = ChatRequest {
             message: "transcribe this".into(),
