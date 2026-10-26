@@ -2,6 +2,7 @@ import { createWorkspaceMediaReader } from '../shared/utils/workspaceMedia'
 import { createWorkspaceImageReader } from '../shared/utils/workspaceImage'
 import { createLibraryTransport } from '../shared/library/transport'
 import { createSourcesTransport } from '../shared/conversation/sourcesTransport'
+import { createExternalLinkInterceptor } from '../shared/utils/externalLinks'
 /** Returns true when running inside the Tauri webview (desktop app). */
 export const isTauriRuntime = (): boolean =>
   typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__)
@@ -1325,53 +1326,9 @@ let activeLinkInterceptorCleanup: (() => void) | null = null
 
 /**
  * Global link interceptor: Catches clicks on anchor tags pointing to external URLs
- * (http:, https:, or target="_blank") and opens them in the system default browser
- * via Tauri desktop actions (or window.open in browser / webview fallbacks).
+ * and opens them in the system default browser via Tauri desktop actions (or window.open fallback).
  */
-export function installExternalLinkInterceptor(
-  targetDocument: Document | null = typeof document !== 'undefined' ? document : null
-): () => void {
-  if (!targetDocument) return () => {}
-
-  const handleClick = (event: MouseEvent) => {
-    // Only handle primary click (left) or auxiliary click (middle)
-    if (event.defaultPrevented || (event.button !== 0 && event.button !== 1)) {
-      return
-    }
-
-    const target = event.target as HTMLElement | null
-    if (!target || typeof target.closest !== 'function') return
-
-    const anchor = target.closest('a') as HTMLAnchorElement | null
-    if (!anchor) return
-
-    const rawHref = anchor.getAttribute('href') || ''
-    if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) {
-      return
-    }
-
-    let resolvedUrl = ''
-    try {
-      resolvedUrl = anchor.href || rawHref
-    } catch {
-      resolvedUrl = rawHref
-    }
-
-    const isHttpOrHttps = /^https?:\/\//i.test(rawHref) || /^https?:\/\//i.test(resolvedUrl)
-    const isBlank = anchor.target === '_blank'
-
-    if (isHttpOrHttps || (isBlank && !rawHref.startsWith('/') && /^https?:\/\//i.test(resolvedUrl))) {
-      event.preventDefault()
-      event.stopPropagation()
-      void openExternal(resolvedUrl)
-    }
-  }
-
-  targetDocument.addEventListener('click', handleClick, true)
-  return () => {
-    targetDocument.removeEventListener('click', handleClick, true)
-  }
-}
+export const installExternalLinkInterceptor = createExternalLinkInterceptor(openExternal)
 
 export function installTauriAdapters() {
   if (typeof document !== 'undefined') {
@@ -1381,7 +1338,8 @@ export function installTauriAdapters() {
     activeLinkInterceptorCleanup = installExternalLinkInterceptor(document)
   }
 
-  if (typeof window !== 'undefined' && isTauriRuntime()) {
+  if (typeof window !== 'undefined' && isTauriRuntime() && !(window as any).__MINT_WINDOW_OPEN_PATCHED__) {
+    ;(window as any).__MINT_WINDOW_OPEN_PATCHED__ = true
     const originalWindowOpen = window.open.bind(window)
     window.open = (url?: string | URL, target?: string, features?: string): Window | null => {
       const urlStr = url ? String(url) : ''

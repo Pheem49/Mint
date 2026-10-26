@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import type { WebSearchSource } from '../../utils/agentActivity'
 import { resolveMediaUrl } from '../../utils/markdown'
+import { runtimePlatform } from '../../platform'
 import '../../css/sources-block.css'
 
 export interface SourcesBlockProps {
@@ -139,13 +140,10 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                     return
                   }
                   // Otherwise open primary link
-                  if (typeof window !== 'undefined' && (window as any).api?.openExternal) {
-                    void (window as any).api.openExternal(primaryItem.url)
-                  } else if (typeof window !== 'undefined' && (window as any).settingsApi?.openExternal) {
-                    void (window as any).settingsApi.openExternal(primaryItem.url)
-                  } else {
+                  void runtimePlatform.openExternal(primaryItem.url).catch((err) => {
+                    console.error('Failed to open source URL:', err)
                     window.open(primaryItem.url, '_blank', 'noopener,noreferrer')
-                  }
+                  })
                 }}
                 onMouseEnter={(e) => {
                   const el = e.currentTarget

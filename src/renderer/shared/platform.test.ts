@@ -100,6 +100,20 @@ describe.each([['Desktop fallback', desktopAdapter], ['Web', webAdapter]] as con
 })
 
 describe('desktop external link interceptor', () => {
+  it('identifies external and internal URLs correctly', async () => {
+    const { isExternalHref } = await import('./utils/externalLinks')
+    expect(isExternalHref('https://example.com')).toBe(true)
+    expect(isExternalHref('http://example.com/page')).toBe(true)
+    expect(isExternalHref('//cdn.example.com/asset.js')).toBe(true)
+    expect(isExternalHref('#/settings')).toBe(false)
+    expect(isExternalHref('/library?item=123')).toBe(false)
+    expect(isExternalHref('./relative')).toBe(false)
+    expect(isExternalHref('../parent')).toBe(false)
+    expect(isExternalHref('javascript:void(0)')).toBe(false)
+    expect(isExternalHref('data:image/png;base64,...')).toBe(false)
+    expect(isExternalHref('blob:http://localhost/123')).toBe(false)
+  })
+
   it('intercepts clicks on external http/https links and prevents default', async () => {
     const openMock = vi.fn()
     vi.stubGlobal('window', { open: openMock })
@@ -120,6 +134,7 @@ describe('desktop external link interceptor', () => {
 
     const externalAnchor: any = {
       getAttribute: (attr: string) => (attr === 'href' ? 'https://example.com/search-result' : null),
+      hasAttribute: (attr: string) => false,
       href: 'https://example.com/search-result',
       target: '_blank',
     }
@@ -138,13 +153,61 @@ describe('desktop external link interceptor', () => {
     clickHandler!(clickEvent)
 
     expect(clickEvent.preventDefault).toHaveBeenCalledOnce()
-    expect(clickEvent.stopPropagation).toHaveBeenCalledOnce()
+    // Does NOT suppress propagation so React/child event listeners can still run
+    expect(clickEvent.stopPropagation).not.toHaveBeenCalled()
     expect(openMock).toHaveBeenCalledWith('https://example.com/search-result', '_blank', 'noopener,noreferrer')
+
+    // Internal relative route (/library?item=lib-123) should NOT be intercepted even if anchor.href resolves to document origin
+    openMock.mockClear()
+    const relativeAnchor: any = {
+      getAttribute: (attr: string) => (attr === 'href' ? '/library?item=lib-123' : null),
+      hasAttribute: (attr: string) => false,
+      href: 'http://localhost:9000/library?item=lib-123',
+      target: '',
+    }
+    const relativeClickEvent: any = {
+      defaultPrevented: false,
+      button: 0,
+      target: {
+        closest: (selector: string) => (selector === 'a' ? relativeAnchor : null),
+      },
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    }
+
+    clickHandler!(relativeClickEvent)
+
+    expect(relativeClickEvent.preventDefault).not.toHaveBeenCalled()
+    expect(openMock).not.toHaveBeenCalled()
+
+    // Download link should not be intercepted
+    openMock.mockClear()
+    const downloadAnchor: any = {
+      getAttribute: (attr: string) => (attr === 'href' ? 'https://example.com/file.png' : null),
+      hasAttribute: (attr: string) => attr === 'download',
+      href: 'https://example.com/file.png',
+      target: '',
+    }
+    const downloadClickEvent: any = {
+      defaultPrevented: false,
+      button: 0,
+      target: {
+        closest: (selector: string) => (selector === 'a' ? downloadAnchor : null),
+      },
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    }
+
+    clickHandler!(downloadClickEvent)
+
+    expect(downloadClickEvent.preventDefault).not.toHaveBeenCalled()
+    expect(openMock).not.toHaveBeenCalled()
 
     // Internal hash link should not be intercepted
     openMock.mockClear()
     const internalAnchor: any = {
       getAttribute: (attr: string) => (attr === 'href' ? '#/settings' : null),
+      hasAttribute: (attr: string) => false,
       href: '#/settings',
       target: '',
     }
