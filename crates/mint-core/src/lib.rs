@@ -81,7 +81,7 @@ pub use system::workspace;
 
 pub use agent_loop::{AgentActionFuture, AgentLoopError, parse_agent_json, run_agent_loop};
 pub use auth::{
-    AuthError, AuthUser, create_session, destroy_session, get_user, legacy_profile_pictures_dir,
+    AuthError, AuthUser, create_session, destroy_session, get_user,
     login_user, profile_pictures_dir, register_user, resolve_avatar_file_path, save_avatar_file,
     session_user_id, update_profile, user_db_path,
 };
@@ -110,7 +110,7 @@ pub use code_tools::{
 pub use config::{
     AgentConfig, ConfigError, CustomProvider, CustomProviderHeader, CustomProviderModel,
     MintConfig, PermissionDecision, PermissionRule, ToolCallingMode, config_path,
-    initialize_config, load_config, permission_decision_for, save_config, set_config_value,
+    initialize_config, load_config, mint_config_dir, permission_decision_for, save_config, set_config_value,
 };
 pub use cron::{
     CronError, CronJob, CronJobDraft, CronStore, localize_schedule, start_cron_scheduler,

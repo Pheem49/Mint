@@ -1062,6 +1062,11 @@ fn is_test_environment() -> bool {
     false
 }
 
+/// Returns the root configuration directory for Mint (`~/.config/mint`).
+pub fn mint_config_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join("mint"))
+}
+
 pub fn config_path() -> Result<PathBuf, ConfigError> {
     if let Ok(override_path) = std::env::var("MINT_CONFIG_PATH") {
         return Ok(PathBuf::from(override_path));
@@ -1072,8 +1077,8 @@ pub fn config_path() -> Result<PathBuf, ConfigError> {
             .join("mint-config.json");
         return Ok(tmp);
     }
-    dirs::config_dir()
-        .map(|directory| directory.join("mint").join("mint-config.json"))
+    mint_config_dir()
+        .map(|directory| directory.join("mint-config.json"))
         .ok_or(ConfigError::ConfigDirectoryUnavailable)
 }
 

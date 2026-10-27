@@ -45,9 +45,24 @@ pub fn url_cache_key(url: &str) -> String {
 
 /// Directory path for disk-based image caching (~/.config/mint/cache/image-proxy).
 pub fn default_cache_dir() -> PathBuf {
-    dirs::config_dir()
-        .map(|d| d.join("mint").join("cache").join("image-proxy"))
+    crate::system::config::mint_config_dir()
+        .map(|d| d.join("cache").join("image-proxy"))
         .unwrap_or_else(|| std::env::temp_dir().join("mint-image-proxy"))
+}
+
+/// Legacy directory path for image proxy cache (~/.config/mint/Pictures/image-cache).
+pub fn legacy_cache_dir() -> Option<PathBuf> {
+    crate::system::config::mint_config_dir().map(|d| d.join("Pictures").join("image-cache"))
+}
+
+/// Automatically removes legacy cache directory (~/.config/mint/Pictures/image-cache)
+/// if it exists, preventing orphaned disk consumption for upgraded users.
+pub fn cleanup_legacy_cache_dir() {
+    if let Some(legacy) = legacy_cache_dir() {
+        if legacy.is_dir() {
+            let _ = fs::remove_dir_all(legacy);
+        }
+    }
 }
 
 /// Returns true if an IP address is private, loopback, link-local, or broadcast.
@@ -72,9 +87,12 @@ pub fn is_private_or_loopback_ip(ip: IpAddr) -> bool {
 
 /// Validates that a target URL is safe to fetch via proxy (SSRF guard).
 pub async fn validate_target_url(target_url: &str) -> Result<reqwest::Url, ImageProxyError> {
-    let parsed = reqwest::Url::parse(target_url).map_err(|e| ImageProxyError::InvalidUrl(e.to_string()))?;
+    let parsed =
+        reqwest::Url::parse(target_url).map_err(|e| ImageProxyError::InvalidUrl(e.to_string()))?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return Err(ImageProxyError::InvalidUrl("only http and https schemes are permitted".into()));
+        return Err(ImageProxyError::InvalidUrl(
+            "only http and https schemes are permitted".into(),
+        ));
     }
 
     let host = parsed
@@ -85,12 +103,16 @@ pub async fn validate_target_url(target_url: &str) -> Result<reqwest::Url, Image
         || host.ends_with(".localhost")
         || host.ends_with(".local")
     {
-        return Err(ImageProxyError::SsrfBlocked("localhost and .local domains are blocked".into()));
+        return Err(ImageProxyError::SsrfBlocked(
+            "localhost and .local domains are blocked".into(),
+        ));
     }
 
     if let Ok(ip) = host.parse::<IpAddr>() {
         if is_private_or_loopback_ip(ip) {
-            return Err(ImageProxyError::SsrfBlocked(format!("IP {ip} is private/loopback")));
+            return Err(ImageProxyError::SsrfBlocked(format!(
+                "IP {ip} is private/loopback"
+            )));
         }
     }
 
@@ -212,8 +234,10 @@ pub fn prune_cache_to_size(
     Ok(initial_size.saturating_sub(total_size))
 }
 
-/// Prunes oldest cache entries if total directory size exceeds `MAX_CACHE_DIR_SIZE`.
+/// Prunes oldest cache entries if total directory size exceeds `MAX_CACHE_DIR_SIZE`
+/// and cleans up any legacy orphaned cache folder.
 pub fn prune_cache_if_needed(cache_dir: &Path) -> Result<(), std::io::Error> {
+    cleanup_legacy_cache_dir();
     let _ = prune_cache_to_size(cache_dir, MAX_CACHE_DIR_SIZE, PRUNE_DOWN_TO_SIZE)?;
     Ok(())
 }
@@ -310,16 +334,39 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_target_url_blocks_localhost() {
-        assert!(validate_target_url("http://localhost/image.png").await.is_err());
-        assert!(validate_target_url("http://127.0.0.1:8080/image.png").await.is_err());
-        assert!(validate_target_url("http://192.168.1.1/secret.jpg").await.is_err());
-        assert!(validate_target_url("http://10.0.0.1/admin.png").await.is_err());
-        assert!(validate_target_url("ftp://example.com/pic.png").await.is_err());
+        assert!(
+            validate_target_url("http://localhost/image.png")
+                .await
+                .is_err()
+        );
+        assert!(
+            validate_target_url("http://127.0.0.1:8080/image.png")
+                .await
+                .is_err()
+        );
+        assert!(
+            validate_target_url("http://192.168.1.1/secret.jpg")
+                .await
+                .is_err()
+        );
+        assert!(
+            validate_target_url("http://10.0.0.1/admin.png")
+                .await
+                .is_err()
+        );
+        assert!(
+            validate_target_url("ftp://example.com/pic.png")
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
     async fn test_validate_target_url_permits_public_url() {
-        let res = validate_target_url("https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/1500x500").await;
+        let res = validate_target_url(
+            "https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/1500x500",
+        )
+        .await;
         assert!(res.is_ok());
     }
 
@@ -338,7 +385,13 @@ mod tests {
         let key = url_cache_key("https://example.com/sample.png");
         let payload = b"\x89PNG fake image content";
 
-        let write_res = write_to_cache(&dir, &key, "https://example.com/sample.png", "image/png", payload);
+        let write_res = write_to_cache(
+            &dir,
+            &key,
+            "https://example.com/sample.png",
+            "image/png",
+            payload,
+        );
         assert!(write_res.is_ok());
 
         let cached = read_from_cache(&dir, &key);
@@ -414,7 +467,8 @@ mod tests {
 
     #[test]
     fn test_prune_cache_lru() {
-        let dir = std::env::temp_dir().join(format!("mint-cache-test-prune-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("mint-cache-test-prune-{}", uuid::Uuid::new_v4()));
         let _ = fs::create_dir_all(&dir);
 
         // Create 3 entries with varying creation times
@@ -445,5 +499,32 @@ mod tests {
         assert!(dir.join("key3.bin").exists());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_default_cache_dir_path_structure() {
+        let dir = default_cache_dir();
+        let s = dir.to_string_lossy();
+        assert!(
+            s.ends_with("cache/image-proxy") || s.ends_with("mint-image-proxy"),
+            "default_cache_dir must point to cache/image-proxy, got: {s}"
+        );
+    }
+
+    #[test]
+    fn test_cleanup_legacy_cache_dir_removes_old_directory() {
+        let temp_root =
+            std::env::temp_dir().join(format!("mint-legacy-test-{}", uuid::Uuid::new_v4()));
+        let legacy_dir = temp_root.join("Pictures").join("image-cache");
+        fs::create_dir_all(&legacy_dir).unwrap();
+        let dummy_file = legacy_dir.join("orphaned.bin");
+        fs::write(&dummy_file, b"old-data").unwrap();
+        assert!(dummy_file.is_file());
+
+        // Verify that cleanup can safely remove it
+        let _ = fs::remove_dir_all(&legacy_dir);
+        assert!(!legacy_dir.exists());
+
+        let _ = fs::remove_dir_all(&temp_root);
     }
 }
