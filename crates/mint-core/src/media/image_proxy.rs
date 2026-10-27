@@ -73,10 +73,19 @@ pub(crate) fn cleanup_legacy_cache_dir() -> bool {
 
 static CLEANUP_ONCE: std::sync::Once = std::sync::Once::new();
 
-/// Proactively ensures legacy cache directory is cleaned up once per process lifetime.
+/// Proactively ensures legacy cache directory is cleaned up asynchronously
+/// in a background thread once per process lifetime without blocking caller latency.
 pub(crate) fn ensure_legacy_cache_cleaned() {
     CLEANUP_ONCE.call_once(|| {
-        let _ = cleanup_legacy_cache_dir();
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::spawn_blocking(|| {
+                let _ = cleanup_legacy_cache_dir();
+            });
+        } else {
+            std::thread::spawn(|| {
+                let _ = cleanup_legacy_cache_dir();
+            });
+        }
     });
 }
 

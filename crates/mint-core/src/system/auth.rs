@@ -68,6 +68,8 @@ fn legacy_profile_pictures_dir() -> Option<PathBuf> {
 }
 
 /// Resolves an avatar file path against explicit modern and legacy directories.
+/// When found in legacy storage, automatically copies the file to the modern directory
+/// to achieve self-healing zero-loss migration.
 pub(crate) fn resolve_avatar_file_path_in(
     modern_dir: &std::path::Path,
     legacy_dir: Option<&std::path::Path>,
@@ -78,24 +80,33 @@ pub(crate) fn resolve_avatar_file_path_in(
         return None;
     }
     let path = std::path::Path::new(trimmed);
-    if path.components().count() != 1
-        || trimmed.contains('/')
-        || trimmed.contains('\\')
-        || trimmed.contains("..")
-    {
-        return None;
-    }
-    let modern_path = modern_dir.join(trimmed);
-    if modern_path.is_file() {
-        return Some(modern_path);
-    }
-    if let Some(legacy_dir) = legacy_dir {
-        let legacy_path = legacy_dir.join(trimmed);
-        if legacy_path.is_file() {
-            return Some(legacy_path);
+    let mut components = path.components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(comp)), None) => {
+            if trimmed.contains('/') || trimmed.contains('\\') {
+                return None;
+            }
+            let clean_name = comp.to_str()?;
+            let modern_path = modern_dir.join(clean_name);
+            if modern_path.is_file() {
+                return Some(modern_path);
+            }
+            if let Some(legacy_dir) = legacy_dir {
+                let legacy_path = legacy_dir.join(clean_name);
+                if legacy_path.is_file() {
+                    // Auto-migrate: copy to modern directory for self-healing persistence
+                    if std::fs::create_dir_all(modern_dir).is_ok()
+                        && std::fs::copy(&legacy_path, &modern_path).is_ok()
+                    {
+                        return Some(modern_path);
+                    }
+                    return Some(legacy_path);
+                }
+            }
+            None
         }
+        _ => None,
     }
-    None
 }
 
 /// Resolves an avatar file path, checking the modern `~/.config/mint/profile` directory first,
@@ -612,12 +623,13 @@ mod tests {
         let legacy_file = legacy_dir.join(filename);
         std::fs::write(&legacy_file, b"legacy-avatar-bytes").unwrap();
 
-        // 1. When modern doesn't have it, resolves to legacy file
+        // 1. When modern doesn't have it, auto-migrates to modern file
         let resolved = resolve_avatar_file_path_in(&modern_dir, Some(&legacy_dir), filename);
-        assert_eq!(resolved, Some(legacy_file.clone()));
+        let modern_file = modern_dir.join(filename);
+        assert_eq!(resolved, Some(modern_file.clone()));
+        assert_eq!(std::fs::read(&modern_file).unwrap(), b"legacy-avatar-bytes");
 
         // 2. When modern also has it, modern takes priority
-        let modern_file = modern_dir.join(filename);
         std::fs::write(&modern_file, b"modern-avatar-bytes").unwrap();
         let resolved_modern = resolve_avatar_file_path_in(&modern_dir, Some(&legacy_dir), filename);
         assert_eq!(resolved_modern, Some(modern_file));
