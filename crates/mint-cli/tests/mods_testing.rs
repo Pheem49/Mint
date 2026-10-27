@@ -62,7 +62,11 @@ fn mod_export_requires_replace_and_preserves_quoted_paths() {
     );
     assert!(root.join("sample.mintmod").exists());
     assert!(!root.join("--replace").exists());
-    let outside = root.with_extension("outside.mintmod");
+    let outside = if cfg!(windows) {
+        std::path::PathBuf::from(r"C:\mint_disallowed_outside\sample.mintmod")
+    } else {
+        std::path::PathBuf::from("/mint_disallowed_outside/sample.mintmod")
+    };
     assert!(
         !run(&["mods", "export", "sample", outside.to_str().unwrap()])
             .status
