@@ -504,6 +504,7 @@ mod tests {
         );
         let denied = crate::MintConfig {
             allowed_read_paths: vec![],
+            blocked_paths: vec![root.clone()],
             ..config.clone()
         };
         assert!(read_skill_file(&memory, &skills[0], "denied", &denied).is_err());

@@ -665,7 +665,7 @@ mod tests {
         let token = tokio_util::sync::CancellationToken::new();
         let cancel = token.clone();
         let thread = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(400));
             cancel.cancel();
         });
         let mut config = local_config();

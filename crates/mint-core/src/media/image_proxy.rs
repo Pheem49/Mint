@@ -514,6 +514,9 @@ mod tests {
                 size: data.len(),
             };
             fs::write(&meta, serde_json::to_string(&c_meta).unwrap()).unwrap();
+            let mtime = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(*ts);
+            let _ = fs::File::open(&bin).and_then(|f| f.set_modified(mtime));
+            let _ = fs::File::open(&meta).and_then(|f| f.set_modified(mtime));
         }
 
         // Total data is ~3000 bytes. If we prune when size exceeds 2500 down to 1500,
