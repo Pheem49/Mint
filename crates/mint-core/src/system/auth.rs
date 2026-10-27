@@ -45,12 +45,18 @@ pub fn user_db_path() -> Result<PathBuf, AuthError> {
         .ok_or(AuthError::ConfigDirectoryUnavailable)
 }
 
-/// Path to the shared profile pictures directory:
-/// `~/.config/mint/profile`.
-pub fn profile_pictures_dir() -> Result<PathBuf, AuthError> {
-    let dir = crate::system::config::mint_config_dir()
+/// Computes the path to the profile pictures directory: `~/.config/mint/profile`,
+/// without creating it on disk. Use for read-only path resolution queries.
+pub fn profile_pictures_dir_path() -> Result<PathBuf, AuthError> {
+    crate::system::config::mint_config_dir()
         .map(|dir| dir.join("profile"))
-        .ok_or(AuthError::ConfigDirectoryUnavailable)?;
+        .ok_or(AuthError::ConfigDirectoryUnavailable)
+}
+
+/// Path to the shared profile pictures directory: `~/.config/mint/profile`,
+/// ensuring the directory exists on disk. Use when saving new avatar files.
+pub fn profile_pictures_dir() -> Result<PathBuf, AuthError> {
+    let dir = profile_pictures_dir_path()?;
     std::fs::create_dir_all(&dir).ok();
     Ok(dir)
 }
@@ -95,7 +101,7 @@ pub(crate) fn resolve_avatar_file_path_in(
 /// Resolves an avatar file path, checking the modern `~/.config/mint/profile` directory first,
 /// and falling back to the legacy `~/.config/mint/Pictures/profile` directory if it exists there.
 pub fn resolve_avatar_file_path(filename: &str) -> Option<PathBuf> {
-    let modern = profile_pictures_dir().ok()?;
+    let modern = profile_pictures_dir_path().ok()?;
     let legacy = legacy_profile_pictures_dir();
     resolve_avatar_file_path_in(&modern, legacy.as_deref(), filename)
 }
@@ -654,6 +660,21 @@ mod tests {
             resolve_avatar_file_path_in(&modern_dir, None, "..\\win.png"),
             None
         );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_avatar_file_path_does_not_create_directory_on_read() {
+        let root = std::env::temp_dir().join(format!("mint-avatar-nonexist-{}", uuid::Uuid::new_v4()));
+        let non_existent_modern = root.join("profile");
+        // Ensure directory does not exist prior to read query
+        assert!(!non_existent_modern.exists());
+
+        let resolved = resolve_avatar_file_path_in(&non_existent_modern, None, "test.png");
+        assert_eq!(resolved, None);
+        // Ensure read query did NOT create directory on disk
+        assert!(!non_existent_modern.exists());
 
         let _ = std::fs::remove_dir_all(root);
     }

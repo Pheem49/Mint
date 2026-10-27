@@ -51,18 +51,33 @@ pub fn default_cache_dir() -> PathBuf {
 }
 
 /// Legacy directory path for image proxy cache (~/.config/mint/Pictures/image-cache).
-pub fn legacy_cache_dir() -> Option<PathBuf> {
+pub(crate) fn legacy_cache_dir() -> Option<PathBuf> {
     crate::system::config::mint_config_dir().map(|d| d.join("Pictures").join("image-cache"))
+}
+
+/// Internal helper that removes a legacy cache directory path if it exists on disk.
+pub(crate) fn cleanup_legacy_cache_dir_in(legacy_path: Option<&Path>) -> bool {
+    if let Some(path) = legacy_path {
+        if path.is_dir() {
+            return fs::remove_dir_all(path).is_ok();
+        }
+    }
+    false
 }
 
 /// Automatically removes legacy cache directory (~/.config/mint/Pictures/image-cache)
 /// if it exists, preventing orphaned disk consumption for upgraded users.
-pub fn cleanup_legacy_cache_dir() {
-    if let Some(legacy) = legacy_cache_dir() {
-        if legacy.is_dir() {
-            let _ = fs::remove_dir_all(legacy);
-        }
-    }
+pub(crate) fn cleanup_legacy_cache_dir() -> bool {
+    cleanup_legacy_cache_dir_in(legacy_cache_dir().as_deref())
+}
+
+static CLEANUP_ONCE: std::sync::Once = std::sync::Once::new();
+
+/// Proactively ensures legacy cache directory is cleaned up once per process lifetime.
+pub(crate) fn ensure_legacy_cache_cleaned() {
+    CLEANUP_ONCE.call_once(|| {
+        let _ = cleanup_legacy_cache_dir();
+    });
 }
 
 /// Returns true if an IP address is private, loopback, link-local, or broadcast.
@@ -237,7 +252,7 @@ pub fn prune_cache_to_size(
 /// Prunes oldest cache entries if total directory size exceeds `MAX_CACHE_DIR_SIZE`
 /// and cleans up any legacy orphaned cache folder.
 pub fn prune_cache_if_needed(cache_dir: &Path) -> Result<(), std::io::Error> {
-    cleanup_legacy_cache_dir();
+    ensure_legacy_cache_cleaned();
     let _ = prune_cache_to_size(cache_dir, MAX_CACHE_DIR_SIZE, PRUNE_DOWN_TO_SIZE)?;
     Ok(())
 }
@@ -247,6 +262,7 @@ pub async fn fetch_and_cache_image(
     cache_dir: &Path,
     target_url: &str,
 ) -> Result<(String, Vec<u8>), ImageProxyError> {
+    ensure_legacy_cache_cleaned();
     let key = url_cache_key(target_url);
 
     // 1. Check local cache
@@ -521,9 +537,14 @@ mod tests {
         fs::write(&dummy_file, b"old-data").unwrap();
         assert!(dummy_file.is_file());
 
-        // Verify that cleanup can safely remove it
-        let _ = fs::remove_dir_all(&legacy_dir);
+        // Test the real cleanup function with path parameter injection
+        let cleaned = cleanup_legacy_cache_dir_in(Some(&legacy_dir));
+        assert!(cleaned);
         assert!(!legacy_dir.exists());
+
+        // Non-existent path returns false
+        assert!(!cleanup_legacy_cache_dir_in(Some(&legacy_dir)));
+        assert!(!cleanup_legacy_cache_dir_in(None));
 
         let _ = fs::remove_dir_all(&temp_root);
     }

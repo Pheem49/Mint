@@ -42,6 +42,7 @@ pub use media::image_search;
 pub use media::image_workflow;
 pub use media::library;
 pub use media::mic_transcribe;
+pub use media::image_proxy;
 pub use media::model_catalog;
 pub use media::pictures;
 pub use media::speech;
@@ -82,8 +83,8 @@ pub use system::workspace;
 pub use agent_loop::{AgentActionFuture, AgentLoopError, parse_agent_json, run_agent_loop};
 pub use auth::{
     AuthError, AuthUser, create_session, destroy_session, get_user,
-    login_user, profile_pictures_dir, register_user, resolve_avatar_file_path, save_avatar_file,
-    session_user_id, update_profile, user_db_path,
+    login_user, profile_pictures_dir, profile_pictures_dir_path, register_user,
+    resolve_avatar_file_path, save_avatar_file, session_user_id, update_profile, user_db_path,
 };
 pub use chat::{
     ChatError, ChatMessage, ChatRequest, ChatResponse, ChatRole, ChatStreamEvent, ContentBlock,
