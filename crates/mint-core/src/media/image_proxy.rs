@@ -43,11 +43,11 @@ pub fn url_cache_key(url: &str) -> String {
     format!("{:x}", Sha256::digest(url.as_bytes()))
 }
 
-/// Directory path for disk-based image caching (~/.config/mint/Pictures/image-cache).
+/// Directory path for disk-based image caching (~/.config/mint/cache/image-proxy).
 pub fn default_cache_dir() -> PathBuf {
     dirs::config_dir()
-        .map(|d| d.join("mint").join("Pictures").join("image-cache"))
-        .unwrap_or_else(|| std::env::temp_dir().join("mint-image-cache"))
+        .map(|d| d.join("mint").join("cache").join("image-proxy"))
+        .unwrap_or_else(|| std::env::temp_dir().join("mint-image-proxy"))
 }
 
 /// Returns true if an IP address is private, loopback, link-local, or broadcast.

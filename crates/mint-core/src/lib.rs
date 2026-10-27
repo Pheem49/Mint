@@ -81,9 +81,9 @@ pub use system::workspace;
 
 pub use agent_loop::{AgentActionFuture, AgentLoopError, parse_agent_json, run_agent_loop};
 pub use auth::{
-    AuthError, AuthUser, create_session, destroy_session, get_user, login_user,
-    profile_pictures_dir, register_user, save_avatar_file, session_user_id, update_profile,
-    user_db_path,
+    AuthError, AuthUser, create_session, destroy_session, get_user, legacy_profile_pictures_dir,
+    login_user, profile_pictures_dir, register_user, resolve_avatar_file_path, save_avatar_file,
+    session_user_id, update_profile, user_db_path,
 };
 pub use chat::{
     ChatError, ChatMessage, ChatRequest, ChatResponse, ChatRole, ChatStreamEvent, ContentBlock,
