@@ -1,86 +1,49 @@
 # Release Notes - Mint Agent v1.17.0
 
-## Desktop & Web UI / UX Enhancements
-- **Resilient Markdown Image Auto-Healing & Load Error Fallback**:
-  - **Local Image Proxy & Disk-Based Cache (`/api/proxy-image`)**: Implemented a secure first-party local image proxy with LRU disk caching in `crates/mint-core/src/media/image_proxy.rs` (`~/.config/mint/cache/image-proxy`). External images blocked by client-side ad-blockers (e.g. uBlock Origin, Brave Shields blocking third-party social trackers like `pbs.twimg.com`) or cross-origin restrictions automatically fallback to the local proxy via `resolveApiProxyUrl`. Features rigorous SSRF protection (blocking localhost, link-local, and private IPv4/IPv6 networks), 7-day TTL, 25MB single-image safety limit, and 200MB cache capacity with automated LRU cleanup down to 150MB.
-  - **Clean Storage Layout & Zero-Loss Avatar Fallback**: Reorganized `~/.config/mint/` directories to cleanly separate ephemeral and personal assets alongside the permanent `Library/` media database: `cache/image-proxy/` for temporary web cache (featuring proactive background cleanup of orphaned legacy cache from previous versions), and `profile/` for user avatars. Features path traversal defense, side-effect-free resolution for missing avatars, and seamless self-healing auto-migration in `resolve_avatar_file_path` (`api_server/routes/auth.rs`) that automatically preserves and transitions existing avatars from legacy `Pictures/profile/` upon upgrading.
-  - **Auto-Heal Unclosed Markdown Images**: Added regex auto-repair in `readableAssistantText` and `autoHealMarkdownImages` (`markdown.tsx`) to detect when LLMs omit the closing parenthesis `)` on long image URLs at the end of a line (e.g. `![alt](https://...`), automatically restoring the closing `)` so the image parses and displays properly instead of leaking as raw text.
-  - **Twitter/X Banner Dimension Auto-Normalization**: Added automatic dimension normalization (`/1500x500`) across both Backend search pipeline (`normalize_web_search_image_url` in `mint-core`) and Frontend media resolver (`normalizeTwitterImageUrl` in `markdown.tsx`), repairing naked `pbs.twimg.com/profile_banners/<id>/<timestamp>` URLs so they resolve to full-resolution images instead of throwing HTTP 404 errors.
-  - **Graceful Image Load Error Fallback**: Replaced silent image hiding (`display: none`) on `onError` with a styled card fallback (`ChatMediaImage`) that informs the user with an "Image failed to load" indicator and provides an "Open link" button to view the source URL in a new tab.
-- **Provider Brand Badges in Chat Message Footer**: Replaced the static colored dot in the message footer provider chip (`{provider} / {model}`, e.g. `deepseek / deepseek-flash`) with crisp 13px vector brand logos (DeepSeek whale, Gemini sparkle, Anthropic mark, OpenAI vortex, Groq, Ollama, OpenRouter, Mistral, Perplexity, Together, Qwen, Hugging Face, LM Studio) and full custom provider logo/emoji support across both Desktop and Web UI.
-- **Compact Tabbed Custom Provider Logo Picker & Crop Integration**: Redesigned the Custom Provider Logo setting in General Tab with a modern 3-tab picker across Desktop and Web:
-  - **AI Presets Tab**: One-click selection of 13 official vector SVG marks (DeepSeek, Ollama, OpenRouter, Groq, Mistral AI, Together AI, Perplexity, LM Studio, Hugging Face, OpenAI, Anthropic, Gemini, Qwen) bundled locally and stored as resilient SVG data URLs.
-  - **Upload & Crop Tab**: Full support for SVG, PNG, WebP, and JPEG files with drag-and-drop dropzone, client-side auto-downscaling, direct native file input trigger, and integrated **Crop & Rotate popup modal** (`AvatarCropModal`) allowing users to zoom, pan, rotate, and crop custom provider badges.
-  - **URL & Emoji Tab**: Supports direct image web URLs (`https://...`) and quick-pick emoji badges (🤖, 🧠, ⚡, 🐋, 🦙, etc.) converted into crisp vector SVG data URLs.
-  - **Direct Index-based State Updates**: Resolved silent saving failures by updating custom providers directly by index instead of fragile real-time slug ID lookups.
-- **Studio Dark Theme (Antigravity Studio Palette)**: Introduced the new "Studio Dark" theme preset and core color mode across Desktop and Web UI, modeled directly after modern dark IDEs like Google Antigravity and Cursor:
-  - **Base Canvas**: `#101010` (RGB: 16, 16, 16) ultra-deep black for main chat area.
-  - **Sidebar & Panels**: `#161616` (RGB: 22, 22, 22) muted charcoal for navigation bar and side drawer.
-  - **Surfaces, Inputs & Message Bubbles**: `#1c1c1c` (RGB: 28, 28, 28) for the composer input container and user chat bubbles with high legibility.
-  - **Active Items & Focus Highlights**: `#323232` (RGB: 50, 50, 50) for selected sidebar projects/sessions and hover interactions.
-  - **Typography**: `#e1e1e1` primary text with `#8e8e8e` secondary/muted labels and icons.
-  - **Accent**: `#10b981` mint green highlights for focal points, badges, and status indicators.
-- **Charcoal Onyx 60/30/10 Theme Architecture**: Refined dark themes (Dark Mint, Midnight, Dark Monochrome) across Desktop and Web to adopt the deep Charcoal Onyx palette (`#17171a` / `#222227` / `#121215`): 60% deep black base canvas (`#0a0a0c`, `#000000`), 30% deep charcoal surfaces (`#121215` – `#17171a`) for textboxes, cards, dialogs, and secondary buttons, and 10% mint green (`#10b981`) accent highlights for focused elements, active indicators, and primary CTA buttons.
-- **Sleek Gray Buttons with Mint Hover Affordance**: Secondary and action buttons (`.btn-secondary`, `.management-action-btn`, `#chat-tool-btn`, `#screen-capture-btn`) feature neutral gray backgrounds with white text and a subtle mint-glow border upon hover, preventing visual fatigue while maintaining brand coherence.
-- **Removed Standalone Dark Slate Gray Preset**: Streamlined the theme catalog by removing the separate `Dark Slate Gray` preset in favor of embedding the sleek slate-gray surface layer directly into all dark themes.
-- **Configurable Agent Step Limit & `/steps`**: Added `/steps` slash command and graphical step budget controls in Settings across Desktop, Web, and CLI (Full-Screen TUI), allowing users to adjust maximum tool execution steps per turn (10–200, default 40).
-- **Trajectory Export & SWE-bench Parity**: Added one-click "Export Trajectory" capability in the Run Summary Dashboard across Desktop and Web UI, downloading canonical SWE-bench / Agent Protocol v1.0 execution transcripts (`{runId}-trajectory.json`) containing complete step sequences, thoughts, observations, token metrics, and duration.
-- **Diagnostic Self-Correction Visuals**: Enhanced the activity drawer to detect and render `[Self-Correction Guidance]` blocks with dedicated high-contrast callout styling, making the agent's self-healing loop clearly visible to developers.
-- **Resilient Activity Drawer Rendering**: Historical "Working through task" activity drawer and file change logs now remain fully accessible and expandable across completed, failed, and interrupted turns, allowing users to inspect executed tools and diagnostics after errors or cancellations.
-- **Run Summary Badge Accuracy**: Updated telemetry outcome classification to render casual chat and non-verified turns (`PARTIAL` / `COMPLETED`) as green `Completed` badges instead of erroneously showing red `Failure` chips.
-- **Titlebar Visibility**: Preserved Desktop titlebar, window controls (minimize/maximize/close), drag region, and application menus while Settings modal is open.
-- **Settings Hierarchy**: Reordered navigation tabs to position General directly above Notifications in the Workspace section across Desktop and Web.
-- **Streamlined Composer**: Removed static AI gateway disclaimer text and lowered the chat input closer to the bottom edge.
-- **External Link Interceptor**: Added global link interception for Desktop to open image previews, search source citations, and chat URLs directly in the system default browser.
-- **Activity & Preview Cards**: Added inline viewed image previews with click-to-zoom modals, and enabled in-panel image viewing inside the Tools Surface without navigating away.
-- **TUI & Terminal Polish**:
-  - **Full-Screen TUI Onboarding Wizard (`mint onboard` & `/onboard`)**:
-    - **Overhauled to Native Ratatui Alternate-Screen Wizard**: Replaced legacy scrolling ANSI escape codes and line-by-line stdin prompts with a full-screen sequential 5-step wizard (`OnboardWizard`) matching the Mint TUI aesthetic (`terminal_theme::TuiTheme` palette, rounded borders, and responsive edge-to-edge full-screen layout filling the entire terminal window).
-    - **4-Step Streamlined Flow with Unified Key & Model Selection**:
-      - **Step 1 (Core AI: Google Gemini Key & Model)**: Unified Gemini setup card with API key input on top (password masking `••••••`, `Ctrl+H` toggle, `Ctrl+V` paste) and default model picker directly below it. Features instant live API model fetching upon typing/entering the key, animated discovery spinner (`⠋`, `⠙`, `⠹`, `⠸`), and a live status badge (`[✓ X models loaded]`). Switch between key input and model selection using `Tab` or `↓`/`↑` arrows; pressing `Enter` confirms and advances directly to Services.
-      - **Step 2 (Services Checklist)**: Unified vertical checklist grouped by category with clean arrow key navigation (`↑`/`↓`), spacebar toggling (`[x]`/`[ ]`), `a` (select all), and `i` (invert), eliminating split-pane tab switching.
-      - **Step 3 (Service Configurations with Grouped Key & Model Cards)**: Paged per service (`1 of N`) rather than field-by-field, reducing screens by over 50%. Services with models (Anthropic, OpenAI, DeepSeek, OpenRouter, Local OpenAI, Ollama, Stability, Ideogram, Replicate, BFL, etc.) feature both the credential input and vertical model picker on a single card with `Tab` navigation. Features real-time background API model discovery for the entered key and local model detection for Ollama.
-      - **Step 4 (Summary & Direct Launch)**: Visual overview of configured AI models, search engines, media generation, and messaging bridges before writing to `~/.config/mint/config.json`. Offers 3 clear actions: `[ Save & Launch Mint ]` (seamlessly enters interactive chat without terminal flash), `[ Save & Exit ]`, and `[ Back to Edit ]`.
-    - **In-App `/onboard` Slash Command & First-Run Detection**: Added `/onboard` command into the shared catalog (`slash-commands.json`), CLI router (`slash_commands.rs`), and interactive chat TUI (`chat_tui.rs`), allowing users to reconfigure providers mid-session. Added first-run detection in `interactive.rs` prompting users to launch the wizard on startup when no AI keys are detected.
-    - **Platform Parity Across CLI, Desktop & Web**: Registered `/onboard` in Desktop and Web UI (`slashCommandProcessor.ts` & `MintDashboard.tsx`), routing `/onboard` to open the Settings modal.
-  - **Compact TUI Web Search Sources & Ctrl+O Integration**: Streamlined web search citations in Full-Screen TUI transcript to display at most 5 primary sources (`MAX_TUI_WEB_SOURCES`), appending an interactive `… [+N more sources] · Ctrl+O details` hint whenever additional sources exist, preventing screen clutter while allowing instant inspection of all results and snippets via the tool viewer modal (`Ctrl+O`).
-  - **Unified Command Badges**: Unified command status badges (`[Command]`, `[Check]`, exit codes) with mint-green accents and suppressed duplicate command output blocks in chat.
+## Desktop & Web UI / UX
+- **Resilient Media & Image Proxy**: Added local image proxy (`/api/proxy-image`) with disk LRU caching and SSRF protection to bypass ad-blocker false positives; auto-heals unclosed markdown image links (`![alt](url...`), normalizes Twitter/X banner URLs, and displays a graceful fallback card on load errors.
+- **Provider Brand Badges & Logo Picker**: Vector SVG brand logos in chat message footers across 13+ providers; redesigned custom provider logo picker with preset SVGs, emoji selection, and an upload modal with pan/crop/rotate controls.
+- **Theme Refresh (Studio Dark & Charcoal Onyx)**: Introduced IDE-inspired "Studio Dark" palette (`#101010`), refined dark themes with balanced Charcoal Onyx styling, and added sleek neutral gray buttons with subtle mint hover glow.
+- **Configurable Step Limits (`/steps`)**: Control max tool execution steps per turn (10–200, default 40) via `/steps` slash command or Settings across Desktop, Web, and Full-Screen TUI.
+- **Trajectory Export & Diagnostics**: One-click SWE-bench/Agent Protocol v1.0 trajectory export (`.json`); dedicated high-contrast callout styling for self-correction guidance; persistent activity drawer accessible across completed and interrupted turns.
+- **Full-Screen TUI Onboarding Wizard (`mint onboard` & `/onboard`)**:
+  - Overhauled to native Ratatui alternate-screen wizard with responsive edge-to-edge layout and Mint TUI styling.
+  - **Step 1 (Core AI)**: Unified Gemini setup with masked key input (`Ctrl+H`), live model discovery, and integrated model picker.
+  - **Step 2 (Services)**: Grouped checklist with arrow navigation, spacebar toggles, select-all (`a`), and invert (`i`).
+  - **Step 3 (Configurations)**: Paged per-service cards featuring bundled API credentials and real-time model pickers (Anthropic, OpenAI, DeepSeek, Ollama, etc.).
+  - **Step 4 (Summary & Launch)**: Visual configuration overview with direct launch (`Save & Launch Mint`) or exit options.
+  - Added `/onboard` slash command and first-run detection across CLI, Desktop, and Web.
+- **Terminal Polish**: Compact web search citations (top 5 with `Ctrl+O` detail viewer modal), unified command badges, external browser link handling, and non-blocking desktop titlebar during settings.
 
 ## Performance & Frontend Optimization
-- **Re-render Isolation**: Decoupled message draft input state from dashboard coordinators, preventing full-page re-renders while typing.
-- **Component Splitting**: Isolated streaming elapsed timers into dedicated leaf components and lazy-loaded secondary modals and rich cards.
-- **Zero-Allocation Transport**: Replaced 32 MiB buffer allocations with in-place UTF-8 byte estimators and lightweight fingerprinting for attachments.
-- **Adaptive Polling**: Switched conversation changes, background jobs, and mods polling from fixed intervals to adaptive active/idle cadences, pausing on inactive tabs.
-- **GPU Compositing Relief**: Removed backdrop blur filters from scrollable chat cards to ensure smooth virtualized scrolling on Linux WebKitGTK and mobile web.
+- **Re-render Isolation**: Decoupled message input state to eliminate full-page re-renders while typing.
+- **Component Splitting**: Isolated streaming elapsed timers into leaf components and lazy-loaded secondary modals.
+- **Zero-Allocation Buffers**: Replaced 32 MiB buffers with lightweight UTF-8 estimators and compact attachment fingerprinting.
+- **Adaptive Polling**: Switched background jobs and status polling to idle-aware intervals that pause on inactive tabs.
+- **GPU Compositing Relief**: Removed backdrop blur filters on scrollable chat containers for smooth virtualized scrolling.
 
 ## Core Engine & Web API Server
-- **Step Budget Warning & Graceful Wrap-Up Synthesis**: Injected proactive step budget warnings at `max_steps - 5` into agent prompt context and tool observations. Replaced hard turn failures at step limits with a Graceful Wrap-Up Synthesis pass (`tools: None`), compelling the LLM to consolidate and deliver a comprehensive final answer rather than terminating prematurely.
-- **Fault-Tolerant Tool Call Parsing**: Hardened tool-call input decoding against provider quirks: strips markdown fences and DeepSeek DSML/thinking tokens, recovers from trailing commas, prunes hallucinated null fields, unpacks double-wrapped arguments, and accepts command aliases (`cmd`, `bash`, `sh`, `exec`, `script`, `code`) and raw shell strings.
-- **Structured Self-Correction Diagnostics Engine**: Built intelligent diagnostic guidance for tool failures (`diagnostics.rs`). Automatically identifies indentation/whitespace mismatch drifts on `apply_patch` failures, calculates sliding-window similarity to pinpoint exact drifted line numbers and code snippets, guides ambiguous hunks with line-numbered occurrences, and extracts structured compiler/runtime error culprits for Rust (`cargo`), Python (`Traceback`), and TypeScript (`tsc`) with actionable next-tool recommendations.
-- **Standardized Trajectory Schema v1.0**: Established an industry-standard, versioned Trajectory Schema (`StandardTrajectoryRun` v1.0) with typed steps, thoughts, tool inputs, observations, execution statuses, and step-level token usage (`StepTokens`). Supports full roundtrip serialization, deterministic replayability, on-the-fly reconstruction from historical SQLite interaction memories (`export_trajectory_json`), and export via `/trajectory` in CLI TUI, Desktop, and Web UI.
-- **Line-Aware Head-Tail Truncation**: Integrated industry-standard dual-bound Head-Tail Truncation harness (`head_tail_truncate`) preserving initial command execution context (first 35 lines) and trailing compiler errors, stack traces, and exit summaries (last 75 lines) while omitting verbose intermediate logs with structured diagnostic markers. Cuts token overhead by up to 70% and prevents loss of root-cause error information.
-- **Repetition & Stuck-Loop Guard**: Implemented an automated agent loop governor (`RepetitionGuard`) that calculates canonical action fingerprints, warns on consecutive duplicate executions, intercepts stuck loops (3+ consecutive identical calls or oscillating cycles A->B->A->B), and delivers structured self-correction guidance without killing the turn. Automatically resets upon workspace-modifying operations.
-- **Context Compaction Natural Role Alternation**: Converted synthetic compaction summaries from internal tool-call representations to compliant alternating dialogue (`Assistant` summary + `User` continuation prompt). Resolves post-compaction agent loop crashes (`HTTP 400 Bad Request`) on reasoning-enabled models like DeepSeek (missing `reasoning_content`) and Gemini (missing `thoughtSignature`).
-- **OpenAI & DeepSeek Serializer Safeguard**: Added automatic `reasoning_content` fallback when serializing historical tool-calling assistant messages in OpenAI-compatible payloads, ensuring strict API protocol compliance during thinking mode.
-- **Non-Blocking SQLite & I/O**: Offloaded SQLite persistence queries and system subprocesses to background worker threads (`spawn_blocking`).
-- **Low-Latency Networking**: Enabled `TCP_NODELAY` on incoming HTTP sockets and implemented single-pass HTTP header framing to prevent redundant body re-scanning.
-- **Workspace Parity**: Standardized agent root resolution between Web API and Desktop to eliminate involuntary working directory overwrites.
-- **Log Suppression**: Filtered routine high-frequency polling endpoints from terminal logs to keep server output clean and operational.
+- **Step Budget Warning & Wrap-Up Synthesis**: Proactive warning at `max_steps - 5` and graceful synthesis pass (`tools: None`) ensuring a complete final answer instead of abrupt termination.
+- **Fault-Tolerant Tool Call Parsing**: Recovers from Markdown fences, DeepSeek thinking tokens, trailing commas, hallucinated nulls, and shell aliases (`bash`, `sh`, `exec`).
+- **Structured Self-Correction Diagnostics**: Diagnostic engine (`diagnostics.rs`) detecting patch indentation drift, line numbering offsets, and compiler errors (Rust, Python, TypeScript) with actionable recovery suggestions.
+- **Standardized Trajectory Schema v1.0**: Versioned, typed trajectory runs (`StandardTrajectoryRun`) with step tokens, thoughts, and replay support via `/trajectory`.
+- **Head-Tail Truncation**: Dual-bound log clipping (first 35 lines context, last 75 lines error output), cutting token overhead by up to 70% while preserving root-cause errors.
+- **Repetition & Loop Guard**: Detects duplicate tool executions and oscillating loops (A→B→A→B), injecting self-correction guidance without aborting the turn.
+- **Context Compaction Role Alternation**: Alternating `Assistant`/`User` format for summaries, fixing HTTP 400 crashes on reasoning models (DeepSeek, Gemini).
+- **Engine Reliability**: Non-blocking SQLite persistence via `spawn_blocking`, low-latency TCP sockets (`TCP_NODELAY`), and standardized workspace path resolution.
 
 ## Subagents, Swarm Orchestration & Plan Mode
-- **Confirmation-First Agent Planning & Casual Affirmation Disambiguation**: Updated `ask_user` tool prompt semantics and added rule `0q` in `crates/mint-core/src/prompts/` to ensure the agent does not treat brief conversational acknowledgments (such as "OK", "ดีมาก", "เข้าใจแล้ว") as immediate commands to modify code. Proactively invokes `ask_user` with structured options (including `(Recommended)`) to confirm execution intent before mutating code.
-- **Parallel Swarms**: Engineered multi-agent swarm runner (`dispatch_agents`) supporting concurrent read-only tasks (1–8 workers) and serialized write lanes.
-- **Plan Mode Reconnaissance**: Mandated read-only parallel subagent exploration for multi-file discovery before plan finalization.
-- **Transcript Isolation**: Segregated subagent micro-actions and child compactions from the main timeline into a live docked status strip and DAG view.
-- **Deterministic Compaction Fallback**: Added structural hard-truncation fallback when LLM summarization fails or hits token limits, preventing agent loop crashes.
-- **Context Cache Optimization**: Introduced rolling vision image eviction in LLM context (retaining latest 2 steps) to cut token usage by up to 90%.
+- **Confirmation-First Planning**: Clarified intent confirmation so conversational acknowledgments ("OK", "understood") don't prematurely trigger code modifications.
+- **Parallel Swarms & Reconnaissance**: Concurrent read-only worker pools (1–8 agents) for multi-file project exploration before plan confirmation.
+- **Transcript Isolation**: Nested subagent micro-actions and child compactions into a dedicated docked status strip and DAG view.
+- **Context Cache Optimization**: Rolling vision window retaining the latest 2 image steps, saving up to 90% in token overhead.
 
 ## Agent Tools, Browser Automation & Sandbox
-- **Safe Temp Directory Access**: Allowed reading and viewing `/tmp` and OS temporary paths across agent tools with persistent Linux sandbox mounts.
-- **Browser Automation**: Integrated isolated headless Chromium automation engine supporting ordered navigation, clicks, fills, screenshots, and durable artifacts.
-- **Evidence-Based Reliability**: Replaced unconditional duplicate-command skips with typed execution states and evidence-based completion checks.
+- **Safe Temp Directory Access**: Persistent Linux sandbox mounts for `/tmp` and OS temporary paths across agent tools.
+- **Headless Browser Automation**: Isolated Chromium automation engine for navigation, clicks, inputs, screenshots, and durable artifacts.
+- **State-Based Execution**: Evidence-backed completion verification replacing unconditional duplicate-command skips.
 
 ## Mint Companion & Voice Input
-- **Live2D Desktop Companion**: Redesigned translucent glass interface with full-screen character view, OS-wide cursor gaze tracking, and window dragging.
-- **Synchronized Speech**: Centralized text-to-speech audio preparation with mouth sync and cross-process playback leasing.
-- **Voice Input Improvements**: Microphone dictation now appends directly to the active draft without auto-submitting.
+- **Live2D Desktop Companion**: Translucent interface with full-screen character view, OS cursor gaze tracking, and window dragging.
+- **Synchronized TTS Speech**: Centralized speech synthesis with real-time lip-sync and audio leasing.
+- **Non-Destructive Voice Input**: Microphone dictation appends directly to the active draft without auto-submitting.
