@@ -46,6 +46,31 @@ pub(super) fn parse_web_search_sources(result: &str) -> Vec<(String, String)> {
     sources
 }
 
+pub(super) const MAX_TUI_WEB_SOURCES: usize = 5;
+
+/// Formats web search sources for display in Full-Screen TUI transcripts.
+/// Caps the list at `limit` items (default 5), and appends a `Ctrl+O details` hint
+/// when additional sources exist so users know they can view the full list via tool details.
+pub(super) fn format_tui_web_sources(sources: &[(String, String)], limit: usize) -> String {
+    if sources.is_empty() {
+        return String::new();
+    }
+    let total = sources.len();
+    let display_items: Vec<_> = sources
+        .iter()
+        .take(limit)
+        .enumerate()
+        .map(|(index, (title, url))| format!("{}. {title}\n   {url}", index + 1))
+        .collect();
+
+    let mut out = format!("Sources:\n{}", display_items.join("\n"));
+    if total > limit {
+        let remaining = total - limit;
+        out.push_str(&format!("\n  … [+{} more sources] · Ctrl+O details", remaining));
+    }
+    out
+}
+
 /// Playful gerunds shown in place of "Thinking" while the model is working,
 /// picked once per turn so the label doesn't change mid-flight.
 const THINKING_VERBS: &[&str] = &[

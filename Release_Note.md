@@ -32,7 +32,9 @@
 - **Streamlined Composer**: Removed static AI gateway disclaimer text and lowered the chat input closer to the bottom edge.
 - **External Link Interceptor**: Added global link interception for Desktop to open image previews, search source citations, and chat URLs directly in the system default browser.
 - **Activity & Preview Cards**: Added inline viewed image previews with click-to-zoom modals, and enabled in-panel image viewing inside the Tools Surface without navigating away.
-- **TUI & Terminal Polish**: Unified command status badges (`[Command]`, `[Check]`, exit codes) with mint-green accents and suppressed duplicate command output blocks in chat.
+- **TUI & Terminal Polish**:
+  - **Compact TUI Web Search Sources & Ctrl+O Integration**: Streamlined web search citations in Full-Screen TUI transcript to display at most 5 primary sources (`MAX_TUI_WEB_SOURCES`), appending an interactive `… [+N more sources] · Ctrl+O details` hint whenever additional sources exist, preventing screen clutter while allowing instant inspection of all results and snippets via the tool viewer modal (`Ctrl+O`).
+  - **Unified Command Badges**: Unified command status badges (`[Command]`, `[Check]`, exit codes) with mint-green accents and suppressed duplicate command output blocks in chat.
 
 ## Performance & Frontend Optimization
 - **Re-render Isolation**: Decoupled message draft input state from dashboard coordinators, preventing full-page re-renders while typing.

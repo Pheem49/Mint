@@ -1630,14 +1630,11 @@ pub async fn run_code_agent_with_options(
         if let Ok(mut status) = live_status.lock()
             && !status.web_sources.is_empty()
         {
-            let sources = status
-                .web_sources
-                .drain(..)
-                .enumerate()
-                .map(|(index, (title, url))| format!("{}. {title}\n   {url}", index + 1))
-                .collect::<Vec<_>>()
-                .join("\n");
-            tui.push_notice(format!("Sources:\n{sources}"));
+            let sources = status.web_sources.drain(..).collect::<Vec<_>>();
+            let text = format_tui_web_sources(&sources, MAX_TUI_WEB_SOURCES);
+            if !text.is_empty() {
+                tui.push_notice(text);
+            }
         }
         tui.push_notice(worked_line);
         avatar_bridge.on_talking(false);
@@ -1992,5 +1989,32 @@ mod skill_card_tests {
         assert!(notes[1].contains("[Check]"));
         assert!(notes[1].contains("Failed"));
         assert!(notes[1].contains("exit 1"));
+    }
+
+    #[test]
+    fn format_tui_web_sources_handles_empty_under_limit_and_over_limit() {
+        assert_eq!(format_tui_web_sources(&[], 5), "");
+
+        let three_items = vec![
+            ("Site 1".into(), "https://example.com/1".into()),
+            ("Site 2".into(), "https://example.com/2".into()),
+            ("Site 3".into(), "https://example.com/3".into()),
+        ];
+        let out = format_tui_web_sources(&three_items, 5);
+        assert!(out.starts_with("Sources:\n"));
+        assert!(out.contains("1. Site 1\n   https://example.com/1"));
+        assert!(out.contains("2. Site 2\n   https://example.com/2"));
+        assert!(out.contains("3. Site 3\n   https://example.com/3"));
+        assert!(!out.contains("more sources"));
+        assert!(!out.contains("Ctrl+O details"));
+
+        let eight_items: Vec<_> = (1..=8)
+            .map(|i| (format!("Site {i}"), format!("https://example.com/{i}")))
+            .collect();
+        let out = format_tui_web_sources(&eight_items, 5);
+        assert!(out.contains("1. Site 1\n   https://example.com/1"));
+        assert!(out.contains("5. Site 5\n   https://example.com/5"));
+        assert!(!out.contains("6. Site 6"));
+        assert!(out.contains("… [+3 more sources] · Ctrl+O details"));
     }
 }
