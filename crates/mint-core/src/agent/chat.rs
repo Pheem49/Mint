@@ -3544,8 +3544,14 @@ mod tests {
     fn openai_serializes_compacted_history_with_role_alternation() {
         let messages = vec![
             ChatMessage::text(ChatRole::User, "Fix the bug"),
-            ChatMessage::text(ChatRole::Assistant, "Summary of earlier steps:\n- read file.rs\n- found syntax error"),
-            ChatMessage::text(ChatRole::User, "Please continue the task from where you left off based on the summary above."),
+            ChatMessage::text(
+                ChatRole::Assistant,
+                "Summary of earlier steps:\n- read file.rs\n- found syntax error",
+            ),
+            ChatMessage::text(
+                ChatRole::User,
+                "Please continue the task from where you left off based on the summary above.",
+            ),
             ChatMessage {
                 role: ChatRole::Assistant,
                 content: vec![ContentBlock::ToolUse {
@@ -4369,7 +4375,8 @@ mod tests {
     #[test]
     fn decode_tool_arguments_sanitizes_fences_tokens_and_trailing_commas() {
         // 1. Markdown fences
-        let fenced = Value::String("```json\n{\"command\": \"curl -s https://example.com\"}\n```".into());
+        let fenced =
+            Value::String("```json\n{\"command\": \"curl -s https://example.com\"}\n```".into());
         let decoded = decode_tool_arguments(&fenced);
         assert_eq!(decoded["command"], "curl -s https://example.com");
 

@@ -29,9 +29,7 @@ pub use session::{
     BrowserActionResult, BrowserObservation, BrowserSession, capture_metadata, execute_action,
     run_session, with_tab,
 };
-pub(crate) use session::{
-    finish_evidence as session_finish_evidence, selected_tab,
-};
+pub(crate) use session::{finish_evidence as session_finish_evidence, selected_tab};
 
 use serde::Serialize;
 

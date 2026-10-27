@@ -20,10 +20,10 @@ mod mod_authoring_regressions;
 mod progress_clock;
 pub mod reliability;
 pub use reliability::{ExecutionEvidence, ExecutionState};
-pub mod truncation;
-pub mod loop_guard;
 pub mod diagnostics;
+pub mod loop_guard;
 pub mod trajectory_schema;
+pub mod truncation;
 pub use trajectory_schema::{StandardTrajectoryRun, StandardTrajectoryStep, StepTokens};
 mod repeated_failures;
 #[cfg(all(test, unix))]
@@ -3508,11 +3508,10 @@ pub(super) async fn dispatch_swarm(
                 emitter.progress(tagged);
             };
 
-            let mut nested_approve =
-                |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
-                    let mut guard = approve_mutex.lock().unwrap();
-                    (*guard)(approval)
-                };
+            let mut nested_approve = |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+                let mut guard = approve_mutex.lock().unwrap();
+                (*guard)(approval)
+            };
 
             let loop_fut = Box::pin(orchestrate_agent_loop(
                 &sub_config,
@@ -4397,7 +4396,9 @@ fn parse_tool_input(action: &str, input: Value) -> Result<AgentInput, Orchestrat
     let normalized = if action == "run_shell" {
         match &input {
             Value::String(cmd) if !cmd.trim().is_empty() => {
-                if let Ok(val) = serde_json::from_str::<Value>(cmd) && val.is_object() {
+                if let Ok(val) = serde_json::from_str::<Value>(cmd)
+                    && val.is_object()
+                {
                     val
                 } else {
                     serde_json::json!({ "command": cmd.trim() })
@@ -6570,6 +6571,9 @@ for line in sys.stdin:
     fn test_parse_tool_input_raw_shell_string() {
         let raw = Value::String("curl -sL --max-time 25 https://sndiary02.com".into());
         let parsed = parse_tool_input("run_shell", raw).unwrap();
-        assert_eq!(parsed.command, "curl -sL --max-time 25 https://sndiary02.com");
+        assert_eq!(
+            parsed.command,
+            "curl -sL --max-time 25 https://sndiary02.com"
+        );
     }
 }

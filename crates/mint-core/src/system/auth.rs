@@ -678,7 +678,8 @@ mod tests {
 
     #[test]
     fn resolve_avatar_file_path_does_not_create_directory_on_read() {
-        let root = std::env::temp_dir().join(format!("mint-avatar-nonexist-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("mint-avatar-nonexist-{}", uuid::Uuid::new_v4()));
         let non_existent_modern = root.join("profile");
         // Ensure directory does not exist prior to read query
         assert!(!non_existent_modern.exists());

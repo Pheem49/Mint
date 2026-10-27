@@ -74,7 +74,10 @@ mod tests {
 
     #[test]
     fn sanitize_keeps_ascii_words_joined_by_dashes() {
-        assert_eq!(sanitize_label("Stripe Webhook Tracer!"), "stripe-webhook-tracer");
+        assert_eq!(
+            sanitize_label("Stripe Webhook Tracer!"),
+            "stripe-webhook-tracer"
+        );
         assert_eq!(sanitize_label("  a__b  "), "a__b");
     }
 

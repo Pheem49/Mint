@@ -27,7 +27,9 @@ pub use dossier::{
     summary_preview,
 };
 pub use labels::{LabelAllocator, sanitize_label};
-pub use permissions::{AgentPermissions, READ_ONLY_ACTIONS, current_permissions, scope_permissions};
+pub use permissions::{
+    AgentPermissions, READ_ONLY_ACTIONS, current_permissions, scope_permissions,
+};
 
 use crate::orchestration::AgentProgress;
 use crate::subagents::SubagentDefinition;

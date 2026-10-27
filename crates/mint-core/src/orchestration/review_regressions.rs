@@ -432,9 +432,9 @@ async fn parallel_dispatch_shows_parent_calls_before_provider_finishes() {
     .await;
     for id in ["dispatch-a", "dispatch-b"] {
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, AgentProgress::SubagentStarted { subagent, .. } if subagent == id)),
+            events.iter().any(
+                |e| matches!(e, AgentProgress::SubagentStarted { subagent, .. } if subagent == id)
+            ),
             "missing live {id}"
         );
     }
@@ -588,6 +588,8 @@ fn test_agent_loop_dispatch_swarm_nested_execution() {
 #[test]
 fn plan_mode_allows_dispatch_agents_and_subagent() {
     assert!(plan_mode_allows("dispatch_agents", &AgentInput::default()));
-    assert!(plan_mode_allows("dispatch_subagent", &AgentInput::default()));
+    assert!(plan_mode_allows(
+        "dispatch_subagent",
+        &AgentInput::default()
+    ));
 }
-

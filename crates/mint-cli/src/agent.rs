@@ -1157,14 +1157,15 @@ pub async fn run_code_agent_with_options(
                         } else {
                             print_timeline_note(&mut status, &message, started_at.elapsed(), None);
                             status.context_pct = None;
-                            status.thinking = Some(if let Some(started) = status.compaction_started {
-                                compaction_label(started.elapsed())
-                            } else {
-                                format!(
-                                    "{thinking_verb} ({} • Esc to interrupt)",
-                                    format_elapsed(started_at.elapsed())
-                                )
-                            });
+                            status.thinking =
+                                Some(if let Some(started) = status.compaction_started {
+                                    compaction_label(started.elapsed())
+                                } else {
+                                    format!(
+                                        "{thinking_verb} ({} • Esc to interrupt)",
+                                        format_elapsed(started_at.elapsed())
+                                    )
+                                });
                         }
                     }
                     render_live_status(&mut status);

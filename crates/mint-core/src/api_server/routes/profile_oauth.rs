@@ -59,7 +59,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
             }
             if let Ok(req) = serde_json::from_str::<ProfileRequest>(body) {
                 let res = tokio::task::spawn_blocking(move || {
-                    MemoryStore::open_default().map(|memory| memory.set_profile(&req.key, &req.value))
+                    MemoryStore::open_default()
+                        .map(|memory| memory.set_profile(&req.key, &req.value))
                 })
                 .await;
                 if let Ok(Ok(Ok(()))) = res {

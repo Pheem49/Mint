@@ -239,7 +239,13 @@ mod tests {
 
     #[test]
     fn serializes_canonical_v1_schema() {
-        let mut run = StandardTrajectoryRun::new("run-101", "chat-abc", "Fix bug in parser", "claude-3-7-sonnet", "anthropic");
+        let mut run = StandardTrajectoryRun::new(
+            "run-101",
+            "chat-abc",
+            "Fix bug in parser",
+            "claude-3-7-sonnet",
+            "anthropic",
+        );
         run.record_step(StandardTrajectoryStep {
             step: 1,
             timestamp: "2026-10-26T12:00:00Z".to_string(),
@@ -254,7 +260,13 @@ mod tests {
                 generated_tokens: 65,
             },
         });
-        run.finish("SUCCESS", 1565, 2.5, vec![], vec!["src/parser.rs".to_string()]);
+        run.finish(
+            "SUCCESS",
+            1565,
+            2.5,
+            vec![],
+            vec!["src/parser.rs".to_string()],
+        );
 
         let json = run.to_json_pretty().expect("must serialize");
         assert!(json.contains("\"schemaVersion\": \"1.0\""));
@@ -267,7 +279,8 @@ mod tests {
 
     #[test]
     fn roundtrip_json_parity() {
-        let mut run = StandardTrajectoryRun::new("run-202", "chat-xyz", "Add feature", "gpt-4o", "openai");
+        let mut run =
+            StandardTrajectoryRun::new("run-202", "chat-xyz", "Add feature", "gpt-4o", "openai");
         run.record_step(StandardTrajectoryStep {
             step: 1,
             timestamp: "2026-10-26T12:01:00Z".to_string(),

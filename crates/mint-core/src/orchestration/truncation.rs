@@ -64,19 +64,23 @@ pub fn head_tail_truncate(text: &str, config: TruncationConfig) -> String {
     }
 
     let head_count = config.head_lines.min(total_lines);
-    let tail_count = config.tail_lines.min(total_lines.saturating_sub(head_count));
+    let tail_count = config
+        .tail_lines
+        .min(total_lines.saturating_sub(head_count));
     let omitted_lines = total_lines.saturating_sub(head_count + tail_count);
 
     let head_text = lines[..head_count].join("\n");
     let tail_text = lines[total_lines - tail_count..].join("\n");
 
-    let omitted_chars = char_count.saturating_sub(head_text.chars().count() + tail_text.chars().count());
+    let omitted_chars =
+        char_count.saturating_sub(head_text.chars().count() + tail_text.chars().count());
 
     let banner = format!(
         "\n\n[... Truncated {omitted_lines} lines ({omitted_chars} chars) to preserve context window — showing initial {head_count} and trailing {tail_count} lines ...]\n\n"
     );
 
-    let combined_chars = head_text.chars().count() + banner.chars().count() + tail_text.chars().count();
+    let combined_chars =
+        head_text.chars().count() + banner.chars().count() + tail_text.chars().count();
     if combined_chars <= config.max_total_chars {
         let mut result = String::with_capacity(head_text.len() + banner.len() + tail_text.len());
         result.push_str(&head_text);
@@ -85,7 +89,9 @@ pub fn head_tail_truncate(text: &str, config: TruncationConfig) -> String {
         result
     } else {
         // If head + banner + tail still exceeds char limit, enforce character budget on the combined text
-        let remaining_for_tail = config.max_total_chars.saturating_sub(head_text.chars().count() + banner.chars().count());
+        let remaining_for_tail = config
+            .max_total_chars
+            .saturating_sub(head_text.chars().count() + banner.chars().count());
         let trimmed_tail: String = if remaining_for_tail > 0 {
             // Keep the very end of tail
             let tail_chars_count = tail_text.chars().count();
@@ -137,7 +143,10 @@ mod tests {
     #[test]
     fn leaves_short_text_untouched() {
         let short = "Line 1\nLine 2\nLine 3";
-        assert_eq!(head_tail_truncate(short, TruncationConfig::default()), short);
+        assert_eq!(
+            head_tail_truncate(short, TruncationConfig::default()),
+            short
+        );
     }
 
     #[test]

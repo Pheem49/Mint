@@ -7,8 +7,8 @@ use futures_util::stream::{self, StreamExt};
 use tokio::sync::mpsc::{self, UnboundedSender};
 
 use super::{
-    AgentRun, AgentStatus, BatchCtx, DEFAULT_BASE, LabelAllocator, RunnerOutput, SwarmEvent,
-    SwarmOutcome, SwarmTask, cap_dossier, sanitize_label, summary_preview, AgentPermissions,
+    AgentPermissions, AgentRun, AgentStatus, BatchCtx, DEFAULT_BASE, LabelAllocator, RunnerOutput,
+    SwarmEvent, SwarmOutcome, SwarmTask, cap_dossier, sanitize_label, summary_preview,
 };
 use crate::orchestration::{AgentProgress, run_control};
 
@@ -327,7 +327,11 @@ mod tests {
         max.fetch_max(now, Ordering::SeqCst);
     }
 
-    async fn probed(probe: Arc<Probe>, run: AgentRun, delay_ms: u64) -> Result<RunnerOutput, String> {
+    async fn probed(
+        probe: Arc<Probe>,
+        run: AgentRun,
+        delay_ms: u64,
+    ) -> Result<RunnerOutput, String> {
         probe.calls.fetch_add(1, Ordering::SeqCst);
         bump(&probe.active, &probe.max_active);
         let writer = run.permissions.is_write_capable();
@@ -408,7 +412,10 @@ mod tests {
         let (out, _) = go(tasks, 4, |run, _| async move {
             let n: u64 = run.instruction.parse().unwrap();
             tokio::time::sleep(Duration::from_millis(60 - n * 25)).await;
-            Ok(RunnerOutput { text: run.instruction, steps: 1 })
+            Ok(RunnerOutput {
+                text: run.instruction,
+                steps: 1,
+            })
         })
         .await;
         let texts: Vec<_> = out.iter().map(|o| o.text.as_str()).collect();
@@ -422,7 +429,12 @@ mod tests {
         let i = ids.clone();
         let (out, _) = go(tasks, 4, move |run, _| {
             i.lock().unwrap().push(run.chat_id.clone());
-            async { Ok(RunnerOutput { text: "x".into(), steps: 1 }) }
+            async {
+                Ok(RunnerOutput {
+                    text: "x".into(),
+                    steps: 1,
+                })
+            }
         })
         .await;
         assert_eq!(out[0].label, "explorer");
@@ -439,7 +451,12 @@ mod tests {
         let tasks = vec![task(Some("Stripe Webhook Tracer"), None, "trace it")];
         let (out, _) = go(tasks, 4, move |run, _| {
             *s.lock().unwrap() = Some(run.clone());
-            async { Ok(RunnerOutput { text: "x".into(), steps: 1 }) }
+            async {
+                Ok(RunnerOutput {
+                    text: "x".into(),
+                    steps: 1,
+                })
+            }
         })
         .await;
         assert_eq!(out[0].label, "stripe-webhook-tracer");
@@ -457,7 +474,12 @@ mod tests {
         let tasks = vec![task(None, Some("nope"), "x"), task(None, None, "   ")];
         let (out, events) = go(tasks, 4, move |_, _| {
             c.fetch_add(1, Ordering::SeqCst);
-            async { Ok(RunnerOutput { text: String::new(), steps: 0 }) }
+            async {
+                Ok(RunnerOutput {
+                    text: String::new(),
+                    steps: 0,
+                })
+            }
         })
         .await;
         assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -478,7 +500,10 @@ mod tests {
         assert!(matches!(events.first(), Some(SwarmEvent::Started { .. })));
         assert!(matches!(
             events.last(),
-            Some(SwarmEvent::Finished { status: AgentStatus::Failed, .. })
+            Some(SwarmEvent::Finished {
+                status: AgentStatus::Failed,
+                ..
+            })
         ));
     }
 
@@ -491,7 +516,10 @@ mod tests {
                 input: serde_json::json!({}),
                 subagent: Some(run.label.clone()),
             });
-            Ok(RunnerOutput { text: "ok".into(), steps: 1 })
+            Ok(RunnerOutput {
+                text: "ok".into(),
+                steps: 1,
+            })
         })
         .await;
         assert!(matches!(events[0], SwarmEvent::Started { .. }));
@@ -499,7 +527,13 @@ mod tests {
             &events[1],
             SwarmEvent::Progress(AgentProgress::ToolStart { subagent: Some(s), .. }) if s == "explorer"
         ));
-        assert!(matches!(events[2], SwarmEvent::Finished { status: AgentStatus::Completed, .. }));
+        assert!(matches!(
+            events[2],
+            SwarmEvent::Finished {
+                status: AgentStatus::Completed,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]
@@ -511,10 +545,19 @@ mod tests {
         let (out, events) = run_control::scope_with_token(
             "cli::abc",
             token,
-            go(vec![task(None, None, "a"), task(None, None, "b")], 4, move |_, _| {
-                c.fetch_add(1, Ordering::SeqCst);
-                async { Ok(RunnerOutput { text: String::new(), steps: 0 }) }
-            }),
+            go(
+                vec![task(None, None, "a"), task(None, None, "b")],
+                4,
+                move |_, _| {
+                    c.fetch_add(1, Ordering::SeqCst);
+                    async {
+                        Ok(RunnerOutput {
+                            text: String::new(),
+                            steps: 0,
+                        })
+                    }
+                },
+            ),
         )
         .await;
         assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -544,7 +587,10 @@ mod tests {
     #[tokio::test]
     async fn huge_results_are_capped() {
         let (out, _) = go(vec![task(None, None, "a")], 4, |_, _| async {
-            Ok(RunnerOutput { text: "z".repeat(20_000), steps: 1 })
+            Ok(RunnerOutput {
+                text: "z".repeat(20_000),
+                steps: 1,
+            })
         })
         .await;
         assert!(out[0].text.ends_with("... [truncated]"));
@@ -559,7 +605,10 @@ mod tests {
             ],
             4,
             |_, _| async {
-                Ok(RunnerOutput { text: "ok".into(), steps: 1 })
+                Ok(RunnerOutput {
+                    text: "ok".into(),
+                    steps: 1,
+                })
             },
         )
         .await;
@@ -577,7 +626,11 @@ mod tests {
             profiles: &builtin,
             plan_mode: true,
         };
-        let tasks = vec![task(Some("writer"), Some("general-purpose"), "inspect something")];
+        let tasks = vec![task(
+            Some("writer"),
+            Some("general-purpose"),
+            "inspect something",
+        )];
         let planned = plan(&ctx, tasks);
         match &planned[0] {
             Planned::Ready(run) => {

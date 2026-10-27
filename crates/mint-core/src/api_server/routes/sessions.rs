@@ -73,8 +73,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 .and_then(|value| value.parse::<usize>().ok())
                 .unwrap_or(50)
                 .min(200);
-            let chat_id = query_param(query, "chatId")
-                .unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
+            let chat_id =
+                query_param(query, "chatId").unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
             let workspace_path = query_param(query, "workspacePath");
             let list = with_memory(move |m| {
                 let scoped_chat_id =
@@ -83,7 +83,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                     .unwrap_or_default())
             })
             .await;
-            if let Ok(list) = list && let Ok(json_str) = serde_json::to_string(&list) {
+            if let Ok(list) = list
+                && let Ok(json_str) = serde_json::to_string(&list)
+            {
                 send_json_response(socket, "200 OK", &json_str).await;
             } else {
                 send_json_response(socket, "500 Internal Server Error", "[]").await;
@@ -92,7 +94,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
 
         ("GET", "/api/chat-sessions") => {
             let list = with_memory(|m| Ok(m.list_chat_sessions().unwrap_or_default())).await;
-            if let Ok(list) = list && let Ok(json_str) = serde_json::to_string(&list) {
+            if let Ok(list) = list
+                && let Ok(json_str) = serde_json::to_string(&list)
+            {
                 send_json_response(socket, "200 OK", &json_str).await;
             } else {
                 send_json_response(socket, "500 Internal Server Error", "[]").await;
@@ -145,7 +149,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
         ("POST", "/api/chat-sessions/delete") => {
             let chat_id = query_param(query, "chatId").unwrap_or_default();
             crate::cancel_agent(&chat_id);
-            let deleted = with_memory(move |memory| Ok(memory.delete_chat_session(&chat_id).unwrap_or(0))).await;
+            let deleted =
+                with_memory(move |memory| Ok(memory.delete_chat_session(&chat_id).unwrap_or(0)))
+                    .await;
             if let Ok(deleted) = deleted {
                 let response = serde_json::json!({ "status": "ok", "deleted": deleted });
                 send_json_response(socket, "200 OK", &response.to_string()).await;
@@ -169,7 +175,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
 
             if let Ok(req) = serde_json::from_str::<RenameRequest>(body) {
                 let updated = with_memory(move |memory| {
-                    Ok(memory.rename_chat_session(&req.chat_id, &req.new_title).unwrap_or(0))
+                    Ok(memory
+                        .rename_chat_session(&req.chat_id, &req.new_title)
+                        .unwrap_or(0))
                 })
                 .await;
                 if let Ok(updated) = updated {
@@ -187,9 +195,10 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
         }
 
         ("POST", "/api/interactions/clear") => {
-            let chat_id = query_param(query, "chatId")
-                .unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
-            let result = with_memory(move |memory| memory.clear_interactions_for_chat(&chat_id)).await;
+            let chat_id =
+                query_param(query, "chatId").unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
+            let result =
+                with_memory(move |memory| memory.clear_interactions_for_chat(&chat_id)).await;
             if result.is_ok() {
                 send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
             } else {
@@ -261,7 +270,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 && let Ok(activity_json) = serde_json::to_string(&payload.activity)
             {
                 let result = with_memory(move |memory| {
-                    memory.set_interaction_agent_activity_json(payload.interaction_id, &activity_json)
+                    memory
+                        .set_interaction_agent_activity_json(payload.interaction_id, &activity_json)
                 })
                 .await;
                 if result.is_ok() {

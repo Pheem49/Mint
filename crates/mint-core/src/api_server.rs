@@ -2073,7 +2073,9 @@ mod tests {
         assert!(!should_log_api_route("/api/pictures/foo.png"));
         assert!(!should_log_api_route("/api/thumbnails/bar.jpg"));
         assert!(!should_log_api_route("/api/proxy-image"));
-        assert!(!should_log_api_route("/api/proxy-image?url=https://example.com/pic.jpg"));
+        assert!(!should_log_api_route(
+            "/api/proxy-image?url=https://example.com/pic.jpg"
+        ));
         assert!(!should_log_api_route("/not-api/test"));
 
         // Standard operational API calls should still be logged

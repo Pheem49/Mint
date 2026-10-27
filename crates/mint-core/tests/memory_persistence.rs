@@ -89,7 +89,12 @@ fn stores_and_reads_interaction_agent_activity() {
 fn exports_trajectory_json_from_agent_activity() {
     let store = store("trajectory-export");
     let interaction_id = store
-        .add_interaction_with_metadata("Write hello world", "Done", "anthropic", "claude-3-7-sonnet")
+        .add_interaction_with_metadata(
+            "Write hello world",
+            "Done",
+            "anthropic",
+            "claude-3-7-sonnet",
+        )
         .unwrap();
     store
         .set_interaction_agent_activity_json(
@@ -98,7 +103,9 @@ fn exports_trajectory_json_from_agent_activity() {
         )
         .unwrap();
 
-    let trajectory_json = store.export_trajectory_json("default", Some("run-999")).unwrap();
+    let trajectory_json = store
+        .export_trajectory_json("default", Some("run-999"))
+        .unwrap();
     assert!(trajectory_json.contains("\"schemaVersion\": \"1.0\""));
     assert!(trajectory_json.contains("\"runId\": \"run-999\""));
     assert!(trajectory_json.contains("\"outcome\": \"SUCCESS\""));

@@ -138,7 +138,6 @@ pub(super) fn reject_native_finish(
     });
 }
 
-
 /// Maximum number of read-only tools run concurrently when a single model turn
 /// requests several of them at once.
 pub(super) const PARALLEL_READ_ONLY_LIMIT: usize = 6;

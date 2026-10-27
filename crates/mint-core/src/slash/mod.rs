@@ -1259,35 +1259,55 @@ fn cmd_steps(rest: &str, config: &mut MintConfig) -> SlashResponse {
                 SlashChoice {
                     label: format!(
                         "25 steps — Fast & frugal{}",
-                        if current_steps == 25 { " (current)" } else { "" }
+                        if current_steps == 25 {
+                            " (current)"
+                        } else {
+                            ""
+                        }
                     ),
                     value: "25".into(),
                 },
                 SlashChoice {
                     label: format!(
                         "40 steps — Default standard{}",
-                        if current_steps == 40 { " (current)" } else { "" }
+                        if current_steps == 40 {
+                            " (current)"
+                        } else {
+                            ""
+                        }
                     ),
                     value: "40".into(),
                 },
                 SlashChoice {
                     label: format!(
                         "60 steps — Extended workflows{}",
-                        if current_steps == 60 { " (current)" } else { "" }
+                        if current_steps == 60 {
+                            " (current)"
+                        } else {
+                            ""
+                        }
                     ),
                     value: "60".into(),
                 },
                 SlashChoice {
                     label: format!(
                         "80 steps — Heavy deep coding{}",
-                        if current_steps == 80 { " (current)" } else { "" }
+                        if current_steps == 80 {
+                            " (current)"
+                        } else {
+                            ""
+                        }
                     ),
                     value: "80".into(),
                 },
                 SlashChoice {
                     label: format!(
                         "100 steps — Long-running autonomous{}",
-                        if current_steps == 100 { " (current)" } else { "" }
+                        if current_steps == 100 {
+                            " (current)"
+                        } else {
+                            ""
+                        }
                     ),
                     value: "100".into(),
                 },
@@ -3295,14 +3315,23 @@ mod tests {
 
         // 1. Bare /steps returns NeedsChoice with presets
         match execute(&req("/steps"), &mut cfg) {
-            SlashResponse::NeedsChoice { command, options, .. } => {
+            SlashResponse::NeedsChoice {
+                command, options, ..
+            } => {
                 assert_eq!(command, "/steps");
                 assert!(options.iter().any(|o| o.value == "25"));
-                assert!(options.iter().any(|o| o.value == "40" && o.label.contains("(current)")));
+                assert!(
+                    options
+                        .iter()
+                        .any(|o| o.value == "40" && o.label.contains("(current)"))
+                );
                 assert!(options.iter().any(|o| o.value == "60"));
                 assert!(options.iter().any(|o| o.value == "reset"));
             }
-            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
 
         // 2. /steps status returns informative message
@@ -3331,14 +3360,20 @@ mod tests {
             SlashResponse::Message { markdown } => {
                 assert!(markdown.contains("between 10 and 200"));
             }
-            other => panic!("expected Error Message, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected Error Message, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
 
         match execute(&req("/steps 250"), &mut cfg) {
             SlashResponse::Message { markdown } => {
                 assert!(markdown.contains("between 10 and 200"));
             }
-            other => panic!("expected Error Message, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected Error Message, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
 
         // 5. /steps reset reverts back to default 40

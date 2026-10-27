@@ -564,7 +564,10 @@ pub(crate) async fn delete_chat_session(chat_id: String) -> Result<usize, String
 }
 
 #[tauri::command]
-pub(crate) async fn rename_chat_session(chat_id: String, new_title: String) -> Result<usize, String> {
+pub(crate) async fn rename_chat_session(
+    chat_id: String,
+    new_title: String,
+) -> Result<usize, String> {
     with_default_memory(move |memory| memory.rename_chat_session(&chat_id, &new_title)).await
 }
 

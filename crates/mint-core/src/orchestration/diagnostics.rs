@@ -35,7 +35,10 @@ pub fn format_patch_not_found_guidance(
         let mut match_line = 1;
         for (i, line) in file_lines.iter().enumerate() {
             let norm_line = line.split_whitespace().collect::<Vec<_>>().join(" ");
-            let first_norm_target = target_lines.first().map(|l| l.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
+            let first_norm_target = target_lines
+                .first()
+                .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+                .unwrap_or_default();
             if !first_norm_target.is_empty() && norm_line.contains(&first_norm_target) {
                 match_line = i + 1;
                 break;
@@ -73,7 +76,9 @@ pub fn format_patch_not_found_guidance(
         let pct = (best_similarity * 100.0).round() as u32;
         let end_line = best_line + window_size.saturating_sub(1);
         let suggested_end = end_line + 5;
-        let sample_snippet = file_lines[best_line.saturating_sub(1)..best_line.saturating_sub(1) + window_size.min(4)].join("\n");
+        let sample_snippet = file_lines
+            [best_line.saturating_sub(1)..best_line.saturating_sub(1) + window_size.min(4)]
+            .join("\n");
 
         format!(
             "Error: patch hunk {hunk_index} old text was not found in {path_display}\n\n\
@@ -138,8 +143,14 @@ pub fn format_ambiguous_patch_guidance(
 }
 
 /// Analyzes shell execution output and extracts language-specific compiler/runtime error pointers.
-pub fn diagnose_command_failure(command: &str, output: &str, exit_code: Option<i32>) -> Option<String> {
-    let code_str = exit_code.map(|c| format!("exit code {c}")).unwrap_or_else(|| "non-zero exit".into());
+pub fn diagnose_command_failure(
+    command: &str,
+    output: &str,
+    exit_code: Option<i32>,
+) -> Option<String> {
+    let code_str = exit_code
+        .map(|c| format!("exit code {c}"))
+        .unwrap_or_else(|| "non-zero exit".into());
 
     // 1. Rust compiler error detection (rustc / cargo)
     if command.contains("cargo") || output.contains("error[E") {
@@ -184,7 +195,9 @@ pub fn diagnose_command_failure(command: &str, output: &str, exit_code: Option<i
         let last_file_line = lines.iter().rev().find(|l| l.trim().starts_with("File \""));
 
         if let Some(exc) = last_exc {
-            let loc = last_file_line.map(|l| format!(" ({})", l.trim())).unwrap_or_default();
+            let loc = last_file_line
+                .map(|l| format!(" ({})", l.trim()))
+                .unwrap_or_default();
             return Some(format!(
                 "[Self-Correction Guidance — Python Runtime Exception ({code_str})]:\n\
                 • Exception: {}{loc}\n\
@@ -236,7 +249,8 @@ mod tests {
 
     #[test]
     fn fuzzy_similarity_pinpoints_drift() {
-        let file_content = "line 1\nline 2\nlet total = calculate_sum(items, tax);\nlet discount = 0.1;\nline 5\n";
+        let file_content =
+            "line 1\nline 2\nlet total = calculate_sum(items, tax);\nlet discount = 0.1;\nline 5\n";
         // Target text has slight drift
         let old_text = "let total = calculate_sum(items);\nlet discount = 0.1;";
         let path = PathBuf::from("src/lib.rs");

@@ -47,7 +47,8 @@ pub(in crate::orchestration) async fn execute(
                                     .image_url
                                     .as_deref()
                                     .map(|img| {
-                                        let normalized = crate::web_search::normalize_web_search_image_url(img);
+                                        let normalized =
+                                            crate::web_search::normalize_web_search_image_url(img);
                                         format!("   Image: {normalized}\n")
                                     })
                                     .unwrap_or_default();

@@ -564,7 +564,9 @@ impl MemoryStore {
     ) -> Result<String, MemoryError> {
         let interactions = self.recent_interactions_for_chat(chat_id, 50)?;
         if interactions.is_empty() {
-            return Err(MemoryError::Trajectory(format!("No interactions found for chat '{chat_id}'")));
+            return Err(MemoryError::Trajectory(format!(
+                "No interactions found for chat '{chat_id}'"
+            )));
         }
 
         let target = if let Some(id_query) = run_id_or_interaction_id {
@@ -591,23 +593,25 @@ impl MemoryStore {
             ))
         })?;
 
-        let activity_val = interaction
-            .agent_activity
-            .as_ref()
-            .ok_or_else(|| MemoryError::Trajectory("No agent activity recorded for this interaction".into()))?;
+        let activity_val = interaction.agent_activity.as_ref().ok_or_else(|| {
+            MemoryError::Trajectory("No agent activity recorded for this interaction".into())
+        })?;
 
-        let events: Vec<crate::orchestration::AgentProgress> = serde_json::from_value(activity_val.clone())
-            .map_err(|e| MemoryError::Trajectory(format!("Failed to parse agent activity events: {e}")))?;
+        let events: Vec<crate::orchestration::AgentProgress> =
+            serde_json::from_value(activity_val.clone()).map_err(|e| {
+                MemoryError::Trajectory(format!("Failed to parse agent activity events: {e}"))
+            })?;
 
         let fallback_run_id = format!("run-{}", interaction.id);
-        let run = crate::orchestration::trajectory_schema::StandardTrajectoryRun::from_agent_activity(
-            &interaction.chat_id,
-            &fallback_run_id,
-            &interaction.user_text,
-            &interaction.model,
-            &interaction.provider,
-            &events,
-        );
+        let run =
+            crate::orchestration::trajectory_schema::StandardTrajectoryRun::from_agent_activity(
+                &interaction.chat_id,
+                &fallback_run_id,
+                &interaction.user_text,
+                &interaction.model,
+                &interaction.provider,
+                &events,
+            );
 
         run.to_json_pretty()
             .map_err(|e| MemoryError::Trajectory(format!("Failed to serialize trajectory: {e}")))

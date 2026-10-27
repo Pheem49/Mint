@@ -114,8 +114,17 @@ mod tests {
 
     #[test]
     fn outcome_header_names_the_agent_status_time_and_steps() {
-        let text = format_outcome(&outcome("explorer-2", AgentStatus::Completed, 12_000, 5, "body"));
-        assert!(text.starts_with("[Agent 'explorer-2' · completed · 12s · 5 steps]"), "{text}");
+        let text = format_outcome(&outcome(
+            "explorer-2",
+            AgentStatus::Completed,
+            12_000,
+            5,
+            "body",
+        ));
+        assert!(
+            text.starts_with("[Agent 'explorer-2' · completed · 12s · 5 steps]"),
+            "{text}"
+        );
         assert!(text.ends_with("body"));
         let one = format_outcome(&outcome("a", AgentStatus::Failed, 1_000, 1, "x"));
         assert!(one.contains("1 step]"), "{one}");
@@ -129,7 +138,12 @@ mod tests {
             outcome("explorer-2", AgentStatus::Cancelled, 0, 0, "not started"),
         ]);
         assert!(text.contains("3 agents"), "{text}");
-        assert!(text.contains("1 completed") && text.contains("1 failed") && text.contains("1 cancelled"), "{text}");
+        assert!(
+            text.contains("1 completed")
+                && text.contains("1 failed")
+                && text.contains("1 cancelled"),
+            "{text}"
+        );
         let a = text.find("found A").unwrap();
         let b = text.find("boom").unwrap();
         let c = text.find("not started").unwrap();

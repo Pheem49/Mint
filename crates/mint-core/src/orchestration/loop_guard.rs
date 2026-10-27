@@ -5,9 +5,9 @@
 //! it intervenes by intercepting redundant execution and returning structured self-correction
 //! guidance to the model without crashing or aborting the turn.
 
-use std::collections::{BTreeMap, VecDeque};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionFingerprint {
@@ -264,7 +264,11 @@ mod tests {
         // 2nd call -> WarnConsecutiveRepeat
         let decision2 = guard.check("read_file", &input);
         match decision2 {
-            LoopGuardDecision::WarnConsecutiveRepeat { count, action, notice } => {
+            LoopGuardDecision::WarnConsecutiveRepeat {
+                count,
+                action,
+                notice,
+            } => {
                 assert_eq!(count, 2);
                 assert_eq!(action, "read_file");
                 assert!(notice.contains("Loop Notice"));
@@ -275,7 +279,11 @@ mod tests {
         // 3rd call -> InterceptStuckLoop
         let decision3 = guard.check("read_file", &input);
         match decision3 {
-            LoopGuardDecision::InterceptStuckLoop { action, instruction, .. } => {
+            LoopGuardDecision::InterceptStuckLoop {
+                action,
+                instruction,
+                ..
+            } => {
                 assert_eq!(action, "read_file");
                 assert!(instruction.contains("Stuck-Loop Guard: Intercepted"));
             }

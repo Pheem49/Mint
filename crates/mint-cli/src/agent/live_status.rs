@@ -66,7 +66,10 @@ pub(super) fn format_tui_web_sources(sources: &[(String, String)], limit: usize)
     let mut out = format!("Sources:\n{}", display_items.join("\n"));
     if total > limit {
         let remaining = total - limit;
-        out.push_str(&format!("\n  … [+{} more sources] · Ctrl+O details", remaining));
+        out.push_str(&format!(
+            "\n  … [+{} more sources] · Ctrl+O details",
+            remaining
+        ));
     }
     out
 }

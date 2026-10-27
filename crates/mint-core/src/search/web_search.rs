@@ -487,16 +487,15 @@ mod tests {
             "https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/1500x500"
         );
 
-        let trailing_slash = "https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/";
+        let trailing_slash =
+            "https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/";
         assert_eq!(
             normalize_web_search_image_url(trailing_slash),
             "https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/1500x500"
         );
 
-        let already_sized = "https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/1500x500";
-        assert_eq!(
-            normalize_web_search_image_url(already_sized),
-            already_sized
-        );
+        let already_sized =
+            "https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/1500x500";
+        assert_eq!(normalize_web_search_image_url(already_sized), already_sized);
     }
 }

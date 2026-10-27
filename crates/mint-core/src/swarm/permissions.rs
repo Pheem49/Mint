@@ -127,7 +127,10 @@ mod tests {
         assert!(p.allows("run_shell"));
         assert!(!p.allows("write_file"));
         assert!(!p.allows("apply_patch"));
-        assert!(p.is_write_capable(), "run_shell can mutate, so it takes the write lane");
+        assert!(
+            p.is_write_capable(),
+            "run_shell can mutate, so it takes the write lane"
+        );
     }
 
     #[test]

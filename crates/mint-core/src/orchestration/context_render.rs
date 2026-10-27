@@ -21,8 +21,10 @@ pub(super) fn render_messages_as_text(messages: &[ChatMessage]) -> String {
                         format!("Called {name} with {input}")
                     }
                     ContentBlock::ToolResult { content, .. } => {
-                        let truncated =
-                            super::truncation::head_tail_truncate(content, super::truncation::TruncationConfig::COMPACT);
+                        let truncated = super::truncation::head_tail_truncate(
+                            content,
+                            super::truncation::TruncationConfig::COMPACT,
+                        );
                         format!("Result: {truncated}")
                     }
                     ContentBlock::Image { .. } => "[image]".to_string(),
@@ -116,7 +118,8 @@ pub(super) async fn compact_native_messages(
             compacted.push(ChatMessage {
                 role: ChatRole::User,
                 content: vec![ContentBlock::Text {
-                    text: "Continue the task using the summary above and the recent steps below.".into(),
+                    text: "Continue the task using the summary above and the recent steps below."
+                        .into(),
                 }],
             });
             compacted.extend_from_slice(&messages[1 + compact_message_count..]);
@@ -729,10 +732,6 @@ mod compaction_progress_tests {
         assert_eq!(compacted.len(), 1 + 2 + 6);
         assert_eq!(compacted[1].role, ChatRole::Assistant);
         assert_eq!(compacted[2].role, ChatRole::User);
-        assert!(fallback
-            .as_deref()
-            .unwrap_or("")
-            .contains("hard-truncate"));
+        assert!(fallback.as_deref().unwrap_or("").contains("hard-truncate"));
     }
 }
-
