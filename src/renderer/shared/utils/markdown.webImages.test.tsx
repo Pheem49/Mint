@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { renderFormattedMessage, sanitizeLatex } from './markdown'
+import { renderFormattedMessage, sanitizeLatex, autoHealMarkdownImages, ChatMediaImage, resolveMediaUrl, resolveApiProxyUrl } from './markdown'
 import { extractToolCardPayloads } from '../components/cards/ToolResultCards'
 import { subscribeThemeChanges } from '../components/cards/MermaidCard'
 import type { WebSearchSource } from './agentActivity'
@@ -83,5 +83,80 @@ describe('web search image links', () => {
     unsub2()
     expect(disconnectCount).toBe(1)
     vi.unstubAllGlobals()
+  })
+
+  it('auto-heals unclosed markdown image tags at the end of a line', () => {
+    const unclosed = '![Machi 馬吉 Portaly](https://img.portaly.cc/12345'
+    expect(autoHealMarkdownImages(unclosed)).toBe('![Machi 馬吉 Portaly](https://img.portaly.cc/12345)')
+
+    const multiline = 'Some text\n![Unclosed](https://example.com/pic.png\n\nMore text'
+    expect(autoHealMarkdownImages(multiline)).toBe('Some text\n![Unclosed](https://example.com/pic.png)\n\nMore text')
+
+    const alreadyClosed = '![Closed](https://example.com/pic.png)'
+    expect(autoHealMarkdownImages(alreadyClosed)).toBe(alreadyClosed)
+  })
+
+  it('renders unclosed image tags properly as images through renderFormattedMessage', () => {
+    const raw = '![Machi](https://img.portaly.cc/12345'
+    const html = renderToStaticMarkup(renderFormattedMessage(raw))
+    expect(html).toContain('<img')
+    expect(html).toContain('src="https://img.portaly.cc/12345"')
+    expect(html).not.toContain('![Machi](')
+  })
+
+  it('renders a fallback UI with link when image fails to load', () => {
+    const html = renderToStaticMarkup(
+      <ChatMediaImage
+        src="https://pbs.twimg.com/profile_banners/123/456"
+        alt="Machi on X"
+        initialError
+      />
+    )
+    expect(html).toContain('chat-media-card--failed')
+    expect(html).toContain('Image failed to load')
+    expect(html).toContain('Machi on X')
+    expect(html).toContain('href="https://pbs.twimg.com/profile_banners/123/456/1500x500"')
+    expect(html).toContain('Open link')
+  })
+
+  it('normalizes Twitter profile banner URLs missing dimensions in resolveMediaUrl', () => {
+    const rawBanner = 'https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404'
+    expect(resolveMediaUrl(rawBanner)).toBe('https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/1500x500')
+
+    const trailingSlash = 'https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/'
+    expect(resolveMediaUrl(trailingSlash)).toBe('https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/1500x500')
+
+    const alreadySized = 'https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/1500x500'
+    expect(resolveMediaUrl(alreadySized)).toBe(alreadySized)
+  })
+
+  it('generates local image proxy URL with resolveApiProxyUrl', () => {
+    expect(resolveApiProxyUrl('')).toBe('')
+
+    // Default test environment (origin is empty or localhost)
+    const target = 'https://pbs.twimg.com/profile_banners/123/456/1500x500'
+    const proxyUrl = resolveApiProxyUrl(target)
+    expect(proxyUrl).toContain('/api/proxy-image?url=https%3A%2F%2Fpbs.twimg.com%2Fprofile_banners%2F123%2F456%2F1500x500')
+
+    // Web UI dev environment on port 9000
+    vi.stubGlobal('window', { location: { port: '9000', origin: 'http://localhost:9000' } })
+    expect(resolveApiProxyUrl(target)).toBe(
+      `http://localhost:3000/api/proxy-image?url=${encodeURIComponent(target)}`
+    )
+    vi.unstubAllGlobals()
+  })
+
+  it('renders image with proxy endpoint when stage is proxy', () => {
+    const rawBanner = 'https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404'
+    const html = renderToStaticMarkup(
+      <ChatMediaImage
+        src={rawBanner}
+        alt="Banner Image"
+        initialStage="proxy"
+      />
+    )
+    expect(html).toContain('data-load-stage="proxy"')
+    expect(html).toContain('/api/proxy-image?url=https%3A%2F%2Fpbs.twimg.com%2Fprofile_banners%2F1366430884698546176%2F1684330404%2F1500x500')
+    expect(html).toContain('alt="Banner Image"')
   })
 })

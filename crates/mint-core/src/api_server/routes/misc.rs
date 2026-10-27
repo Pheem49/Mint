@@ -181,6 +181,42 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             }
         }
 
+        ("GET", route) if route == "/api/proxy-image" || route.starts_with("/api/proxy-image") => {
+            let target_url = query_param(query, "url").unwrap_or_default();
+            if target_url.trim().is_empty() {
+                send_json_response(
+                    socket,
+                    "400 Bad Request",
+                    "{\"error\":\"missing url query parameter\"}",
+                )
+                .await;
+                return;
+            }
+
+            let cache_dir = crate::media::image_proxy::default_cache_dir();
+            match crate::media::image_proxy::fetch_and_cache_image(&cache_dir, &target_url).await {
+                Ok((mime_type, bytes)) => {
+                    send_binary_response(socket, "200 OK", &mime_type, &bytes).await;
+                }
+                Err(err) => {
+                    let status = match &err {
+                        crate::media::image_proxy::ImageProxyError::InvalidUrl(_)
+                        | crate::media::image_proxy::ImageProxyError::SsrfBlocked(_) => {
+                            "400 Bad Request"
+                        }
+                        crate::media::image_proxy::ImageProxyError::BadStatus(code)
+                            if *code == 404 =>
+                        {
+                            "404 Not Found"
+                        }
+                        _ => "502 Bad Gateway",
+                    };
+                    let err_msg = serde_json::json!({ "error": err.to_string() }).to_string();
+                    send_json_response(socket, status, &err_msg).await;
+                }
+            }
+        }
+
         ("GET", "/api/media") => {
             let path_param = query_param(query, "path")
                 .map(|p| percent_decode(&p))

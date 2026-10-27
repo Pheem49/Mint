@@ -167,8 +167,11 @@ async fn enrich_with_og_images(hits: Vec<SearchHit>, max_fetch: usize) -> Vec<Se
     hits.into_iter()
         .enumerate()
         .map(|(i, mut h)| {
-            if i < resolved.len() {
+            if i < resolved.len() && resolved[i].is_some() {
                 h.image_url = resolved[i].clone();
+            }
+            if let Some(img) = h.image_url.take() {
+                h.image_url = Some(normalize_web_search_image_url(&img));
             }
             h
         })
@@ -342,11 +345,11 @@ async fn brave_search(
             let image_url = item["thumbnail"]["original"]
                 .as_str()
                 .filter(|s| !s.is_empty())
-                .map(|s| s.replace("&amp;", "&"))
+                .map(normalize_web_search_image_url)
                 .or_else(|| {
                     item["thumbnail"]["src"]
                         .as_str()
-                        .and_then(unwrap_brave_proxy_url)
+                        .map(normalize_web_search_image_url)
                 });
             Some(SearchHit {
                 title: item["title"].as_str()?.to_owned(),
@@ -442,6 +445,24 @@ pub(crate) fn unwrap_brave_proxy_url(url: &str) -> Option<String> {
     }
 }
 
+/// Normalizes search result image URLs: unwraps Brave proxy URLs, unescapes XML entities,
+/// and repairs known CDN quirks (such as Twitter profile banners missing size dimensions).
+pub fn normalize_web_search_image_url(url: &str) -> String {
+    let unescaped = unwrap_brave_proxy_url(url).unwrap_or_else(|| url.to_owned());
+    let unescaped = unescaped.replace("&amp;", "&");
+    // Normalize Twitter/X profile banner URLs:
+    // https://pbs.twimg.com/profile_banners/<id>/<timestamp> -> append /1500x500 if missing size
+    if unescaped.contains("pbs.twimg.com/profile_banners/") {
+        let trimmed = unescaped.trim_end_matches('/');
+        if let Some((_, last)) = trimmed.rsplit_once('/') {
+            if !last.is_empty() && last.chars().all(|c| c.is_ascii_digit()) {
+                return format!("{trimmed}/1500x500");
+            }
+        }
+    }
+    unescaped
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -455,6 +476,27 @@ mod tests {
             Some(
                 "https://images.ctfassets.net/kftzwdyauwt9/6ibCaqsoO7F6XCNCIO8zaZ/9475cdebc1f0af100414f1c85860fc4c/Hero_16x9.png?w=1600&h=900&fit=fill"
             )
+        );
+    }
+
+    #[test]
+    fn test_normalize_twitter_profile_banner() {
+        let raw = "https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404";
+        assert_eq!(
+            normalize_web_search_image_url(raw),
+            "https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/1500x500"
+        );
+
+        let trailing_slash = "https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/";
+        assert_eq!(
+            normalize_web_search_image_url(trailing_slash),
+            "https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/1500x500"
+        );
+
+        let already_sized = "https://pbs.twimg.com/profile_banners/1366430884698546176/1684330404/1500x500";
+        assert_eq!(
+            normalize_web_search_image_url(already_sized),
+            already_sized
         );
     }
 }

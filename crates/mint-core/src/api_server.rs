@@ -122,6 +122,7 @@ pub(crate) fn should_log_api_route(route: &str) -> bool {
 
     if route.starts_with("/api/pictures/")
         || route.starts_with("/api/thumbnails/")
+        || route.starts_with("/api/proxy-image")
         || route.starts_with("/api/background-jobs")
         || route == "/api/media"
         || route == "/api/chat"
@@ -1172,6 +1173,25 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                     )
                     .await;
                 }
+                                ("GET", route)
+                                    if route == "/api/proxy-image"
+                                        || route.starts_with("/api/proxy-image") =>
+                                {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
                                 ("GET", "/api/config") => {
                     routes::misc::execute(
                         routes::RequestCtx {
@@ -2052,6 +2072,8 @@ mod tests {
         assert!(!should_log_api_route("/api/interactions"));
         assert!(!should_log_api_route("/api/pictures/foo.png"));
         assert!(!should_log_api_route("/api/thumbnails/bar.jpg"));
+        assert!(!should_log_api_route("/api/proxy-image"));
+        assert!(!should_log_api_route("/api/proxy-image?url=https://example.com/pic.jpg"));
         assert!(!should_log_api_route("/not-api/test"));
 
         // Standard operational API calls should still be logged

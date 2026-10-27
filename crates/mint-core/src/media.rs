@@ -7,6 +7,7 @@ pub mod gemini_live;
 pub mod image_gen;
 pub mod image_model_fetcher;
 pub mod image_models;
+pub mod image_proxy;
 pub mod image_search;
 pub mod image_workflow;
 pub mod library;
