@@ -59,6 +59,7 @@
 - **Log Suppression**: Filtered routine high-frequency polling endpoints from terminal logs to keep server output clean and operational.
 
 ## Subagents, Swarm Orchestration & Plan Mode
+- **Confirmation-First Agent Planning & Casual Affirmation Disambiguation**: Updated `ask_user` tool prompt semantics and added rule `0q` in `crates/mint-core/src/prompts/` to ensure the agent does not treat brief conversational acknowledgments (such as "OK", "ดีมาก", "เข้าใจแล้ว") as immediate commands to modify code. Proactively invokes `ask_user` with structured options (including `(Recommended)`) to confirm execution intent before mutating code.
 - **Parallel Swarms**: Engineered multi-agent swarm runner (`dispatch_agents`) supporting concurrent read-only tasks (1–8 workers) and serialized write lanes.
 - **Plan Mode Reconnaissance**: Mandated read-only parallel subagent exploration for multi-file discovery before plan finalization.
 - **Transcript Isolation**: Segregated subagent micro-actions and child compactions from the main timeline into a live docked status strip and DAG view.

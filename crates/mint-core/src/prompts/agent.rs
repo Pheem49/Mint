@@ -293,7 +293,7 @@ pub fn build_system_prompt(
         input_formats.push("- request_user_approval: {\"title\":\"short title\",\"summary\":\"what needs approval\"}");
     }
     if allowed_actions.contains(&"ask_user") {
-        input_formats.push("- ask_user: {\"query\":\"short question\",\"header\":\"optional short tag\",\"multiSelect\":false,\"options\":[{\"label\":\"choice 1\",\"description\":\"optional detail\"},{\"label\":\"choice 2\"}]} (header, multiSelect, and options are all optional; options is max 3 choices, each with an optional one-line description; set multiSelect true to let the user pick more than one; omit options entirely for a free-text question — the user can always type a custom answer instead of picking a choice. Use this only when you're blocked on a decision that is genuinely the user's to make — one you can't resolve from the request, the code, or a sensible default. Don't use it to ask for permission to proceed or to confirm something you can just go do.)");
+        input_formats.push("- ask_user: {\"query\":\"short question\",\"header\":\"optional short tag\",\"multiSelect\":false,\"options\":[{\"label\":\"choice 1\",\"description\":\"optional detail\"},{\"label\":\"choice 2\"}]} (header, multiSelect, and options are all optional; options is max 3 choices, each with an optional one-line description; set multiSelect true to let the user pick more than one; omit options entirely for a free-text question — the user can always type a custom answer instead of picking a choice. Use this tool when you need the user's direction, or after proposing a plan/recommendation to ask how they want to proceed before mutating code. Avoid using it for trivial micro-steps that the user already explicitly authorized.)");
     }
     if allowed_actions.contains(&"detect_project") {
         input_formats.push("- detect_project: {\"path\":\".\"}");
@@ -457,6 +457,11 @@ pub fn build_system_prompt(
     } else {
         rules.push(
             "0. For casual conversation or questions that need no local tool, use finish immediately.",
+        );
+    }
+    if allowed_actions.contains(&"ask_user") {
+        rules.push(
+            "0q. When proposing plans, architectural options, or recommendations, do not treat casual affirmations (such as 'OK', 'ดีมาก', 'เข้าใจแล้ว') as immediate orders to modify code. Instead, call ask_user with clear options (Option 1 with '(Recommended)', alternative options, and allowing custom input) to confirm whether the user wants to execute the plan or merely review it.",
         );
     }
     if allowed_actions.contains(&"list_files") || allowed_actions.contains(&"read_file") {

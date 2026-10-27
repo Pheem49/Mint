@@ -605,7 +605,7 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "ask_user",
-            "Ask the user a short question, optionally with up to 3 pick-a-choice options (each with an optional description), optionally allowing multiple selections, and optionally tagged with a short header label. The user can still answer freely. Use this tool only when you're blocked on a decision that is genuinely the user's to make — one you can't resolve from the request, the code, or a sensible default. Don't use it to ask for permission to proceed or to confirm something you can just go do.",
+            "Ask the user a short question, optionally with up to 3 pick-a-choice options (each with an optional description), optionally allowing multiple selections, and optionally tagged with a short header label. The user can still answer freely. Use this tool when you need the user's direction, or after proposing a plan/recommendation to ask how they want to proceed before mutating code. Avoid using it for trivial micro-steps that the user already explicitly authorized.",
             schema(
                 json!({
                     "query": { "type": "string" },
