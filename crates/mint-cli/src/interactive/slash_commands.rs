@@ -381,6 +381,7 @@ pub async fn handle_slash_command(
             | "/shells"
             | "/palette"
             | "/theme"
+            | "/onboard"
             | "/image"
             | "/paste"
             | "/avatar"
@@ -609,6 +610,19 @@ pub async fn handle_slash_command(
                     }
                 }
                 Ok(None) => {}
+                Err(error) => ui.report_error(&error),
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/onboard" => {
+            match ui.prompt_onboard(&mut session.config) {
+                Ok(true) => {
+                    ui.push_notice("✔ Configuration updated successfully.");
+                }
+                Ok(false) => {
+                    ui.push_notice("Onboarding cancelled.");
+                }
                 Err(error) => ui.report_error(&error),
             }
             Some(SlashResult::Handled)

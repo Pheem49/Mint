@@ -91,6 +91,9 @@ pub trait CommandUi {
         initial: Option<&str>,
     ) -> Result<Option<String>>;
     fn prompt_confirm(&mut self, question: &str, default: bool) -> Result<bool>;
+    fn prompt_onboard(&mut self, _config: &mut mint_core::MintConfig) -> Result<bool> {
+        Ok(false)
+    }
     fn report_error(&mut self, error: &anyhow::Error);
     fn clear_transcript(&mut self) {}
     fn reload_transcript(&mut self, _chat_id: &str, _workspace: &std::path::Path) {}
@@ -224,6 +227,10 @@ impl CommandUi for FullScreenCommandUi<'_> {
             Some(idx) => Ok(idx == 0),
             None => Ok(default_idx == 0),
         }
+    }
+
+    fn prompt_onboard(&mut self, config: &mut mint_core::MintConfig) -> Result<bool> {
+        self.terminal.run_onboard_wizard(config)
     }
 
     fn report_error(&mut self, error: &anyhow::Error) {
@@ -360,6 +367,38 @@ impl CommandUi for ClassicCommandUi {
     fn prompt_confirm(&mut self, question: &str, default: bool) -> Result<bool> {
         let suffix = if default { "[Y/n]" } else { "[y/N]" };
         crate::interactive::confirm(&format!("{question} {suffix} "))
+    }
+
+    fn prompt_onboard(&mut self, config: &mut mint_core::MintConfig) -> Result<bool> {
+        let mut wizard = crate::onboard::OnboardWizard::new(config.clone());
+        crossterm::terminal::enable_raw_mode()?;
+        let mut stdout = std::io::stdout();
+        let _ = crossterm::execute!(
+            stdout,
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::cursor::Hide
+        );
+        let backend = ratatui::backend::CrosstermBackend::new(stdout);
+        let mut terminal = ratatui::Terminal::new(backend)?;
+
+        let outcome = wizard.run_with_terminal(&mut terminal);
+
+        let _ = crossterm::terminal::disable_raw_mode();
+        let mut stdout = std::io::stdout();
+        let _ = crossterm::execute!(
+            stdout,
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show
+        );
+
+        match outcome? {
+            crate::onboard::OnboardOutcome::SavedAndLaunch
+            | crate::onboard::OnboardOutcome::SavedAndExit => {
+                *config = wizard.take_config();
+                Ok(true)
+            }
+            crate::onboard::OnboardOutcome::Cancelled => Ok(false),
+        }
     }
 
     fn report_error(&mut self, error: &anyhow::Error) {

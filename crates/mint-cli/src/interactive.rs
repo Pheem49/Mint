@@ -450,6 +450,33 @@ pub async fn run_interactive_chat_with_session(
         }
     }
 
+    let needs_onboarding = session.config.api_key.is_empty()
+        && session.config.anthropic_api_key.is_empty()
+        && session.config.openai_api_key.is_empty()
+        && session.config.openrouter_api_key.is_empty()
+        && session.config.deepseek_api_key.is_empty()
+        && session.config.hf_api_key.is_empty()
+        && session.config.local_api_base_url.is_empty()
+        && session.config.ollama_model.is_empty();
+
+    if needs_onboarding && !prompt_resume_at_start {
+        let mut ui: Box<dyn CommandUi> = match tui.as_mut() {
+            Some((terminal, state, handle)) => {
+                Box::new(FullScreenCommandUi::new(terminal, state, handle))
+            }
+            None => Box::new(ClassicCommandUi::new()),
+        };
+        let should_onboard = ui
+            .prompt_confirm(
+                "No AI provider configured yet. Run the onboarding wizard now?",
+                true,
+            )
+            .unwrap_or(false);
+        if should_onboard {
+            let _ = ui.prompt_onboard(&mut session.config);
+        }
+    }
+
     let mut startup_update = crate::updater::get_cached_update_notice();
     let mut update_handle = if crate::updater::should_check_for_update() {
         Some(tokio::task::spawn_blocking(
@@ -857,7 +884,10 @@ pub fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Re
 }
 pub fn load_all_available_skills(current_dir: &Path) -> Vec<mint_core::LearnedSkill> {
     let memory = MemoryStore::open_default().unwrap_or_else(|_| {
-        MemoryStore::open(std::env::temp_dir().join(format!("mint-fallback-memory-{}.sqlite", std::process::id())))
+        MemoryStore::open(std::env::temp_dir().join(format!(
+            "mint-fallback-memory-{}.sqlite",
+            std::process::id()
+        )))
     });
     mint_core::skill_inventory::list_available_skills(&memory, Some(current_dir))
         .unwrap_or_default()

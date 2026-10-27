@@ -112,7 +112,20 @@ pub fn handle_update(check: bool, dry_run: bool, approve: bool) -> Result<()> {
 }
 
 pub async fn handle_onboard() -> Result<()> {
-    onboard::run().await
+    match onboard::run().await? {
+        onboard::OnboardOutcome::SavedAndLaunch => {
+            println!("\x1b[32m✔ Configuration saved. Launching Mint...\x1b[0m");
+            crate::interactive::run_interactive_chat_with_session(None, false, false, None, true)
+                .await?;
+        }
+        onboard::OnboardOutcome::SavedAndExit => {
+            println!("\x1b[32m✔ Configuration saved successfully!\x1b[0m");
+        }
+        onboard::OnboardOutcome::Cancelled => {
+            println!("\x1b[33mOnboarding cancelled.\x1b[0m");
+        }
+    }
+    Ok(())
 }
 
 pub async fn handle_setup() -> Result<()> {

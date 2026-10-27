@@ -430,7 +430,15 @@ fn clip_text(text: &str, width: usize) -> String {
 }
 
 fn format_subagent_tool_action(action: &str, input: &serde_json::Value) -> String {
-    for key in ["description", "command", "cmd", "path", "query", "pattern", "url"] {
+    for key in [
+        "description",
+        "command",
+        "cmd",
+        "path",
+        "query",
+        "pattern",
+        "url",
+    ] {
         if let Some(val) = input.get(key).and_then(|v| v.as_str()) {
             if let Some(line) = val.lines().find(|l| !l.trim().is_empty()) {
                 let trimmed = line.trim();
@@ -1450,15 +1458,17 @@ impl ChatViewState {
                 input,
                 ..
             } => {
-                if let Some(agent) = self.swarm_agents.iter_mut().find(|a| a.label == *agent_label)
+                if let Some(agent) = self
+                    .swarm_agents
+                    .iter_mut()
+                    .find(|a| a.label == *agent_label)
                 {
                     agent.current_action = Some(format_subagent_tool_action(action, input));
                 }
                 return None;
             }
             AgentProgress::ToolEnd {
-                subagent: Some(_),
-                ..
+                subagent: Some(_), ..
             } => {
                 return None;
             }
@@ -2872,9 +2882,9 @@ impl ChatViewState {
         {
             0
         } else {
-            let max_avail = main_area.height.saturating_sub(
-                6 + 3 + status_height + suggestion_height + composer_height + 1,
-            );
+            let max_avail = main_area
+                .height
+                .saturating_sub(6 + 3 + status_height + suggestion_height + composer_height + 1);
             if max_avail == 0 {
                 0
             } else if main_area.height < 24 || max_avail < 3 {
@@ -3891,9 +3901,7 @@ impl ChatViewState {
                             SwarmUiStatus::Failed => (
                                 Span::styled(
                                     "  ✗ ",
-                                    Style::default()
-                                        .fg(Color::Red)
-                                        .add_modifier(Modifier::BOLD),
+                                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                                 ),
                                 4,
                             ),
@@ -3939,9 +3947,7 @@ impl ChatViewState {
                         let suffix_width = UnicodeWidthStr::width(suffix_str.as_str());
 
                         let desc = if a.status == SwarmUiStatus::Success
-                            && a.summary_preview
-                                .as_deref()
-                                .is_some_and(|p| !p.is_empty())
+                            && a.summary_preview.as_deref().is_some_and(|p| !p.is_empty())
                         {
                             a.summary_preview.as_deref().unwrap()
                         } else if let Some(act) = a
@@ -4074,7 +4080,9 @@ impl ChatViewState {
                 main_area.x,
                 main_area.y + 6,
                 main_area.width,
-                main_area.height.saturating_sub(6 + composer_height + swarm_height + 1),
+                main_area
+                    .height
+                    .saturating_sub(6 + composer_height + swarm_height + 1),
             ));
             frame.render_widget(ratatui::widgets::Clear, area);
             let mut lines = crate::mods_ui::slot_lines(&self.mods, "side_panel");
@@ -5752,6 +5760,18 @@ impl ChatTui {
             {
                 self.handle_dialog_event(event::read()?, &mut state)?;
             }
+        }
+    }
+    pub fn run_onboard_wizard(&mut self, config: &mut mint_core::MintConfig) -> Result<bool> {
+        let mut wizard = crate::onboard::OnboardWizard::new(config.clone());
+        let outcome = wizard.run_with_terminal(&mut self.terminal)?;
+        match outcome {
+            crate::onboard::OnboardOutcome::SavedAndLaunch
+            | crate::onboard::OnboardOutcome::SavedAndExit => {
+                *config = wizard.take_config();
+                Ok(true)
+            }
+            crate::onboard::OnboardOutcome::Cancelled => Ok(false),
         }
     }
     pub async fn drive_agent<T: Send + 'static>(
@@ -8532,8 +8552,14 @@ mod swarm_panel_tests {
             Some("Running `cargo test`")
         );
         // Subagent tools must NOT be pushed to the main transcript or tools list!
-        assert!(state.transcript.is_empty(), "transcript must stay clean without subagent tool spam");
-        assert!(state.tools.is_empty(), "tools list must not include subagent micro-tools");
+        assert!(
+            state.transcript.is_empty(),
+            "transcript must stay clean without subagent tool spam"
+        );
+        assert!(
+            state.tools.is_empty(),
+            "tools list must not include subagent micro-tools"
+        );
 
         let tool_end = mint_core::AgentProgress::ToolEnd {
             call_id: Some("call-1".to_string()),

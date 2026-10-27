@@ -1046,6 +1046,9 @@ export default function MintDashboard() {
         } else if (slashResult.action === 'generate_veo') {
           changeView('veo')
           return
+        } else if (slashResult.action === 'open_settings') {
+          window.location.hash = '#/settings'
+          return
         } else if (slashResult.action === 'resume_session') {
           const query = (slashResult.payload?.query || '').trim().toLowerCase()
           const target = query
