@@ -13,7 +13,7 @@
   - **Step 3 (Configurations)**: Paged per-service cards featuring bundled API credentials and real-time model pickers (Anthropic, OpenAI, DeepSeek, Ollama, etc.).
   - **Step 4 (Summary & Launch)**: Visual configuration overview with direct launch (`Save & Launch Mint`) or exit options.
   - Added `/onboard` slash command and first-run detection across CLI, Desktop, and Web.
-- **Terminal Polish**: Compact web search citations (top 5 with `Ctrl+O` detail viewer modal), unified command badges, external browser link handling, and non-blocking desktop titlebar during settings.
+- **Terminal Polish**: Compact web search citations (top 5 with `Ctrl+O view web_search` smart jump, matched tool-card ANSI color styling, and structured results formatting), automatic source citation reconstruction on session resume (`/resume`), unified command badges, external browser link handling, and non-blocking desktop titlebar during settings.
 
 ## Performance & Frontend Optimization
 - **Re-render Isolation**: Decoupled message input state to eliminate full-page re-renders while typing.

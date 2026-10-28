@@ -21,7 +21,7 @@ pub(super) fn extract_domain(url: &str) -> String {
 /// Parse (title, url) pairs from the formatted `web_search` ToolEnd result text.
 /// The format produced by orchestration.rs is:
 ///   1. Title\n   URL: https://...\n   Snippet\n
-pub(super) fn parse_web_search_sources(result: &str) -> Vec<(String, String)> {
+pub(crate) fn parse_web_search_sources(result: &str) -> Vec<(String, String)> {
     let mut sources = Vec::new();
     let mut current_title: Option<String> = None;
     for line in result.lines() {
@@ -46,12 +46,12 @@ pub(super) fn parse_web_search_sources(result: &str) -> Vec<(String, String)> {
     sources
 }
 
-pub(super) const MAX_TUI_WEB_SOURCES: usize = 5;
+pub(crate) const MAX_TUI_WEB_SOURCES: usize = 5;
 
 /// Formats web search sources for display in Full-Screen TUI transcripts.
-/// Caps the list at `limit` items (default 5), and appends a `Ctrl+O details` hint
+/// Caps the list at `limit` items (default 5), and appends a `Ctrl+O view web_search` hint
 /// when additional sources exist so users know they can view the full list via tool details.
-pub(super) fn format_tui_web_sources(sources: &[(String, String)], limit: usize) -> String {
+pub(crate) fn format_tui_web_sources(sources: &[(String, String)], limit: usize) -> String {
     if sources.is_empty() {
         return String::new();
     }
@@ -67,8 +67,13 @@ pub(super) fn format_tui_web_sources(sources: &[(String, String)], limit: usize)
     if total > limit {
         let remaining = total - limit;
         out.push_str(&format!(
-            "\n  … [+{} more sources] · Ctrl+O details",
-            remaining
+            "\n{}  … [+{} more sources] · {}{}{}{}",
+            crate::terminal_theme::ANSI_MUTED,
+            remaining,
+            crate::terminal_theme::ANSI_RESET,
+            crate::terminal_theme::ANSI_BLUE,
+            "Ctrl+O view web_search",
+            crate::terminal_theme::ANSI_RESET,
         ));
     }
     out

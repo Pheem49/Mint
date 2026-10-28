@@ -2016,6 +2016,9 @@ mod skill_card_tests {
         assert!(out.contains("1. Site 1\n   https://example.com/1"));
         assert!(out.contains("5. Site 5\n   https://example.com/5"));
         assert!(!out.contains("6. Site 6"));
-        assert!(out.contains("… [+3 more sources] · Ctrl+O details"));
+        assert!(out.contains("… [+3 more sources] · "));
+        assert!(out.contains("Ctrl+O view web_search"));
+        assert!(out.contains(crate::terminal_theme::ANSI_MUTED));
+        assert!(out.contains(crate::terminal_theme::ANSI_BLUE));
     }
 }

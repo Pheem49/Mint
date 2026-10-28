@@ -1638,12 +1638,30 @@ impl ChatViewState {
             if self.tools.is_empty() {
                 self.set_notice("No tool activity recorded yet");
             } else {
-                self.tool_viewer = Some(self.tools.len() - 1);
+                let target = self.preferred_tool_viewer_index();
+                self.tool_viewer = Some(target);
                 self.refresh_tool_viewer(true);
             }
             return true;
         }
         false
+    }
+
+    fn preferred_tool_viewer_index(&self) -> usize {
+        let has_recent_sources = self.transcript.iter().rev().take(6).any(|entry| {
+            entry.text.starts_with("Sources:\n") || entry.text.contains("Ctrl+O view web_search")
+        });
+
+        if has_recent_sources {
+            if let Some(pos) = self
+                .tools
+                .iter()
+                .rposition(|tool| tool.action == "web_search")
+            {
+                return pos;
+            }
+        }
+        self.tools.len() - 1
     }
 
     fn live_thought(&self) -> Option<&ThinkingSegment> {
@@ -2032,9 +2050,14 @@ impl ChatViewState {
         }
     }
 
-    fn push_saved_activity(&mut self, activity: Option<&serde_json::Value>, turn_status: &str) {
+    fn push_saved_activity(
+        &mut self,
+        activity: Option<&serde_json::Value>,
+        turn_status: &str,
+    ) -> Vec<(String, String)> {
+        let mut sources = Vec::new();
         let Some(events) = activity.and_then(serde_json::Value::as_array) else {
-            return;
+            return sources;
         };
         let first_tool = self.tools.len();
         for value in events {
@@ -2048,13 +2071,19 @@ impl ChatViewState {
                     mint_core::AgentProgress::ToolStart { .. } => {
                         self.record_tool_progress(&event);
                     }
-                    mint_core::AgentProgress::ToolEnd { .. } => {
+                    mint_core::AgentProgress::ToolEnd { action, result, .. } => {
                         if let Some(index) = self.record_tool_progress(&event) {
                             self.tools[index].elapsed = value["data"]["elapsed_ms"]
                                 .as_u64()
                                 .or_else(|| value["data"]["elapsedMs"].as_u64())
                                 .map(std::time::Duration::from_millis);
                             self.refresh_tool_card(index);
+                        }
+                        if action == "web_search"
+                            && !result.starts_with("Web search error:")
+                            && result != "No web search results found."
+                        {
+                            sources.extend(crate::agent::parse_web_search_sources(result));
                         }
                     }
                     mint_core::AgentProgress::SubagentStarted { .. }
@@ -2115,6 +2144,7 @@ impl ChatViewState {
                 self.refresh_tool_card(index);
             }
         }
+        sources
     }
 
     pub fn reload_transcript_with(
@@ -2146,11 +2176,22 @@ impl ChatViewState {
             for row in rows {
                 self.transcript
                     .push(TranscriptEntry::new(TranscriptRole::User, row.user_text));
-                self.push_saved_activity(row.agent_activity.as_ref(), &row.status);
+                let sources = self.push_saved_activity(row.agent_activity.as_ref(), &row.status);
                 match row.status.as_str() {
-                    "completed" => self
-                        .transcript
-                        .push(TranscriptEntry::new(TranscriptRole::Assistant, row.ai_text)),
+                    "completed" => {
+                        self.transcript
+                            .push(TranscriptEntry::new(TranscriptRole::Assistant, row.ai_text));
+                        if !sources.is_empty() {
+                            let text = crate::agent::format_tui_web_sources(
+                                &sources,
+                                crate::agent::MAX_TUI_WEB_SOURCES,
+                            );
+                            if !text.is_empty() {
+                                self.transcript
+                                    .push(TranscriptEntry::new(TranscriptRole::Notice, text));
+                            }
+                        }
+                    }
                     "queued" => self.transcript.push(TranscriptEntry::new(
                         TranscriptRole::Notice,
                         "Queued for this session…",
@@ -2240,12 +2281,24 @@ impl ChatViewState {
                 // Incoming new interaction from an external client (Web/Desktop)
                 self.transcript
                     .push(TranscriptEntry::new(TranscriptRole::User, &row.user_text));
-                self.push_saved_activity(row.agent_activity.as_ref(), &row.status);
+                let sources = self.push_saved_activity(row.agent_activity.as_ref(), &row.status);
                 match row.status.as_str() {
-                    "completed" => self.transcript.push(TranscriptEntry::new(
-                        TranscriptRole::Assistant,
-                        &row.ai_text,
-                    )),
+                    "completed" => {
+                        self.transcript.push(TranscriptEntry::new(
+                            TranscriptRole::Assistant,
+                            &row.ai_text,
+                        ));
+                        if !sources.is_empty() {
+                            let text = crate::agent::format_tui_web_sources(
+                                &sources,
+                                crate::agent::MAX_TUI_WEB_SOURCES,
+                            );
+                            if !text.is_empty() {
+                                self.transcript
+                                    .push(TranscriptEntry::new(TranscriptRole::Notice, text));
+                            }
+                        }
+                    }
                     "queued" => self.transcript.push(TranscriptEntry::new(
                         TranscriptRole::Notice,
                         "Queued for this session…",
@@ -2281,11 +2334,22 @@ impl ChatViewState {
                         }
                     }
                     if append {
-                        self.push_saved_activity(row.agent_activity.as_ref(), &row.status);
+                        let sources =
+                            self.push_saved_activity(row.agent_activity.as_ref(), &row.status);
                         self.transcript.push(TranscriptEntry::new(
                             TranscriptRole::Assistant,
                             &row.ai_text,
                         ));
+                        if !sources.is_empty() {
+                            let text = crate::agent::format_tui_web_sources(
+                                &sources,
+                                crate::agent::MAX_TUI_WEB_SOURCES,
+                            );
+                            if !text.is_empty() {
+                                self.transcript
+                                    .push(TranscriptEntry::new(TranscriptRole::Notice, text));
+                            }
+                        }
                         changed = true;
                     }
                 } else if row.status == "running" {
@@ -6031,6 +6095,29 @@ mod dialog_tests {
     }
 
     #[test]
+    fn resume_restores_web_search_sources_in_transcript() {
+        let (root, memory) = saved_activity_fixture(
+            serde_json::json!([
+                {"type":"ToolStart","data":{"callId":"call_1","action":"web_search","input":{"query":"rust ratatui"}}},
+                {"type":"ToolEnd","data":{"callId":"call_1","action":"web_search","input":{"query":"rust ratatui"},"result":"1. Ratatui Docs\n   URL: https://ratatui.rs\n   Terminal UI library"}}
+            ]),
+            "completed",
+        );
+        let mut state = ChatViewState::default();
+        state.reload_transcript_with(&memory, "resume-details", &root);
+        let sources_entry = state.transcript.iter().find(|entry| {
+            entry.role == TranscriptRole::Notice && entry.text.starts_with("Sources:\n")
+        });
+        assert!(
+            sources_entry.is_some(),
+            "Sources notice should be reconstructed upon resume"
+        );
+        let text = &sources_entry.unwrap().text;
+        assert!(text.contains("1. Ratatui Docs\n   https://ratatui.rs"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn resume_interrupted_activity_keeps_partial_thought_and_never_restarts_spinner() {
         let events: Vec<mint_core::AgentProgress> = serde_json::from_value(serde_json::json!([
             {"type":"ThinkingDelta","data":{"id":"partial","delta":"unfinished ","elapsed_ms":400}},
@@ -8624,5 +8711,86 @@ mod swarm_panel_tests {
         assert!(text.contains("[recon]"));
         assert!(text.contains("Reading `schema.rs`"));
         assert!(text.contains("[Plan]"));
+    }
+
+    #[test]
+    fn tool_viewer_smart_jumps_to_web_search_when_sources_present() {
+        use crate::interactive::tool_activity::ToolActivity;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut state = ChatViewState::default();
+        // Tool 0: web_search
+        state.tools.push(ToolActivity {
+            entry: 0,
+            call_id: Some("call_web".into()),
+            action: "web_search".into(),
+            input: serde_json::json!({"query": "cosplay 4khd"}),
+            subagent: None,
+            started: std::time::Instant::now(),
+            elapsed: Some(std::time::Duration::from_millis(1200)),
+            result: Some("1. 4KHD Cosplay\n   URL: https://4khd.com\n   Preview text".into()),
+            status: Some(mint_core::integrations::mcp_result::ToolStatus::Success),
+        });
+        // Tool 1: run_shell (ran afterwards)
+        state.tools.push(ToolActivity {
+            entry: 1,
+            call_id: Some("call_shell".into()),
+            action: "run_shell".into(),
+            input: serde_json::json!({"command": "echo done"}),
+            subagent: None,
+            started: std::time::Instant::now(),
+            elapsed: Some(std::time::Duration::from_millis(500)),
+            result: Some("exit: 0\nstdout:\ndone\nstderr:".into()),
+            status: Some(mint_core::integrations::mcp_result::ToolStatus::Success),
+        });
+
+        let make_key = |code: KeyCode, modifiers: KeyModifiers| KeyEvent::new(code, modifiers);
+
+        // Without Sources notice, Ctrl+O opens the latest tool (index 1: run_shell)
+        let key = make_key(KeyCode::Char('o'), KeyModifiers::CONTROL);
+        assert!(state.handle_tool_key(key));
+        assert_eq!(state.tool_viewer, Some(1));
+        state.handle_tool_key(make_key(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(state.tool_viewer, None);
+
+        // When Sources notice is in recent transcript, Ctrl+O smart jumps to web_search (index 0)
+        state.push_notice("Sources:\n1. 4KHD Cosplay\n   https://4khd.com\n  … [+10 more sources] · Ctrl+O view web_search");
+        state.push_notice("─ Worked for 10s • test ──────────────────────────────");
+
+        assert!(state.handle_tool_key(key));
+        assert_eq!(state.tool_viewer, Some(0));
+        assert_eq!(state.tools[state.tool_viewer.unwrap()].action, "web_search");
+    }
+
+    #[test]
+    fn format_tui_web_sources_renders_with_muted_and_blue_spans_in_transcript_entry() {
+        let sources: Vec<(String, String)> = (1..=10)
+            .map(|i| (format!("Title {i}"), format!("https://example.com/{i}")))
+            .collect();
+        let formatted = crate::agent::format_tui_web_sources(&sources, 5);
+        let entry = TranscriptEntry::new(TranscriptRole::Notice, formatted);
+
+        let more_line = entry
+            .rendered_lines
+            .iter()
+            .find(|line| {
+                line.spans
+                    .iter()
+                    .any(|s| s.content.contains("more sources] · "))
+            })
+            .expect("more sources line should be present");
+
+        let muted_span = more_line
+            .spans
+            .iter()
+            .find(|s| s.content.contains("more sources] · "))
+            .expect("muted span found");
+        assert_eq!(muted_span.style.fg, Some(crate::terminal_theme::MUTED));
+
+        let blue_span = more_line
+            .spans
+            .iter()
+            .find(|s| s.content.contains("Ctrl+O view web_search"))
+            .expect("blue span found");
+        assert_eq!(blue_span.style.fg, Some(crate::terminal_theme::BLUE));
     }
 }

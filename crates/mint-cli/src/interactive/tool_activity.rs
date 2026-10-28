@@ -221,7 +221,8 @@ impl ToolActivity {
             .input
             .get("command")
             .or_else(|| self.input.get("cmd"))
-            .and_then(Value::as_str);
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty());
         let input = command
             .map(str::to_owned)
             .unwrap_or_else(|| serde_json::to_string_pretty(&self.input).unwrap_or_default());
@@ -247,13 +248,65 @@ impl ToolActivity {
         }));
         lines.push(Line::default());
         lines.push(Line::styled("Output", Style::default().fg(BLUE)));
-        lines.extend(
-            self.result
-                .as_deref()
-                .unwrap_or("Waiting for result…")
-                .lines()
-                .map(|line| Line::styled(line.to_owned(), Style::default().fg(TEXT))),
-        );
+        let result_text = self.result.as_deref().unwrap_or("Waiting for result…");
+        if self.action == "web_search"
+            && !result_text.starts_with("Web search error:")
+            && result_text != "No web search results found."
+        {
+            for line in result_text.lines() {
+                let trimmed = line.trim_start();
+                if let Some((num, title)) = trimmed.split_once(". ")
+                    && num.parse::<usize>().is_ok()
+                {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("{num}. "),
+                            Style::default()
+                                .fg(BLUE)
+                                .add_modifier(ratatui::style::Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            title.to_owned(),
+                            Style::default()
+                                .fg(TEXT)
+                                .add_modifier(ratatui::style::Modifier::BOLD),
+                        ),
+                    ]));
+                } else if let Some(url) = trimmed.strip_prefix("URL: ") {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            "   URL: ",
+                            Style::default().fg(crate::terminal_theme::MUTED),
+                        ),
+                        Span::styled(url.to_owned(), Style::default().fg(ACCENT)),
+                    ]));
+                } else if let Some(img) = trimmed.strip_prefix("Image: ") {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            "   Image: ",
+                            Style::default().fg(crate::terminal_theme::MUTED),
+                        ),
+                        Span::styled(
+                            img.to_owned(),
+                            Style::default().fg(crate::terminal_theme::MUTED),
+                        ),
+                    ]));
+                } else if trimmed.is_empty() {
+                    lines.push(Line::default());
+                } else {
+                    lines.push(Line::styled(
+                        format!("   {trimmed}"),
+                        Style::default().fg(crate::terminal_theme::MUTED),
+                    ));
+                }
+            }
+        } else {
+            lines.extend(
+                result_text
+                    .lines()
+                    .map(|line| Line::styled(line.to_owned(), Style::default().fg(TEXT))),
+            );
+        }
         lines
     }
     pub fn details(&self) -> String {
@@ -437,5 +490,64 @@ mod tests {
         };
         let non_cmd_lines = non_command.lines(80);
         assert_eq!(non_cmd_lines[1].style.fg, Some(crate::terminal_theme::TEXT));
+    }
+
+    #[test]
+    fn web_search_detail_lines_format_titles_and_urls_distinctly() {
+        let tool = ToolActivity {
+            entry: 0,
+            call_id: None,
+            action: "web_search".into(),
+            input: serde_json::json!({"query":"cosplay"}),
+            subagent: None,
+            started: Instant::now(),
+            elapsed: None,
+            result: Some("1. Cosplay Site\n   URL: https://example.com/cosplay\n   Image: https://example.com/img.jpg\n   High quality cosplay photos".into()),
+            status: Some(ToolStatus::Success),
+        };
+        let detail_lines = tool.detail_lines();
+        // Title line should have bold styling
+        let title_line = detail_lines
+            .iter()
+            .find(|l| l.to_string().contains("1. Cosplay Site"))
+            .expect("title line found");
+        assert!(title_line.spans.iter().any(|s| {
+            s.style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        }));
+        // URL line should format the URL with ACCENT color
+        let url_line = detail_lines
+            .iter()
+            .find(|l| l.to_string().contains("URL: https://example.com/cosplay"))
+            .expect("url line found");
+        assert!(
+            url_line
+                .spans
+                .iter()
+                .any(|s| s.style.fg == Some(crate::terminal_theme::ACCENT))
+        );
+    }
+
+    #[test]
+    fn detail_input_ignores_empty_command_string_and_shows_input() {
+        let tool = ToolActivity {
+            entry: 0,
+            call_id: None,
+            action: "web_search".into(),
+            input: serde_json::json!({"command": "", "query": "cosplay"}),
+            subagent: None,
+            started: Instant::now(),
+            elapsed: None,
+            result: Some("No web search results found.".into()),
+            status: Some(ToolStatus::Success),
+        };
+        let (is_command, input) = tool.detail_input();
+        assert!(!is_command);
+        assert!(input.contains("\"query\": \"cosplay\""));
+
+        let lines = tool.detail_lines();
+        assert!(lines.iter().any(|l| l.to_string() == "Input"));
+        assert!(!lines.iter().any(|l| l.to_string() == "Command"));
     }
 }
