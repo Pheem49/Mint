@@ -678,6 +678,17 @@ h1 {
   100% { transform: translate(-60px, -70px) scale(0.9); }
 }
 
+/* Studio Dark: Pure solid neutral canvas without colored decorative background glows */
+[data-theme="studio"] .assistant-workspace.chat-only::before,
+[data-theme="studio"] .assistant-workspace.chat-only::after {
+  display: none !important;
+}
+
+[data-theme="studio"] .assistant-workspace,
+[data-theme="studio"] .app-body {
+  background: var(--bg-canvas, #101010) !important;
+}
+
 [data-theme="light"] .suggestion-card:hover {
   background: rgba(143, 108, 245, 0.05);
 }

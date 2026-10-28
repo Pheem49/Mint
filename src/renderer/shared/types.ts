@@ -146,6 +146,16 @@ export type AgentProgress =
   | { type: 'SubagentStarted'; data: { subagent: string; profile: string; task: string } }
   | { type: 'SubagentFinished'; data: { subagent: string; status: 'completed' | 'failed' | 'cancelled'; elapsed_ms?: number; elapsedMs?: number; steps: number; summary_preview?: string; summaryPreview?: string } }
 
+export interface QueuedPrompt {
+  id: string
+  chatId: string
+  text: string
+  imageAttachments?: Array<{ dataUri: string; name: string; previewDataUri?: string }>
+  videoAttachments?: Array<{ dataUri: string; name: string }>
+  documentAttachment?: DocumentAttachment | null
+  createdAt: number
+}
+
 export interface InteractionMemory {
   id: number
   chatId: string

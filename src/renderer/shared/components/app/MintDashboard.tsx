@@ -352,6 +352,7 @@ export default function MintDashboard() {
   )
   const {
     conversationId, workspacePath, message, imageAttachments, videoAttachments, documentAttachment,
+    queuedPrompts, queuePaused,
     sending, sendingMessage, sendingImageCount, sendingVideoCount, streamedReply,
     streamedResponse, agentProgress, interactions, hasOlderInteractions,
     streamingConversationId, activeTurnId, agentActivitySnapshots, pendingApprovals,
@@ -1013,7 +1014,18 @@ export default function MintDashboard() {
     const currentVideos = videoAttachments
     const currentDocument = documentAttachment
     const hasAttachments = currentImages.length > 0 || currentVideos.length > 0 || Boolean(currentDocument)
-    if ((!trimmed && !hasAttachments) || sending) return
+    if (!trimmed && !hasAttachments) return
+
+    if (sending) {
+      conversationActions.queuePrompt({
+        text: trimmed,
+        imageAttachments: currentImages.map(img => ({ dataUri: img.dataUri, name: img.name })),
+        videoAttachments: currentVideos.map(vid => ({ dataUri: vid.dataUri, name: vid.name })),
+        documentAttachment: currentDocument,
+      })
+      conversationActions.clearComposer()
+      return
+    }
 
     if (trimmed.startsWith('/')) {
       // Shared Rust engine first (mint_core::slash). Anything it doesn't own
@@ -1714,6 +1726,8 @@ export default function MintDashboard() {
     isCliSession: conversationId.startsWith('cli') || conversationId === 'cli',
     cliSessionId: conversationId.startsWith('cli') ? conversationId : undefined,
     conversationTitle: chatSessions.find((session) => session.id === conversationId)?.title,
+    queuedPrompts: queuedPrompts ?? [],
+    queuePaused: queuePaused ?? false,
   }
   const chatActions: ConversationActions = {
     onSelectSlashChoice: (value) => {
@@ -1758,6 +1772,11 @@ export default function MintDashboard() {
     onBackToCode: () => changeView('code'),
     onOpenArtifact: openArtifactSurface,
     onOpenReview: isDesktopApp ? openReviewSurface : undefined,
+    onRemoveQueuedPrompt: conversationActions.removeQueuedPrompt,
+    onEditQueuedPrompt: conversationActions.editQueuedPrompt,
+    onClearQueuedPrompts: conversationActions.clearQueuedPrompts,
+    onSteerQueuedPrompt: conversationActions.steerQueuedPrompt,
+    onResumeQueue: conversationActions.resumeQueue,
   }
 
   const stableToggleSidebar = useLatestCallback(toggleSidebar)

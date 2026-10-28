@@ -44,9 +44,28 @@ export interface AgentActivityView {
   timeline?: TimelineItem[]
 }
 
+export function isDummyValue(value: unknown): boolean {
+  if (typeof value !== 'string') return false
+  const lower = value.trim().toLowerCase()
+  return (
+    lower === 'null' ||
+    lower === 'undefined' ||
+    lower === 'none' ||
+    lower === 'nil' ||
+    lower === '(null)' ||
+    lower === '""' ||
+    lower === "''"
+  )
+}
+
 function activityDetail(input: Record<string, unknown>, key: string): string {
+  if (!input || typeof input !== 'object') return ''
   const value = input[key]
-  return typeof value === 'string' && value.trim() ? value : ''
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return isDummyValue(trimmed) ? '' : trimmed
+  }
+  return ''
 }
 
 export function formatActivityTarget(value: string): string {
@@ -114,11 +133,12 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
 
   if (!command && typeof (input as unknown) === 'string') {
     const raw = (input as unknown as string).trim()
-    if (raw && !raw.startsWith('{')) command = raw
+    if (raw && !raw.startsWith('{') && !isDummyValue(raw)) command = raw
   }
 
   const name = activityDetail(input, 'name')
   const tool = activityDetail(input, 'tool')
+  const server = activityDetail(input, 'server')
   const symbol = activityDetail(input, 'symbol') || activityDetail(input, 'ticker')
   const filter = activityDetail(input, 'filter')
   const expression = activityDetail(input, 'expression') || activityDetail(input, 'expr') || activityDetail(input, 'math')
@@ -126,32 +146,59 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
   const url = activityDetail(input, 'url')
   const selector = activityDetail(input, 'selector')
 
-  const fallbackTarget =
-    action === 'web_search' || action === 'search_code' || action === 'knowledge_search'
-      ? (query || '(empty query)')
-      : action === 'read_file' || action === 'write_file'
-        ? (path || '(empty path)')
-        : action === 'find_definition' || action === 'find_references'
-          ? (symbol || '(empty symbol)')
-          : action === 'run_tests'
-            ? (filter || '(all tests)')
-            : action === 'run_typecheck' || action === 'run_linter'
-              ? (path || 'workspace')
-              : action === 'run_shell'
-                ? (command || '(empty command)')
-                : action === 'calculation'
-                  ? (expression || '(math expression)')
-                  : action === 'weather'
-                    ? (city || '(location)')
-                    : action === 'stock'
-                      ? (query || symbol || '(symbol)')
-                      : action === 'browser_open'
-                        ? (url || '(url)')
-                        : action === 'browser_click'
-                          ? (selector || '(element)')
-                          : action.replaceAll('_', ' ')
-
-  const rawTarget = path || query || command || expression || symbol || city || url || selector || filter || name || tool || fallbackTarget
+  let rawTarget = ''
+  switch (action) {
+    case 'run_shell':
+      rawTarget = command || '(empty command)'
+      break
+    case 'web_search':
+    case 'search_code':
+    case 'knowledge_search':
+      rawTarget = query || '(empty query)'
+      break
+    case 'read_file':
+    case 'write_file':
+    case 'view_image':
+      rawTarget = path || '(empty path)'
+      break
+    case 'find_definition':
+    case 'find_references':
+      rawTarget = symbol || '(empty symbol)'
+      break
+    case 'run_tests':
+      rawTarget = filter || '(all tests)'
+      break
+    case 'run_typecheck':
+    case 'run_linter':
+      rawTarget = path || 'workspace'
+      break
+    case 'calculation':
+    case 'calculator':
+      rawTarget = expression || '(math expression)'
+      break
+    case 'weather':
+      rawTarget = city || '(location)'
+      break
+    case 'stock':
+      rawTarget = query || symbol || '(symbol)'
+      break
+    case 'browser_open':
+    case 'browser_navigate':
+      rawTarget = url || '(url)'
+      break
+    case 'browser_click':
+      rawTarget = selector || '(element)'
+      break
+    case 'mcp_tool':
+      rawTarget = tool ? (server ? `${server}/${tool}` : tool) : (name || 'mcp tool')
+      break
+    case 'note_write':
+      rawTarget = name || path || '(note)'
+      break
+    default:
+      rawTarget = path || query || command || expression || symbol || city || url || selector || filter || name || tool || action.replaceAll('_', ' ')
+      break
+  }
 
   // Append line range for read_file when startLine / endLine are available
   let target = rawTarget

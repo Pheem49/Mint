@@ -477,6 +477,9 @@ async fn execute_owned(
     if action == "browser_open" {
         super::navigate::validate_url(args["url"].as_str().unwrap_or("").trim())?;
     }
+    if !super::lifecycle::is_browser_running(config).await {
+        super::lifecycle::spawn_automation_browser(config).await?;
+    }
     if session.tab.is_none() && action != "browser_tabs" {
         let page = tab_request(config, "new?about:blank").await?;
         let tab = page["id"]

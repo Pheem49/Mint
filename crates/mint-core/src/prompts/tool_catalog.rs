@@ -1104,7 +1104,19 @@ mod browser_startup_tests {
     fn browser_tools_are_discoverable_when_browser_automation_enabled() {
         let mut config = MintConfig::default();
         let default_tools = tool_catalog(&config, false, Path::new("."), false);
-        assert!(!default_tools.iter().any(|tool| tool.name == "browser_open"));
+        // By default, browser tools are enabled out of the box for real web browsing.
+        assert!(default_tools.iter().any(|tool| tool.name == "browser_open"));
+
+        // Explicitly disabling browser automation removes browser tools.
+        config
+            .extra
+            .insert("browserAutomationEnabled".into(), json!(false));
+        let disabled_tools = tool_catalog(&config, false, Path::new("."), false);
+        assert!(
+            !disabled_tools
+                .iter()
+                .any(|tool| tool.name == "browser_open")
+        );
 
         config
             .extra

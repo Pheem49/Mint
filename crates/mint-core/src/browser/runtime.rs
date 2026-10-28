@@ -73,6 +73,12 @@ impl ManagedBrowser {
         ];
         if headless {
             args.push("--headless=new".into());
+            args.push("--disable-gpu".into());
+            if cfg!(target_os = "linux") {
+                args.push("--no-sandbox".into());
+                args.push("--disable-setuid-sandbox".into());
+                args.push("--disable-dev-shm-usage".into());
+            }
         }
         if let Some(extra) = config
             .extra
@@ -134,6 +140,8 @@ impl ManagedBrowser {
                     "chromium".into(),
                     "chromium-browser".into(),
                     "microsoft-edge".into(),
+                    "/opt/google/chrome/google-chrome".into(),
+                    "/opt/google/chrome/chrome".into(),
                 ]
             };
             #[cfg(target_os = "windows")]

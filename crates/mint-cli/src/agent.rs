@@ -98,8 +98,9 @@ pub async fn run_code_agent_with_image(
 fn get_field_alias<'a>(input: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
     for &k in keys {
         if let Some(v) = input.get(k).and_then(|v| v.as_str()) {
-            if !v.trim().is_empty() {
-                return Some(v.trim());
+            let trimmed = v.trim();
+            if !trimmed.is_empty() && !mint_core::is_dummy_value(trimmed) {
+                return Some(trimmed);
             }
         }
     }
@@ -2016,6 +2017,9 @@ mod skill_card_tests {
         assert!(out.contains("1. Site 1\n   https://example.com/1"));
         assert!(out.contains("5. Site 5\n   https://example.com/5"));
         assert!(!out.contains("6. Site 6"));
-        assert!(out.contains("… [+3 more sources] · Ctrl+O details"));
+        assert!(out.contains("… [+3 more sources] · "));
+        assert!(out.contains("Ctrl+O view web_search"));
+        assert!(out.contains(crate::terminal_theme::ANSI_MUTED));
+        assert!(out.contains(crate::terminal_theme::ANSI_BLUE));
     }
 }

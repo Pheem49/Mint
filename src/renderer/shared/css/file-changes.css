@@ -72,6 +72,59 @@
   gap: 7px;
 }
 
+.file-changes-summary-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.file-changes-common-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  color: var(--text-muted, #94a3b8);
+  font-family: var(--font-mono, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(440px, 60vw);
+  margin-top: 1px;
+  opacity: 0.85;
+}
+
+.file-changes-common-dir svg {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.file-changes-common-dir-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-changes-rewind-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  font-size: 0.72rem;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--status-error, #f87171);
+  border: 1px solid color-mix(in srgb, var(--status-error, #ef4444) 30%, transparent);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.file-changes-rewind-btn:hover {
+  background: color-mix(in srgb, var(--status-error, #ef4444) 18%, transparent);
+  border-color: color-mix(in srgb, var(--status-error, #ef4444) 50%, transparent);
+}
+
 .file-changes-review-btn {
   background: color-mix(in srgb, var(--text-main) 5%, transparent);
   border: 1px solid var(--border);
@@ -90,13 +143,122 @@
 }
 
 .file-changes-item {
-  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
-  border-radius: var(--radius-xs, 5px);
-  padding: 2px 4px;
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: var(--radius-xs, 6px);
+  background: color-mix(in srgb, var(--surface-bg, #1e1e20) 60%, rgba(255, 255, 255, 0.02));
+  overflow: hidden;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.file-changes-item:last-child {
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+.file-changes-item:hover {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--surface-bg, #1e1e20) 40%, rgba(255, 255, 255, 0.04));
+}
+
+.file-changes-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  gap: 8px;
+}
+
+.file-changes-filename {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-main, #f1f5f9);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-changes-name {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78rem;
+}
+
+.file-changes-subdir {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  color: var(--text-muted, #94a3b8);
+  opacity: 0.75;
+}
+
+.file-changes-chip-new {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--accent, #10b981);
+  background: color-mix(in srgb, var(--accent, #10b981) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #10b981) 28%, transparent);
+  border-radius: 999px;
+  padding: 1px 7px;
+  line-height: 1.25;
+  letter-spacing: 0.02em;
+  margin-left: 4px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.file-changes-preview-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 500;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-main) 6%, transparent);
+  color: var(--text-muted, #94a3b8);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.file-changes-preview-btn:hover {
+  background: color-mix(in srgb, var(--accent, #10b981) 15%, transparent);
+  color: var(--accent, #10b981);
+  border-color: color-mix(in srgb, var(--accent, #10b981) 35%, transparent);
+}
+
+.file-changes-show-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 12px;
+  margin-top: 2px;
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--text-muted, #94a3b8);
+  background: transparent;
+  border: 1px dashed color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: var(--radius-xs, 6px);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.file-changes-show-more:hover {
+  background: color-mix(in srgb, var(--text-main) 6%, transparent);
+  color: var(--text-main, #f1f5f9);
+  border-color: var(--border);
+}
+
+.file-changes-show-more svg {
+  transition: transform 0.2s ease;
+  opacity: 0.75;
+}
+
+.file-changes-show-more[aria-expanded="true"] svg {
+  transform: rotate(180deg);
 }
 
 .file-changes-list-container {

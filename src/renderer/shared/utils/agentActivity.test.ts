@@ -145,5 +145,90 @@ describe('fault-tolerant run_shell command extraction', () => {
   it('falls back to (empty command) when no command is provided anywhere', () => {
     expect(describeTool('run_shell', {}).target).toBe('(empty command)')
   })
+
+  it('ignores dummy null/undefined strings and picks real command over path/query for run_shell', () => {
+    expect(
+      describeTool('run_shell', {
+        command: 'cd /tmp && ls -la',
+        path: 'null',
+        query: 'null',
+        name: 'null',
+        title: 'null',
+      }).target
+    ).toBe('cd /tmp && ls -la')
+
+    expect(
+      describeTool('run_shell', {
+        command: 'curl -s https://api.twitter.com',
+        path: 'null',
+        query: 'null',
+      }).target
+    ).toBe('curl -s https://api.twitter.com')
+  })
+
+  it('treats standalone dummy string command as empty and falls back to (empty command)', () => {
+    expect(describeTool('run_shell', { command: 'null' }).target).toBe('(empty command)')
+    expect(describeTool('run_shell', { command: 'undefined' }).target).toBe('(empty command)')
+    expect(describeTool('run_shell', { command: 'None' }).target).toBe('(empty command)')
+  })
 })
+
+describe('action-first target resolution and dummy value stripping', () => {
+  it('prioritizes query for web_search even when dummy path or other keys are present', () => {
+    expect(
+      describeTool('web_search', {
+        query: 'Kuuko W official twitter',
+        path: 'null',
+        command: 'null',
+        name: 'null',
+      }).target
+    ).toBe('Kuuko W official twitter')
+  })
+
+  it('strips dummy query for web_search and falls back to (empty query)', () => {
+    expect(describeTool('web_search', { query: 'null' }).target).toBe('(empty query)')
+    expect(describeTool('web_search', { query: 'undefined' }).target).toBe('(empty query)')
+  })
+
+  it('prioritizes path for read_file even when dummy command or query are present', () => {
+    expect(
+      describeTool('read_file', {
+        path: 'src/main.rs',
+        command: 'null',
+        query: 'null',
+      }).target
+    ).toBe('src/main.rs')
+  })
+})
+
+describe('live progress retention across multi-step turns', () => {
+  it('preserves all tool executions and timeline groups without dropping earlier tools', () => {
+    let progress: AgentProgress[] = []
+    // Simulate 15 shell tool executions interleaved with thoughts
+    for (let i = 0; i < 15; i++) {
+      progress = reduceLiveAgentProgress(progress, {
+        type: 'Thought',
+        data: { thought: `Thinking step ${i}` },
+      })
+      progress = reduceLiveAgentProgress(progress, {
+        type: 'ToolStart',
+        data: { action: 'run_shell', input: { command: `echo step ${i}` }, callId: `call-${i}` },
+      })
+      progress = reduceLiveAgentProgress(progress, {
+        type: 'ToolEnd',
+        data: { action: 'run_shell', input: { command: `echo step ${i}` }, result: `step ${i}`, callId: `call-${i}` },
+      })
+    }
+
+    const view = activitiesFrom(progress)
+    // All 15 tool executions must be preserved
+    expect(view.items).toHaveLength(15)
+    // The very first tool execution must still be present and intact
+    expect(view.items[0].target).toBe('echo step 0')
+    expect(view.items[14].target).toBe('echo step 14')
+    // Timeline must not drop the early groups
+    expect(view.timeline?.length).toBeGreaterThan(15)
+  })
+})
+
 
