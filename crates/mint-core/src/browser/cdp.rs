@@ -1,13 +1,49 @@
-//! Transport layer: a hand-rolled Chrome DevTools Protocol client over a raw
-//! WebSocket. Every call here opens a fresh connection, sends one JSON-RPC
-//! request, and reads until the matching `id` comes back — there is no
-//! connection pooling or session reuse, so every higher-level action pays a
-//! full websocket handshake + page-list lookup.
+//! Target-pinned CDP transport. Agent/workflow sessions retain sockets so
+//! session-scoped Chrome settings survive across actions. A disconnected input
+//! is never resent automatically.
 
 use crate::MintConfig;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use std::{collections::BTreeMap, future::Future, sync::Arc};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
+type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
+type Pool = Arc<tokio::sync::Mutex<BTreeMap<String, Socket>>>;
+tokio::task_local! {static SOCKETS: Pool;}
+pub(super) async fn run_transport<F: Future>(future: F) -> F::Output {
+    SOCKETS
+        .scope(Arc::new(tokio::sync::Mutex::new(BTreeMap::new())), future)
+        .await
+}
+
+async fn exchange(
+    socket: &mut Socket,
+    id: u64,
+    method: &str,
+    params: Value,
+) -> Result<Value, String> {
+    socket
+        .send(Message::Text(
+            json!({"id":id,"method":method,"params":params})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .map_err(|e| format!("browser_disconnected: {e}; input completion may be unconfirmed"))?;
+    while let Some(message) = socket.next().await {
+        let Message::Text(raw) = message.map_err(|e| e.to_string())? else {
+            continue;
+        };
+        let value: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+        if value["id"] == id {
+            return Ok(value);
+        }
+    }
+    Err(
+        "browser_disconnected: socket closed before response; observe before repeating input"
+            .into(),
+    )
+}
 
 use super::overlay::build_overlay_script;
 
@@ -58,28 +94,48 @@ pub(super) async fn cdp_call_raw(
         let socket_url = page["webSocketDebuggerUrl"]
             .as_str()
             .ok_or("Missing browser websocket URL")?;
-        let (mut socket, _) = connect_async(socket_url)
-            .await
-            .map_err(|e| format!("browser_disconnected: {e}"))?;
-        socket
-            .send(Message::Text(
-                json!({ "id": 1, "method": method, "params": params })
-                    .to_string()
-                    .into(),
-            ))
-            .await
-            .map_err(|e| e.to_string())?;
-        while let Some(message) = socket.next().await {
-            let Message::Text(raw) = message.map_err(|e| e.to_string())? else {
-                continue;
-            };
-            let value: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-            if value["id"] == 1 {
-                validate_response(&value)?;
-                return Ok(value);
+        let pool = SOCKETS.try_with(Arc::clone).ok();
+        let mut reused = if let Some(pool) = &pool {
+            pool.lock().await.remove(socket_url)
+        } else {
+            None
+        };
+        let mut socket = if let Some(socket) = reused.take() {
+            socket
+        } else {
+            let (mut socket, _) = connect_async(socket_url)
+                .await
+                .map_err(|e| format!("browser_disconnected: {e}"))?;
+            if config.extra.get("__managedBrowser") == Some(&json!(true)) {
+                let width = config
+                    .extra
+                    .get("browserViewportWidth")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1440)
+                    .clamp(320, 7680);
+                let height = config
+                    .extra
+                    .get("browserViewportHeight")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(900)
+                    .clamp(240, 4320);
+                let reply = exchange(
+                    &mut socket,
+                    0,
+                    "Emulation.setDeviceMetricsOverride",
+                    json!({"width":width,"height":height,"deviceScaleFactor":1,"mobile":false}),
+                )
+                .await?;
+                validate_response(&reply)?;
             }
+            socket
+        };
+        let value = exchange(&mut socket, 1, method, params).await?;
+        if let Some(pool) = pool {
+            pool.lock().await.insert(socket_url.to_owned(), socket);
         }
-        Err("browser_disconnected: websocket closed before response".into())
+        validate_response(&value)?;
+        Ok(value)
     })
     .await
     .map_err(|_| {

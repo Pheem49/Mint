@@ -29,7 +29,11 @@ pub(super) fn action_fingerprint(decision: &AgentDecision) -> String {
         "create_plan" | "update_plan" => format!("{}:{}", decision.action, input.steps.join("\n")),
         "request_user_approval" => format!("request_user_approval:{}", input.summary.trim()),
         "ask_user" => format!("ask_user:{}", input.query.trim()),
-        "view_image" => format!("view_image:{}", input.path.trim()),
+        "view_image" => format!(
+            "view_image:{}:{}",
+            input.path.trim(),
+            input.artifact_id.trim()
+        ),
         "run_shell" => format!("run_shell:{}", input.command.trim()),
         "verify" => format!("verify:{}", input.commands.join("\n")),
         "apply_patch" => input
@@ -132,28 +136,6 @@ pub(super) fn reject_native_finish(
             text: rejection.to_string(),
         }],
     });
-}
-
-/// Maximum number of `dispatch_subagent` calls run concurrently when a single
-/// model turn requests several of them at once (see `orchestrate_agent_loop`'s
-/// parallel-dispatch branch). Kept low: each subagent makes its own AI-provider
-/// API calls, so a higher cap risks tripping the configured provider's rate
-/// limit, and most tasks don't naturally decompose into more than a couple of
-/// truly independent pieces anyway.
-pub(super) const PARALLEL_SUBAGENT_LIMIT: usize = 2;
-
-/// Whether this step's decisions should run as a concurrency-limited batch of
-/// subagent dispatches instead of the normal one-at-a-time loop: 2 or more
-/// decisions, every one of them a `dispatch_subagent` call with nothing else
-/// mixed in. A lone subagent call, or one mixed with other actions, stays on
-/// the sequential path — keeps ordering between subagent results and other
-/// tool results simple, and avoids parallelizing tools that were never
-/// verified to be safe to run concurrently.
-pub(super) fn decisions_are_parallel_subagent_batch(decisions: &[(String, AgentDecision)]) -> bool {
-    decisions.len() >= 2
-        && decisions
-            .iter()
-            .all(|(_, d)| d.action == "dispatch_subagent")
 }
 
 /// Maximum number of read-only tools run concurrently when a single model turn

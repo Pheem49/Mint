@@ -417,144 +417,170 @@ pub(crate) async fn cancel_chat_message(chat_id: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub(crate) fn save_interaction_agent_activity(
-    interaction_id: i64,
-    activity: Vec<AgentProgress>,
-) -> Result<(), String> {
-    let activity_json = serde_json::to_string(&activity).map_err(|error| error.to_string())?;
-    MemoryStore::open_default()
-        .and_then(|memory| {
-            memory
-                .set_interaction_agent_activity_json(interaction_id, &activity_json)
-                .map(|_| ())
-        })
-        .map_err(|error| error.to_string())
+async fn run_blocking_db<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(task)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+async fn with_default_memory<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(MemoryStore) -> Result<T, mint_core::agent::memory::MemoryError> + Send + 'static,
+{
+    run_blocking_db(move || {
+        MemoryStore::open_default()
+            .and_then(task)
+            .map_err(|error| error.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn save_system_interaction(
+pub(crate) async fn save_interaction_agent_activity(
+    interaction_id: i64,
+    activity: Vec<AgentProgress>,
+) -> Result<(), String> {
+    run_blocking_db(move || {
+        let activity_json = serde_json::to_string(&activity).map_err(|error| error.to_string())?;
+        MemoryStore::open_default()
+            .and_then(|memory| {
+                memory
+                    .set_interaction_agent_activity_json(interaction_id, &activity_json)
+                    .map(|_| ())
+            })
+            .map_err(|error| error.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn save_system_interaction(
     chat_id: String,
     user_text: String,
     ai_text: Option<String>,
     provider: String,
     model: String,
 ) -> Result<i64, String> {
-    MemoryStore::open_default()
-        .and_then(|memory| {
-            memory.add_interaction_for_chat(
-                &chat_id,
-                &user_text,
-                ai_text.as_deref().unwrap_or(""),
-                &provider,
-                &model,
-            )
-        })
-        .map_err(|error| error.to_string())
+    with_default_memory(move |memory| {
+        memory.add_interaction_for_chat(
+            &chat_id,
+            &user_text,
+            ai_text.as_deref().unwrap_or(""),
+            &provider,
+            &model,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn update_chat_session_workspace(
+pub(crate) async fn update_chat_session_workspace(
     chat_id: String,
     workspace_path: Option<String>,
 ) -> Result<(), String> {
-    MemoryStore::open_default()
-        .and_then(|memory| memory.set_chat_session_workspace(&chat_id, workspace_path.as_deref()))
-        .map_err(|error| error.to_string())
+    with_default_memory(move |memory| {
+        memory.set_chat_session_workspace(&chat_id, workspace_path.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn get_recent_interactions(
+pub(crate) async fn get_recent_interactions(
     limit: Option<usize>,
     chat_id: Option<String>,
     workspace_path: Option<String>,
 ) -> Result<Vec<InteractionMemory>, String> {
-    let scoped_chat_id = mint_core::scoped_chat_id(
-        chat_id
-            .as_deref()
-            .unwrap_or(mint_core::DEFAULT_CONVERSATION_ID),
-        workspace_path.as_deref(),
-    );
-    MemoryStore::open_default()
-        .and_then(|memory| memory.recent_interactions_for_chat(&scoped_chat_id, limit.unwrap_or(5)))
-        .map_err(|error| error.to_string())
+    with_default_memory(move |memory| {
+        let scoped_chat_id = mint_core::scoped_chat_id(
+            chat_id
+                .as_deref()
+                .unwrap_or(mint_core::DEFAULT_CONVERSATION_ID),
+            workspace_path.as_deref(),
+        );
+        memory.recent_interactions_for_chat(&scoped_chat_id, limit.unwrap_or(5))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn get_conversation_snapshot(
+pub(crate) async fn get_conversation_snapshot(
     chat_id: String,
     before_id: Option<i64>,
     limit: Option<usize>,
 ) -> Result<ConversationSnapshot, String> {
-    MemoryStore::open_default()
-        .and_then(|memory| memory.conversation_snapshot(&chat_id, before_id, limit.unwrap_or(50)))
-        .map_err(|error| error.to_string())
+    with_default_memory(move |memory| {
+        memory.conversation_snapshot(&chat_id, before_id, limit.unwrap_or(50))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn get_conversation_sources(
+pub(crate) async fn get_conversation_sources(
     chat_id: String,
 ) -> Result<mint_core::agent::memory::ConversationSources, String> {
-    MemoryStore::open_default()
-        .and_then(|store| store.conversation_sources(&chat_id))
-        .map_err(|error| error.to_string())
+    with_default_memory(move |store| store.conversation_sources(&chat_id)).await
 }
 
 #[tauri::command]
-pub(crate) fn save_source_attachments(
+pub(crate) async fn save_source_attachments(
     chat_id: String,
     interaction_id: i64,
     attachments: Vec<mint_core::agent::memory::SourceAttachment>,
 ) -> Result<(), String> {
-    MemoryStore::open_default()
-        .map_err(|error| error.to_string())?
-        .save_source_attachments(&chat_id, interaction_id, &attachments)
+    run_blocking_db(move || {
+        MemoryStore::open_default()
+            .map_err(|error| error.to_string())?
+            .save_source_attachments(&chat_id, interaction_id, &attachments)
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn get_conversation_changes(
+pub(crate) async fn get_conversation_changes(
     chat_id: String,
     after: i64,
     limit: Option<usize>,
 ) -> Result<ConversationChanges, String> {
-    MemoryStore::open_default()
-        .and_then(|memory| memory.conversation_changes(&chat_id, after, limit.unwrap_or(100)))
-        .map_err(|error| error.to_string())
+    with_default_memory(move |memory| {
+        memory.conversation_changes(&chat_id, after, limit.unwrap_or(100))
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn list_chat_sessions() -> Result<Vec<ChatSession>, String> {
-    MemoryStore::open_default()
-        .and_then(|memory| memory.list_chat_sessions())
-        .map_err(|error| error.to_string())
+pub(crate) async fn list_chat_sessions() -> Result<Vec<ChatSession>, String> {
+    with_default_memory(|memory| memory.list_chat_sessions()).await
 }
 
 #[tauri::command]
-pub(crate) fn delete_chat_session(chat_id: String) -> Result<usize, String> {
+pub(crate) async fn delete_chat_session(chat_id: String) -> Result<usize, String> {
     mint_core::cancel_agent(&chat_id);
-    MemoryStore::open_default()
-        .and_then(|memory| memory.delete_chat_session(&chat_id))
-        .map_err(|error| error.to_string())
+    with_default_memory(move |memory| memory.delete_chat_session(&chat_id)).await
 }
 
 #[tauri::command]
-pub(crate) fn rename_chat_session(chat_id: String, new_title: String) -> Result<usize, String> {
-    MemoryStore::open_default()
-        .and_then(|memory| memory.rename_chat_session(&chat_id, &new_title))
-        .map_err(|error| error.to_string())
+pub(crate) async fn rename_chat_session(
+    chat_id: String,
+    new_title: String,
+) -> Result<usize, String> {
+    with_default_memory(move |memory| memory.rename_chat_session(&chat_id, &new_title)).await
 }
 
 #[tauri::command]
-pub(crate) fn clear_chat_history(chat_id: Option<String>) -> Result<usize, String> {
-    MemoryStore::open_default()
-        .and_then(|memory| {
-            memory.clear_interactions_for_chat(
-                chat_id
-                    .as_deref()
-                    .unwrap_or(mint_core::DEFAULT_CONVERSATION_ID),
-            )
-        })
-        .map_err(|error| error.to_string())
+pub(crate) async fn clear_chat_history(chat_id: Option<String>) -> Result<usize, String> {
+    with_default_memory(move |memory| {
+        memory.clear_interactions_for_chat(
+            chat_id
+                .as_deref()
+                .unwrap_or(mint_core::DEFAULT_CONVERSATION_ID),
+        )
+    })
+    .await
 }
 
 #[tauri::command]

@@ -1,31 +1,12 @@
 use super::persona;
 use crate::MintConfig;
 
-pub(crate) fn browser_endpoint_available(config: &MintConfig) -> bool {
-    use std::net::{TcpStream, ToSocketAddrs};
-    use std::time::Duration;
-    let endpoint = config
+pub(crate) fn browser_tools_enabled(config: &MintConfig) -> bool {
+    config
         .extra
-        .get("browserDebugUrl")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("http://127.0.0.1:9222/json/list");
-    let Ok(url) = reqwest::Url::parse(endpoint) else {
-        return false;
-    };
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-    let Some(port) = url.port_or_known_default() else {
-        return false;
-    };
-    (host, port)
-        .to_socket_addrs()
-        .ok()
-        .is_some_and(|mut addresses| {
-            addresses.any(|address| {
-                TcpStream::connect_timeout(&address, Duration::from_millis(50)).is_ok()
-            })
-        })
+        .get("browserAutomationEnabled")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
 }
 
 pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
@@ -65,13 +46,6 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "video_waveform",
     "note_write",
     "mcp_list_tools",
-    "browser_open",
-    "browser_read",
-    "browser_observe",
-    "browser_wait",
-    "browser_scroll",
-    "browser_mouse_move",
-    "browser_screenshot",
     "run_shell",
     // Read-only poll of a background job's buffered output; the run_shell
     // call that started it is still gated to read-only commands above.
@@ -79,7 +53,8 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     // Cosmetic/non-mutating — no reason to block it during read-only
     // plan-mode investigation.
     "avatar_signal",
-    "conversation_summary",
+    "dispatch_agents",
+    "dispatch_subagent",
 ];
 
 /// The full set of coding-agent actions before plan-mode/disabled-tools/browser
@@ -88,7 +63,6 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
 /// two paths can never drift on which actions exist.
 pub(crate) fn base_allowed_actions() -> Vec<&'static str> {
     vec![
-        "conversation_summary",
         "list_files",
         "read_file",
         "search_code",
@@ -172,12 +146,17 @@ pub fn build_system_prompt(
 ) -> String {
     let mut allowed_actions = base_allowed_actions();
 
-    if browser_endpoint_available(config) {
+    if browser_tools_enabled(config) {
         allowed_actions.extend_from_slice(crate::browser::BROWSER_TOOLS);
     }
 
     if !config.avatar_token.is_empty() {
         allowed_actions.push("avatar_signal");
+    }
+
+    if native {
+        allowed_actions.push("dispatch_agents");
+        allowed_actions.push("dispatch_subagent");
     }
 
     allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
@@ -283,7 +262,7 @@ pub fn build_system_prompt(
         input_formats.push("- browser_key_press: {\"key\":\"Enter\"} (keys: Enter,Tab,Escape,Backspace,Delete,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,F1-F12,Space)");
     }
     if allowed_actions.contains(&"browser_screenshot") {
-        input_formats.push("- browser_screenshot: {}");
+        input_formats.push("- browser_screenshot: {mode?:viewport|fullPage|element,selector?:string,elementRef?:string}");
     }
     if allowed_actions.contains(&"memory_recall") {
         input_formats.push("- memory_recall: {\"query\":\"what did user say about X\"}");
@@ -314,7 +293,7 @@ pub fn build_system_prompt(
         input_formats.push("- request_user_approval: {\"title\":\"short title\",\"summary\":\"what needs approval\"}");
     }
     if allowed_actions.contains(&"ask_user") {
-        input_formats.push("- ask_user: {\"query\":\"short question\",\"header\":\"optional short tag\",\"multiSelect\":false,\"options\":[{\"label\":\"choice 1\",\"description\":\"optional detail\"},{\"label\":\"choice 2\"}]} (header, multiSelect, and options are all optional; options is max 3 choices, each with an optional one-line description; set multiSelect true to let the user pick more than one; omit options entirely for a free-text question — the user can always type a custom answer instead of picking a choice. Use this only when you're blocked on a decision that is genuinely the user's to make — one you can't resolve from the request, the code, or a sensible default. Don't use it to ask for permission to proceed or to confirm something you can just go do.)");
+        input_formats.push("- ask_user: {\"query\":\"short question\",\"header\":\"optional short tag\",\"multiSelect\":false,\"options\":[{\"label\":\"choice 1\",\"description\":\"optional detail\"},{\"label\":\"choice 2\"}]} (header, multiSelect, and options are all optional; options is max 3 choices, each with an optional one-line description; set multiSelect true to let the user pick more than one; omit options entirely for a free-text question — the user can always type a custom answer instead of picking a choice. Use this tool when you need the user's direction, or after proposing a plan/recommendation to ask how they want to proceed before mutating code. Avoid using it for trivial micro-steps that the user already explicitly authorized.)");
     }
     if allowed_actions.contains(&"detect_project") {
         input_formats.push("- detect_project: {\"path\":\".\"}");
@@ -480,6 +459,11 @@ pub fn build_system_prompt(
             "0. For casual conversation or questions that need no local tool, use finish immediately.",
         );
     }
+    if allowed_actions.contains(&"ask_user") {
+        rules.push(
+            "0q. When proposing plans, architectural options, or recommendations, do not treat casual affirmations (such as 'OK', 'ดีมาก', 'เข้าใจแล้ว') as immediate orders to modify code. Instead, call ask_user with clear options (Option 1 with '(Recommended)', alternative options, and allowing custom input) to confirm whether the user wants to execute the plan or merely review it.",
+        );
+    }
     if allowed_actions.contains(&"list_files") || allowed_actions.contains(&"read_file") {
         rules.push("1. Inspect the workspace before editing.");
         rules.push("1a. For user folders such as Downloads, Documents, Desktop, Pictures, Music, or Videos, use list_files with that folder name or ~/folder before using shell.");
@@ -505,6 +489,7 @@ pub fn build_system_prompt(
         rules.push("4. Shell commands and file edits require user approval. Mint handles approval after you request the tool.");
         rules.push("4a. SKILL CHANGES: Create or edit reusable skills only when the user asks for that work. Otherwise complete the current task and suggest the skill in your summary. Use write_file or apply_patch for skill files so Mint can show the concrete diff and request approval for each change. A general file or session permission does not authorize changing persistent skill instructions. After approval, report the saved skill path and what changed.");
     }
+    rules.push("Execution evidence: distinguish succeeded, failed, running, cancelled and unknown. Inspect background jobs with shell_output before claiming completion. Retry a command after relevant changes or with retryReason, but observe ambiguous side effects before repeating them. finish.completionStatus must be verified, unverified, blocked or failed; a verification explanation cannot override failed or pending checks. When checks cannot run, finish honestly with unverified/blocked and the reason. Opening a browser or starting a process completes only that step, not the user's entire task.");
     if allowed_actions.contains(&"run_shell") {
         rules.push("5. Shell commands are classified as readOnly, test, network, or mutating. Only policy-allowed modes may run after approval. Never request destructive commands such as rm -rf, git reset --hard, git checkout --, or git clean -f.");
     }
@@ -532,8 +517,11 @@ pub fn build_system_prompt(
     if allowed_actions.contains(&"avatar_signal") {
         rules.push("7v. A Project Avatar is connected. Call avatar_signal when your reply carries an emotional beat the automatic tool-based reactions can't express — greeting, joking, apologizing, thinking something over. Don't call it for routine tool-driven turns (shell, browser, image/video generation); those already react on their own.");
     }
+    if allowed_actions.contains(&"run_shell") && !allowed_actions.contains(&"browser_open") {
+        rules.push("7a. For browsing, viewing, or capturing websites/webpages: use run_shell to run headless browser commands directly (e.g. google-chrome --headless=new --screenshot=screenshot.png <url>). ALWAYS call view_image with the generated image path (e.g. view_image(path: \"screenshot.png\")) immediately after capturing a screenshot so you and the user can inspect the visual result.");
+    }
     if allowed_actions.contains(&"browser_open") {
-        rules.push("7a. Use browser_open to open websites in the automation browser. Inspect the returned page observation, then use browser_observe/browser_read to read the page or browser_screenshot for visual inspection; verify the requested URL/content with browser_wait before finishing. A successful browser_open already opens the website for the user: do not also launch it through run_shell, xdg-open, open, Start-Process, or another browser. Keep website navigation and interaction in the automation browser. If the user explicitly requests an external browser, use that route instead of first opening the website in automation. If automation is unavailable or blocked, report that and ask the user before switching browsers.");
+        rules.push("7a. Use browser_open to open websites; Mint starts an isolated browser session automatically (headless by default). Inspect the returned page observation, then use browser_observe/browser_read to read the page or browser_screenshot for visual inspection; verify the requested URL/content with browser_wait before finishing. A successful browser_open already opens the website for the user: do not also launch it through run_shell, xdg-open, open, Start-Process, or another browser. Keep website navigation and interaction in the automation browser. If the user explicitly requests an external browser, use that route instead of first opening the website in automation. If automation is unavailable or blocked, report that and ask the user before switching browsers. For a predefined command-line workflow, write a JSON steps file and run mint browser run --file <file> through run_shell; --headed explicitly shows its window. Use the shared engine rather than hand-written browser scripts.");
     }
     if allowed_actions.contains(&"browser_click") {
         rules.push("7b. Use browser_click to click elements. Selector can be: CSS selector (button.class, #id, [attr=val]), text=ExactText to find by visible text, contains=PartialText for partial match, or xpath=//expr for XPath. Prefer text= or contains= when the element has visible text but no unique CSS class.");
@@ -556,7 +544,7 @@ pub fn build_system_prompt(
         rules.push("7g. Use browser_key_press to press a keyboard key (e.g. Enter, Tab, Escape, ArrowDown). Use after browser_type or browser_mouse_click to interact with focused elements.");
     }
     if allowed_actions.contains(&"browser_screenshot") {
-        rules.push("7h. Use browser_screenshot to capture the current page as a PNG image (base64). Use it to inspect the visual state of the page before deciding where to click.");
+        rules.push("7h. Use browser_screenshot to capture the page as a durable image artifact, shown in chat and attached to the model. Use it to inspect the visual state of the page before deciding where to click.");
     }
     if allowed_actions.contains(&"browser_observe") {
         rules.push("7i. Browser workflow: browser_observe -> action -> inspect the returned observation -> verify the expected result with browser_wait. Each run starts in its own tab. Use browser_tabs to list/open/select/close tabs; select new popup tabs explicitly. Prefer elementRef from the most recent observation over guessing selectors. Old refs expire after observation refresh, navigation, removed nodes, or tab selection. browser_fill replaces text; browser_type appends. browser_select handles native dropdowns; browser_scroll scrolls the viewport or a target. browser_wait accepts condition url/text/visible/hidden, value or target, and timeoutMs (default 10000, maximum 30000). Observations support textOffset and elementOffset pagination. Coordinate actions require a screenshot of the selected tab within 30 seconds. Never retry an ambiguous click or submission automatically; observe and check the result first. input_dispatched is not task completion. Cite observed URL/text/field evidence in finish.verification, or say the task is unverified/blocked. If blocked by login, CAPTCHA, or repeated lack of progress, ask_user for manual takeover; only after user confirmation call browser_observe with takeoverComplete=true.");
@@ -568,7 +556,10 @@ pub fn build_system_prompt(
         rules.push("8a. Use git_status and git_diff before summarizing local code changes.");
     }
     if allowed_actions.contains(&"create_plan") || allowed_actions.contains(&"update_plan") {
-        rules.push("8b. When the user asks to plan, structure, or inspect a workflow ('วางแผน', 'plan', 'structure', 'audit'), call `create_plan` FIRST with your step checklist before doing deep execution. Keep investigation focused and concise: NEVER recursively read dozens of source files when a directory listing, symbols, search_code, or architectural overview is sufficient.");
+        rules.push("8b. Plan Mode & Pre-Planning Reconnaissance: When in plan mode or when the user asks to plan, structure, or inspect a workflow ('วางแผน', 'plan', 'structure', 'audit'), call `create_plan` FIRST with your step checklist before doing deep execution. When investigating, gathering facts across multiple files, tracing workflows, or verifying architecture, ALWAYS delegate broad exploration to parallel read-only subagents (`dispatch_agents` with base 'explorer') rather than sequentially reading dozens of files in the main turn. Subagents explore concurrently in isolated sandboxes and return concise dossiers, keeping your planning context clean and fast. Formulate your structured step checklist (`create_plan`) and final plan based on their synthesized findings.");
+    }
+    if allowed_actions.contains(&"dispatch_agents") {
+        rules.push("8c. Subagent Swarm Delegation (`dispatch_agents`): Delegate independent, broad, or exploratory tasks to parallel subagents to keep the main conversation context clean. Provide `tasks: [{ role, base, instruction }]`. In plan mode, all subagents run strictly read-only ('explorer') to gather reconnaissance without side-effects. Outside plan mode, read-only subagents run concurrently up to the parallel limit while write tasks serialize in a single lane. Subagents return capped structured dossiers directly back into your context — you synthesize their findings and present the final answer to the user.");
     }
     if allowed_actions.contains(&"note_write") {
         rules.push("9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.");

@@ -75,6 +75,47 @@
   margin: 0;
 }
 
+.management-workspace-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 4px;
+}
+
+.management-workspace-label {
+  font-weight: 500;
+}
+
+.management-workspace-path {
+  padding: 2px 6px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+  color: var(--text-main, #f8fafc);
+  font-size: 0.8rem;
+  font-family: var(--font-mono, monospace);
+  word-break: break-all;
+}
+
+.management-workspace-none {
+  font-style: italic;
+  color: var(--text-muted, #94a3b8);
+}
+
+.management-modal-source {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: var(--text-muted, #64748b);
+  word-break: break-all;
+}
+
+.management-modal-source code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78rem;
+  color: var(--text-muted, #94a3b8);
+}
+
 .management-primary-btn {
   display: inline-flex;
   align-items: center;
@@ -817,9 +858,9 @@
 
 .management-badge.active,
 .management-badge.connected {
-  background: rgba(16, 185, 129, 0.15);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: var(--status-success-bg);
+  color: var(--status-success-fg);
+  border: 1px solid var(--status-success-border);
 }
 
 .management-badge.workspace {
@@ -829,16 +870,16 @@
 }
 
 .management-badge.global {
-  background: rgba(168, 85, 247, 0.15);
-  color: #c084fc;
-  border: 1px solid rgba(168, 85, 247, 0.3);
+  background: var(--status-purple-bg);
+  color: var(--status-purple-fg);
+  border: 1px solid var(--status-purple-border);
 }
 
 .management-badge.inactive,
 .management-badge.disconnected {
-  background: rgba(148, 163, 184, 0.15);
+  background: var(--bg-surface-soft);
   color: var(--text-muted, #94a3b8);
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  border: 1px solid var(--border-default);
 }
 
 .management-dot {
@@ -866,7 +907,7 @@
 }
 
 .management-tag.global {
-  color: #c084fc;
+  color: var(--status-purple-fg);
 }
 
 /* Compact plugin row (Plugins & Integrations) — one line per plugin (icon +
@@ -922,7 +963,7 @@
 }
 
 .management-plugin-name .management-dot.connected {
-  background: #34d399;
+  background: var(--status-success-fg);
 }
 
 .management-section-title {
@@ -1105,29 +1146,29 @@
   border-radius: var(--radius-md);
   font-size: 0.82rem;
   font-weight: 500;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-main, #cbd5e1);
+  border: 1px solid var(--btn-gray-border, var(--border, rgba(255, 255, 255, 0.1)));
+  background: var(--btn-gray-bg, var(--bg-surface-soft));
+  color: var(--btn-gray-fg, var(--text-main, #f8fafc));
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .management-action-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-main);
-  border-color: var(--border, rgba(255, 255, 255, 0.2));
+  background: var(--btn-gray-bg-hover, var(--bg-surface-hover));
+  color: var(--btn-gray-fg, var(--text-main));
+  border-color: var(--accent-border, var(--btn-gray-border-hover));
 }
 
 .management-action-btn.danger {
-  color: #f87171;
-  border-color: rgba(239, 68, 68, 0.3);
-  background: rgba(239, 68, 68, 0.1);
+  color: var(--status-error-fg);
+  border-color: var(--status-error-border);
+  background: var(--status-error-bg);
 }
 
 .management-action-btn.danger:hover {
-  background: rgba(239, 68, 68, 0.25);
-  color: #fca5a5;
-  border-color: rgba(239, 68, 68, 0.5);
+  background: var(--hover-delete-bg);
+  color: var(--hover-delete);
+  border-color: var(--status-error);
 }
 
 /* Expand / Collapse Chevron Button */
@@ -1506,11 +1547,11 @@
 }
 
 .mcp-test-status.success {
-  color: #34d399;
+  color: var(--status-success-fg);
 }
 
 .mcp-test-status.error {
-  color: #f87171;
+  color: var(--status-error-fg);
 }
 
 .mcp-test-status.testing {
@@ -1518,9 +1559,9 @@
 }
 
 .management-badge.remote {
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: var(--status-info-bg);
+  color: var(--status-info-fg);
+  border: 1px solid var(--status-info-border);
 }
 
 .mcp-spin {
@@ -1541,8 +1582,8 @@
   margin-top: 14px;
   border-radius: var(--radius-lg, 10px);
   overflow: hidden;
-  border: 1px solid rgba(245, 158, 11, 0.28);
-  background: rgba(245, 158, 11, 0.05);
+  border: 1px solid var(--status-warning-border);
+  background: var(--status-warning-bg);
 }
 
 .mcp-security-header {
@@ -1550,21 +1591,21 @@
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  background: rgba(245, 158, 11, 0.12);
-  color: #fbbf24;
+  background: var(--status-warning-bg);
+  color: var(--status-warning-fg);
   font-size: 0.86rem;
   font-weight: 600;
-  border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+  border-bottom: 1px solid var(--status-warning-border);
 }
 
 .mcp-security-icon {
   flex-shrink: 0;
-  color: #f59e0b;
+  color: var(--status-warning);
 }
 
 .mcp-security-body {
   padding: 12px 14px;
-  background: rgba(15, 23, 42, 0.45);
+  background: var(--bg-surface-soft);
 }
 
 .mcp-security-ack {
@@ -1613,8 +1654,8 @@
 
 .mint-custom-checkbox:hover {
   border-color: var(--accent, #10b981);
-  background: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.16);
+  background: var(--bg-surface-hover);
+  box-shadow: 0 0 0 3px var(--accent-glow, rgba(16, 185, 129, 0.16));
 }
 
 .mint-custom-checkbox:checked {
@@ -1637,7 +1678,7 @@
 }
 
 .mint-custom-checkbox:focus-visible {
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+  box-shadow: 0 0 0 3px var(--accent-glow, rgba(16, 185, 129, 0.3));
 }
 
 /* Allow All Tools Row */

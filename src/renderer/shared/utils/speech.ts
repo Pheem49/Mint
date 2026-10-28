@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 
 export interface SpeechToTextOptions {
+  chatId?: string
   language?: string
   message: string
   sending: boolean
@@ -10,6 +11,7 @@ export interface SpeechToTextOptions {
 }
 
 export function useSpeechToText({
+  chatId,
   language,
   message,
   sending,
@@ -32,6 +34,9 @@ export function useSpeechToText({
   const voiceAwaitingResponseRef = useRef(false)
   const isSpeakingRef = useRef(false)
   const messageRef = useRef(message)
+  const chatIdRef = useRef(chatId)
+  const previousChatIdRef = useRef(chatId)
+  chatIdRef.current = chatId
 
   // Sync state to refs for event handlers
   useEffect(() => {
@@ -97,6 +102,12 @@ export function useSpeechToText({
     setVoiceTranscript('')
   }
 
+  useEffect(() => {
+    if (previousChatIdRef.current === chatId) return
+    previousChatIdRef.current = chatId
+    cancelRecognition()
+  }, [chatId])
+
   const scheduleVoiceListen = (delayMs = 350) => {
     clearRestartTimer()
     if (!voiceModeRef.current || sendingRef.current || voiceAwaitingResponseRef.current || isSpeakingRef.current) return
@@ -111,9 +122,10 @@ export function useSpeechToText({
 
     const SpeechRecognitionApi = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SpeechRecognitionApi) {
-      setVoiceTranscript('Speech recognition is unavailable in this browser. Use Chrome or Edge.')
+      setVoiceTranscript('')
       voiceModeRef.current = false
-      setVoiceMode(true)
+      setVoiceMode(false)
+      window.alert('Speech recognition is unavailable in this browser. Use Chrome or Edge.')
       return Promise.resolve(false)
     }
 
@@ -147,7 +159,9 @@ export function useSpeechToText({
         if (recognitionRef.current !== recognition) return
         let interimText = ''
         let finalText = ''
-        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        // Each event contains the complete session result list. Rebuild it so
+        // later phrases retain earlier finals and interim revisions do not duplicate text.
+        for (let index = 0; index < event.results.length; index += 1) {
           const transcript = event.results[index]?.[0]?.transcript ?? ''
           if (event.results[index]?.isFinal) {
             finalText += transcript
@@ -175,7 +189,7 @@ export function useSpeechToText({
         clearSilenceTimer()
       }
       recognition.onend = () => {
-        if (recognitionRef.current !== recognition) return
+        if (recognitionRef.current !== recognition || chatIdRef.current !== chatId) return
         resolveStartRef.current?.(false)
         resolveStartRef.current = null
         recognitionRef.current = null

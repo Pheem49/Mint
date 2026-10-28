@@ -56,12 +56,12 @@ button {
 
 .chat-ui-grid-item:hover {
   transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.16) !important;
-  box-shadow: 0 6px 20px -4px rgba(0, 0, 0, 0.3);
+  border-color: var(--border-strong) !important;
+  box-shadow: var(--shadow-md);
 }
 
 .chat-ui-feature-item:hover {
-  border-color: rgba(255, 255, 255, 0.18) !important;
+  border-color: var(--border-strong) !important;
 }
 
 /* Minimalist AI Workspace (Claude / Cursor style) Code Block */
@@ -103,7 +103,7 @@ button {
 .chat-code-block-lines {
   font-size: 0.7rem;
   color: var(--text-soft, #64748b);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-surface-soft);
   padding: 1px 6px;
   border-radius: 4px;
 }
@@ -130,7 +130,7 @@ button {
 }
 
 .chat-code-action-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-surface-hover);
   color: var(--text-main, #f1f5f9);
 }
 
@@ -183,7 +183,7 @@ button {
 }
 
 .chat-code-line:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-surface-soft);
 }
 
 .chat-code-line-num {
@@ -206,70 +206,17 @@ button {
   padding-left: 16px;
 }
 
-/* Syntax Highlighting Tokens - Claude / Cursor low-saturation theme */
-.token-command {
-  color: #38bdf8; /* Soft sky blue */
-  font-weight: 500;
-}
-
-.token-keyword {
-  color: #818cf8; /* Soft indigo / violet */
-  font-weight: 500;
-}
-
-.token-string {
-  color: #86efac; /* Calm emerald green */
-}
-
-.token-flag {
-  color: #fde047; /* Soft yellow / amber */
-}
-
-.token-comment {
-  color: #64748b; /* Muted slate */
-  font-style: italic;
-}
-
-.token-number {
-  color: #fdba74; /* Soft warm orange */
-}
-
-.token-variable {
-  color: #f472b6; /* Soft pink */
-}
-
-.token-property {
-  color: #93c5fd; /* Soft light blue */
-}
-
-.token-function {
-  color: #38bdf8; /* Soft sky blue */
-}
-
-.token-type {
-  color: #a78bfa; /* Soft purple */
-}
-
-.token-boolean {
-  color: #fb7185; /* Soft rose */
-}
-
-.token-operator {
-  color: #94a3b8; /* Muted slate */
-}
-
-.token-punctuation {
-  color: #64748b; /* Darker muted slate */
-}
-
 .chat-bold-highlight {
   color: var(--text-chat, var(--text-main, inherit));
   font-weight: 600;
 }
+
 /* Code Syntax Highlighting (Driven by tokens.css) */
+.token-command { color: var(--syntax-command); font-weight: 500; }
+.token-keyword { color: var(--syntax-keyword); font-weight: 500; }
 .token-string { color: var(--syntax-string); }
 .token-flag { color: var(--syntax-flag); }
-.token-comment { color: var(--syntax-comment); }
+.token-comment { color: var(--syntax-comment); font-style: italic; }
 .token-number { color: var(--syntax-number); }
 .token-variable { color: var(--syntax-variable); }
 .token-property { color: var(--syntax-property); }

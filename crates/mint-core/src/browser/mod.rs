@@ -20,15 +20,16 @@ mod lifecycle;
 mod logging;
 mod navigate;
 mod overlay;
+pub mod runtime;
 mod session;
+pub mod workflow;
 
 pub(crate) use lifecycle::BROWSER_TOOLS;
 pub use session::{
-    BrowserActionResult, BrowserObservation, BrowserSession, execute_action, run_session, with_tab,
+    BrowserActionResult, BrowserObservation, BrowserSession, capture_metadata, execute_action,
+    run_session, with_tab,
 };
-pub(crate) use session::{
-    finish_evidence as session_finish_evidence, last_state as session_last_state, selected_tab,
-};
+pub(crate) use session::{finish_evidence as session_finish_evidence, selected_tab};
 
 use serde::Serialize;
 

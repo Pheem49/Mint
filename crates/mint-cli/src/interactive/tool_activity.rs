@@ -55,6 +55,13 @@ impl ToolActivity {
             {
                 return ToolStatus::Cancelled;
             }
+            if result
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with("skipped")
+            {
+                return ToolStatus::Skipped;
+            }
             if result.lines().any(|line| {
                 line.strip_prefix("exit: ")
                     .is_some_and(|code| !matches!(code.trim(), "0" | "unknown"))
@@ -70,15 +77,15 @@ impl ToolActivity {
     }
     pub fn heading(&self) -> String {
         let name = if self.shell() {
-            "Shell".to_owned()
+            "run_shell".to_owned()
         } else {
             self.action.replace('_', " ")
         };
         let (icon, status) = match self.status {
             None => ("●", "running"),
-            Some(ToolStatus::Success) => ("✓", "completed"),
-            Some(ToolStatus::Failed) => ("✗", "failed"),
-            Some(ToolStatus::TimedOut) => ("✗", "timed out"),
+            Some(ToolStatus::Success) => ("●", "completed"),
+            Some(ToolStatus::Failed) => ("●", "failed"),
+            Some(ToolStatus::TimedOut) => ("●", "timed out"),
             Some(ToolStatus::Cancelled)
                 if self
                     .result
@@ -88,6 +95,9 @@ impl ToolActivity {
                 ("○", "interrupted")
             }
             Some(ToolStatus::Cancelled) => ("○", "cancelled"),
+            Some(ToolStatus::Running) => ("◌", "running"),
+            Some(ToolStatus::Unknown) => ("?", "unconfirmed"),
+            Some(ToolStatus::Skipped) => ("○", "skipped"),
         };
         let elapsed = if self.running() {
             Some(self.started.elapsed())
@@ -117,6 +127,11 @@ impl ToolActivity {
             "description",
             "command",
             "cmd",
+            "script",
+            "exec",
+            "code",
+            "bash",
+            "sh",
             "path",
             "query",
             "pattern",
@@ -128,42 +143,80 @@ impl ToolActivity {
                 }
             }
         }
-        self.input.to_string()
+        if let Some(args) = self.input.get("arguments") {
+            if let Some(obj) = args.as_object() {
+                for key in ["command", "cmd", "script", "exec", "code", "bash", "sh"] {
+                    if let Some(value) = obj.get(key).and_then(Value::as_str) {
+                        if let Some(line) = value.lines().find(|line| !line.trim().is_empty()) {
+                            return line.trim().to_owned();
+                        }
+                    }
+                }
+            }
+        }
+        String::new()
     }
     pub fn lines(&self, width: u16) -> Vec<Line<'static>> {
-        let color = match self.status {
-            None => crate::terminal_theme::TEXT,
-            Some(ToolStatus::Success) => crate::terminal_theme::ACCENT,
-            Some(ToolStatus::Cancelled) => crate::terminal_theme::WARNING,
-            _ => Color::Red,
-        };
         let output = self
             .result
             .as_ref()
             .map(|result| format!("Output · {} lines · ", result.lines().count()))
             .unwrap_or_default();
-        vec![
-            Line::styled(
-                clip(&self.heading(), width as usize),
+        let subject = self.subject();
+        let is_command = self
+            .input
+            .get("command")
+            .or_else(|| self.input.get("cmd"))
+            .or_else(|| self.input.get("script"))
+            .or_else(|| self.input.get("exec"))
+            .or_else(|| self.input.get("code"))
+            .or_else(|| self.input.get("bash"))
+            .or_else(|| self.input.get("sh"))
+            .and_then(Value::as_str)
+            .is_some()
+            || self.shell();
+        let mut lines = vec![self.heading_line(width as usize)];
+        if !subject.is_empty() {
+            let color = if is_command {
+                crate::terminal_theme::ACCENT
+            } else {
+                crate::terminal_theme::TEXT
+            };
+            lines.push(Line::styled(
+                clip(&format!("  {}", subject), width as usize),
                 Style::default().fg(color),
+            ));
+        }
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {output}"),
+                Style::default().fg(crate::terminal_theme::MUTED),
             ),
-            Line::styled(
-                clip(&format!("  {}", self.subject()), width as usize),
+            Span::styled(
+                "Ctrl+O details",
+                Style::default().fg(crate::terminal_theme::BLUE),
+            ),
+        ]));
+        lines
+    }
+    fn heading_line(&self, width: usize) -> Line<'static> {
+        let color = match self.status {
+            None => crate::terminal_theme::TEXT,
+            Some(ToolStatus::Success) => crate::terminal_theme::ACCENT,
+            Some(ToolStatus::Cancelled | ToolStatus::Skipped) => crate::terminal_theme::WARNING,
+            _ => Color::Red,
+        };
+        let heading = clip(&self.heading(), width);
+        let icon_end = heading.chars().next().map_or(0, char::len_utf8);
+        Line::from(vec![
+            Span::styled(heading[..icon_end].to_owned(), Style::default().fg(color)),
+            Span::styled(
+                heading[icon_end..].to_owned(),
                 Style::default().fg(crate::terminal_theme::TEXT),
             ),
-            Line::from(vec![
-                Span::styled(
-                    format!("  {output}"),
-                    Style::default().fg(crate::terminal_theme::MUTED),
-                ),
-                Span::styled(
-                    "Ctrl+O details",
-                    Style::default().fg(crate::terminal_theme::BLUE),
-                ),
-            ]),
-        ]
+        ])
     }
-    pub fn details(&self) -> String {
+    fn detail_input(&self) -> (bool, String) {
         let command = self
             .input
             .get("command")
@@ -172,15 +225,44 @@ impl ToolActivity {
         let input = command
             .map(str::to_owned)
             .unwrap_or_else(|| serde_json::to_string_pretty(&self.input).unwrap_or_default());
+        (command.is_some(), input)
+    }
+    pub fn detail_lines(&self) -> Vec<Line<'static>> {
+        use crate::terminal_theme::{ACCENT, BLUE, TEXT};
+        let (command, input) = self.detail_input();
+        let mut lines = vec![
+            self.heading_line(usize::MAX),
+            Line::styled(format!("Tool: {}", self.action), Style::default().fg(TEXT)),
+            Line::default(),
+            Line::styled(
+                if command { "Command" } else { "Input" },
+                Style::default().fg(BLUE),
+            ),
+        ];
+        lines.extend(input.lines().map(|line| {
+            Line::styled(
+                line.to_owned(),
+                Style::default().fg(if command { ACCENT } else { TEXT }),
+            )
+        }));
+        lines.push(Line::default());
+        lines.push(Line::styled("Output", Style::default().fg(BLUE)));
+        lines.extend(
+            self.result
+                .as_deref()
+                .unwrap_or("Waiting for result…")
+                .lines()
+                .map(|line| Line::styled(line.to_owned(), Style::default().fg(TEXT))),
+        );
+        lines
+    }
+    pub fn details(&self) -> String {
+        let (command, input) = self.detail_input();
         format!(
             "{}\nTool: {}\n\n{}\n{}\n\nOutput\n{}",
             self.heading(),
             self.action,
-            if command.is_some() {
-                "Command"
-            } else {
-                "Input"
-            },
+            if command { "Command" } else { "Input" },
             input,
             self.result.as_deref().unwrap_or("Waiting for result…")
         )
@@ -301,7 +383,7 @@ mod tests {
             };
             tool.finish(result, None);
             assert!(matches!(tool.status, Some(ToolStatus::Failed)), "{result}");
-            assert_eq!(tool.lines(80)[0].style.fg, Some(Color::Red));
+            assert_eq!(tool.lines(80)[0].spans[0].style.fg, Some(Color::Red));
         }
     }
 
@@ -324,5 +406,36 @@ mod tests {
             tool.details()
                 .contains("User denied shell command: echo example")
         );
+    }
+
+    #[test]
+    fn command_subject_is_styled_with_accent_color() {
+        let tool = ToolActivity {
+            entry: 0,
+            call_id: None,
+            action: "run_shell".into(),
+            input: serde_json::json!({"command":"mkdir -p /tmp/test"}),
+            subagent: None,
+            started: Instant::now(),
+            elapsed: None,
+            result: None,
+            status: None,
+        };
+        let lines = tool.lines(80);
+        assert_eq!(lines[1].style.fg, Some(crate::terminal_theme::ACCENT));
+
+        let non_command = ToolActivity {
+            entry: 0,
+            call_id: None,
+            action: "read_file".into(),
+            input: serde_json::json!({"path":"/tmp/test.png"}),
+            subagent: None,
+            started: Instant::now(),
+            elapsed: None,
+            result: None,
+            status: None,
+        };
+        let non_cmd_lines = non_command.lines(80);
+        assert_eq!(non_cmd_lines[1].style.fg, Some(crate::terminal_theme::TEXT));
     }
 }

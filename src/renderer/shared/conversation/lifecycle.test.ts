@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createConversationLifecycle, type ConversationTransport, type ConversationEffects, type PendingApproval } from './lifecycle'
+import { createConversationLifecycle, conversationPollIntervalsMs, type ConversationTransport, type ConversationEffects, type PendingApproval } from './lifecycle'
 import type { AgentProgress, ChatResponse, ConversationChanges, ConversationSnapshot, InteractionMemory, ChatSession } from '../types'
 
 function deferred<T>() {
@@ -64,6 +64,32 @@ describe('Conversation lifecycle through the renderer interface', () => {
     expect(lifecycle.getSnapshot().documentAttachment).toBeNull()
     expect(lifecycle.getSnapshot().message).toBe('')
     results[1].resolve(reply); await retried
+  })
+
+  it('fingerprints attachments for retry deduplication without calling JSON.stringify on attachment payloads', async () => {
+    const received: any[] = []
+    const results = [deferred<ChatResponse>(), deferred<ChatResponse>(), deferred<ChatResponse>()]
+    const { lifecycle } = setup({ streamChatMessage: (...args) => {
+      received.push(args[15])
+      return results[received.length - 1].promise
+    } })
+    const stringifySpy = vi.spyOn(JSON, 'stringify')
+    const img1 = { name: 'photo.png', dataUri: 'data:image/png;base64,AAAA1111' }
+    const img2 = { name: 'photo.png', dataUri: 'data:image/png;base64,BBBB2222' }
+
+    const attempt1 = lifecycle.sendPrompt('Analyze', { imageAttachments: [img1] })
+    results[0].reject(new Error('Network error')); await attempt1
+
+    const attempt2 = lifecycle.sendPrompt('Analyze', { imageAttachments: [img1] })
+    results[1].reject(new Error('Network error')); await attempt2
+
+    const attempt3 = lifecycle.sendPrompt('Analyze', { imageAttachments: [img2] })
+    results[2].resolve(reply); await attempt3
+
+    expect(stringifySpy).not.toHaveBeenCalled()
+    expect(received[0]?.requestId).toBeTruthy()
+    expect(received[1]?.requestId).toBe(received[0]?.requestId)
+    expect(received[2]?.requestId).not.toBe(received[0]?.requestId)
   })
 
   it('rejects old A snapshots after A → B → A, including an old failure', async () => {
@@ -359,4 +385,58 @@ it('can submit from a LAN HTTP browser without crypto.randomUUID', async()=>{
  expect(receipt.requestId).toBeTruthy()
  expect(lifecycle.getSnapshot().sending).toBe(false)
  vi.unstubAllGlobals()
+})
+
+it('exports adaptive conversation polling intervals for active and idle runs', () => {
+  expect(conversationPollIntervalsMs(true)).toEqual({ historyMs: 1500, sessionsMs: 5000 })
+  expect(conversationPollIntervalsMs(false)).toEqual({ historyMs: 5000, sessionsMs: 15000 })
+})
+
+it('adapts polling intervals between idle and active runs in watch', async () => {
+  vi.useFakeTimers()
+  let historySyncCount = 0
+  let sessionRefreshCount = 0
+  const { lifecycle, streams } = setup({
+    getConversationChanges: async () => { historySyncCount++; return { changes: [], cursor: 0, hasMore: false } },
+    listChatSessions: async () => { sessionRefreshCount++; return [] },
+  })
+  await lifecycle.refreshHistory()
+
+  const browser = {
+    window: { addEventListener: vi.fn(), removeEventListener: vi.fn(), setInterval, clearInterval },
+    document: { addEventListener: vi.fn(), removeEventListener: vi.fn(), visibilityState: 'visible' },
+  } as unknown as import('./lifecycle').ConversationBrowser
+
+  const stop = lifecycle.watch(browser, true)
+  // Initial synchronous invocation at attach
+  expect(historySyncCount).toBe(1)
+  expect(sessionRefreshCount).toBe(0)
+
+  // Idle state: history syncs every 5s, sessions every 15s
+  await vi.advanceTimersByTimeAsync(4900)
+  expect(historySyncCount).toBe(1)
+  await vi.advanceTimersByTimeAsync(200)
+  expect(historySyncCount).toBe(2)
+
+  await vi.advanceTimersByTimeAsync(9700)
+  expect(sessionRefreshCount).toBe(0)
+  await vi.advanceTimersByTimeAsync(300)
+  expect(sessionRefreshCount).toBe(1)
+
+  // Start an active prompt -> switches to active polling (1.5s history, 5s sessions)
+  const run = lifecycle.sendPrompt('test active run')
+  const initialHistory = historySyncCount
+  await vi.advanceTimersByTimeAsync(1500)
+  expect(historySyncCount).toBe(initialHistory + 1)
+
+  // Finish run -> returns to idle polling
+  streams[0].result.resolve(reply)
+  await run
+  const afterRunHistory = historySyncCount
+  await vi.advanceTimersByTimeAsync(1500)
+  // Since it returned to idle (5000ms), 1500ms shouldn't trigger another sync
+  expect(historySyncCount).toBe(afterRunHistory)
+
+  stop()
+  expect(vi.getTimerCount()).toBe(0)
 })

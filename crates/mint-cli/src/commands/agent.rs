@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::Subcommand;
@@ -182,6 +182,78 @@ pub enum AvatarCommand {
     Disable,
 }
 
+pub fn is_mint_root(p: &Path) -> bool {
+    if !p.join("package.json").exists() {
+        return false;
+    }
+    if p.join("vite.config.web.ts").exists()
+        || p.join("out").join("web").join("index-web.html").exists()
+        || p.join("crates").join("mint-cli").exists()
+    {
+        return true;
+    }
+    if let Ok(contents) = std::fs::read_to_string(p.join("package.json")) {
+        if contents.contains("\"@pheem49/mint\"") || contents.contains("\"dev:web\"") {
+            return true;
+        }
+    }
+    false
+}
+
+pub fn find_mint_root() -> Result<PathBuf> {
+    // 1. Explicit override via environment variables
+    for var in ["MINT_ROOT", "MINT_PROJECT_ROOT", "MINT_WEB_ROOT"] {
+        if let Some(val) = std::env::var_os(var) {
+            let path = PathBuf::from(val);
+            if is_mint_root(&path) {
+                return Ok(path);
+            }
+        }
+    }
+
+    // 2. Traversal up from current executable
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(root) = exe_path.ancestors().find(|p| is_mint_root(p)) {
+            return Ok(root.to_path_buf());
+        }
+    }
+
+    // 3. Compile-time directory (where mint was built / cargo installed)
+    let compile_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    if let Some(root) = compile_dir.ancestors().find(|p| is_mint_root(p)) {
+        return Ok(root.to_path_buf());
+    }
+
+    // 4. Current working directory ancestors (ONLY if it's genuinely Mint's root, not another repo)
+    if let Ok(cwd) = std::env::current_dir() {
+        if let Some(root) = cwd.ancestors().find(|p| is_mint_root(p)) {
+            return Ok(root.to_path_buf());
+        }
+    }
+
+    // 5. Standard user/system installation locations
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join(".mint"),
+            home.join(".local/share/mint"),
+            home.join("vscode/Project/Mint-CLI"),
+        ];
+        for candidate in candidates {
+            if is_mint_root(&candidate) {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "Failed to find Mint Web assets (package.json and vite.config.web.ts).\n\
+        To use 'mint web':\n\
+        • Install via npm: npm install -g @pheem49/mint\n\
+        • Or set MINT_ROOT to your Mint source checkout path (e.g. export MINT_ROOT=/path/to/Mint)\n\
+        • Or use the Mint Desktop application or web app at https://mint.aemeth.xyz"
+    )
+}
+
 pub(crate) async fn launch_mint_target(target: String, dev: bool) -> Result<()> {
     match target.as_str() {
         "cli" => {
@@ -197,34 +269,7 @@ pub(crate) async fn launch_mint_target(target: String, dev: bool) -> Result<()> 
         "web" => {
             let config = load_config()?;
             print_welcome_banner(&config);
-            let project_root = {
-                let mut found = None;
-                if let Ok(exe_path) = std::env::current_exe() {
-                    let mut path = exe_path.parent();
-                    while let Some(p) = path {
-                        if p.join("package.json").exists() {
-                            found = Some(p.to_path_buf());
-                            break;
-                        }
-                        path = p.parent();
-                    }
-                }
-                if found.is_none()
-                    && let Ok(cwd) = std::env::current_dir()
-                {
-                    let mut path = Some(cwd.as_path());
-                    while let Some(p) = path {
-                        if p.join("package.json").exists() {
-                            found = Some(p.to_path_buf());
-                            break;
-                        }
-                        path = p.parent();
-                    }
-                }
-                found.ok_or_else(|| {
-                    anyhow::anyhow!("Failed to find project root directory containing package.json")
-                })?
-            };
+            let project_root = find_mint_root()?;
             let dist_web_out = project_root.join("out").join("web").join("index-web.html");
             let dist_web_legacy = project_root
                 .join("out")
@@ -240,6 +285,7 @@ pub(crate) async fn launch_mint_target(target: String, dev: bool) -> Result<()> 
             let frontend = mint_core::bg_shell::start_web_frontend(&project_root, &config, web_cmd)
                 .map_err(|e| anyhow::anyhow!("Failed to launch web app: {e}"))?;
             mint_core::bg_shell::watch_web_owner();
+            mint_core::companion::navigation::configure_web("http://localhost:9000/".into());
 
             println!("\n{MINT}✔ Mint Web is running!{RESET}\n");
             println!("    {BLUE}Web UI:{RESET}     {MINT}http://localhost:9000{RESET}");
@@ -458,11 +504,59 @@ pub async fn handle_auto() -> Result<()> {
     Ok(())
 }
 
-pub async fn handle_web(dev: bool, tailscale: bool) -> Result<()> {
+async fn wait_for_web(urls: &[&str], timeout: std::time::Duration) -> Result<()> {
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(1))
+        .build()?;
+    tokio::time::timeout(timeout, async {
+        loop {
+            let mut ready = true;
+            for url in urls {
+                if !client
+                    .get(*url)
+                    .send()
+                    .await
+                    .is_ok_and(|r| r.status().is_success())
+                {
+                    ready = false;
+                    break;
+                }
+            }
+            if ready {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!("Mint Web did not become ready before the browser-opening timeout")
+    })
+}
+
+pub async fn handle_web(dev: bool, tailscale: bool, open: bool) -> Result<()> {
     if tailscale {
         return super::tailnet_web::run().await;
     }
-    launch_mint_target("web".into(), dev).await
+    let browser = open.then(|| tokio::spawn(async {
+        let result = async {
+            wait_for_web(
+                &["http://127.0.0.1:9000/", "http://127.0.0.1:3000/api/status"],
+                std::time::Duration::from_secs(120),
+            ).await?;
+            actions::open_system_handler("http://localhost:9000")
+        }.await;
+        if let Err(error) = result {
+            eprintln!("Could not open Mint Web automatically: {error}. Open http://localhost:9000 manually once ready.");
+        }
+    }));
+    let result = launch_mint_target("web".into(), dev).await;
+    if let Some(browser) = browser {
+        browser.abort();
+    }
+    result
 }
 
 pub async fn handle_api(port: u16) -> Result<()> {
@@ -1112,4 +1206,104 @@ pub async fn handle_avatar(command: AvatarCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod web_readiness_tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn server(ready: Arc<AtomicBool>) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = [0; 4096];
+                let bytes_read = stream.read(&mut request).await.unwrap();
+                if bytes_read == 0 {
+                    continue;
+                }
+                let status = if ready.load(Ordering::Acquire) {
+                    "200 OK"
+                } else {
+                    "503 Service Unavailable"
+                };
+                let response =
+                    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+        (url, task)
+    }
+
+    #[tokio::test]
+    async fn waits_for_both_frontend_and_api_to_succeed() {
+        let (frontend, frontend_task) = server(Arc::new(AtomicBool::new(true))).await;
+        let api_ready = Arc::new(AtomicBool::new(false));
+        let (api, api_task) = server(api_ready.clone()).await;
+        let urls = [frontend.as_str(), api.as_str()];
+        let ready = wait_for_web(&urls, std::time::Duration::from_secs(3));
+        tokio::pin!(ready);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(350), &mut ready)
+                .await
+                .is_err()
+        );
+        api_ready.store(true, Ordering::Release);
+        ready.await.unwrap();
+        frontend_task.abort();
+        api_task.abort();
+    }
+
+    #[tokio::test]
+    async fn unavailable_web_times_out_instead_of_opening_early() {
+        let (url, server_task) = server(Arc::new(AtomicBool::new(false))).await;
+        assert!(
+            wait_for_web(&[&url], std::time::Duration::from_millis(100))
+                .await
+                .is_err()
+        );
+        server_task.abort();
+    }
+
+    #[test]
+    fn is_mint_root_validates_structure_and_rejects_arbitrary_projects() {
+        let unique = format!(
+            "mint-test-root-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        assert!(!is_mint_root(&temp));
+
+        let foreign_pkg = temp.join("package.json");
+        std::fs::write(
+            &foreign_pkg,
+            r#"{"name": "foreign-app", "scripts": {"test": "echo test"}}"#,
+        )
+        .unwrap();
+        assert!(!is_mint_root(&temp));
+
+        let vite_config = temp.join("vite.config.web.ts");
+        std::fs::write(&vite_config, "// vite config").unwrap();
+        assert!(is_mint_root(&temp));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn find_mint_root_honors_env_and_resolves_compile_time() {
+        let root = find_mint_root().expect("Should locate current Mint workspace root");
+        assert!(root.join("package.json").exists());
+        assert!(root.join("vite.config.web.ts").exists());
+    }
 }

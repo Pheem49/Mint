@@ -1,80 +1,5 @@
 /* web: app-shell.css — split from styles.css, rules kept in original order */
-
-:root {
-  --status-listening: #7dd3fc;
-  --status-thinking: var(--accent);
-  --status-speaking: #22c55e;
-  --status-error: #ef4444;
-  --hover-delete: #fca5a5;
-  --hover-delete-bg: rgba(248, 113, 113, 0.12);
-  --hover-edit: #c7d2fe;
-  --hover-edit-bg: rgba(99, 102, 241, 0.12);
-  --close-btn-hover-bg: #3a2020;
-  --close-btn-hover-color: #ff8a8a;
-
-  /* Radius scale — same across all themes. Values are the dominant sizes
-     already in use across the app; stray one-off values (5px, 7px, 9px,
-     11px, 14px, 18px, 24px, 99px, 9999px, ...) were consolidated onto the
-     nearest step here so cards/buttons/panels of the same visual weight
-     share the same corner radius. Sub-4px radii are left as raw px values
-     where they appear — those are deliberate micro-details (e.g. a small
-     square-ish status dot), not part of this scale. */
-  --radius-xs: 6px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 14px;
-  --radius-xl: 16px;
-  --radius-2xl: 20px;
-  --radius-3xl: 24px;
-  --radius-full: 999px;
-
-  /* Elevation scale — border-first: most resting surfaces lean on --border
-     (or --border-light) for their edge and don't need a shadow at all
-     (--shadow itself is `none` in dark mode). These tokens are for the
-     minority of cases that do want a lift — a toolbar raised above
-     scrolling content, a dropdown, a modal — consolidated from a long tail
-     of one-off rgba(0,0,0,N) values that varied in blur/opacity for no
-     reason tied to their actual elevation. --glow-accent-* replaces
-     one-off `color-mix(in srgb, var(--accent) NN%, transparent)` shadows
-     used for accent-tinted hover/active glows (buttons, chips) — capped
-     around ~28% so the glow reads as an accent, not a flash. Reserve
-     --shadow-lg for real modals/dialogs; @keyframes pulse/breathe rings
-     (status/recording/voice-active indicators) are a different thing —
-     motion communicating state, not elevation — and are left alone. */
-  --shadow-xs: 0 2px 8px rgba(0, 0, 0, 0.12);
-  --shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.16);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.22);
-  --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.5);
-  --glow-accent-xs: 0 2px 8px color-mix(in srgb, var(--accent) 15%, transparent);
-  --glow-accent-sm: 0 4px 14px color-mix(in srgb, var(--accent) 22%, transparent);
-  --glow-accent-md: 0 6px 18px color-mix(in srgb, var(--accent) 28%, transparent);
-}
-
-[data-theme="light"] {
-  --status-listening: #0284c7;
-  --status-thinking: var(--accent);
-  --status-speaking: #16a34a;
-  --status-error: #dc2626;
-  --hover-delete: #dc2626;
-  --hover-delete-bg: rgba(220, 38, 38, 0.08);
-  --hover-edit: #4f46e5;
-  --hover-edit-bg: rgba(79, 70, 229, 0.08);
-  --close-btn-hover-bg: #fee2e2;
-  --close-btn-hover-color: #dc2626;
-}
-
-[data-theme="midnight"] {
-  --status-listening: #7dd3fc;
-  --status-thinking: var(--accent);
-  --status-speaking: #22c55e;
-  --status-error: #fca5a5;
-  --hover-delete: #fca5a5;
-  --hover-delete-bg: rgba(248, 113, 113, 0.12);
-  --hover-edit: #c7d2fe;
-  --hover-edit-bg: rgba(99, 102, 241, 0.12);
-  --close-btn-hover-bg: #3a2020;
-  --close-btn-hover-color: #ff8a8a;
-}
+/* Global status, radius, and shadow tokens are centrally defined in shared/theme/tokens.css */
 
 * {
   box-sizing: border-box;
@@ -315,7 +240,7 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0,0,0,0.45);
+  background: var(--bg-backdrop, rgba(0,0,0,0.45));
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   z-index: 1000;
@@ -327,19 +252,7 @@ h1 {
   height: min(780px, 88vh);
   overflow: hidden;
   border-radius: var(--radius-xl);
-  box-shadow: 0 30px 80px rgba(0,0,0,0.6);
-}
-
-[data-theme="light"] .settings-modal-overlay {
-  background: rgba(15, 23, 42, 0.42);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-[data-theme="light"] .settings-modal {
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--shadow-lg);
 }
 
 @keyframes modelFloat {
@@ -947,7 +860,7 @@ h1 {
   .assistant-workspace .conversation-panel.is-empty .input-area {
     position: absolute;
     top: auto;
-    bottom: 44px;
+    bottom: 16px;
     left: 50%;
     width: min(840px, calc(100% - 64px));
     margin: 0;
@@ -955,16 +868,8 @@ h1 {
   }
 
   .assistant-workspace .conversation-panel.is-empty .empty-chat-prompt {
-    top: calc(100% + 44px - 50vh);
+    top: calc(100% + 16px - 50vh);
     transform: translateY(-50%);
-  }
-
-  .assistant-workspace .conversation-panel.is-empty .input-disclaimer {
-    position: absolute;
-    right: 32px;
-    bottom: 8px;
-    left: 32px;
-    margin: 0;
   }
 }
 

@@ -3,27 +3,29 @@
  * Markdown parsing and rendering for message bubbles, built on react-markdown + remark-gfm.
  * Shared by both Desktop and Web ChatPanel — do NOT duplicate this.
  */
-import { Children, cloneElement, Fragment, isValidElement, type CSSProperties, type ReactElement, type ReactNode } from 'react'
+import { Children, cloneElement, Fragment, isValidElement, lazy, memo, Suspense, useEffect, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ChatCodeBlock } from '../components/ChatCodeBlock'
-import WeatherCard from '../components/WeatherCard'
-import StockCard from '../components/StockCard'
-import CalculationCard from '../components/CalculationCard'
-import ImageSearchCard from '../components/ImageSearchCard'
-import ImageGenCard from '../components/ImageGenCard'
-import MermaidCard from '../components/MermaidCard'
-import UiGridCard from '../components/UiGridCard'
+import { ChatCodeBlock } from '../components/chat/ChatCodeBlock'
 import { parseCardJsonSafely } from './cardJson'
-import UiFeatureCard from '../components/UiFeatureCard'
-import UiMockupWidget from '../components/UiMockupWidget'
 import type { WebSearchSource } from './agentActivity'
+
+const WeatherCard = lazy(() => import('../components/cards/WeatherCard'))
+const StockCard = lazy(() => import('../components/cards/StockCard'))
+const CalculationCard = lazy(() => import('../components/cards/CalculationCard'))
+const ImageSearchCard = lazy(() => import('../components/cards/ImageSearchCard'))
+const ImageGenCard = lazy(() => import('../components/cards/ImageGenCard'))
+const MermaidCard = lazy(() => import('../components/cards/MermaidCard'))
+const UiGridCard = lazy(() => import('../components/cards/UiGridCard'))
+const UiFeatureCard = lazy(() => import('../components/cards/UiFeatureCard'))
+const UiMockupWidget = lazy(() => import('../components/cards/UiMockupWidget'))
 import {
   Info,
   Lightbulb,
   AlertCircle,
   AlertTriangle,
   ShieldAlert,
+  ImageOff,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -50,9 +52,31 @@ export function unwrapBraveImageUrl(url: string): string {
   return url
 }
 
+/**
+ * Normalizes Twitter profile banner URLs missing dimensions (e.g. /1366430884698546176/1684330404)
+ * by appending /1500x500 so Twitter CDN returns the full image instead of 404 Not Found.
+ */
+export function normalizeTwitterImageUrl(url: string): string {
+  if (!url || !url.includes('pbs.twimg.com/profile_banners/')) return url
+  return url.replace(/^(https?:\/\/pbs\.twimg\.com\/profile_banners\/\d+\/\d+)\/?$/, '$1/1500x500')
+}
+
+/**
+ * Resolves an external image URL to the local backend proxy endpoint (/api/proxy-image?url=...).
+ * When running in the web browser (e.g. localhost:9000), routes to http://localhost:3000/api/proxy-image.
+ */
+export function resolveApiProxyUrl(targetUrl: string): string {
+  if (!targetUrl) return ''
+  const origin = typeof window !== 'undefined' && window.location.port === '9000'
+    ? 'http://localhost:3000'
+    : (typeof window !== 'undefined' ? window.location.origin : '')
+  return `${origin}/api/proxy-image?url=${encodeURIComponent(targetUrl)}`
+}
+
 export const resolveMediaUrl = (url: string): string => {
   if (!url) return ''
-  const unwrapped = unwrapBraveImageUrl(url)
+  let unwrapped = unwrapBraveImageUrl(url)
+  unwrapped = normalizeTwitterImageUrl(unwrapped)
   if (unwrapped.startsWith('data:') || unwrapped.startsWith('http://') || unwrapped.startsWith('https://')) {
     return unwrapped
   }
@@ -70,26 +94,38 @@ export const isTableLine = (line: string): boolean => {
   return trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 1
 }
 
+/**
+ * Auto-heals markdown image tags where the model omitted the closing parenthesis ')' at the end of a line.
+ * Matches `![alt](url` at line end and appends `)`.
+ */
+export function autoHealMarkdownImages(text: string): string {
+  if (!text || typeof text !== 'string') return ''
+  return text.replace(/(^|[^\\])(!\[[^\]\r\n]*\]\((?:https?:\/\/|\/api\/|data:)[^\s\)]+)[ \t]*$/gm, '$1$2)')
+}
+
 export function readableAssistantText(text: string): string {
   if (typeof text !== 'string') return ''
   const trimmed = text.trim()
-  if (!trimmed.startsWith('{')) return sanitizeLatex(text)
+  if (!trimmed.startsWith('{')) return autoHealMarkdownImages(sanitizeLatex(text))
   try {
     const value = JSON.parse(trimmed)
     if (value?.action === 'finish' && typeof value?.input?.summary === 'string' && value.input.summary.trim()) {
-      return sanitizeLatex(value.input.summary)
+      return autoHealMarkdownImages(sanitizeLatex(value.input.summary))
     }
     if (typeof value?.finish?.summary === 'string' && value.finish.summary.trim()) {
-      return sanitizeLatex(value.finish.summary)
+      return autoHealMarkdownImages(sanitizeLatex(value.finish.summary))
     }
   } catch {
-    return sanitizeLatex(text)
+    return autoHealMarkdownImages(sanitizeLatex(text))
   }
-  return sanitizeLatex(text)
+  return autoHealMarkdownImages(sanitizeLatex(text))
 }
 
 /** Replace common LaTeX math symbols with their Unicode equivalents */
-function sanitizeLatex(text: string): string {
+export function sanitizeLatex(text: string): string {
+  if (!text.includes('\\') && !text.includes('$') && !text.includes('arrow')) {
+    return text
+  }
   return text
     // arrows
     .replace(/\$\\rightarrow\$|\\\(\\rightarrow\\\)|\\rightarrow|\bightarrow\b/g, '→')
@@ -265,7 +301,7 @@ function renderJsonCard(
 ): ReactNode {
   const parsed = parseJsonSafely(codeText)
   return parsed
-    ? render(parsed)
+    ? <Suspense fallback={null}>{render(parsed)}</Suspense>
     : <ChatCodeBlock code={codeText} language={lang} />
 }
 
@@ -287,7 +323,7 @@ function renderCodeCard(lang: string, codeText: string): ReactNode {
     case 'image-gen-json':
       return renderJsonCard(codeText, lang, (data) => <ImageGenCard data={data} />)
     case 'mermaid':
-      return <MermaidCard code={codeText} />
+      return <Suspense fallback={null}><MermaidCard code={codeText} /></Suspense>
     case 'ui_grid':
     case 'ui-grid':
     case 'ui_grid_json':
@@ -297,7 +333,7 @@ function renderCodeCard(lang: string, codeText: string): ReactNode {
         clean = clean.replace(/^ui[-_]grid(?:[-_]json)?\s*/i, '')
       }
       const parsed = parseJsonSafely(clean)
-      if (parsed) return <UiGridCard data={parsed} />
+      if (parsed) return <Suspense fallback={null}><UiGridCard data={parsed} /></Suspense>
       return <ChatCodeBlock code={codeText} language={lang} />
     }
     case 'ui_card':
@@ -311,7 +347,7 @@ function renderCodeCard(lang: string, codeText: string): ReactNode {
         clean = clean.replace(/^ui[-_](?:card|feature)(?:[-_]json)?\s*/i, '')
       }
       const parsed = parseJsonSafely(clean)
-      if (parsed) return <UiFeatureCard data={parsed} />
+      if (parsed) return <Suspense fallback={null}><UiFeatureCard data={parsed} /></Suspense>
       return <ChatCodeBlock code={codeText} language={lang} />
     }
     case 'ui_mockup':
@@ -323,7 +359,7 @@ function renderCodeCard(lang: string, codeText: string): ReactNode {
         clean = clean.replace(/^ui[-_]mockup(?:[-_]json)?\s*/i, '')
       }
       const parsed = parseJsonSafely(clean)
-      if (parsed) return <UiMockupWidget data={parsed} />
+      if (parsed) return <Suspense fallback={null}><UiMockupWidget data={parsed} /></Suspense>
       return <ChatCodeBlock code={codeText} language={lang} />
     }
     default:
@@ -406,32 +442,110 @@ function renderAlertBox(type: string, children: ReactNode): ReactNode {
   )
 }
 
-function renderMessageImage(src: string | undefined, alt: string | undefined, sourceUrl?: string): ReactNode {
-  const url = resolveMediaUrl(String(src || ''))
+export function ChatMediaImage({
+  src,
+  alt,
+  sourceUrl,
+  initialError,
+  initialStage,
+}: {
+  src: string | undefined
+  alt: string | undefined
+  sourceUrl?: string
+  initialError?: boolean
+  initialStage?: 'direct' | 'proxy' | 'failed'
+}): ReactNode {
+  const [stage, setStage] = useState<'direct' | 'proxy' | 'failed'>(
+    initialStage || (initialError ? 'failed' : 'direct')
+  )
+  const directUrl = resolveMediaUrl(String(src || ''))
   const label = alt || 'Generated Image'
-  const isExternal = /^https?:\/\//.test(url)
+  const isExternal = /^https?:\/\//.test(directUrl)
+  const pageUrl = sourceUrl && /^https?:\/\//.test(sourceUrl) ? sourceUrl : directUrl
+
+  useEffect(() => {
+    setStage(initialStage || (initialError ? 'failed' : 'direct'))
+  }, [src, initialError, initialStage])
+
+  if (stage === 'failed') {
+    return (
+      <div
+        className="chat-media-card chat-media-card--failed"
+        style={{
+          margin: '6px 0 10px',
+          borderRadius: '10px',
+          padding: '10px 14px',
+          border: '1px solid var(--border, rgba(255,255,255,0.12))',
+          background: 'var(--panel-bg, #141416)',
+          maxWidth: '420px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted, #94a3b8)', fontSize: '0.82rem' }}>
+          <ImageOff size={16} style={{ flexShrink: 0, color: 'var(--text-muted, #94a3b8)' }} />
+          <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ fontWeight: 500 }}>{label !== 'Generated Image' ? `${label}: ` : ''}</span>
+            <span>Image failed to load</span>
+          </div>
+          <a
+            href={pageUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="chat-link"
+            style={{
+              flexShrink: 0,
+              fontSize: '0.78rem',
+              padding: '3px 8px',
+              borderRadius: '6px',
+              background: 'var(--bg-surface-soft, rgba(255,255,255,0.06))',
+              border: '1px solid var(--border, rgba(255,255,255,0.12))',
+              color: 'var(--interactive-fg-hover, #38bdf8)',
+              textDecoration: 'none',
+            }}
+          >
+            Open link
+          </a>
+        </div>
+      </div>
+    )
+  }
+
+  const handleImageError = () => {
+    if (isExternal && stage === 'direct') {
+      // First attempt failed (likely ad-blocker or CORS issue): retry via local backend proxy
+      setStage('proxy')
+    } else {
+      // Proxy or local resource also failed: display fallback card
+      setStage('failed')
+    }
+  }
+
+  const activeSrc = isExternal && stage === 'proxy'
+    ? resolveApiProxyUrl(directUrl)
+    : directUrl
+
   if (isExternal) {
-    const pageUrl = sourceUrl && /^https?:\/\//.test(sourceUrl) ? sourceUrl : url
     return (
       <div
         className="chat-media-card chat-media-card--thumbnail"
+        data-load-stage={stage}
         style={{ margin: '6px 0 10px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px' }}
       >
         <a href={pageUrl} target="_blank" rel="noopener noreferrer" title={sourceUrl ? `Open source page: ${label}` : label} style={{ display: 'flex', justifyContent: 'center', textDecoration: 'none' }}>
           <img
-            src={url}
+            key={activeSrc}
+            src={activeSrc}
             alt={label}
             loading="lazy"
             referrerPolicy="no-referrer"
             style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block' }}
-            onError={(e) => { const card = e.currentTarget.closest('.chat-media-card') as HTMLElement | null; if (card) card.style.display = 'none' }}
+            onError={handleImageError}
           />
         </a>
         {(label !== 'Generated Image' || sourceUrl) && (
           <div style={{ padding: '5px 10px', fontSize: '0.72rem', color: 'var(--text-muted, #64748b)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
             {sourceUrl && (
-              <a href={url} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, color: 'var(--interactive-fg-hover)' }}>
+              <a href={directUrl} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, color: 'var(--interactive-fg-hover)' }}>
                 View full image
               </a>
             )}
@@ -442,9 +556,19 @@ function renderMessageImage(src: string | undefined, alt: string | undefined, so
   }
   return (
     <div className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
-      <img src={url} alt={label} referrerPolicy="no-referrer" style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
+      <img
+        src={directUrl}
+        alt={label}
+        referrerPolicy="no-referrer"
+        style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }}
+        onError={handleImageError}
+      />
     </div>
   )
+}
+
+function renderMessageImage(src: string | undefined, alt: string | undefined, sourceUrl?: string): ReactNode {
+  return <ChatMediaImage src={src} alt={alt} sourceUrl={sourceUrl} />
 }
 
 function renderMessageLink(href: string | undefined, children: ReactNode, node: any, sourceByImage?: Map<string, string>): ReactNode {
@@ -526,9 +650,9 @@ const mdComponents = {
         const lang = match[1].replace(/_/g, '-').toLowerCase()
         const parsed = parseJsonSafely(match[2].trim())
         if (parsed) {
-          if (lang.startsWith('ui-grid')) return <UiGridCard data={parsed} />
-          if (lang.startsWith('ui-card') || lang.startsWith('ui-feature')) return <UiFeatureCard data={parsed} />
-          if (lang.startsWith('ui-mockup')) return <UiMockupWidget data={parsed} />
+          if (lang.startsWith('ui-grid')) return <Suspense fallback={null}><UiGridCard data={parsed} /></Suspense>
+          if (lang.startsWith('ui-card') || lang.startsWith('ui-feature')) return <Suspense fallback={null}><UiFeatureCard data={parsed} /></Suspense>
+          if (lang.startsWith('ui-mockup')) return <Suspense fallback={null}><UiMockupWidget data={parsed} /></Suspense>
         }
       }
     }
@@ -648,7 +772,7 @@ const mdComponents = {
           margin: '12px 0',
           padding: '8px 16px',
           borderLeft: '3px solid var(--accent, #38bdf8)',
-          background: 'rgba(255, 255, 255, 0.02)',
+          background: 'var(--bg-surface-soft)',
           borderRadius: '0 8px 8px 0',
           color: 'var(--text-muted, #94a3b8)',
           fontStyle: 'italic',
@@ -734,3 +858,13 @@ export function renderFormattedMessage(text: string, webSources: WebSearchSource
     </div>
   )
 }
+
+export const FormattedMessage = memo(function FormattedMessage({
+  text,
+  sources,
+}: {
+  text: string
+  sources?: WebSearchSource[]
+}) {
+  return renderFormattedMessage(text, sources)
+})

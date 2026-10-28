@@ -83,7 +83,7 @@
     gap: 12px;
     padding: 18px 20px;
     border-top: 1px solid var(--border);
-    background: rgba(0, 0, 0, 0.15);
+    background: var(--bg-surface-soft);
 }
 
 .plugin-config-panel .setting-row.stacked {
@@ -158,12 +158,12 @@
 
 .plugin-tag.accent {
     background: var(--accent);
-    color: var(--accent-contrast, #fff);
+    color: var(--accent-contrast, var(--text-on-accent));
 }
 
 .plugin-tag.ok {
-    background: color-mix(in srgb, #10b981 16%, transparent);
-    color: #10b981;
+    background: color-mix(in srgb, var(--status-success, #10b981) 16%, transparent);
+    color: var(--status-success, #10b981);
 }
 
 .plugin-tag.info {
@@ -185,9 +185,9 @@
 }
 
 .plugin-status.connected {
-    border-color: color-mix(in srgb, #10b981 30%, transparent);
-    background: color-mix(in srgb, #10b981 12%, transparent);
-    color: #10b981;
+    border-color: color-mix(in srgb, var(--status-success, #10b981) 30%, transparent);
+    background: color-mix(in srgb, var(--status-success, #10b981) 12%, transparent);
+    color: var(--status-success, #10b981);
 }
 
 .plugin-status::before {
@@ -219,7 +219,7 @@
 
 .btn-icon.is-active {
     background: var(--accent);
-    color: var(--accent-contrast, #fff);
+    color: var(--accent-contrast, var(--text-on-accent));
 }
 
 .btn-icon.danger {

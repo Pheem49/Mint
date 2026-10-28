@@ -6,6 +6,49 @@
 .mcp-artifact { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .mcp-image-button { padding: 0; background: transparent; border: 0; cursor: zoom-in; }
 .mcp-image-button img { width: 100%; max-height: 320px; object-fit: contain; border-radius: 8px; }
-.mcp-image-dialog { max-width: 95vw; max-height: 95vh; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-surface); color: var(--text-primary); }
-.mcp-image-dialog::backdrop { background: rgba(0,0,0,.7); }
-.mcp-image-dialog img { display: block; max-width: 85vw; max-height: 80vh; object-fit: contain; margin-top: 10px; }
+.mcp-image-dialog { box-sizing: border-box; width: fit-content; max-width: 96vw; max-height: 94dvh; padding: 12px; overflow: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-overlay); color: var(--text-main); }
+.mcp-image-dialog::backdrop { background: rgba(0, 0, 0, .75); }
+.mcp-image-dialog header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; font-size: 13px; }
+.mcp-image-dialog header span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.mcp-image-dialog button { display: grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface-soft); color: var(--text-main); cursor: pointer; }
+.mcp-image-dialog img { display: block; max-width: 100%; max-height: calc(94dvh - 86px); object-fit: contain; }
+.mcp-image-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.execution-state { font-weight: 600; }
+.execution-state-succeeded { color: var(--accent, #69e6a6); }
+.execution-state-failed { color: var(--danger, #ff6b6b); }
+.execution-state-running { color: var(--interactive-fg, #60a5fa); }
+.execution-state-cancelled { color: var(--muted, #888); }
+.execution-exit { color: var(--muted, #888); }
+.execution-exit-error { color: var(--danger, #ff6b6b); }
+
+.mcp-results-compact {
+  margin: 6px 0 10px 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.mcp-warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface-soft);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.mcp-warning-icon {
+  flex-shrink: 0;
+  color: var(--interactive-fg, var(--accent));
+  opacity: 0.9;
+}
+
+.mcp-warning-text {
+  flex: 1;
+  min-width: 0;
+}
+

@@ -490,6 +490,44 @@ pub(crate) fn undo_git_checkpoint(workspace_path: Option<String>) -> Result<Stri
 }
 
 #[tauri::command]
+pub(crate) async fn prepare_workspace_media(
+    app: tauri::AppHandle,
+    path: String,
+    workspace_path: String,
+) -> Result<mint_core::workspace::PreparedWorkspaceMedia, String> {
+    use tauri::Manager;
+    let media = tokio::task::spawn_blocking(move || {
+        mint_core::workspace::prepare_media(
+            std::path::Path::new(&workspace_path),
+            &path,
+            &load_config().map_err(|error| error.to_string())?,
+        )
+    })
+    .await
+    .map_err(|error| format!("media preparation failed: {error}"))??;
+    app.asset_protocol_scope()
+        .allow_file(&media.path)
+        .map_err(|error| error.to_string())?;
+    Ok(media)
+}
+
+#[tauri::command]
+pub(crate) async fn read_workspace_image(
+    path: String,
+    workspace_path: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        mint_core::workspace::read_image(
+            std::path::Path::new(&workspace_path),
+            &path,
+            &load_config().map_err(|error| error.to_string())?,
+        )
+    })
+    .await
+    .map_err(|error| format!("image read task failed: {error}"))?
+}
+
+#[tauri::command]
 pub(crate) fn read_workspace_file(
     path: String,
     workspace_path: Option<String>,

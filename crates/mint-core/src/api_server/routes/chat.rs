@@ -379,7 +379,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                 }
                             });
                         } else {
-                            let root = std::env::current_dir().unwrap_or_default();
+                            let root = resolve_agent_root(chat_req.workspace_path.as_deref());
                             let fast_mode = config
                                 .extra
                                 .get("enableFastMode")
@@ -390,20 +390,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             let config_clone = config.clone();
                             let chat_id = chat_req.chat_id.clone();
                             let chat_id_str = chat_id.clone().unwrap_or_default();
-                            // Unlike `root` above (this route's agent-mode tools
-                            // deliberately still operate against the API server
-                            // process's own cwd, not any client-sent workspace —
-                            // out of scope for the chat_id-scoping fix), the
-                            // conversation identity itself DOES need the client's
-                            // workspace: `orchestrate_agent_loop` would otherwise
-                            // self-derive from `root` (constant across every web
-                            // request), which can't distinguish workspaces at
-                            // all. Pre-scoping here is safe/idempotent — see
-                            // `scoped_chat_id`'s docs — so its self-derivation
-                            // becomes a no-op on the id we hand it below. The raw,
-                            // unscoped `chat_id_str` above is left untouched: it's
-                            // only a cancellation-token key, and `/api/cancel-chat`
-                            // sends back the same raw id it started with.
+                            // Resolve client's workspace path for parity with desktop. Idempotent on scoped_chat_id.
                             let agent_scoped_chat_id = crate::agent::memory::scoped_chat_id(
                                 chat_id.as_deref().unwrap_or(DEFAULT_CONVERSATION_ID),
                                 chat_req.workspace_path.as_deref(),
@@ -585,5 +572,32 @@ mod tests {
             assert!(request.messages.is_none());
             assert!(request.tools.is_none());
         }
+    }
+
+    #[test]
+    fn resolve_agent_root_uses_workspace_path_when_valid_and_falls_back_to_current_dir() {
+        let current = std::env::current_dir().unwrap_or_default();
+        let canonical_current = current.canonicalize().unwrap_or_else(|_| current.clone());
+
+        // None falls back to current_dir
+        assert_eq!(resolve_agent_root(None), canonical_current);
+
+        // Empty string falls back to current_dir
+        assert_eq!(resolve_agent_root(Some("")), canonical_current);
+        assert_eq!(resolve_agent_root(Some("   ")), canonical_current);
+
+        // Non-existent directory falls back to current_dir
+        assert_eq!(
+            resolve_agent_root(Some("/path/that/does/not/exist_12345")),
+            canonical_current
+        );
+
+        // Valid directory returns its canonical path
+        let temp = std::env::temp_dir();
+        let canonical_temp = temp.canonicalize().unwrap_or_else(|_| temp.clone());
+        assert_eq!(
+            resolve_agent_root(Some(temp.to_str().unwrap())),
+            canonical_temp
+        );
     }
 }

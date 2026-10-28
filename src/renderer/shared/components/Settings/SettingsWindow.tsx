@@ -1,0 +1,796 @@
+import { Bell } from 'lucide-react'
+import React, { useState, useEffect, useRef } from 'react'
+import '../../css/settings/base.css'
+import '../../css/settings/general.css'
+import '../../css/settings/profile.css'
+import '../../css/settings/automation.css'
+import '../../css/settings/theme.css'
+import '../../css/settings/plugins.css'
+import '../../css/settings/agents.css'
+import '../../css/settings/shortcuts.css'
+import { getLocalApiBase } from '../../platform'
+import { isTauriRuntime, getProfileValue, setProfileValue, setActiveModel, authUpdateProfile } from '@/tauri'
+import { useAuthUser } from '../app/AuthGate'
+import { useProviderModels } from '@/hooks/useProviderModels'
+import { useImageProviderModels } from '@/hooks/useImageProviderModels'
+import { useVideoProviderModels } from '@/hooks/useVideoProviderModels'
+import NotificationsTab from './NotificationsTab'
+import GeneralTab from './GeneralTab'
+import ProfileTab from './ProfileTab'
+import MemoryTab from './MemoryTab'
+import AudioTab from './AudioTab'
+import AutomationTab from './AutomationTab'
+import ThemeTab from './ThemeTab'
+import PluginsTab from './PluginsTab'
+import AgentsTab from './AgentsTab'
+import {
+  GEMINI_MODELS,
+  OPENAI_MODELS,
+  OPENROUTER_MODELS,
+  DEEPSEEK_MODELS,
+  ANTHROPIC_MODELS,
+  HF_MODELS,
+  LOCAL_MODELS,
+  OLLAMA_MODELS,
+} from '../../constants/models'
+
+export type {
+  CustomProviderModel,
+  CustomProviderHeader,
+  CustomProviderConfig,
+} from '../../types'
+
+import { DEFAULT_CONFIG, migrateFontFamily, migrateTypographyScale, migrateTuiTheme } from '../../constants/config'
+export { DEFAULT_CONFIG }
+import { applyThemeStyles } from '../../utils/ui'
+import { APP_VERSION } from '../../version'
+
+type TabType =
+  | 'sect-notifications'
+  | 'sect-general'
+  | 'sect-profile'
+  | 'sect-audio'
+  | 'sect-automation'
+  | 'sect-theme'
+  | 'sect-plugins'
+  | 'sect-shortcuts'
+  | 'sect-memory'
+  | 'sect-agents'
+
+interface SettingsNavItem {
+  id: TabType
+  label: string
+  group: 'Account' | 'Workspace' | 'Appearance' | 'Advanced'
+  icon: React.ReactNode
+}
+
+const SETTINGS_NAV: SettingsNavItem[] = [
+  {
+    id: 'sect-general',
+    label: 'General',
+    group: 'Workspace',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    ),
+  },
+  { id: 'sect-notifications', label: 'Notifications', group: 'Workspace', icon: <Bell size={14} aria-hidden="true" /> },
+  {
+    id: 'sect-profile',
+    label: 'Profile',
+    group: 'Account',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+        <circle cx="12" cy="7" r="4"></circle>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-automation',
+    label: 'Automation',
+    group: 'Workspace',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+        <line x1="8" y1="21" x2="16" y2="21"></line>
+        <line x1="12" y1="17" x2="12" y2="21"></line>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-theme',
+    label: 'Theme & UI',
+    group: 'Appearance',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-memory',
+    label: 'Personal Memory',
+    group: 'Account',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-audio',
+    label: 'Audio & Voice',
+    group: 'Appearance',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-plugins',
+    label: 'Plugins',
+    group: 'Advanced',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+        <polyline points="2 17 12 22 22 17"></polyline>
+        <polyline points="2 12 12 17 22 12"></polyline>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-agents',
+    label: 'Multi-Agent (Beta)',
+    group: 'Workspace',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+        <circle cx="9" cy="7" r="4"></circle>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+      </svg>
+    ),
+  },
+]
+
+const SETTINGS_NAV_GROUPS: Array<'Account' | 'Workspace' | 'Appearance' | 'Advanced'> = [
+  'Account',
+  'Workspace',
+  'Appearance',
+  'Advanced',
+]
+
+export {
+  GEMINI_MODELS,
+  OPENAI_MODELS,
+  OPENROUTER_MODELS,
+  DEEPSEEK_MODELS,
+  ANTHROPIC_MODELS,
+  HF_MODELS,
+  LOCAL_MODELS,
+  OLLAMA_MODELS,
+} from '../../constants/models'
+
+export default function SettingsWindow() {
+  const [activeTab, setActiveTab] = useState<TabType>('sect-general')
+  const [navSearch, setNavSearch] = useState('')
+  const [config, setConfig] = useState(DEFAULT_CONFIG)
+
+  const [userName, setUserName] = useState('')
+  const [userPreferences, setUserPreferences] = useState('')
+
+  const { user: authUser, refreshUser } = useAuthUser()
+  const [profileName, setProfileName] = useState('')
+  const [profileImageUrl, setProfileImageUrl] = useState('')
+  const profileSeededRef = useRef(false)
+
+  useEffect(() => {
+    if (authUser && !profileSeededRef.current) {
+      setProfileName(authUser.name || '')
+      setProfileImageUrl(authUser.image || '')
+      profileSeededRef.current = true
+    }
+  }, [authUser])
+
+  const [customGemini, setCustomGemini] = useState('')
+  const [customOpenAI, setCustomOpenAI] = useState('')
+  const [customOpenRouter, setCustomOpenRouter] = useState('')
+  const [customDeepSeek, setCustomDeepSeek] = useState('')
+  const [customAnthropic, setCustomAnthropic] = useState('')
+  const [customHF, setCustomHF] = useState('')
+  const [customLocal, setCustomLocal] = useState('')
+  const [customOllama, setCustomOllama] = useState('')
+  const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
+
+  const { models: dynamicGeminiModels } = useProviderModels('gemini', config.apiKey)
+  const { models: dynamicAnthropicModels } = useProviderModels('anthropic', config.anthropicApiKey)
+  const { models: dynamicOpenAIModels } = useProviderModels('openai', config.openaiApiKey)
+  const { models: dynamicOpenRouterModels } = useProviderModels('openrouter', config.openrouterApiKey)
+  const { models: dynamicDeepSeekModels } = useProviderModels('deepseek', config.deepseekApiKey)
+  const { models: dynamicLocalModels } = useProviderModels('local_openai', '', config.localApiBaseUrl)
+
+  const { options: nanoBananaImageOpts } = useImageProviderModels('nanobanana', config.apiKey)
+  const { options: dalleImageOpts } = useImageProviderModels('dalle', config.openaiApiKey)
+  const { options: replicateImageOpts } = useImageProviderModels('replicate', config.replicateApiKey)
+  const { options: stabilityImageOpts } = useImageProviderModels('stability', config.stabilityApiKey)
+  const { options: ideogramImageOpts } = useImageProviderModels('ideogram', config.ideogramApiKey)
+  const { options: bflImageOpts } = useImageProviderModels('bfl', config.bflApiKey)
+
+  const dynamicImageModels = React.useMemo(
+    () => ({
+      nanobanana: nanoBananaImageOpts,
+      dalle: dalleImageOpts,
+      replicate: replicateImageOpts,
+      stability: stabilityImageOpts,
+      ideogram: ideogramImageOpts,
+      bfl: bflImageOpts,
+    }),
+    [nanoBananaImageOpts, dalleImageOpts, replicateImageOpts, stabilityImageOpts, ideogramImageOpts, bflImageOpts],
+  )
+
+  const { options: veoVideoOpts } = useVideoProviderModels('veo', config.apiKey)
+  const dynamicVideoModels = React.useMemo(
+    () => ({
+      veo: veoVideoOpts,
+    }),
+    [veoVideoOpts],
+  )
+
+  const [updateMessage, setUpdateMessage] = useState('')
+  const [updateAvailable, setUpdateAvailable] = useState(false)
+
+  const isDesktopApp = isTauriRuntime()
+
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        let loadedConfig: any = null
+        if (window.settingsApi) {
+          loadedConfig = await window.settingsApi.getSettings()
+        } else {
+          const saved = await getProfileValue('user-settings')
+          if (saved) {
+            loadedConfig = JSON.parse(saved)
+          }
+        }
+
+        if (loadedConfig) {
+          const merged = {
+            ...DEFAULT_CONFIG,
+            ...migrateTuiTheme(migrateTypographyScale(migrateFontFamily(loadedConfig))),
+          }
+          setConfig(merged)
+
+          if (merged.geminiModel && !GEMINI_MODELS.includes(merged.geminiModel)) {
+            setCustomGemini(merged.geminiModel)
+          }
+          if (merged.openaiModel && !OPENAI_MODELS.includes(merged.openaiModel)) {
+            setCustomOpenAI(merged.openaiModel)
+          }
+          if (merged.openrouterModel && !OPENROUTER_MODELS.includes(merged.openrouterModel)) {
+            setCustomOpenRouter(merged.openrouterModel)
+          }
+          if (merged.deepseekModel && !DEEPSEEK_MODELS.includes(merged.deepseekModel)) {
+            setCustomDeepSeek(merged.deepseekModel)
+          }
+          if (merged.anthropicModel && !ANTHROPIC_MODELS.includes(merged.anthropicModel)) {
+            setCustomAnthropic(merged.anthropicModel)
+          }
+          if (merged.hfModel && !HF_MODELS.includes(merged.hfModel)) {
+            setCustomHF(merged.hfModel)
+          }
+          if (merged.localModelName && !LOCAL_MODELS.includes(merged.localModelName)) {
+            setCustomLocal(merged.localModelName)
+          }
+          if (merged.ollamaModel && !OLLAMA_MODELS.includes(merged.ollamaModel)) {
+            setCustomOllama(merged.ollamaModel)
+          }
+
+          applyThemeStyles(merged)
+        }
+
+        const nameVal = await getProfileValue('name')
+        if (nameVal) setUserName(nameVal)
+        const prefVal = await getProfileValue('preferences')
+        if (prefVal) setUserPreferences(prefVal)
+      } catch (e) {
+        console.error('Failed to load settings:', e)
+      }
+    }
+    loadSettings()
+  }, [])
+
+  useEffect(() => {
+    const fetchOllamaModels = async () => {
+      const host = config.ollamaHost || 'http://127.0.0.1:11434'
+      const cleanHost = host.replace(/\/$/, '')
+      try {
+        const res = await fetch(`${cleanHost}/api/tags`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data && Array.isArray(data.models)) {
+            const names = data.models.map((m: any) => m.name)
+            setDynamicOllamaModels(names)
+            return
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch local Ollama models:', err)
+      }
+      setDynamicOllamaModels(OLLAMA_MODELS)
+    }
+
+    fetchOllamaModels()
+  }, [config.ollamaHost])
+
+  const resolveCustomModels = () => {
+    const finalConfig = { ...config }
+    if (config.geminiModel === 'custom') {
+      finalConfig.geminiModel = customGemini || 'gemini-2.5-flash'
+    }
+    if (config.openaiModel === 'custom') {
+      finalConfig.openaiModel = customOpenAI || 'gpt-4o'
+    }
+    if (config.openrouterModel === 'custom') {
+      finalConfig.openrouterModel = customOpenRouter || 'openai/gpt-4o-mini'
+    }
+    if (config.deepseekModel === 'custom') {
+      finalConfig.deepseekModel = customDeepSeek || 'deepseek-v4-flash'
+    }
+    if (config.anthropicModel === 'custom') {
+      finalConfig.anthropicModel = customAnthropic || 'claude-3-5-sonnet-latest'
+    }
+    if (config.hfModel === 'custom') {
+      finalConfig.hfModel = customHF || 'meta-llama/Meta-Llama-3-8B-Instruct'
+    }
+    if (config.localModelName === 'custom') {
+      finalConfig.localModelName = customLocal || 'local-model'
+    }
+    if (config.ollamaModel === 'custom') {
+      finalConfig.ollamaModel = customOllama || 'llama3:latest'
+    }
+    return finalConfig
+  }
+
+  const handleSave = async () => {
+    const finalConfig = resolveCustomModels()
+
+    try {
+      await setProfileValue('name', userName)
+      await setProfileValue('preferences', userPreferences)
+    } catch (e) {
+      console.error('Failed to save user profile memory:', e)
+    }
+
+    try {
+      const updated = await authUpdateProfile(profileName, profileImageUrl)
+      refreshUser(updated)
+    } catch (e) {
+      console.error('Failed to save account profile:', e)
+    }
+
+    const getActiveModelName = (provider: string, cfg: typeof finalConfig) => {
+      switch (provider) {
+        case 'gemini':
+          return cfg.geminiModel
+        case 'openai':
+          return cfg.openaiModel
+        case 'openrouter':
+          return cfg.openrouterModel
+        case 'deepseek':
+          return cfg.deepseekModel
+        case 'anthropic':
+          return cfg.anthropicModel
+        case 'huggingface':
+          return cfg.hfModel
+        case 'local_openai':
+          return cfg.localModelName
+        case 'ollama':
+          return cfg.ollamaModel
+        default:
+          return ''
+      }
+    }
+    const oldModel = getActiveModelName(config.aiProvider, config)
+    const newModel = getActiveModelName(finalConfig.aiProvider, finalConfig)
+    if (config.aiProvider !== finalConfig.aiProvider || oldModel !== newModel) {
+      setActiveModel(finalConfig.aiProvider, newModel).catch(() => {})
+    }
+
+    if (window.settingsApi) {
+      await window.settingsApi.saveSettings(finalConfig)
+      applyThemeStyles(finalConfig)
+      window.settingsApi.closeSettings()
+    } else {
+      try {
+        await setProfileValue('user-settings', JSON.stringify(finalConfig))
+        applyThemeStyles(finalConfig)
+      } catch (e) {
+        console.error('Failed to save user settings:', e)
+      }
+    }
+  }
+
+  const handleSaveWithoutClosing = async () => {
+    const finalConfig = resolveCustomModels()
+
+    try {
+      await setProfileValue('name', userName)
+      await setProfileValue('preferences', userPreferences)
+    } catch (e) {
+      console.error('Failed to save user profile memory:', e)
+    }
+
+    if (window.settingsApi) {
+      await window.settingsApi.saveSettings(finalConfig)
+      applyThemeStyles(finalConfig)
+    } else {
+      try {
+        await setProfileValue('user-settings', JSON.stringify(finalConfig))
+        applyThemeStyles(finalConfig)
+      } catch (e) {
+        console.error('Failed to save user settings:', e)
+      }
+    }
+  }
+
+  const handleReset = async () => {
+    if (confirm('Reset all settings to default?')) {
+      setConfig(DEFAULT_CONFIG)
+      setCustomGemini('')
+      setCustomOpenAI('')
+      setCustomAnthropic('')
+      setCustomHF('')
+      setCustomLocal('')
+      setCustomOllama('')
+      setUserName('')
+      setUserPreferences('')
+      try {
+        await setProfileValue('name', '')
+        await setProfileValue('preferences', '')
+      } catch (e) {
+        console.error('Failed to reset profile memory:', e)
+      }
+      applyThemeStyles(DEFAULT_CONFIG)
+    }
+  }
+
+  const handleClose = () => {
+    window.settingsApi?.closeSettings()
+  }
+
+  const handleOpenExternal = (e: React.MouseEvent, url: string) => {
+    e.preventDefault()
+    if (window.settingsApi?.openExternal) {
+      window.settingsApi.openExternal(url)
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
+  }
+
+  const handleConnectPlugin = async (plugin: string) => {
+    if (!isDesktopApp && plugin === 'discord') {
+      alert('Discord Rich Presence requires the desktop app.')
+      return
+    }
+    if (plugin === 'discord') {
+      try {
+        await window.api.executeProactiveAction({ type: 'plugin', pluginName: 'discord', target: '' })
+        alert('Discord Rich Presence updated.')
+      } catch (reason) {
+        alert(String(reason))
+      }
+      return
+    }
+    alert(`Configure ${plugin} credentials, then invoke the plugin from Mint chat.`)
+  }
+
+  const handleCheckUpdates = async () => {
+    if (!isDesktopApp) {
+      setUpdateMessage('Desktop updates are only available in the Tauri app.')
+      return
+    }
+    try {
+      const update = await window.settingsApi.checkForUpdates()
+      setUpdateAvailable(Boolean(update.available))
+      setUpdateMessage(update.available ? `Mint ${update.version} is available.` : 'Mint is up to date.')
+    } catch (reason) {
+      setUpdateMessage(String(reason))
+    }
+  }
+
+  const handleInstallUpdate = async () => {
+    if (!isDesktopApp) {
+      setUpdateMessage('Desktop updates are only available in the Tauri app.')
+      return
+    }
+    if (!confirm('Install the signed Mint update now?')) return
+    try {
+      setUpdateMessage(await window.settingsApi.installAvailableUpdate())
+      setUpdateAvailable(false)
+    } catch (reason) {
+      setUpdateMessage(String(reason))
+    }
+  }
+
+  const updateField = (field: keyof typeof DEFAULT_CONFIG, value: any) => {
+    setConfig((prev) => {
+      const updated = { ...prev, [field]: value }
+      applyThemeStyles(updated)
+      if (field === 'showDesktopWidget' && window.settingsApi) {
+        void window.settingsApi.saveSettings(updated).catch((error) => {
+          console.error('Failed to save Assistant Presence setting:', error)
+        })
+      }
+      return updated
+    })
+  }
+
+  const updateFields = (patch: Partial<typeof DEFAULT_CONFIG>) => {
+    setConfig((prev) => {
+      const updated = { ...prev, ...patch }
+      applyThemeStyles(updated)
+      if (window.settingsApi) {
+        void window.settingsApi.saveSettings(updated).catch((error) => {
+          console.error('Failed to save live theme settings:', error)
+        })
+      }
+      return updated
+    })
+  }
+
+  return (
+    <div className="settings-container">
+      <header className="settings-header drag-region">
+        <div className="header-left">
+          <span className="settings-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </span>
+          <div>
+            <h1>Settings</h1>
+            <p>{isDesktopApp ? 'Configure Mint assistant behavior and integrations.' : `Web settings through Local API: ${getLocalApiBase()}`}</p>
+          </div>
+        </div>
+        <button className="close-btn" onClick={handleClose} aria-label="Close">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </header>
+
+      <main className="settings-body">
+        <nav className="settings-sidebar" aria-label="Settings sections">
+          <div className="settings-nav-search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input
+              type="text"
+              placeholder="Search"
+              value={navSearch}
+              onChange={(e) => setNavSearch(e.target.value)}
+              aria-label="Search settings"
+            />
+          </div>
+          <div className="settings-nav-scroll">
+            {SETTINGS_NAV_GROUPS.map((group) => {
+              const items = SETTINGS_NAV.filter(
+                (item) => item.group === group && item.label.toLowerCase().includes(navSearch.trim().toLowerCase()),
+              )
+              if (!items.length) return null
+              return (
+                <div className="settings-nav-group" key={group}>
+                  <p className="settings-nav-group-label">{group}</p>
+                  {items.map((item) => (
+                    <button
+                      key={item.id}
+                      className={`tab-btn ${activeTab === item.id ? 'active' : ''}`}
+                      onClick={() => setActiveTab(item.id)}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center' }}>{item.icon}</span>
+                      <strong>{item.label}</strong>
+                    </button>
+                  ))}
+                </div>
+              )
+            })}
+          </div>
+        </nav>
+
+        <div className="settings-content">
+          {!isDesktopApp && (
+            <div className="web-safe-notice">
+              <strong>Web mode</strong>
+              <span>Desktop-only controls are hidden or disabled here. Settings are saved through the Local API server.</span>
+            </div>
+          )}
+
+          {activeTab === 'sect-general' && (
+            <GeneralTab
+              config={config}
+              updateField={updateField}
+              customGemini={customGemini}
+              setCustomGemini={setCustomGemini}
+              customOpenAI={customOpenAI}
+              setCustomOpenAI={setCustomOpenAI}
+              customOpenRouter={customOpenRouter}
+              setCustomOpenRouter={setCustomOpenRouter}
+              customDeepSeek={customDeepSeek}
+              setCustomDeepSeek={setCustomDeepSeek}
+              customAnthropic={customAnthropic}
+              setCustomAnthropic={setCustomAnthropic}
+              customHF={customHF}
+              setCustomHF={setCustomHF}
+              customLocal={customLocal}
+              setCustomLocal={setCustomLocal}
+              customOllama={customOllama}
+              setCustomOllama={setCustomOllama}
+              dynamicOllamaModels={dynamicOllamaModels}
+              dynamicGeminiModels={dynamicGeminiModels}
+              dynamicAnthropicModels={dynamicAnthropicModels}
+              dynamicOpenAIModels={dynamicOpenAIModels}
+              dynamicOpenRouterModels={dynamicOpenRouterModels}
+              dynamicDeepSeekModels={dynamicDeepSeekModels}
+              dynamicLocalModels={dynamicLocalModels}
+              dynamicImageModels={dynamicImageModels}
+              dynamicVideoModels={dynamicVideoModels}
+              updateAvailable={updateAvailable}
+              updateMessage={updateMessage}
+              handleCheckUpdates={handleCheckUpdates}
+              handleInstallUpdate={handleInstallUpdate}
+              isDesktopApp={isDesktopApp}
+              onSaveWithoutClosing={handleSaveWithoutClosing}
+            />
+          )}
+
+          {activeTab === 'sect-notifications' && (
+            <NotificationsTab
+              settings={config.notificationSettings}
+              onChange={(value) => updateField('notificationSettings', value)}
+            />
+          )}
+
+          {activeTab === 'sect-profile' && (
+            <ProfileTab
+              name={profileName}
+              setName={setProfileName}
+              imageUrl={profileImageUrl}
+              setImageUrl={setProfileImageUrl}
+            />
+          )}
+
+          {activeTab === 'sect-memory' && (
+            <MemoryTab
+              userName={userName}
+              setUserName={setUserName}
+              userPreferences={userPreferences}
+              setUserPreferences={setUserPreferences}
+            />
+          )}
+
+          {activeTab === 'sect-audio' && (
+            <AudioTab
+              config={config}
+              updateField={updateField}
+              apiKey={config.apiKey}
+            />
+          )}
+
+          {activeTab === 'sect-automation' && (
+            <AutomationTab
+              config={config}
+              updateField={updateField}
+            />
+          )}
+
+          {activeTab === 'sect-theme' && (
+            <ThemeTab
+              config={config}
+              updateField={updateField}
+              updateFields={updateFields}
+            />
+          )}
+
+          {activeTab === 'sect-plugins' && (
+            <PluginsTab
+              config={config}
+              updateField={updateField}
+              updateFields={updateFields}
+              handleConnectPlugin={handleConnectPlugin}
+            />
+          )}
+
+          {activeTab === 'sect-agents' && (
+            <AgentsTab
+              config={config}
+              updateField={updateField}
+              dynamicOllamaModels={dynamicOllamaModels}
+              providerModels={{
+                gemini: dynamicGeminiModels,
+                anthropic: dynamicAnthropicModels,
+                openai: dynamicOpenAIModels,
+                openrouter: dynamicOpenRouterModels,
+                deepseek: dynamicDeepSeekModels,
+                local_openai: dynamicLocalModels,
+              }}
+            />
+          )}
+        </div>
+      </main>
+
+      <footer className="settings-footer">
+        <div className="settings-footer-meta">
+          <span className="settings-footer-version">Version: {APP_VERSION}</span>
+          <div className="settings-footer-links">
+            <a
+              href="https://github.com/Pheem49/Mint"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => handleOpenExternal(e, 'https://github.com/Pheem49/Mint')}
+              className="settings-footer-link"
+              title="https://github.com/Pheem49/Mint"
+            >
+              GitHub
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+            <span className="settings-footer-separator">•</span>
+            <a
+              href="https://mint.aemeth.xyz/"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => handleOpenExternal(e, 'https://mint.aemeth.xyz/')}
+              className="settings-footer-link"
+              title="https://mint.aemeth.xyz/"
+            >
+              Website
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+          </div>
+        </div>
+        <div className="footer-actions">
+          <button type="button" className="btn-secondary" onClick={handleReset} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="1 4 1 10 7 10"></polyline>
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+            </svg>
+            Reset Defaults
+          </button>
+          <button type="button" className="btn-primary" onClick={(e) => { e.preventDefault(); handleSave(); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+              <polyline points="17 21 17 13 7 13 7 21"></polyline>
+              <polyline points="7 3 7 8 15 8"></polyline>
+            </svg>
+            Save Settings
+          </button>
+        </div>
+      </footer>
+    </div>
+  )
+}

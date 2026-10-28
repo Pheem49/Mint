@@ -3,7 +3,7 @@ import { collectSessionSources } from './sessionSources'
 import type { AgentProgress } from '../types'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import SessionSources from '../components/SessionSources'
+import SessionSources from '../components/workspace/SessionSources'
 
 const search = (url: string, title = 'Reference'): AgentProgress => ({ type: 'ToolEnd', data: { action: 'web_search', input: { query: 'example' }, result: `1. ${title}\nURL: ${url}\nA useful reference` } })
 describe('session sources', () => {
@@ -27,5 +27,45 @@ describe('session sources', () => {
     const html = renderToStaticMarkup(createElement(SessionSources, { sources, loading: false, error: '', onRetry: () => {}, onOpenLibrary: () => {} }))
     expect(html).toContain('src="https://www.google.com/s2/favicons?sz=32&amp;domain=open.spotify.com"')
     expect(html).toContain('referrerPolicy="no-referrer"')
+  })
+  it('maps libraryItemId onto session sources and exposes tool preview for images', () => {
+    const sources = collectSessionSources({
+      attachments: [{
+        id: 10,
+        interactionId: 1,
+        name: 'diagram.png',
+        kind: 'image',
+        mimeType: 'image/png',
+        thumbnailDataUri: 'data:image/png;base64,abc',
+        libraryItemId: 'lib-123',
+      }],
+      webSearchProgress: [],
+    })
+    expect(sources[0]).toMatchObject({
+      id: 'attachment:10',
+      kind: 'image',
+      name: 'diagram.png',
+      libraryItemId: 'lib-123',
+      thumbnailDataUri: 'data:image/png;base64,abc',
+    })
+    const htmlWithPreview = renderToStaticMarkup(createElement(SessionSources, {
+      sources,
+      loading: false,
+      error: '',
+      onRetry: () => {},
+      onOpenLibrary: () => {},
+      onOpenArtifact: () => {},
+    }))
+    expect(htmlWithPreview).toContain('Open image preview in Tools')
+
+    const htmlWithoutPreview = renderToStaticMarkup(createElement(SessionSources, {
+      sources,
+      loading: false,
+      error: '',
+      onRetry: () => {},
+      onOpenLibrary: () => {},
+    }))
+    expect(htmlWithoutPreview).not.toContain('Open image preview in Tools')
+    expect(htmlWithoutPreview).toContain('href="/library?item=lib-123"')
   })
 })

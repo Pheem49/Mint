@@ -84,6 +84,29 @@ function withMediaPlaceholders(message: string, imageDataUri?: string | null, vi
   return message
 }
 
+const MAX_REQUEST_BYTES = 32 * 1024 * 1024
+const REQUEST_LIMIT_ERROR = 'Attachments exceed the 32 MiB request limit. Send fewer files at once.'
+
+function utf8ByteLength(value?: string | null): number {
+  if (!value) return 0
+  if (value.length > MAX_REQUEST_BYTES) return value.length
+  if (value.startsWith('data:') && value.includes(';base64,')) return value.length
+  let bytes = value.length
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    if (code >= 0x80) {
+      if (code <= 0x7ff) bytes += 1
+      else if (code >= 0xd800 && code <= 0xdbff) {
+        bytes += 2
+        i++
+      } else {
+        bytes += 2
+      }
+    }
+  }
+  return bytes
+}
+
 /** Shared wire contract; adapters supply runtime detection, address and authentication. */
 export function createConversationTransport(environment: TransportEnvironment): ConversationOperations {
   const requestBody = (message: string, imageDataUri?: string | null, audioDataUri?: string | null,
@@ -95,14 +118,33 @@ export function createConversationTransport(environment: TransportEnvironment): 
     imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, chatId, agentId, planMode, pinnedMcpServer,
   })
 
-  const validate = (request: ReturnType<typeof requestBody>) => {
-    const body = JSON.stringify(request)
-    if (new TextEncoder().encode(body).byteLength > 32 * 1024 * 1024) throw new Error('Attachments exceed the 32 MiB request limit. Send fewer files at once.')
-    return body
+  const assertWithinLimit = (request: ReturnType<typeof requestBody>) => {
+    const metadataBytes = request.attachmentMetadata
+      ? utf8ByteLength(request.attachmentMetadata.requestId)
+        + (request.attachmentMetadata.imageNames?.reduce((sum, name) => sum + utf8ByteLength(name) + 4, 0) ?? 0)
+        + (request.attachmentMetadata.videoNames?.reduce((sum, name) => sum + utf8ByteLength(name) + 4, 0) ?? 0)
+      : 0
+    const totalBytes = 256
+      + metadataBytes
+      + utf8ByteLength(request.message)
+      + utf8ByteLength(request.systemInstruction)
+      + utf8ByteLength(request.imageDataUri)
+      + utf8ByteLength(request.audioDataUri)
+      + utf8ByteLength(request.videoDataUri)
+      + utf8ByteLength(request.documentAttachment?.filename)
+      + utf8ByteLength(request.documentAttachment?.dataUri)
+      + utf8ByteLength(request.workspacePath)
+      + utf8ByteLength(request.chatId)
+      + utf8ByteLength(request.agentId)
+      + utf8ByteLength(request.pinnedMcpServer)
+    if (totalBytes > MAX_REQUEST_BYTES) throw new Error(REQUEST_LIMIT_ERROR)
   }
-  const post = (route: string, request: ReturnType<typeof requestBody>) => environment.fetch(`${environment.apiBase()}/${route}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: validate(request),
-  })
+  const post = (route: string, request: ReturnType<typeof requestBody>) => {
+    assertWithinLimit(request)
+    return environment.fetch(`${environment.apiBase()}/${route}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+    })
+  }
 
 
   return {
@@ -125,7 +167,7 @@ export function createConversationTransport(environment: TransportEnvironment): 
           return { provider: 'error', model: 'error', text: `Failed to connect to Local API Server: ${error}` }
         }
       }
-      validate(request)
+      assertWithinLimit(request)
       const { invoke } = await import('@tauri-apps/api/core')
       const response = await invoke<ChatResponse>('send_chat_message', { ownerToken: environment.ownerToken(), request, ...(attachmentMetadata ? { attachmentMetadata } : {}) })
       return response
@@ -145,7 +187,7 @@ export function createConversationTransport(environment: TransportEnvironment): 
         }
         return readStream(response, callbacks)
       }
-      validate(request)
+      assertWithinLimit(request)
       const { invoke, Channel } = await import('@tauri-apps/api/core')
       const onEvent = new Channel<StreamEvent>()
       onEvent.onmessage = event => { deliverEvent(event, callbacks) }

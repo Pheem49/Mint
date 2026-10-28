@@ -370,6 +370,8 @@ pub async fn run_interactive_chat_with_session(
         jobs: BackgroundJobs::new(),
     };
 
+    crate::companion_navigation::configure(&session.chat_id);
+
     let mut tui = if use_tui {
         match chat_tui::ChatTui::enter(&session.current_dir) {
             Ok(terminal) => {
@@ -434,6 +436,7 @@ pub async fn run_interactive_chat_with_session(
         ) {
             Ok(Some(target_id)) => {
                 session.chat_id = target_id.clone();
+                crate::companion_navigation::set_chat(&session.chat_id);
                 mint_core::live_sync::update_live_sync_chat_id(&session.chat_id);
                 ui.reload_transcript(&session.chat_id, &session.current_dir);
                 ui.push_notice(format!("Switched to session: {target_id}"));
@@ -444,6 +447,33 @@ pub async fn run_interactive_chat_with_session(
             Err(err) => {
                 ui.push_notice(format!("Failed to load sessions: {err}"));
             }
+        }
+    }
+
+    let needs_onboarding = session.config.api_key.is_empty()
+        && session.config.anthropic_api_key.is_empty()
+        && session.config.openai_api_key.is_empty()
+        && session.config.openrouter_api_key.is_empty()
+        && session.config.deepseek_api_key.is_empty()
+        && session.config.hf_api_key.is_empty()
+        && session.config.local_api_base_url.is_empty()
+        && session.config.ollama_model.is_empty();
+
+    if needs_onboarding && !prompt_resume_at_start {
+        let mut ui: Box<dyn CommandUi> = match tui.as_mut() {
+            Some((terminal, state, handle)) => {
+                Box::new(FullScreenCommandUi::new(terminal, state, handle))
+            }
+            None => Box::new(ClassicCommandUi::new()),
+        };
+        let should_onboard = ui
+            .prompt_confirm(
+                "No AI provider configured yet. Run the onboarding wizard now?",
+                true,
+            )
+            .unwrap_or(false);
+        if should_onboard {
+            let _ = ui.prompt_onboard(&mut session.config);
         }
     }
 
@@ -853,11 +883,13 @@ pub fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Re
     Ok(())
 }
 pub fn load_all_available_skills(current_dir: &Path) -> Vec<mint_core::LearnedSkill> {
-    MemoryStore::open_default()
-        .ok()
-        .and_then(|memory| {
-            mint_core::skill_inventory::list_available_skills(&memory, Some(current_dir)).ok()
-        })
+    let memory = MemoryStore::open_default().unwrap_or_else(|_| {
+        MemoryStore::open(std::env::temp_dir().join(format!(
+            "mint-fallback-memory-{}.sqlite",
+            std::process::id()
+        )))
+    });
+    mint_core::skill_inventory::list_available_skills(&memory, Some(current_dir))
         .unwrap_or_default()
         .into_iter()
         .map(|entry| entry.skill)

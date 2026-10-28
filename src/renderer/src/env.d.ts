@@ -1,8 +1,20 @@
 declare module '*.css';
 declare module '*.svg?url';
+declare module '*.svg?raw' {
+  const content: string;
+  export default content;
+}
 declare module '*.md?raw' {
   const content: string;
   export default content;
+}
+declare module 'react-dom' {
+  export function createPortal(children: any, container: any, key?: any): any;
+  export function flushSync<R>(fn: () => R): R;
+}
+declare module 'react-dom/server' {
+  export function renderToStaticMarkup(element: any): string;
+  export function renderToString(element: any): string;
 }
 
 type Unlisten = () => void;
@@ -41,6 +53,7 @@ interface Window {
     clearAiNotifications: () => void;
     getTtsUrls: (text: string) => Promise<Array<{ shortText: string; url: string }>>;
     setAiState: (state: string) => void;
+    openExternal: (url: string) => Promise<any>;
   };
   settingsApi: {
     getSettings: () => Promise<any>;

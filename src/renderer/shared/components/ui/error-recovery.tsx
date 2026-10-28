@@ -11,7 +11,7 @@ export interface ErrorRecoveryProps {
 /** The application fallback must work independently of the loaded app's theme. */
 export function ErrorRecovery({ onBackToChat, onRefresh }: ErrorRecoveryProps) {
   return (
-    <main className="error-recovery" style={{ flex: 1, minHeight: 0, overflowY: 'auto', color: '#f4f4f5' }}>
+    <main className="error-recovery" style={{ flex: 1, minHeight: 0, overflowY: 'auto', color: 'var(--text-primary, #f4f4f5)' }}>
       <div className="error-recovery-content">
         <div className="error-recovery-orb" style={{ width: 'min(280px, 60vw, 34vh)', aspectRatio: '1' }}>
           <VoicePoweredOrb animate={false} enableVoiceControl={false} hue={0} />

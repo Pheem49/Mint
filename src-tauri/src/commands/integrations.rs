@@ -43,10 +43,16 @@ pub(crate) async fn test_mcp_connection(
 }
 
 #[tauri::command]
-pub(crate) async fn read_mcp_artifact(id: String) -> Result<String, String> {
+pub(crate) async fn read_mcp_artifact(
+    id: String,
+    chat_id: Option<String>,
+) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         use base64::Engine as _;
         let (entry, bytes) = mint_core::integrations::mcp_result::read_artifact(&id)?;
+        if chat_id.as_deref() != Some(entry.chat_id.as_str()) {
+            return Err("Artifact unavailable in this conversation".into());
+        }
         let mime = if entry.kind == "image" {
             entry.mime_type
         } else {

@@ -177,3 +177,10 @@ pub(crate) async fn remove_library_item(id: String) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?
 }
+
+#[tauri::command]
+pub(crate) async fn speech_request(
+    request: mint_core::tts::playback::SpeechRequest,
+) -> Result<mint_core::tts::playback::SpeechReply, String> {
+    mint_core::tts::playback::request(request).await
+}

@@ -1,4 +1,6 @@
 //! Local, optional companion transport. Never boots an API server or integrations.
+pub mod navigation;
+
 use futures_util::{SinkExt, StreamExt};
 use mint_companion_protocol::{
     Command, Event, HostDescriptor, Session, Status, Turn, TurnBook, VERSION,
@@ -135,6 +137,9 @@ impl Hub {
         Event::Snapshot {
             host_id: self.host_id.clone(),
             version: VERSION,
+            surface: navigation::surface(),
+            speech: true,
+            chat_id: selected.map(str::to_owned),
             sessions: self.sessions.lock().unwrap().clone(),
             turns,
         }
@@ -300,6 +305,10 @@ async fn listen(hub: Arc<Hub>) -> std::io::Result<()> {
         name: format!("{name} · {}", std::process::id()),
         endpoint: format!("ws://{}/companion/v1", listener.local_addr()?),
         token: token.clone(),
+        identity: std::env::current_exe()
+            .ok()
+            .zip(std::env::current_dir().ok())
+            .and_then(|paths| serde_json::to_string(&paths).ok()),
     };
     let path = dir.join(format!("{}.json", hub.host_id));
     let mut options = std::fs::OpenOptions::new();
@@ -393,6 +402,28 @@ async fn serve(socket: TcpStream, hub: Arc<Hub>, token: String) {
                 if let Message::Ping(bytes) = message { if socket.send(Message::Pong(bytes)).await.is_err() { break; } continue; }
                 let Message::Text(text) = message else { continue; };
                 let reply = match serde_json::from_str::<Command>(&text) {
+                    Ok(Command::Speech { request }) => {
+                        let allowed = match &request {
+                            mint_companion_protocol::SpeechRequest::Prepare { turn_id, text, audio_only, .. } => turn_id.is_some() && text.is_none() && *audio_only,
+                            _ => true,
+                        };
+                        if !allowed { Event::Error { request_id: None, message: "Companion can only read a saved completed reply".into() } }
+                        else { match crate::tts::playback::request(request).await {
+                            Ok(reply) => Event::Speech { reply },
+                            Err(message) => Event::Error { request_id: None, message },
+                        } }
+                    }
+                    Ok(Command::OpenChat { chat_id, new_terminal }) => {
+                        hub.refresh_sessions();
+                        let session = hub.sessions.lock().unwrap().iter().find(|s| s.chat_id == chat_id).cloned();
+                        match session {
+                            None => Event::Navigation { outcome: mint_companion_protocol::NavigationOutcome::MissingSession },
+                            Some(session) => match navigation::open(session, new_terminal).await {
+                                Ok(outcome) => Event::Navigation { outcome },
+                                Err(message) => Event::Error { request_id: None, message },
+                            }
+                        }
+                    }
                     Ok(Command::ListSessions) => hub.snapshot(selected.as_deref()),
                     Ok(Command::Subscribe { chat_id }) => {
                         if !hub.sessions.lock().unwrap().iter().any(|s| s.chat_id == chat_id) {
@@ -676,11 +707,20 @@ mod tests {
         tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
         tokio_tungstenite::tungstenite::Error,
     > {
+        connect_hub(token, Arc::new(Hub::default())).await
+    }
+    async fn connect_hub(
+        token: &str,
+        hub: Arc<Hub>,
+    ) -> Result<
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+        tokio_tungstenite::tungstenite::Error,
+    > {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
-            serve(socket, std::sync::Arc::new(Hub::default()), "secret".into()).await;
+            serve(socket, hub, "secret".into()).await;
         });
         let mut request = format!("ws://{addr}/companion/v1")
             .into_client_request()
@@ -709,6 +749,74 @@ mod tests {
             Event::Snapshot { version: 1, .. }
         ));
     }
+    #[tokio::test]
+    async fn navigation_uses_the_saved_session_and_rechecks_deleted_sessions() {
+        let path =
+            std::env::temp_dir().join(format!("mint-handoff-{}.sqlite", uuid::Uuid::new_v4()));
+        let memory = crate::MemoryStore::open(&path);
+        memory
+            .register_cli_session("cli::handoff", Some("/workspace/selected"), None, None)
+            .unwrap();
+        let hub = Arc::new(Hub::default());
+        *hub.memory.lock().unwrap() = Some(memory.clone());
+        let calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let observed = Arc::clone(&calls);
+        navigation::configure(
+            mint_companion_protocol::Surface::Tui,
+            move |session, new_terminal| {
+                assert_eq!(session.chat_id, "cli::handoff");
+                assert_eq!(session.workspace.as_deref(), Some("/workspace/selected"));
+                assert!(!new_terminal);
+                observed.fetch_add(1, Ordering::Relaxed);
+                Ok(mint_companion_protocol::NavigationOutcome::NeedsTerminal)
+            },
+        );
+        let mut socket = connect_hub("secret", hub).await.unwrap();
+        async fn request(
+            socket: &mut tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<TcpStream>,
+            >,
+        ) -> mint_companion_protocol::NavigationOutcome {
+            socket
+                .send(Message::Text(
+                    r#"{"type":"open_chat","chatId":"cli::handoff","newTerminal":false}"#.into(),
+                ))
+                .await
+                .unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                loop {
+                    let response = socket.next().await.unwrap().unwrap();
+                    if let Event::Navigation { outcome } =
+                        serde_json::from_str::<Event>(&response.to_string()).unwrap()
+                    {
+                        return outcome;
+                    }
+                }
+            })
+            .await
+            .unwrap()
+        }
+        assert_eq!(
+            request(&mut socket).await,
+            mint_companion_protocol::NavigationOutcome::NeedsTerminal
+        );
+        memory.delete_chat_session("cli::handoff").unwrap();
+        assert_eq!(
+            request(&mut socket).await,
+            mint_companion_protocol::NavigationOutcome::MissingSession
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert!(
+            memory
+                .recent_interactions_for_chat("cli::handoff", 10)
+                .unwrap()
+                .is_empty()
+        );
+        let _ = socket.close(None).await;
+        drop(memory);
+        let _ = std::fs::remove_file(path);
+    }
+
     #[tokio::test]
     async fn invalid_token_cannot_read_sessions() {
         assert!(connect("wrong").await.is_err());

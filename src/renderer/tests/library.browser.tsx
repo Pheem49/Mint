@@ -1,6 +1,6 @@
 import React from 'react'
 import {createRoot} from 'react-dom/client'
-import LibraryPage from '../shared/components/LibraryPage'
+import LibraryPage from '../shared/components/studio/LibraryPage'
 import {installRendererPlatform,type RendererAdapter} from '../shared/platform'
 import type {LibraryItem,LibraryQuery} from '../shared/types'
 let failAction=false;let offline=false;let openChat='';let contentReads=0

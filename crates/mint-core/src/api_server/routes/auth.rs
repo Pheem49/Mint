@@ -128,10 +128,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 "gif" => "image/gif",
                 _ => "image/png",
             };
-            let file_path = profile_pictures_dir()
-                .ok()
-                .filter(|_| !filename.is_empty())
-                .map(|dir| dir.join(&filename));
+            let file_path = resolve_avatar_file_path(&filename);
             match file_path.and_then(|path| std::fs::read(path).ok()) {
                 Some(bytes) => send_binary_response(socket, "200 OK", content_type, &bytes).await,
                 None => {

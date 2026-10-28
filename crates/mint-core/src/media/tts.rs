@@ -1,3 +1,4 @@
+pub mod playback;
 use serde::Serialize;
 
 const MAX_GOOGLE_TTS_CHARS: usize = 200;

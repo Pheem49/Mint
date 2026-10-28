@@ -3,6 +3,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
+import { pdfjsAssets } from './src/bin/pdfjs-assets.mjs'
 
 export default defineConfig({
   root: resolve(__dirname, 'src/renderer'),
@@ -54,6 +55,7 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    pdfjsAssets(),
     {
       name: 'rewrite-html',
       configureServer(server) {

@@ -12,7 +12,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use super::agent::{PLAN_MODE_ALLOWED_ACTIONS, base_allowed_actions, browser_endpoint_available};
+use super::agent::{PLAN_MODE_ALLOWED_ACTIONS, base_allowed_actions, browser_tools_enabled};
 use crate::MintConfig;
 use crate::chat::ToolSpec;
 use crate::subagents::list_subagents;
@@ -34,15 +34,14 @@ fn tool(name: &str, description: &str, parameters: Value) -> ToolSpec {
 }
 
 /// Builds the native tool-calling catalog for the current request: the set of
-/// actions available given `config.disabled_tools`, whether the automation
-/// browser is reachable on port 9222, and whether plan mode is active (which
+/// actions available given `config.disabled_tools`, whether browser automation is enabled, and whether plan mode is active (which
 /// restricts to investigation-only actions plus `exit_plan_mode`).
 ///
 /// Mirrors the exact filtering `build_system_prompt` applies to
 /// `base_allowed_actions`, so the two code paths can never offer a different
 /// set of tools for the same request.
 ///
-/// `dispatch_subagent` is deliberately **not** part of `base_allowed_actions`
+/// `dispatch_agents` is deliberately **not** part of `base_allowed_actions`
 /// (which also drives the legacy JSON-prompt path) — it's native-tool-calling
 /// only, same scoping as context compaction. `allow_subagent_dispatch` should
 /// be `false` when building the catalog for a subagent's own nested loop, so
@@ -55,7 +54,7 @@ pub fn tool_catalog(
     allow_subagent_dispatch: bool,
 ) -> Vec<ToolSpec> {
     let mut allowed = base_allowed_actions();
-    if browser_endpoint_available(config) {
+    if browser_tools_enabled(config) {
         allowed.extend_from_slice(crate::browser::BROWSER_TOOLS);
     }
     if !config.avatar_token.is_empty() && !config.avatar_signal_disabled {
@@ -79,37 +78,86 @@ pub fn tool_catalog(
     // and can be streamed as the final answer.
     tools.push(finish_tool());
 
-    if allow_subagent_dispatch && !plan_mode {
+    if allow_subagent_dispatch {
         let subagents = list_subagents(Some(root));
-        if !subagents.is_empty() {
-            tools.push(dispatch_subagent_tool(&subagents));
+        let available_subagents: Vec<_> = if plan_mode {
+            subagents
+                .into_iter()
+                .filter(|s| {
+                    let perms = crate::swarm::AgentPermissions::from_tools(s.tools.as_deref());
+                    !perms.is_write_capable()
+                })
+                .collect()
+        } else {
+            subagents
+        };
+        if !available_subagents.is_empty() {
+            tools.push(dispatch_agents_tool(&available_subagents, plan_mode));
         }
+    }
+
+    if let Some(permissions) = crate::swarm::current_permissions() {
+        tools.retain(|t| permissions.allows(&t.name));
     }
 
     tools
 }
 
-fn dispatch_subagent_tool(subagents: &[crate::subagents::SubagentDefinition]) -> ToolSpec {
+fn dispatch_agents_tool(
+    subagents: &[crate::subagents::SubagentDefinition],
+    plan_mode: bool,
+) -> ToolSpec {
     let names: Vec<String> = subagents.iter().map(|s| s.name.clone()).collect();
     let catalog_text = subagents
         .iter()
         .map(|s| format!("- {}: {}", s.name, s.description))
         .collect::<Vec<_>>()
         .join("\n");
+    let description = if plan_mode {
+        format!(
+            "Delegate exploratory reconnaissance tasks to isolated, read-only sub-agents running \
+             concurrently in their own contexts to investigate across files, trace flows, or verify \
+             system facts before creating the plan. In plan mode, all subagents run strictly read-only.\n\
+             Available read-only base profiles (defaults to 'explorer'):\n{catalog_text}"
+        )
+    } else {
+        format!(
+            "Delegate one or more focused tasks to isolated sub-agents that run concurrently in \
+             their own contexts and return capped dossiers — use this to investigate across files, \
+             trace flows, or check hypotheses without polluting your main context.\n\
+             Base profiles decide the permissions of each agent (defaults to 'explorer'):\n{catalog_text}"
+        )
+    };
     tool(
-        "dispatch_subagent",
-        &format!(
-            "Delegate a focused sub-task to a specialized subagent that runs in its own \
-             isolated context and returns only its final result — use this to investigate \
-             something without filling up your own context with the intermediate steps. \
-             Available subagents:\n{catalog_text}"
-        ),
+        "dispatch_agents",
+        &description,
         schema(
             json!({
-                "name": { "type": "string", "enum": names, "description": "Which subagent to dispatch." },
-                "instruction": { "type": "string", "description": "The task/question to give the subagent." }
+                "tasks": {
+                    "type": "array",
+                    "description": "List of tasks to run concurrently in isolated sub-agents.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "role": {
+                                "type": "string",
+                                "description": "Display label and focus for this agent (e.g. 'stripe-webhook-tracer')."
+                            },
+                            "base": {
+                                "type": "string",
+                                "enum": names,
+                                "description": "Profile deciding permissions. Defaults to 'explorer' (read-only)."
+                            },
+                            "instruction": {
+                                "type": "string",
+                                "description": "The task, research question, or command to execute."
+                            }
+                        },
+                        "required": ["instruction"]
+                    }
+                }
             }),
-            &["name", "instruction"],
+            &["tasks"],
         ),
     )
 }
@@ -126,7 +174,11 @@ fn finish_tool() -> ToolSpec {
                 },
                 "verification": {
                     "type": "string",
-                    "description": "Verification performed after file changes and its result; otherwise omit."
+                    "description": "Observed check results, or the reason completion is limited. Prose cannot override actual execution evidence."
+                },
+                "completionStatus": {
+                    "type": "string", "enum": ["verified", "unverified", "blocked", "failed"],
+                    "description": "Use verified only with actual evidence. Use unverified/blocked/failed and explain limitations in verification."
                 }
             }),
             &["summary"],
@@ -160,16 +212,6 @@ fn all_tools() -> Vec<ToolSpec> {
             schema(
                 json!({"arguments":{"type":"object","properties":{"manifest":{"type":"object"},"source":{"type":"string"},"readme":{"type":"string"},"expectedHash":{"type":"string"}},"required":["manifest","source"]}}),
                 &["arguments"],
-            ),
-        ),
-        tool(
-            "conversation_summary",
-            "Internal tool representing a compacted conversation history summary from previous steps.",
-            schema(
-                json!({
-                    "summary": { "type": "string", "description": "Compacted summary text." }
-                }),
-                &[],
             ),
         ),
         tool(
@@ -424,7 +466,10 @@ fn all_tools() -> Vec<ToolSpec> {
         tool(
             "browser_screenshot",
             "Capture the current automation browser page as an image.",
-            schema(json!({}), &[]),
+            schema(
+                json!({"mode":{"type":"string","enum":["viewport","fullPage","element"]},"selector":{"type":"string"},"elementRef":{"type":"string"}}),
+                &[],
+            ),
         ),
         tool(
             "memory_recall",
@@ -560,7 +605,7 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "ask_user",
-            "Ask the user a short question, optionally with up to 3 pick-a-choice options (each with an optional description), optionally allowing multiple selections, and optionally tagged with a short header label. The user can still answer freely. Use this tool only when you're blocked on a decision that is genuinely the user's to make — one you can't resolve from the request, the code, or a sensible default. Don't use it to ask for permission to proceed or to confirm something you can just go do.",
+            "Ask the user a short question, optionally with up to 3 pick-a-choice options (each with an optional description), optionally allowing multiple selections, and optionally tagged with a short header label. The user can still answer freely. Use this tool when you need the user's direction, or after proposing a plan/recommendation to ask how they want to proceed before mutating code. Avoid using it for trivial micro-steps that the user already explicitly authorized.",
             schema(
                 json!({
                     "query": { "type": "string" },
@@ -605,8 +650,11 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "view_image",
-            "View an image file from the workspace.",
-            schema(json!({ "path": { "type": "string" } }), &["path"]),
+            "View an image from the workspace using path, or reopen an image artifact from this conversation using artifactId.",
+            schema(
+                json!({ "path": { "type": "string" }, "artifactId":{"type":"string"} }),
+                &[],
+            ),
         ),
         tool(
             "search_docs",
@@ -687,6 +735,7 @@ fn all_tools() -> Vec<ToolSpec> {
             schema(
                 json!({
                     "command": { "type": "string" },
+                    "retryReason": { "type": "string", "description": "Reason for retrying a previous command. Inspect running/unknown results before repeating side effects." },
                     "background": {
                         "type": "boolean",
                         "description": "Run detached and return immediately with a job_id instead of waiting for the command to exit. Defaults to false."
@@ -1049,6 +1098,37 @@ fn all_tools() -> Vec<ToolSpec> {
 }
 
 #[cfg(test)]
+mod browser_startup_tests {
+    use super::*;
+    #[test]
+    fn browser_tools_are_discoverable_when_browser_automation_enabled() {
+        let mut config = MintConfig::default();
+        let default_tools = tool_catalog(&config, false, Path::new("."), false);
+        assert!(!default_tools.iter().any(|tool| tool.name == "browser_open"));
+
+        config
+            .extra
+            .insert("browserAutomationEnabled".into(), json!(true));
+        config.extra.insert(
+            "browserDebugUrl".into(),
+            json!("http://127.0.0.1:1/json/list"),
+        );
+        let tools = tool_catalog(&config, false, Path::new("."), false);
+        assert!(tools.iter().any(|tool| tool.name == "browser_open"));
+        assert!(
+            crate::prompts::agent::build_system_prompt(&config, false, false, None, None)
+                .contains("browser_open")
+        );
+        config.disabled_tools.push("browser_open".into());
+        assert!(
+            !tool_catalog(&config, false, Path::new("."), false)
+                .iter()
+                .any(|tool| tool.name == "browser_open")
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1130,7 +1210,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_subagent_offered_only_when_allowed_and_subagents_exist() {
+    fn dispatch_agents_offered_only_when_allowed_and_subagents_exist() {
         let root = std::env::temp_dir().join("mint-tool-catalog-subagents");
         let _ = std::fs::remove_dir_all(&root);
         write_subagent(
@@ -1147,20 +1227,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&empty_root);
         std::fs::create_dir_all(&empty_root).unwrap();
         let tools = tool_catalog(&config, false, &empty_root, true);
-        assert!(tools.iter().any(|t| t.name == "dispatch_subagent"));
+        assert!(tools.iter().any(|t| t.name == "dispatch_agents"));
 
         // Subagents exist + allowed -> offered.
         let tools = tool_catalog(&config, false, &root, true);
-        assert!(tools.iter().any(|t| t.name == "dispatch_subagent"));
+        assert!(tools.iter().any(|t| t.name == "dispatch_agents"));
 
         // Subagents exist but not allowed (this is itself a nested subagent
         // call) -> the depth-limit enforcement, never offered.
         let tools = tool_catalog(&config, false, &root, false);
-        assert!(!tools.iter().any(|t| t.name == "dispatch_subagent"));
+        assert!(!tools.iter().any(|t| t.name == "dispatch_agents"));
 
-        // Subagents exist but plan mode is active -> never offered either.
+        // Subagents exist and plan mode is active -> offered with read-only profiles only!
         let tools = tool_catalog(&config, true, &root, true);
-        assert!(!tools.iter().any(|t| t.name == "dispatch_subagent"));
+        let plan_dispatch = tools.iter().find(|t| t.name == "dispatch_agents");
+        assert!(plan_dispatch.is_some());
+        assert!(plan_dispatch.unwrap().description.contains("read-only"));
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&empty_root);

@@ -137,6 +137,13 @@ pub struct MintConfig {
     pub disabled_tools: Vec<String>,
     pub agents: Vec<AgentConfig>,
     pub enable_agent_collaboration: bool,
+    /// Maximum number of sub-agents run concurrently within a swarm batch
+    /// (1..=8, default 4). Clamped when used.
+    #[serde(default = "default_swarm_max_parallel")]
+    pub swarm_max_parallel: usize,
+    /// Maximum steps allowed per agent turn (default 40, clamped to 10..=200).
+    #[serde(default = "default_agent_max_steps")]
+    pub agent_max_steps: usize,
     /// When true, reflection after a reusable task proposes a new or refined
     /// workspace skill. Every proposal needs interactive approval before saving.
     /// Off by default; `/autoskill on` enables proposals, not unattended writes.
@@ -189,6 +196,16 @@ fn default_true() -> bool {
 
 fn default_thinking_effort() -> String {
     "medium".into()
+}
+
+fn default_swarm_max_parallel() -> usize {
+    crate::swarm::DEFAULT_MAX_PARALLEL
+}
+
+pub const DEFAULT_AGENT_MAX_STEPS: usize = 40;
+
+fn default_agent_max_steps() -> usize {
+    DEFAULT_AGENT_MAX_STEPS
 }
 
 /// Thinking/reasoning configuration for a specific model.
@@ -285,6 +302,15 @@ impl MintConfig {
     ) -> Option<PermissionDecision> {
         permission_decision_for(&self.permission_rules, tool, subject, project_root)
     }
+
+    /// Resolved maximum steps per turn, clamped between 10 and 200 (defaults to 40).
+    pub fn resolved_agent_max_steps(&self) -> usize {
+        if self.agent_max_steps == 0 {
+            DEFAULT_AGENT_MAX_STEPS
+        } else {
+            self.agent_max_steps.clamp(10, 200)
+        }
+    }
 }
 
 /// Core matching logic behind [`MintConfig::permission_decision`], exposed as a
@@ -364,9 +390,12 @@ impl Default for MintConfig {
     fn default() -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let current_directory = std::env::current_dir().unwrap_or_else(|_| home.clone());
-        let allowed_paths = vec![
+        let temp_dir = std::env::temp_dir();
+        let canonical_temp = temp_dir.canonicalize().ok();
+        let mut allowed_paths = vec![
             home.clone(),
             current_directory,
+            temp_dir.clone(),
             home.join("Desktop"),
             home.join("Documents"),
             home.join("Downloads"),
@@ -374,6 +403,25 @@ impl Default for MintConfig {
             home.join("Music"),
             home.join("Videos"),
         ];
+        if let Some(canonical) = canonical_temp {
+            if canonical != temp_dir && !allowed_paths.contains(&canonical) {
+                allowed_paths.push(canonical);
+            }
+        }
+        #[cfg(unix)]
+        {
+            let slash_tmp = PathBuf::from("/tmp");
+            if slash_tmp.exists() {
+                if !allowed_paths.contains(&slash_tmp) {
+                    allowed_paths.push(slash_tmp.clone());
+                }
+                if let Ok(canonical_slash_tmp) = slash_tmp.canonicalize() {
+                    if !allowed_paths.contains(&canonical_slash_tmp) {
+                        allowed_paths.push(canonical_slash_tmp);
+                    }
+                }
+            }
+        }
         Self {
             theme: "dark".into(),
             tui_theme: "dark".into(),
@@ -434,6 +482,8 @@ impl Default for MintConfig {
             disabled_tools: Vec::new(),
             agents: default_agents(),
             enable_agent_collaboration: false,
+            swarm_max_parallel: crate::swarm::DEFAULT_MAX_PARALLEL,
+            agent_max_steps: DEFAULT_AGENT_MAX_STEPS,
             auto_skill_writing: false,
             memory_recall: true,
             auto_fact_extraction: true,
@@ -1012,6 +1062,11 @@ fn is_test_environment() -> bool {
     false
 }
 
+/// Returns the root configuration directory for Mint (`~/.config/mint`).
+pub fn mint_config_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join("mint"))
+}
+
 pub fn config_path() -> Result<PathBuf, ConfigError> {
     if let Ok(override_path) = std::env::var("MINT_CONFIG_PATH") {
         return Ok(PathBuf::from(override_path));
@@ -1022,8 +1077,8 @@ pub fn config_path() -> Result<PathBuf, ConfigError> {
             .join("mint-config.json");
         return Ok(tmp);
     }
-    dirs::config_dir()
-        .map(|directory| directory.join("mint").join("mint-config.json"))
+    mint_config_dir()
+        .map(|directory| directory.join("mint-config.json"))
         .ok_or(ConfigError::ConfigDirectoryUnavailable)
 }
 
@@ -1172,6 +1227,10 @@ fn default_sandbox_command() -> &'static str {
 fn runtime_extra_defaults() -> BTreeMap<String, Value> {
     serde_json::from_value(serde_json::json!({
         "automationBrowser": "chromium",
+        "browserAgentMode": "headless",
+        "browserExecutable": "",
+        "browserViewportWidth": 1440,
+        "browserViewportHeight": 900,
         "browserDebugUrl": "http://127.0.0.1:9222/json/list",
         "browserExtensionContextUrl": "http://127.0.0.1:3212/context",
         "proactiveInterval": 60,
@@ -1807,5 +1866,34 @@ mod tests {
         config.openai_model = "gpt-4o".into();
         let (enabled, _) = config.resolved_thinking();
         assert!(!enabled);
+    }
+
+    #[test]
+    fn test_agent_max_steps_config_and_clamping() {
+        let mut config = MintConfig::default();
+        assert_eq!(config.agent_max_steps, DEFAULT_AGENT_MAX_STEPS);
+        assert_eq!(config.resolved_agent_max_steps(), 40);
+
+        // Clamping to min 10
+        config.agent_max_steps = 3;
+        assert_eq!(config.resolved_agent_max_steps(), 10);
+
+        // Clamping to max 200
+        config.agent_max_steps = 500;
+        assert_eq!(config.resolved_agent_max_steps(), 200);
+
+        // Zero defaults to 40
+        config.agent_max_steps = 0;
+        assert_eq!(config.resolved_agent_max_steps(), 40);
+
+        // Custom in-range value
+        config.agent_max_steps = 75;
+        assert_eq!(config.resolved_agent_max_steps(), 75);
+
+        // Deserialization with camelCase agentMaxSteps
+        let json_str = r#"{"agentMaxSteps": 60}"#;
+        let deserialized: MintConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(deserialized.agent_max_steps, 60);
+        assert_eq!(deserialized.resolved_agent_max_steps(), 60);
     }
 }

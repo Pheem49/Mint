@@ -8,8 +8,7 @@ const results=[];
 const wait=(ms=60)=>new Promise(resolve=>setTimeout(resolve,ms));
 const assert=(ok,message)=>{if(!ok)throw new Error(message);results.push(message)};
 try {
- const {default:SelectField}=await import('../shared/components/SelectField');
- const {default:GlideSelect}=await import('../shared/components/GlideSelect');
+ const {default:SelectField, GlideSelect}=await import('../shared/components/ui/SelectField');
  const picks=[];
  function Fixture(){
   const [value,setValue]=React.useState('png');

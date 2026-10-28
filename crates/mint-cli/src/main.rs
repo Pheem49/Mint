@@ -8,6 +8,7 @@ mod actions;
 mod agent;
 mod background;
 pub mod commands;
+mod companion_navigation;
 mod cron_wizard;
 mod gateway;
 mod gmail;
@@ -25,6 +26,19 @@ pub(crate) mod terminal_theme;
 mod updater;
 
 pub use commands::Command;
+
+#[cfg(test)]
+mod browser_cli_regressions {
+    use super::*;
+    #[test]
+    fn browser_workflow_command_accepts_a_file_and_headed_override() {
+        let parsed =
+            Cli::try_parse_from(["mint", "browser", "run", "--file", "task.json", "--headed"])
+                .unwrap();
+        assert!(matches!(parsed.command, Some(Command::Browser { .. })));
+        assert!(Cli::try_parse_from(["mint", "browser", "run"]).is_err());
+    }
+}
 pub use interactive::{
     SESSION_APPROVED, active_model, confirm, confirm_security, print_welcome_banner,
     run_interactive_chat, run_interactive_chat_with_options,
@@ -317,11 +331,18 @@ fn log_panic_to_file(message: &str) {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--mint-mod-host") {
         return mint_mod_runtime::worker_main().map_err(anyhow::Error::msg);
     }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
     let _background_shutdown = mint_core::bg_shell::ShutdownGuard;
     install_panic_hook();
     let mut cli = Cli::parse();

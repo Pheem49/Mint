@@ -1,5 +1,8 @@
+import { createWorkspaceMediaReader } from '../shared/utils/workspaceMedia'
+import { createWorkspaceImageReader } from '../shared/utils/workspaceImage'
 import { createLibraryTransport } from '../shared/library/transport'
 import { createSourcesTransport } from '../shared/conversation/sourcesTransport'
+import { createExternalLinkInterceptor } from '../shared/utils/externalLinks'
 export * from '../shared/types'
 import type { MintPlatformApi } from '../shared/platform'
 import { createConversationTransport } from '../shared/conversation/transport'
@@ -467,6 +470,17 @@ export const { sendChatMessage, streamChatMessage } = createConversationTranspor
   ownerToken: getStoredAuthToken,
 })
 
+export async function speechRequest(request: import('../shared/speech/types').SpeechRequest): Promise<import('../shared/speech/types').SpeechReply> {
+  if (isTauriRuntime()) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke('speech_request', { request })
+  }
+  const response = await authFetch(`${getLocalApiBase()}/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) })
+  const result = await response.json()
+  if (!response.ok) throw new Error(result.error || 'Speech request failed')
+  return result
+}
+
 export async function getTtsUrls(text: string): Promise<TtsUrl[]> {
   if (typeof window === 'undefined') return []
   if (!isTauriRuntime()) return []
@@ -650,6 +664,12 @@ export async function saveInteractionAgentActivity(
   }
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('save_interaction_agent_activity', { interactionId, activity })
+}
+
+export async function pendingCompanionChat(acknowledgedId?: string): Promise<string | null> {
+  if (!isTauriRuntime()) return null
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string | null>('pending_companion_chat', { acknowledgedId: acknowledgedId ?? null })
 }
 
 export async function listChatSessions(): Promise<ChatSession[]> {
@@ -1004,7 +1024,43 @@ export function convertFileSrc(filePath: string, protocol = 'asset'): string {
   return `https://asset.localhost/${encodeURIComponent(path)}`;
 }
 
+/**
+ * Opens an external URL in the system's default browser (via Tauri desktop action in Tauri runtime,
+ * or window.open in fallback browser environments).
+ */
+export async function openExternal(url: string): Promise<any> {
+  if (isTauriRuntime()) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke('run_desktop_action', { action: { type: 'open_url', target: url } })
+  }
+  if (typeof window !== 'undefined') {
+    return window.open(url, '_blank', 'noopener,noreferrer')
+  }
+}
+
+let activeWebLinkInterceptorCleanup: (() => void) | null = null
+
+const baseInstallExternalLinkInterceptor = createExternalLinkInterceptor(openExternal)
+
+/**
+ * Global link interceptor: Catches clicks on anchor tags pointing to external URLs
+ * and opens them via Tauri desktop actions when running in a Tauri webview.
+ */
+export const installExternalLinkInterceptor = (
+  targetDocument: Document | null = typeof document !== 'undefined' ? document : null
+): () => void => {
+  if (!targetDocument || !isTauriRuntime()) return () => {}
+  return baseInstallExternalLinkInterceptor(targetDocument)
+}
+
 export function installTauriAdapters() {
+  if (typeof document !== 'undefined' && isTauriRuntime()) {
+    if (activeWebLinkInterceptorCleanup) {
+      activeWebLinkInterceptorCleanup()
+    }
+    activeWebLinkInterceptorCleanup = installExternalLinkInterceptor(document)
+  }
+
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     console.warn(`Not running inside Tauri. Connecting to local API server fallback at ${getApiBase()}.`);
     const API_BASE = getApiBase();
@@ -1041,9 +1097,7 @@ export function installTauriAdapters() {
         window.location.hash = '#/';
       },
       quitApp: () => undefined,
-      openExternal: async (url: string) => {
-        window.open(url, '_blank', 'noopener,noreferrer')
-      },
+      openExternal: (url: string) => openExternal(url),
       openFolder: async () => ({ success: false, message: 'Opening local folders is only available in the desktop app.' }),
     };
 
@@ -1226,6 +1280,7 @@ export function installTauriAdapters() {
       clearAiNotifications: clearBrowserNotifications,
       getTtsUrls: async () => [],
       setAiState: () => {},
+      openExternal: (url: string) => openExternal(url),
     };
     return;
   }
@@ -1271,10 +1326,7 @@ export function installTauriAdapters() {
       const { invoke } = await import('@tauri-apps/api/core')
       return void invoke('exit_app')
     },
-    openExternal: async (url) => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('run_desktop_action', { action: { type: 'open_url', target: url } })
-    },
+    openExternal: (url: string) => openExternal(url),
     openFolder: async (path) => {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('open_folder', { path })
@@ -1416,6 +1468,7 @@ export function installTauriAdapters() {
       const { invoke } = await import('@tauri-apps/api/core')
       return void invoke('set_ai_state', { state })
     },
+    openExternal: (url: string) => openExternal(url),
   }
 }
 
@@ -2269,6 +2322,10 @@ export async function undoGitCheckpoint(
   }
 }
 
+export const readWorkspaceMedia = createWorkspaceMediaReader({ isNative: isTauriRuntime, apiBase: getLocalApiBase, fetch: authFetch, convertFileSrc })
+
+export const readWorkspaceImage = createWorkspaceImageReader({ isNative: isTauriRuntime, apiBase: getLocalApiBase, fetch: authFetch })
+
 export const readWorkspaceFile = async (path: string, workspacePath?: string): Promise<string> => {
   if (!isTauriRuntime()) {
     try {
@@ -2325,14 +2382,14 @@ const _apiCheck: MintPlatformApi = {
   detectSystemTools,
   sendChatMessage,
   streamChatMessage,
-  getTtsUrls,
+  getTtsUrls, speechRequest,
   cancelChatMessage,
   getRecentInteractions,
   getConversationSnapshot,
   getConversationChanges,
   saveSystemInteraction,
   saveInteractionAgentActivity,
-  listChatSessions,
+  listChatSessions, pendingCompanionChat,
   updateChatSessionWorkspace,
   deleteChatSession,
   renameChatSession,
@@ -2374,7 +2431,8 @@ const _apiCheck: MintPlatformApi = {
   listGitCheckpoints,
   rollbackGitCheckpoint,
   undoGitCheckpoint,
-  readWorkspaceFile,
+  readWorkspaceFile, readWorkspaceImage, readWorkspaceMedia,
+  openExternal,
   testMcpConnection,
 }
 
@@ -2401,12 +2459,12 @@ export async function startHtmlPreview(root: string, relativePath: string, mintB
 }
 
 /** Loads artifacts by ID; no server-provided filesystem path is accepted. */
-export async function readMcpArtifact(id: string): Promise<string> {
+export async function readMcpArtifact(id: string, chatId?: string): Promise<string> {
   if (isTauriRuntime()) {
     const { invoke } = await import('@tauri-apps/api/core')
-    return invoke<string>('read_mcp_artifact', { id })
+    return invoke<string>('read_mcp_artifact', { id, chatId })
   }
-  const response = await authFetch(`${getApiBase()}/mcp-artifacts/${encodeURIComponent(id)}`)
+  const response = await authFetch(`${getApiBase()}/mcp-artifacts/${encodeURIComponent(id)}${chatId ? `?chatId=${encodeURIComponent(chatId)}` : ''}`)
   if (!response.ok) throw new Error('Artifact unavailable')
   return URL.createObjectURL(await response.blob())
 }

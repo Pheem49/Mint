@@ -3,21 +3,26 @@
 .session-sources-heading > span:first-child { display: inline-flex; align-items: center; gap: 6px; }
 .session-sources-heading small { color: var(--text-muted); font-size: 10px; font-weight: 400; }
 .session-sources-heading > span:last-child { color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.session-sources-group h3 { margin: 14px 0 5px; color: var(--text-muted); font-size: 10px; font-weight: 500; }
+.session-sources-group h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 14px 0 5px; color: var(--text-muted); font-size: 10px; font-weight: 500; }
+.session-sources-group h3 span { font-variant-numeric: tabular-nums; }
+.session-sources-search { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 6px 8px; border: 1px solid var(--border-subtle, var(--border)); border-radius: var(--radius-xs, 6px); background: var(--bg-surface-soft, var(--surface-strong)); color: var(--text-muted); }
+.session-sources-search:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.session-sources-search > svg { flex-shrink: 0; }
+.session-sources-search input { width: 100%; min-width: 0; min-height: 24px; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text-main); font: inherit; font-size: 12px; }
+.session-sources-search input::placeholder { color: var(--text-muted); }
 .session-sources-group ul { margin: 0; padding: 0; list-style: none; }
 .session-source-row { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 6px; border-radius: var(--radius-xs, 6px); color: var(--text-main); text-decoration: none; }
 a.session-source-row:hover { background: var(--bg-surface-hover, var(--surface-strong)); }
+a.session-source-row.is-opening { opacity: 0.65; cursor: wait; }
 .session-source-icon { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; overflow: hidden; color: var(--text-muted); border-radius: 5px; background: var(--bg-surface-soft, var(--surface-strong)); }
 .session-source-icon.is-file { color: var(--accent); }
 .session-source-icon img { width: 100%; height: 100%; object-fit: cover; }
 .session-source-icon.is-web img { width: 20px; height: 20px; object-fit: contain; }
 .session-source-copy { flex: 1; min-width: 0; }
-.session-source-copy strong, .session-source-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-source-copy strong { font-size: 12px; font-weight: 400; line-height: 1.5; }
-.session-source-copy small { color: var(--text-muted); font-size: 10px; line-height: 1.4; }
+.session-source-copy strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; white-space: normal; font-size: 12px; font-weight: 400; line-height: 1.5; }
+.session-source-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 10px; line-height: 1.4; }
 .session-sources-empty, .session-sources-error { margin: 10px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 .session-sources-error { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.session-sources-more, .session-sources-error button { min-height: 30px; padding: 5px 6px; border: 0; border-radius: var(--radius-xs, 6px); background: transparent; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
-.session-sources-more { margin-top: 6px; }
-.session-sources-more:hover, .session-sources-error button:hover { color: var(--text-main); background: var(--bg-surface-hover, var(--surface-strong)); }
+.session-sources-error button { min-height: 30px; padding: 5px 6px; border: 0; border-radius: var(--radius-xs, 6px); background: transparent; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.session-sources-error button:hover { color: var(--text-main); background: var(--bg-surface-hover, var(--surface-strong)); }
 .session-sources a:focus-visible, .session-sources button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

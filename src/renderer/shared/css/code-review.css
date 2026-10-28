@@ -76,7 +76,7 @@
 }
 
 .code-review-branch-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-surface-hover);
 }
 
 .code-review-chevron-small {
@@ -85,14 +85,14 @@
 }
 
 .code-review-branch-stat-add {
-  color: #22c55e;
+  color: var(--status-success, #22c55e);
   font-weight: 600;
   font-size: 0.82rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .code-review-branch-stat-del {
-  color: #ef4444;
+  color: var(--status-error, #ef4444);
   font-weight: 600;
   font-size: 0.82rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -121,8 +121,8 @@
 
 .code-review-icon-btn:hover,
 .code-review-close-btn:hover {
-  color: #f1f5f9;
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main, #f1f5f9);
+  background: var(--bg-surface-hover);
 }
 
 .code-review-close-btn {
@@ -154,7 +154,7 @@
 
 .code-review-target-branch-btn:hover {
   color: var(--text-main, #f1f5f9);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-surface-soft);
 }
 
 /* Banner */
@@ -162,8 +162,8 @@
   margin: 4px 16px 10px;
   padding: 8px 14px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -186,13 +186,13 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #cbd5e1;
+  color: var(--text-secondary, #cbd5e1);
   font-size: 0.78rem;
   font-weight: 500;
 }
 
 .code-review-banner-info-icon {
-  color: #818cf8;
+  color: var(--interactive-fg);
   flex-shrink: 0;
 }
 
@@ -208,8 +208,8 @@
   justify-content: center;
   width: 24px;
   height: 24px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-subtle);
   border-radius: 5px;
   color: var(--text-muted, #94a3b8);
   font-size: 0.95rem;
@@ -219,8 +219,8 @@
 }
 
 .code-review-page-arrow:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
 }
 
 .code-review-page-arrow:disabled {
@@ -234,7 +234,7 @@
   flex-direction: row;
   flex: 1 1 auto;
   min-height: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border-subtle);
   position: relative;
   overflow: hidden;
 }
@@ -285,14 +285,14 @@
   bottom: 0;
   left: 4px;
   width: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--border-subtle);
   transition: background-color 0.15s ease, box-shadow 0.15s ease, width 0.15s ease;
 }
 
 .code-review-resizer:hover .code-review-resizer-line,
 .code-review-resizer.is-dragging .code-review-resizer-line {
-  background: #818cf8;
-  box-shadow: 0 0 8px rgba(129, 140, 248, 0.6);
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
   width: 2px;
 }
 
@@ -300,16 +300,16 @@
   width: 4px;
   height: 26px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--border-strong);
   z-index: 2;
   transition: all 0.15s ease;
 }
 
 .code-review-resizer:hover .code-review-resizer-handle,
 .code-review-resizer.is-dragging .code-review-resizer-handle {
-  background: #a5b4fc;
+  background: var(--accent-hover);
   height: 38px;
-  box-shadow: 0 0 6px rgba(165, 180, 252, 0.5);
+  box-shadow: 0 0 6px var(--accent-glow);
 }
 
 .code-review-resizer.is-collapsed {
@@ -320,7 +320,7 @@
 
 .code-review-resizer.is-collapsed .code-review-resizer-line {
   left: 3px;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--border-default);
 }
 
 .code-review-file-view {
@@ -346,8 +346,8 @@
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--bg-surface-soft);
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 0.78rem;
   position: sticky;
   top: 0;
@@ -371,13 +371,13 @@
 }
 
 .code-review-file-bar-status.is-modified {
-  color: #38bdf8;
-  background: rgba(56, 189, 248, 0.12);
+  color: var(--status-info-fg);
+  background: var(--status-info-bg);
 }
 
 .code-review-file-bar-status.is-created {
-  color: #22c55e;
-  background: rgba(34, 197, 94, 0.12);
+  color: var(--status-success-fg);
+  background: var(--status-success-bg);
 }
 
 .code-review-file-bar-path {
@@ -389,13 +389,13 @@
 }
 
 .code-review-file-bar-stat-add {
-  color: #22c55e;
+  color: var(--status-success, #22c55e);
   font-weight: 600;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .code-review-file-bar-stat-del {
-  color: #ef4444;
+  color: var(--status-error, #ef4444);
   font-weight: 600;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -425,46 +425,46 @@
 }
 
 .code-review-line.is-add {
-  background: rgba(16, 185, 129, 0.12);
-  border-left: 2px solid #10b981;
+  background: var(--diff-add-bg);
+  border-left: 2px solid var(--diff-add-border);
 }
 
 .code-review-line.is-del {
-  background: rgba(239, 68, 68, 0.12);
-  border-left: 2px solid #ef4444;
+  background: var(--diff-del-bg);
+  border-left: 2px solid var(--diff-del-border);
 }
 
 .code-review-gutter {
   width: 38px;
   text-align: right;
   padding-right: 12px;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   user-select: none;
   flex-shrink: 0;
 }
 
 .code-review-line.is-add .code-review-gutter {
-  color: #34d399;
+  color: var(--diff-add-gutter);
 }
 
 .code-review-line.is-del .code-review-gutter {
-  color: #f87171;
+  color: var(--diff-del-gutter);
 }
 
 .code-review-sign {
   width: 14px;
   text-align: center;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   user-select: none;
   flex-shrink: 0;
 }
 
 .code-review-line.is-add .code-review-sign {
-  color: #10b981;
+  color: var(--diff-add-border);
 }
 
 .code-review-line.is-del .code-review-sign {
-  color: #ef4444;
+  color: var(--diff-del-border);
 }
 
 .code-review-code-text {
@@ -477,11 +477,11 @@
 }
 
 .code-review-line.is-add .code-review-code-text {
-  color: #d1fae5;
+  color: var(--diff-add-text);
 }
 
 .code-review-line.is-del .code-review-code-text {
-  color: #fee2e2;
+  color: var(--diff-del-text);
 }
 
 .code-review-empty-diff,
@@ -493,8 +493,8 @@
 
 /* Right: File Tree Pane */
 .code-review-tree-pane {
-  border-left: 1px solid rgba(255, 255, 255, 0.07);
-  background: rgba(0, 0, 0, 0.22);
+  border-left: 1px solid var(--border-subtle);
+  background: var(--bg-surface-soft);
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
@@ -524,13 +524,13 @@
 }
 
 .code-review-tree-collapse-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #f1f5f9;
+  background: var(--bg-surface-hover);
+  color: var(--text-main, #f1f5f9);
 }
 
 .code-review-icon-btn.is-active {
-  color: #818cf8;
-  background: rgba(129, 140, 248, 0.12);
+  color: var(--interactive-fg);
+  background: var(--accent-subtle);
 }
 
 .code-review-search-wrap {
@@ -538,7 +538,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .code-review-search-icon {
@@ -548,8 +548,8 @@
 
 .code-review-search-input {
   width: 100%;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
   border-radius: 8px;
   padding: 5px 10px;
   color: var(--text-main, #f1f5f9);
@@ -559,8 +559,8 @@
 }
 
 .code-review-search-input:focus {
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--accent-border);
+  background: var(--bg-surface-hover);
 }
 
 .code-review-tree-list {
@@ -588,7 +588,7 @@
   background: transparent;
   border: 0;
   border-radius: 6px;
-  color: #cbd5e1;
+  color: var(--text-secondary, #cbd5e1);
   font-size: 0.78rem;
   font-weight: 500;
   cursor: pointer;
@@ -597,8 +597,8 @@
 }
 
 .code-review-tree-folder-btn:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: #ffffff;
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
 }
 
 .code-review-chevron {
@@ -615,7 +615,7 @@
 }
 
 .code-review-mod-dot {
-  color: #ea580c;
+  color: var(--status-warning);
   font-size: 1rem;
   line-height: 1;
   margin-left: auto;
@@ -639,7 +639,7 @@
   background: transparent;
   border: 1px solid transparent;
   border-radius: 8px;
-  color: #cbd5e1;
+  color: var(--text-secondary, #cbd5e1);
   font-size: 0.76rem;
   cursor: pointer;
   text-align: left;
@@ -647,15 +647,15 @@
 }
 
 .code-review-tree-file:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: #f8fafc;
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
 }
 
 .code-review-tree-file.is-selected {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.13);
-  color: #ffffff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .code-review-tree-icon {
@@ -690,13 +690,13 @@
 }
 
 .code-review-file-status-icon.is-modified {
-  color: #38bdf8;
-  background: rgba(56, 189, 248, 0.1);
+  color: var(--status-info-fg);
+  background: var(--status-info-bg);
 }
 
 .code-review-file-status-icon.is-created {
-  color: #22c55e;
-  background: rgba(34, 197, 94, 0.1);
+  color: var(--status-success-fg);
+  background: var(--status-success-bg);
 }
 
 .code-review-tree-file-name {
@@ -713,8 +713,8 @@
 
 .code-review-branch-group .git-branch-trigger {
   padding: 4px 10px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
   font-size: 0.84rem;
   font-weight: 500;
@@ -730,8 +730,8 @@
 }
 
 .code-review-branch-group .git-branch-trigger:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--bg-surface-hover);
+  border-color: var(--border-strong);
 }
 
 .code-review-branch-group .git-branch-name {
@@ -747,7 +747,7 @@
 }
 
 .code-review-branch-group .git-branch-icon {
-  color: var(--accent, #6366f1);
+  color: var(--interactive-fg);
   flex-shrink: 0;
 }
 
@@ -756,7 +756,7 @@
   height: 6px;
   flex: 0 0 6px;
   border-radius: 50%;
-  background: #10b981;
+  background: var(--accent, #10b981);
 }
 
 .code-review-branch-group .git-branch-chevron {
@@ -811,10 +811,10 @@
   align-items: center;
   gap: 6px;
   padding: 6px 14px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-default);
   border-radius: 8px;
-  color: #cbd5e1;
+  color: var(--text-secondary, #cbd5e1);
   font-size: 0.78rem;
   font-weight: 500;
   cursor: pointer;
@@ -822,8 +822,8 @@
 }
 
 .code-review-clean-refresh-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
 }
 
 .code-review-scope-group {
@@ -835,8 +835,8 @@
 .code-review-scope-btn {
   padding: 3px 8px;
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-subtle);
   color: var(--text-muted, #94a3b8);
   font-size: 0.74rem;
   cursor: pointer;
@@ -844,13 +844,13 @@
 }
 
 .code-review-scope-btn:hover {
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
 }
 
 .code-review-scope-btn.is-active {
-  background: rgba(129, 140, 248, 0.16);
-  border-color: rgba(129, 140, 248, 0.35);
-  color: #818cf8;
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+  color: var(--interactive-fg);
   font-weight: 600;
 }

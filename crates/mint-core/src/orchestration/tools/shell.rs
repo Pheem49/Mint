@@ -61,11 +61,21 @@ pub(in crate::orchestration) async fn execute(
 
             match approved {
                 ApprovalOutcome::Approved if input.background => {
+                    if let Err(reason) = reliability::before_shell(command, &input.retry_reason) {
+                        return Ok(format!("Skipped: {reason}"));
+                    }
                     let started = crate::bg_shell::with_context(
                         crate::bg_shell::chat_context(root, chat_id),
                         || crate::bg_shell::start_background(root, config, command),
                     )
                     .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+                    reliability::record(
+                        command,
+                        reliability::ExecutionState::Running,
+                        None,
+                        Some(started.id.clone()),
+                        "",
+                    );
                     Ok(format!(
                         "job_id: {}\npid: {}\nstatus: running\nUse the 'shell_output' tool with this job_id to check on it, and 'kill_shell' to stop it.",
                         started.id,
@@ -74,7 +84,9 @@ pub(in crate::orchestration) async fn execute(
                             .map_or_else(|| "unknown".to_string(), |p| p.to_string()),
                     ))
                 }
-                ApprovalOutcome::Approved => run_shell(root, config, chat_id, command).await,
+                ApprovalOutcome::Approved => {
+                    run_shell(root, config, chat_id, command, &input.retry_reason).await
+                }
                 ApprovalOutcome::Denied => Ok(format!("User denied shell command: {}", command)),
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
             }
@@ -89,6 +101,9 @@ pub(in crate::orchestration) async fn execute(
                     "No accessible background job with that id".into(),
                 ));
             }
+            let snapshot = crate::bg_shell::snapshot(job_id)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            reliability::record_job(&snapshot);
             crate::bg_shell::poll_output(job_id)
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))
         }
@@ -112,7 +127,7 @@ pub(in crate::orchestration) async fn execute(
             }
             let mut output = Vec::new();
             for command in &input.commands {
-                output.push(run_shell(root, config, chat_id, command).await?);
+                output.push(run_shell(root, config, chat_id, command, &input.retry_reason).await?);
             }
             Ok(output.join("\n\n"))
         }
@@ -147,7 +162,10 @@ pub(in crate::orchestration) async fn execute(
                 ));
             };
 
-            let out = run_shell(root, config, chat_id, &cmd).await?;
+            let out = run_shell(root, config, chat_id, &cmd, &input.retry_reason).await?;
+            if out.starts_with("Skipped") {
+                return Ok(out);
+            }
             let failed = shell_result_failed(&out);
             let status_mark = if failed {
                 "✗ [TEST FAILED]"
@@ -177,7 +195,10 @@ pub(in crate::orchestration) async fn execute(
                 ));
             };
 
-            let out = run_shell(root, config, chat_id, &cmd).await?;
+            let out = run_shell(root, config, chat_id, &cmd, &input.retry_reason).await?;
+            if out.starts_with("Skipped") {
+                return Ok(out);
+            }
             let failed = shell_result_failed(&out);
             let status_mark = if failed {
                 "✗ [TYPECHECK FAILED]"
@@ -203,7 +224,10 @@ pub(in crate::orchestration) async fn execute(
                 ));
             };
 
-            let out = run_shell(root, config, chat_id, &cmd).await?;
+            let out = run_shell(root, config, chat_id, &cmd, &input.retry_reason).await?;
+            if out.starts_with("Skipped") {
+                return Ok(out);
+            }
             let failed = shell_result_failed(&out);
             let status_mark = if failed {
                 "✗ [LINT FAILED]"

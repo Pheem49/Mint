@@ -285,9 +285,23 @@ pub fn handle_learn(path: Option<PathBuf>, list: bool, delete: Option<String>) -
         let unique_skills =
             mint_core::skill_inventory::list_available_skills(&memory, root.as_deref())?;
         if unique_skills.is_empty() {
-            println!("No learned skills found.");
+            if let Some(ref workspace_root) = root {
+                println!(
+                    "No learned skills found in workspace: {}",
+                    workspace_root.display()
+                );
+            } else {
+                println!("No learned skills found.");
+            }
         } else {
-            println!("Learned AI Skills:");
+            if let Some(ref workspace_root) = root {
+                println!(
+                    "Learned AI Skills (Workspace: {}):",
+                    workspace_root.display()
+                );
+            } else {
+                println!("Learned AI Skills:");
+            }
             for entry in &unique_skills {
                 let skill = &entry.skill;
                 let name = &skill.name;

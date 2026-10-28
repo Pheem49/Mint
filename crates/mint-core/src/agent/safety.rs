@@ -331,10 +331,11 @@ pub fn assert_path_capability(
         Capability::Read => &config.allowed_read_paths,
         Capability::Write => &config.allowed_write_paths,
     };
-    if !allowed_paths
-        .iter()
-        .map(|path| resolve_path(path))
-        .any(|path| resolved.starts_with(path))
+    if !is_temp_path(&resolved)
+        && !allowed_paths
+            .iter()
+            .map(|path| resolve_path(path))
+            .any(|path| resolved.starts_with(path))
     {
         return Err(SafetyError::PathDenied {
             capability: capability.as_str(),
@@ -342,6 +343,31 @@ pub fn assert_path_capability(
         });
     }
     Ok(resolved)
+}
+
+fn is_temp_path(path: &Path) -> bool {
+    let temp = std::env::temp_dir();
+    if path.starts_with(&temp) {
+        return true;
+    }
+    if let Ok(canonical_temp) = temp.canonicalize() {
+        if path.starts_with(&canonical_temp) {
+            return true;
+        }
+    }
+    #[cfg(unix)]
+    {
+        let slash_tmp = Path::new("/tmp");
+        if path.starts_with(slash_tmp) {
+            return true;
+        }
+        if let Ok(canonical_slash_tmp) = slash_tmp.canonicalize() {
+            if path.starts_with(&canonical_slash_tmp) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn resolve_path(path: &Path) -> PathBuf {
@@ -475,5 +501,31 @@ mod tests {
         let result =
             assert_path_capability(Path::new("/var/lib/private"), Capability::Read, &config);
         assert!(matches!(result, Err(SafetyError::PathDenied { .. })));
+    }
+
+    #[test]
+    fn allows_temp_directory_paths_even_when_allowed_paths_is_empty() {
+        let config = MintConfig {
+            allowed_read_paths: vec![],
+            allowed_write_paths: vec![],
+            ..MintConfig::default()
+        };
+        let temp_file = std::env::temp_dir().join("some_image.png");
+        let result = assert_path_capability(&temp_file, Capability::Read, &config);
+        assert!(result.is_ok());
+        let write_result = assert_path_capability(&temp_file, Capability::Write, &config);
+        assert!(write_result.is_ok());
+    }
+
+    #[test]
+    fn blocks_sensitive_files_even_inside_temp_directory() {
+        let config = MintConfig {
+            allowed_read_paths: vec![],
+            blocked_file_names: vec![".env".into()],
+            ..MintConfig::default()
+        };
+        let temp_env = std::env::temp_dir().join(".env");
+        let result = assert_path_capability(&temp_env, Capability::Read, &config);
+        assert!(matches!(result, Err(SafetyError::BlockedFileName { .. })));
     }
 }

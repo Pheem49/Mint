@@ -83,9 +83,11 @@ export const applyTheme = (cfg: any): void => {
   document.documentElement.setAttribute('data-theme', effectiveTheme)
   document.documentElement.setAttribute('data-surface', surfaceStyle)
   const normalizedAccent = accentColor.trim().toLowerCase()
+  const isMonochrome = normalizedAccent === '#ffffff' || normalizedAccent === '#fff'
+  const isGray = normalizedAccent === '#52525b' || normalizedAccent === '#475569' || normalizedAccent === '#3f3f46' || normalizedAccent === '#64748b'
   document.documentElement.setAttribute(
     'data-accent-mode',
-    normalizedAccent === '#ffffff' || normalizedAccent === '#fff' ? 'monochrome' : 'color'
+    isMonochrome ? 'monochrome' : (isGray ? 'gray' : 'color')
   )
 
   // Set Accent variables

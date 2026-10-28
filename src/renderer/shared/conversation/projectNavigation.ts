@@ -37,3 +37,14 @@ export async function navigateToProject(path: string, navigation: ProjectNavigat
     await navigation.newChat(targetPath, view)
   }
 }
+
+/** Open a persisted ID without substituting another session or its workspace. */
+export async function navigateToSavedConversation(id: string, navigation: Pick<ProjectNavigation, 'listSessions' | 'openSession' | 'isCurrent'>): Promise<boolean> {
+  if (navigation.isCurrent?.() === false) return false
+  const sessions = await navigation.listSessions()
+  if (navigation.isCurrent?.() === false) return false
+  const session = sessions.find(session => session.id === id)
+  if (!session) return false
+  await navigation.openSession(session, 'chat')
+  return true
+}

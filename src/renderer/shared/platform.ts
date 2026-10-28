@@ -68,7 +68,7 @@ export type SlashResponse =
 
 export interface MintPlatformApi {
   modsOperation(operation: import("./mods").ModOperation): Promise<import("./mods").ModResponse>
-  readMcpArtifact(id: string): Promise<string>
+  readMcpArtifact(id: string, chatId?: string): Promise<string>
   listBackgroundJobs(workspace?: string): Promise<import("./types").BackgroundJob[]>
   getBackgroundJob(id: string): Promise<import("./types").BackgroundJobOutput>
   stopBackgroundJob(id: string): Promise<import("./types").BackgroundJob>
@@ -112,6 +112,7 @@ export interface MintPlatformApi {
     onTurnStarted?: (interactionId: number) => void,
     attachmentMetadata?: import('./types').AttachmentMetadata,
   ): Promise<ChatResponse>
+  speechRequest(request: import('./speech/types').SpeechRequest): Promise<import('./speech/types').SpeechReply>
   getTtsUrls(text: string): Promise<TtsUrl[]>
   cancelChatMessage(chatId: string): Promise<void>
   getRecentInteractions(limit?: number, chatId?: string | null, workspacePath?: string | null): Promise<InteractionMemory[]>
@@ -128,6 +129,7 @@ export interface MintPlatformApi {
   ): Promise<any>
 
   saveInteractionAgentActivity(interactionId: number, progress: any[]): Promise<void>
+  pendingCompanionChat(acknowledgedId?: string): Promise<string | null>
   listChatSessions(): Promise<ChatSession[]>
   updateChatSessionWorkspace(chatId: string, workspacePath: string | null): Promise<void>
   deleteChatSession(chatId: string): Promise<number>
@@ -176,6 +178,9 @@ export interface MintPlatformApi {
   rollbackGitCheckpoint(chatId: string, step: number, workspacePath?: string): Promise<{ status: string; message: string }>
   undoGitCheckpoint(workspacePath?: string): Promise<{ status: string; message: string }>
   readWorkspaceFile(path: string, workspacePath?: string): Promise<string>
+  readWorkspaceImage(path: string, workspacePath: string): Promise<string>
+  readWorkspaceMedia(path: string, workspacePath: string): Promise<import('./types').WorkspaceMediaSource>
+  openExternal(url: string): Promise<any>
   testMcpConnection(
     url: string,
     headers?: Record<string, string>,
@@ -267,11 +272,11 @@ export const conversationPlatform = {
   clearChatHistory: operation('clearChatHistory'), deleteChatSession: operation('deleteChatSession'),
   renameChatSession: operation('renameChatSession'), getRecentInteractions: operation('getRecentInteractions'),
   getConversationSnapshot: operation('getConversationSnapshot'), getConversationChanges: operation('getConversationChanges'),
-  saveSystemInteraction: operation('saveSystemInteraction'), listChatSessions: operation('listChatSessions'),
+  saveSystemInteraction: operation('saveSystemInteraction'), listChatSessions: operation('listChatSessions'), pendingCompanionChat: operation('pendingCompanionChat'),
   updateChatSessionWorkspace: operation('updateChatSessionWorkspace'),
   saveInteractionAgentActivity: operation('saveInteractionAgentActivity'), streamChatMessage: operation('streamChatMessage'),
   cancelChatMessage: operation('cancelChatMessage'), submitToolApproval: operation('submitToolApproval'),
-  listen: operation('listen'), readClipboardImage: operation('readClipboardImage'), getTtsUrls: operation('getTtsUrls'),
+  listen: operation('listen'), readClipboardImage: operation('readClipboardImage'), getTtsUrls: operation('getTtsUrls'), speechRequest: operation('speechRequest'),
   startGeminiLiveSession: operation('startGeminiLiveSession'), sendGeminiLiveAudioChunk: operation('sendGeminiLiveAudioChunk'),
   stopGeminiLiveSession: operation('stopGeminiLiveSession'), listGitCheckpoints: operation('listGitCheckpoints'),
   rollbackGitCheckpoint: operation('rollbackGitCheckpoint'), undoGitCheckpoint: operation('undoGitCheckpoint'),
@@ -316,7 +321,8 @@ export const runtimePlatform = {
   appIconPath: () => String(requireRendererPlatform().APP_ICON_PATH ?? './assets/icon.png'),
   getRuntimeStatus: operation('getRuntimeStatus'), setActiveModel: operation('setActiveModel'),
   selectWorkspaceDirectory: operation('selectWorkspaceDirectory'), selectLinkedFolderPath: operation('selectLinkedFolderPath'),
-  isTauriRuntime: operation('isTauriRuntime'), readWorkspaceFile: operation('readWorkspaceFile'),
+  isTauriRuntime: operation('isTauriRuntime'), readWorkspaceFile: operation('readWorkspaceFile'), readWorkspaceImage: operation('readWorkspaceImage'), readWorkspaceMedia: operation('readWorkspaceMedia'),
+  openExternal: operation('openExternal'),
 }
 
 /** Install the Desktop or Web adapter before rendering the application. */

@@ -22,13 +22,7 @@ impl Drop for ChildGuard {
 }
 
 fn project_root() -> Result<PathBuf> {
-    let cwd = std::env::current_dir()?;
-    let exe = std::env::current_exe()?;
-    exe.ancestors()
-        .chain(cwd.ancestors())
-        .find(|path| path.join("package.json").exists())
-        .map(PathBuf::from)
-        .context("Could not find the Mint project root (package.json)")
+    super::agent::find_mint_root()
 }
 
 fn tailscale(args: &[&str]) -> Result<String> {
@@ -152,6 +146,7 @@ pub async fn run() -> Result<()> {
             .context("Could not start the production Web UI")?,
     );
     wait_for_port(9000).await?;
+    mint_core::companion::navigation::configure_web(url.clone());
 
     let api_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 3000);
     let mut api = tokio::spawn(mint_core::api_server::start_api_server_on(api_addr));

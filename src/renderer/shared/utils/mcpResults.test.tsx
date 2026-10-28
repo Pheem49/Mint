@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import McpToolResults from '../components/McpToolResults'
+import McpToolResults from '../components/activity/McpToolResults'
 import { reduceLiveAgentProgress, compactAgentProgressForPersistence } from '../agentProgress'
+
+it('shows screenshot origin and dimensions in saved artifact cards', () => {
+  const progress: any[] = [{ type: 'ToolArtifacts', data: { callId: 'capture', warnings: [], artifacts: [{ id: 'capture-image', kind: 'image', name: 'result.png', size: 100, metadata: { url: 'http://localhost:3000/result', width: 1440, height: 900 } }] } }]
+  const html = renderToStaticMarkup(<McpToolResults progress={progress} />)
+  expect(html).toContain('http://localhost:3000/result')
+  expect(html).toContain('1440 × 900')
+})
 
 describe('MCP progress retention', () => {
   it('keeps artifacts visible after later tools and folds progress by call', () => {
@@ -89,3 +96,19 @@ it('shows stopped waiting when interrupted during a device operation', () => {
   expect(html).toContain('Stopped waiting')
   expect(html).not.toContain('Awaiting device completion')
 })
+
+it('renders warning banner with icon and accessible status', () => {
+  const progress: any[] = [{
+    type: 'ToolArtifacts',
+    data: {
+      callId: 'a',
+      artifacts: [],
+      warnings: ['Model input was resized/compressed; the original image is available for download.'],
+    },
+  }]
+  const html = renderToStaticMarkup(<McpToolResults progress={progress} />)
+  expect(html).toContain('mcp-warning-banner')
+  expect(html).toContain('mcp-results-compact')
+  expect(html).toContain('Model input was resized/compressed')
+})
+

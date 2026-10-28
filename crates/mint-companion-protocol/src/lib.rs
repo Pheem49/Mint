@@ -11,6 +11,9 @@ pub struct HostDescriptor {
     pub name: String,
     pub endpoint: String,
     pub token: String,
+    /// Stable executable and launch-directory identity; absent on older hosts.
+    #[serde(default)]
+    pub identity: Option<String>,
 }
 
 pub fn hosts_dir() -> Option<std::path::PathBuf> {
@@ -29,6 +32,22 @@ pub enum Status {
     Completed,
     Failed,
     Interrupted,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Surface {
+    Desktop,
+    Web,
+    Tui,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigationOutcome {
+    Opened,
+    NeedsTerminal,
+    MissingSession,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,9 +72,78 @@ pub struct Turn {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "operation",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum SpeechRequest {
+    Prefer {
+        owner: String,
+        chat_id: String,
+        enabled: bool,
+    },
+    Prepare {
+        owner: String,
+        chat_id: String,
+        turn_id: Option<i64>,
+        text: Option<String>,
+        #[serde(default)]
+        automatic: bool,
+        #[serde(default)]
+        audio_only: bool,
+        #[serde(default)]
+        route_owner: Option<String>,
+    },
+    Audio {
+        owner: String,
+        index: usize,
+    },
+    Renew {
+        owner: String,
+    },
+    Release {
+        owner: String,
+    },
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum SpeechReply {
+    Prepared {
+        text: String,
+        provider: String,
+        volume: f64,
+        speed: f64,
+        pitch: f64,
+        chunks: usize,
+    },
+    Audio {
+        data: String,
+    },
+    Lease {
+        active: bool,
+    },
+    Released,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     ListSessions,
+    Speech {
+        request: SpeechRequest,
+    },
+    OpenChat {
+        #[serde(rename = "chatId")]
+        chat_id: String,
+        #[serde(default, rename = "newTerminal")]
+        new_terminal: bool,
+    },
     Subscribe {
         #[serde(rename = "chatId")]
         chat_id: String,
@@ -79,10 +167,22 @@ pub enum Command {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    Speech {
+        reply: SpeechReply,
+    },
+    Navigation {
+        outcome: NavigationOutcome,
+    },
     Snapshot {
         #[serde(rename = "hostId")]
         host_id: String,
         version: u32,
+        #[serde(default)]
+        surface: Option<Surface>,
+        #[serde(default)]
+        speech: bool,
+        #[serde(default, rename = "chatId")]
+        chat_id: Option<String>,
         sessions: Vec<Session>,
         turns: Vec<Turn>,
     },
@@ -159,5 +259,18 @@ mod tests {
         let wire =
             r#"{"type":"send_chat","chatId":"one","requestId":"req","message":"hi","tools":[{}]}"#;
         assert!(serde_json::from_str::<Command>(wire).is_err());
+    }
+}
+
+#[cfg(test)]
+mod navigation_tests {
+    use super::*;
+    #[test]
+    fn open_chat_is_an_explicit_navigation_request_without_chat_submission() {
+        let request =
+            serde_json::json!({"type":"open_chat","chatId":"cli::saved","newTerminal":false});
+        assert!(serde_json::from_value::<Command>(request).is_ok());
+        let injected = serde_json::json!({"type":"open_chat","chatId":"cli::saved","newTerminal":false,"executable":"evil"});
+        assert!(serde_json::from_value::<Command>(injected).is_err());
     }
 }

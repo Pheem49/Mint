@@ -12,10 +12,19 @@ use std::time::Instant;
 use thiserror::Error;
 
 pub mod approvals;
+#[cfg(test)]
+mod image_regressions;
 mod mcp_review;
 #[cfg(test)]
 mod mod_authoring_regressions;
 mod progress_clock;
+pub mod reliability;
+pub use reliability::{ExecutionEvidence, ExecutionState};
+pub mod diagnostics;
+pub mod loop_guard;
+pub mod trajectory_schema;
+pub mod truncation;
+pub use trajectory_schema::{StandardTrajectoryRun, StandardTrajectoryStep, StepTokens};
 mod repeated_failures;
 #[cfg(all(test, unix))]
 mod review_regressions;
@@ -35,7 +44,6 @@ use crate::knowledge::KnowledgeStore;
 use crate::plugins::execute_native_plugin;
 use crate::prompts::tool_catalog::tool_catalog;
 use crate::semantic::{index_semantic_code, search_semantic_code};
-use crate::shell::run_shell_command;
 use crate::symbols::build_symbol_index;
 use crate::{
     Capability, ChatError, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID, MemoryError,
@@ -98,6 +106,7 @@ struct TurnLease {
 impl TurnLease {
     async fn start(memory: &MemoryStore, chat_id: &str, text: &str) -> Result<Self, MemoryError> {
         let id = memory.start_turn(chat_id, text)?;
+        crate::tts::playback::cancel_chat(memory, chat_id);
         crate::companion::queued(chat_id, id, text);
         let _ = TURN_START_LISTENER.try_with(|listener| {
             if listener.chat_id == chat_id {
@@ -479,12 +488,16 @@ fn model_tool_result(action: &str, result: &str) -> String {
     {
         result.to_owned()
     } else {
-        truncate(result)
+        truncation::head_tail_truncate(result, truncation::TruncationConfig::default())
     }
 }
 
 fn tool_progress_input(root: &Path, decision: &AgentDecision) -> Value {
     let mut input = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+    if matches!(decision.action.as_str(), "browser_type" | "browser_fill") {
+        input["text"] = "[redacted input]".into();
+        input["query"] = "[redacted input]".into();
+    }
     if decision.action == "read_file"
         && let Some(skill) = crate::skills::skill_for_read_path(root, &decision.input.path)
         && let Some(object) = input.as_object_mut()
@@ -497,7 +510,7 @@ fn tool_progress_input(root: &Path, decision: &AgentDecision) -> Value {
 /// Truncates `text` to at most `max_chars` characters (not bytes, so this
 /// never splits a multi-byte UTF-8 character) for injection into a "recent
 /// context" summary. Cheap no-op for the common case of a short message.
-fn truncate_for_context(text: &str, max_chars: usize) -> String {
+pub(super) fn truncate_for_context(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_owned();
     }
@@ -627,8 +640,7 @@ use workspace_helpers::*;
 /// whole accumulated conversation, so total tokens for one task scale
 /// roughly with step count. Was lowered from 32 to 24 to cap runaway/looping
 /// tasks earlier, but 24 turned out too tight for legitimate multi-file
-/// work, cutting it off mid-task — raised to 40 as a middle ground.
-const MAX_STEPS: usize = 40;
+/// work, cutting it off mid-task — now configurable via `MintConfig::agent_max_steps` (default 40).
 // A tool gets its own correction budget, renewed after successful execution.
 const MAX_TOOL_ARGUMENT_RETRIES: usize = 5;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
@@ -643,6 +655,13 @@ const COMPACTION_TRIGGER_RATIO: f64 = 0.75;
 /// Number of most-recent Assistant/Tool step-pairs kept verbatim (uncompacted)
 /// in `native_messages`.
 const COMPACTION_KEEP_RECENT_STEPS: usize = 3;
+/// Number of most-recent Tool step-pairs that retain full `ContentBlock::Image` pixels.
+/// Older tool turns have image blocks pruned to reduce prompt cache and token usage.
+const MAX_RETAINED_IMAGE_STEPS: usize = 2;
+/// Adaptive token threshold to compact context in long-running agent tasks (>= 20 steps),
+/// preventing cumulative prompt cache and token bloat before hitting the full window ratio.
+const ADAPTIVE_COMPACTION_TOKEN_CEILING: u32 = 40_000;
+const ADAPTIVE_COMPACTION_MIN_STEPS: usize = 20;
 /// How many times a step retries after every configured provider comes back
 /// `ChatError::NetworkUnavailable` before finally giving up — swapping
 /// providers is pointless when the network itself is down, so this waits and
@@ -761,6 +780,11 @@ pub enum AgentProgress {
         artifacts: Vec<crate::integrations::mcp_result::McpArtifact>,
         warnings: Vec<String>,
     },
+    ExecutionUpdate {
+        #[serde(rename = "callId")]
+        call_id: String,
+        executions: Vec<reliability::ExecutionEvidence>,
+    },
     Thinking {
         elapsed_secs: u64,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -873,6 +897,50 @@ pub enum AgentProgress {
     RunCompleted {
         summary: RunTelemetrySummary,
     },
+    SubagentStarted {
+        subagent: String,
+        profile: String,
+        task: String,
+    },
+    SubagentFinished {
+        subagent: String,
+        status: String,
+        #[serde(default, alias = "elapsed_ms", rename = "elapsedMs")]
+        elapsed_ms: u64,
+        steps: u32,
+        #[serde(default, alias = "summary_preview", rename = "summaryPreview")]
+        summary_preview: String,
+    },
+}
+
+impl From<crate::swarm::SwarmEvent> for AgentProgress {
+    fn from(event: crate::swarm::SwarmEvent) -> Self {
+        match event {
+            crate::swarm::SwarmEvent::Started {
+                label,
+                profile,
+                task,
+            } => AgentProgress::SubagentStarted {
+                subagent: label,
+                profile,
+                task,
+            },
+            crate::swarm::SwarmEvent::Progress(p) => p,
+            crate::swarm::SwarmEvent::Finished {
+                label,
+                status,
+                elapsed_ms,
+                steps,
+                summary_preview,
+            } => AgentProgress::SubagentFinished {
+                subagent: label,
+                status: status.as_str().to_string(),
+                elapsed_ms,
+                steps,
+                summary_preview,
+            },
+        }
+    }
 }
 
 /// Determines whether a thought string represents long-form / internal chain-of-thought
@@ -1005,6 +1073,8 @@ pub struct RunTelemetrySummary {
     pub duration_secs: f64,
     pub tool_timeline: Vec<ToolExecutionRecord>,
     pub retries_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trajectory: Option<trajectory_schema::StandardTrajectoryRun>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1029,6 +1099,8 @@ pub struct AgentResult {
     pub model: String,
     pub summary: String,
     pub verification: String,
+    #[serde(default)]
+    pub completion_status: String,
     pub fallback: Option<String>,
     #[serde(default)]
     pub fallback_reason: Option<String>,
@@ -1064,11 +1136,36 @@ struct AgentDecision {
     input: AgentInput,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmTaskInput {
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub base: Option<String>,
+    #[serde(default)]
+    pub instruction: String,
+}
+
+impl From<SwarmTaskInput> for crate::swarm::SwarmTask {
+    fn from(input: SwarmTaskInput) -> Self {
+        Self {
+            role: input.role,
+            base: input.base,
+            instruction: input.instruction,
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentInput {
     #[serde(default)]
+    tasks: Vec<SwarmTaskInput>,
+    #[serde(default)]
     path: String,
+    #[serde(default)]
+    artifact_id: String,
     #[serde(
         default,
         alias = "q",
@@ -1092,10 +1189,20 @@ struct AgentInput {
     city: String,
     #[serde(default, alias = "expr", alias = "math")]
     expression: String,
-    #[serde(default, alias = "cmd")]
+    #[serde(
+        default,
+        alias = "cmd",
+        alias = "script",
+        alias = "exec",
+        alias = "code",
+        alias = "bash",
+        alias = "sh"
+    )]
     command: String,
     #[serde(default)]
     background: bool,
+    #[serde(default, alias = "retryReason")]
+    retry_reason: String,
     #[serde(default, alias = "job_id")]
     job_id: String,
     #[serde(default)]
@@ -1108,6 +1215,8 @@ struct AgentInput {
     summary: String,
     #[serde(default)]
     verification: String,
+    #[serde(default)]
+    completion_status: String,
     #[serde(default)]
     plan: String,
     #[serde(default)]
@@ -1162,6 +1271,8 @@ struct AgentInput {
     tab_id: String,
     #[serde(default)]
     operation: String,
+    #[serde(default)]
+    mode: String,
     #[serde(default)]
     condition: String,
     #[serde(default)]
@@ -1280,9 +1391,78 @@ where
         .map(|input| input.unwrap_or_default())
 }
 
-// Some providers encode the structured patch twice. Decode only that field;
-// retain strict typing for all other arguments and never infer a target file.
+fn prune_null_values(value: &mut Value) {
+    if let Value::Object(map) = value {
+        map.retain(|k, v| !(v.is_null() && k != "path"));
+        for v in map.values_mut() {
+            prune_null_values(v);
+        }
+    } else if let Value::Array(arr) = value {
+        for v in arr.iter_mut() {
+            prune_null_values(v);
+        }
+    }
+}
+
+// Some providers encode the structured patch twice or double-wrap arguments.
+// Decode those fields, prune nulls for robust serde defaults, and retain strict
+// typing for all other arguments.
 fn decode_agent_input(mut value: Value) -> Result<AgentInput, String> {
+    // 1. If value is a string, check if it's an encoded JSON object
+    if let Value::String(s) = &value {
+        let trimmed = s.trim();
+        if trimmed.starts_with('{') && trimmed.ends_with('}') {
+            if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+                if parsed.is_object() {
+                    value = parsed;
+                }
+            }
+        }
+    }
+
+    // 2. Prune null fields so serde default values apply for missing keys
+    prune_null_values(&mut value);
+
+    // 3. Unpack nested "arguments" if top-level command is missing
+    if let Value::Object(map) = &mut value {
+        let has_command = map
+            .get("command")
+            .or_else(|| map.get("cmd"))
+            .or_else(|| map.get("script"))
+            .or_else(|| map.get("exec"))
+            .or_else(|| map.get("code"))
+            .or_else(|| map.get("bash"))
+            .or_else(|| map.get("sh"))
+            .and_then(Value::as_str)
+            .is_some_and(|s| !s.trim().is_empty());
+
+        if !has_command {
+            if let Some(args_val) = map.get("arguments").cloned() {
+                let inner_obj = match args_val {
+                    Value::Object(inner_map) => Some(inner_map),
+                    Value::String(inner_str) => serde_json::from_str::<Value>(&inner_str)
+                        .ok()
+                        .and_then(|v| match v {
+                            Value::Object(m) => Some(m),
+                            _ => None,
+                        }),
+                    _ => None,
+                };
+                if let Some(inner) = inner_obj {
+                    let mut wrapped = Value::Object(inner);
+                    prune_null_values(&mut wrapped);
+                    if let Value::Object(cleaned) = wrapped {
+                        for (k, v) in cleaned {
+                            if !map.contains_key(&k) && !v.is_null() {
+                                map.insert(k, v);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let outer_path = value.get("path").and_then(Value::as_str).map(str::to_owned);
     if let Some(patch) = value.get_mut("patch").filter(|patch| !patch.is_null()) {
         if let Value::String(encoded) = patch {
@@ -1765,7 +1945,7 @@ where
             );
             let mut mod_usage = crate::mods::UsageTracker::new(&root, chat_id, companion_turn_id);
             let resolved_task = resolve_github_links(task, config).await;
-            let agent_result = crate::browser::run_session(async {
+            let agent_result = reliability::scope(Box::pin(crate::browser::run_session(async {
         // Subagent runs use a synthetic `{parent_chat_id}::subagent::{name}` chat id
         // (see the `dispatch_subagent` arm in `execute_tool`) so their own memory
         // interaction doesn't leak into the parent conversation's history. That
@@ -1837,17 +2017,16 @@ where
         let mut repeated_failures = RepeatedFailures::default();
         let mut streamed_finish_summary = String::new();
         let mut streamed_direct_text = String::new();
-        // Track the most recent step (if any) that successfully modified a file
-        // (`apply_patch`/`write_file`) and the most recent step that ran `verify`,
-        // so `finish` can be rejected when code was changed but never checked —
-        // see the gate right before the `finish` handling block below.
-        let mut last_modify_step: Option<usize> = None;
-        let mut last_verify_step: Option<usize> = None;
-        // Whether the most recent `verify` call actually passed — separate from
-        // `last_verify_step`, which only records that one *ran*. Lets `finish` be
-        // rejected when the agent ignores a real failure and claims success anyway;
-        // see `unacknowledged_verify_failure` right before the `finish` handling block.
+        // Used only for retry telemetry; finish validation uses the typed ledger.
         let mut last_verify_failed: Option<bool> = None;
+        let run_id = format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S"));
+        let mut trajectory_run = trajectory_schema::StandardTrajectoryRun::new(
+            &run_id,
+            chat_id,
+            &resolved_task,
+            config.active_model(),
+            &config.ai_provider,
+        );
         let mut trajectory: Vec<String> = Vec::new();
         // Structured history for native tool-calling providers, maintained alongside
         // `trajectory`/`observation` (which remain the source of truth for the
@@ -1890,8 +2069,11 @@ where
             std::collections::BTreeSet::new();
         let mut files_created: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
+        let mut repetition_guard = loop_guard::RepetitionGuard::default();
+        let max_steps = config.resolved_agent_max_steps();
+        let warning_threshold = max_steps.saturating_sub(5);
 
-        'steps: for step in 1..=MAX_STEPS {
+        'steps: for step in 1..=max_steps {
             crate::mods::set_turn_policy(&root, chat_id, plan_mode, pinned_mcp_server);
             let _ = execute_mod_requests(&root, chat_id, config, plan_mode, &mut approve, &mut progress, None).await;
             if run_control::cancelled() { turn.interrupt(); return Err(OrchestrationError::Agent("Agent turn canceled by user".into())); }
@@ -1941,13 +2123,32 @@ where
                 ));
             }
 
+            if step >= warning_threshold {
+                let remaining = max_steps.saturating_sub(step);
+                if remaining == 0 {
+                    active_system_prompt.push_str(&format!(
+                        "\n\n[CRITICAL STEP LIMIT REACHED - FINAL STEP]\n\
+                         You are at step {step} of {max_steps} (the absolute final step). \
+                         Do NOT execute any new tool calls or start new exploration. \
+                         You MUST call 'finish' right now, synthesize all findings, results, and links discovered so far, \
+                         and provide a complete, clear, and comprehensive answer to the user."
+                    ));
+                } else {
+                    active_system_prompt.push_str(&format!(
+                        "\n\n[STEP BUDGET WARNING]\n\
+                         You are at step {step} of {max_steps} ({remaining} step{} remaining). \
+                         Do not initiate new broad exploratory tasks or repeat failed attempts. \
+                         Consolidate your findings and call 'finish' with your final report before the budget is exhausted.",
+                        if remaining == 1 { "" } else { "s" }
+                    ));
+                }
+            }
+
             let tool_mode = active_config.tool_calling_mode();
             // A finish can still be rejected after the provider finishes
             // streaming when edited files have not been verified. Don't show
             // that provisional summary to the user as if the run were done.
-            let allow_final_stream =
-                !unverified_modification(last_modify_step, last_verify_step, "")
-                    && last_verify_failed != Some(true);
+            let allow_final_stream = reliability::completion("verified", "").is_ok();
 
             if tool_mode == ToolCallingMode::JsonPrompt
                 && active_config.ai_provider == "ollama"
@@ -2164,6 +2365,20 @@ where
                             progress(AgentProgress::ToolStart { call_id: None, action: action.clone(), input: input.clone(), subagent: None });
                             progress(AgentProgress::ToolEnd { elapsed_ms: None, call_id: None, status: None, action: action.clone(), input: input.clone(), result: error.clone(), subagent: None });
                             trajectory.push(format_trajectory_step(step, "", action, error));
+                            trajectory_run.record_step(StandardTrajectoryStep {
+                                step,
+                                timestamp: chrono::Utc::now().to_rfc3339(),
+                                thought: String::new(),
+                                action: action.clone(),
+                                input: input.clone(),
+                                observation: error.clone(),
+                                status: "failed".to_string(),
+                                duration_ms: thought_started.elapsed().as_millis() as u64,
+                                tokens: StepTokens {
+                                    input_tokens: last_input_tokens,
+                                    generated_tokens: response.output_tokens.unwrap_or(0) as u64,
+                                },
+                            });
                         }
                         step_tool_results.extend(errors);
                         decisions
@@ -2277,22 +2492,7 @@ where
             let mut step_images: std::collections::HashMap<String, Vec<String>> =
                 std::collections::HashMap::new();
 
-            if decisions_are_parallel_subagent_batch(&decisions) {
-                let completed = run_parallel_subagent_batch(
-                    &decisions,
-                    step,
-                    &root,
-                    config,
-                    chat_id,
-                    &mut approve,
-                    &mut progress,
-                    &mut action_counts,
-                    &mut trajectory,
-                )
-                .await;
-                invalid_tool_calls.observe_completed(&completed);
-                step_tool_results.extend(completed);
-            } else if decisions_are_parallel_read_only_batch(&decisions) {
+            if decisions_are_parallel_read_only_batch(&decisions) {
                 let completed = run_parallel_read_only_batch(
                     &decisions,
                     step,
@@ -2361,59 +2561,18 @@ where
                             reject_native_finish(tool_mode, &mut native_messages, &response.text, error);
                             continue 'steps;
                         }
-                        if unverified_modification(
-                            last_modify_step,
-                            last_verify_step,
-                            &decision.input.verification,
-                        ) {
-                            let err_msg = "Error: You modified a file (apply_patch/write_file) in this \
-                                       run but finished without verifying it. Call the verify tool \
-                                       with build/test/lint commands appropriate for this project \
-                                       before finishing. If no check genuinely applies (e.g. no test \
-                                       suite, documentation-only change), say so explicitly in the \
-                                       finish action's 'verification' field and finish again.";
-                            trajectory.push(format_trajectory_step(
-                                step,
-                                &decision.thought,
-                                &decision.action,
-                                err_msg,
-                            ));
-                            rebuild_observation(task, &root, &trajectory, &mut observation);
-                            reject_native_finish(
-                                tool_mode,
-                                &mut native_messages,
-                                &response.text,
-                                err_msg,
-                            );
-                            continue 'steps;
-                        }
-                        if unacknowledged_verify_failure(
-                            last_verify_failed,
-                            &decision.input.verification,
-                        ) {
-                            let err_msg = "Error: Your last verify call reported a failure \
-                                       (non-zero exit code), but you're finishing without \
-                                       addressing it. Read the stdout/stderr from that verify \
-                                       call, fix the actual problem, and run verify again until \
-                                       it passes. Do not report success in the finish summary \
-                                       while a real check is failing — if the failure is genuinely \
-                                       unrelated to your change (e.g. pre-existing), say so \
-                                       explicitly in the finish action's 'verification' field and \
-                                       finish again.";
-                            trajectory.push(format_trajectory_step(
-                                step,
-                                &decision.thought,
-                                &decision.action,
-                                err_msg,
-                            ));
-                            rebuild_observation(task, &root, &trajectory, &mut observation);
-                            reject_native_finish(
-                                tool_mode,
-                                &mut native_messages,
-                                &response.text,
-                                err_msg,
-                            );
-                            continue 'steps;
+                        let completion_status = match reliability::completion(&decision.input.completion_status, &decision.input.verification) {
+                            Ok(status) => status,
+                            Err(error) => {
+                                trajectory.push(format_trajectory_step(step, &decision.thought, &decision.action, &error));
+                                rebuild_observation(task, &root, &trajectory, &mut observation);
+                                reject_native_finish(tool_mode, &mut native_messages, &response.text, &error);
+                                continue 'steps;
+                            }
+                        };
+                        if completion_status != "verified" {
+                            let notice = format!("\n\nCompletion: {}. {}", completion_status, decision.input.verification.trim());
+                            summary.push_str(&notice);
                         }
                         // Auto-append generated media (image/video) and model feedback to summary if LLM omitted it
                         let mut media_blocks = Vec::new();
@@ -2478,10 +2637,17 @@ where
                             summary.clone(),
                             turn.id,
                         );
+                        trajectory_run.finish(
+                            completion_status.to_ascii_uppercase(),
+                            turn_total_tokens,
+                            started_at.elapsed().as_secs_f64(),
+                            files_created.iter().cloned().collect(),
+                            files_modified.iter().cloned().collect(),
+                        );
                         let run_summary = RunTelemetrySummary {
-                            run_id: format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
+                            run_id: run_id.clone(),
                             task: task.to_string(),
-                            outcome: "SUCCESS".to_string(),
+                            outcome: completion_status.to_ascii_uppercase(),
                             total_tokens: turn_total_tokens as usize,
                             tool_calls_count: executed_tools.len(),
                             files_changed: files_created
@@ -2493,6 +2659,7 @@ where
                             duration_secs: started_at.elapsed().as_secs_f64(),
                             tool_timeline: executed_tools.clone(),
                             retries_count: executed_tools.iter().filter(|t| t.retried).count(),
+                            trajectory: Some(trajectory_run),
                         };
                         let _ = execute_mod_requests(&root, chat_id, config, plan_mode, &mut approve, &mut progress, None).await;
                         progress(AgentProgress::RunCompleted {
@@ -2511,6 +2678,7 @@ where
                             model: final_model,
                             summary,
                             verification,
+                            completion_status,
                             fallback: final_fallback,
                             fallback_reason: final_fallback_reason,
                             total_tokens: turn_total_tokens,
@@ -2522,6 +2690,20 @@ where
                     if decision.action == "mcp_tool" && mcp_review.blocks_repeat(&decision.input.server,&decision.input.tool,&decision.input.arguments) {
                         let message="Error: Automatic repeat blocked: this Device command's completion is unconfirmed. Read its status or wait for a new user instruction; do not send the command again this turn.".to_string();
                         trajectory.push(format_trajectory_step(step,&decision.thought,&decision.action,&message));
+                        trajectory_run.record_step(StandardTrajectoryStep {
+                            step,
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                            thought: decision.thought.clone(),
+                            action: decision.action.clone(),
+                            input: tool_progress_input(&root,&decision),
+                            observation: message.clone(),
+                            status: "intercepted".to_string(),
+                            duration_ms: thought_started.elapsed().as_millis() as u64,
+                            tokens: StepTokens {
+                                input_tokens: last_input_tokens,
+                                generated_tokens: response.output_tokens.unwrap_or(0) as u64,
+                            },
+                        });
                         step_tool_results.push((call_id.clone(),decision.action.clone(),tool_progress_input(&root,&decision),message).into());
                         continue;
                     }
@@ -2536,6 +2718,20 @@ where
                                 turn.interrupt();return Err(OrchestrationError::Agent(preparation.text));
                             }
                             trajectory.push(format_trajectory_step(step,&decision.thought,&decision.action,&preparation.text));
+                            trajectory_run.record_step(StandardTrajectoryStep {
+                                step,
+                                timestamp: chrono::Utc::now().to_rfc3339(),
+                                thought: decision.thought.clone(),
+                                action: decision.action.clone(),
+                                input: tool_progress_input(&root,&decision),
+                                observation: preparation.text.clone(),
+                                status: "intercepted".to_string(),
+                                duration_ms: thought_started.elapsed().as_millis() as u64,
+                                tokens: StepTokens {
+                                    input_tokens: last_input_tokens,
+                                    generated_tokens: response.output_tokens.unwrap_or(0) as u64,
+                                },
+                            });
                             step_tool_results.push(ToolResultEntry{call_id:call_id.clone(),action:decision.action.clone(),input:tool_progress_input(&root,&decision),text:preparation.text,status:preparation.status});
                             continue;
                     }
@@ -2548,7 +2744,7 @@ where
                     };
 
                     // Set only on the real `execute_tool` path below (PreHookOutcome::Allowed);
-                    // stays false for plan-mode/hook blocks and the duplicate-shell skip, since
+                    // stays false for plan-mode/hook blocks, since
                     // those don't actually run anything and shouldn't count toward verification.
                     let mut action_succeeded = false;
                     let mut outcome_status = None;
@@ -2638,11 +2834,6 @@ where
                             "Blocked: '{}' is not available in plan mode (read-only investigation only). Call exit_plan_mode with your proposed plan once you are ready to implement it; the user will approve or reject it.",
                             decision.action
                         )
-                    } else if decision.action == "run_shell" && action_count > 1 {
-                        format!(
-                            "Skipped duplicate shell command: {}\n\n[System Tip: This exact shell command already ran once in this task. Do not run it again. Use the finish action now and tell the user the action was completed.]",
-                            decision.input.command.trim()
-                        )
                     } else if pinned_mcp_server.is_some_and(|p| {
                         (decision.action == "mcp_tool" || decision.action == "mcp_list_tools")
                             && decision.input.server != p
@@ -2654,89 +2845,116 @@ where
                     } else {
                         let input_val =
                             tool_progress_input(&root, &decision);
+                        let loop_decision = repetition_guard.check(&decision.action, &input_val);
                         progress(AgentProgress::ToolStart { call_id: Some(activity_call_id.clone()),
                             action: decision.action.clone(),
                             input: input_val.clone(),
                             subagent: None,
                         });
 
-                        match crate::hooks::run_pre_tool_hooks(
-                            &hooks,
-                            &decision.action,
-                            &input_val,
-                            &root,
-                        ) {
-                            crate::hooks::PreHookOutcome::Blocked(reason) => {
-                                format!(
-                                    "Blocked by hook: {}\n\n[System Tip: A configured PreToolUse hook rejected this action. Adjust your approach or ask the user for guidance.]",
-                                    reason
-                                )
+                        match loop_decision {
+                            loop_guard::LoopGuardDecision::InterceptStuckLoop { ref action, ref reason, ref instruction } => {
+                                outcome_status = Some(crate::integrations::mcp_result::ToolStatus::Failed);
+                                action_succeeded = false;
+                                progress(AgentProgress::Thought {
+                                    thought: format!("[Stuck-Loop Guard] Intercepted repeated call to '{action}': {reason}"),
+                                });
+                                instruction.clone()
                             }
-                            crate::hooks::PreHookOutcome::Allowed => {
-                                if matches!(
-                                    decision.action.as_str(),
-                                    "write_file" | "apply_patch" | "note_write"
-                                ) {
-                                    let target_path = if !decision.input.path.is_empty() {
-                                        Some(decision.input.path.as_str())
-                                    } else {
-                                        None
-                                    };
-                                    let _ = crate::git::create_checkpoint(
-                                        &root,
-                                        chat_id,
-                                        step,
-                                        &decision.action,
-                                        target_path,
-                                        &format!("Before Step {step}: {}", decision.action),
-                                    );
-                                }
-
-                                let (tool_result, success) = match execute_tool_outcome_reviewed(
-                                    &root,
-                                    config,
-                                    &decision,
-                                    chat_id,
-                                    &mut approve,
-                                    &mut progress,
-                                    &activity_call_id,
-                                    Some(&mcp_review),
-                                )
-                                .await
-                                {
-                                    Ok(outcome) => {
-                                        if decision.action=="mcp_tool" {mcp_review.record_result(&decision.input.server,&decision.input.tool,&decision.input.arguments,&outcome);}
-                                        if matches!(decision.action.as_str(),"mcp_tool"|"mcp_list_tools") { outcome_status = Some(outcome.status); }
-                                        if !outcome.images.is_empty() { step_images.insert(call_id.clone(), outcome.images); }
-                                        let success = outcome.status == crate::integrations::mcp_result::ToolStatus::Success;
-                                        (outcome.text, success)
-                                    },
-                                    Err(error) => (format!("Error: {}", error), false),
-                                };
-                                action_succeeded = success;
-                                if success {
-                                    invalid_tool_calls.succeeded(&decision.action);
-                                }
-                                let hook_messages = crate::hooks::run_post_tool_hooks(
+                            _ => {
+                                match crate::hooks::run_pre_tool_hooks(
                                     &hooks,
                                     &decision.action,
                                     &input_val,
-                                    &tool_result,
-                                    success,
                                     &root,
-                                );
-                                if hook_messages.is_empty() {
-                                    tool_result
-                                } else {
-                                    format!(
-                                        "{}\n\n{}",
-                                        tool_result,
-                                        hook_messages
-                                            .iter()
-                                            .map(|message| format!("[Hook] {}", message))
-                                            .collect::<Vec<_>>()
-                                            .join("\n")
-                                    )
+                                ) {
+                                    crate::hooks::PreHookOutcome::Blocked(reason) => {
+                                        format!(
+                                            "Blocked by hook: {}\n\n[System Tip: A configured PreToolUse hook rejected this action. Adjust your approach or ask the user for guidance.]",
+                                            reason
+                                        )
+                                    }
+                                    crate::hooks::PreHookOutcome::Allowed => {
+                                        if matches!(
+                                            decision.action.as_str(),
+                                            "write_file" | "apply_patch" | "note_write"
+                                        ) {
+                                            let target_path = if !decision.input.path.is_empty() {
+                                                Some(decision.input.path.as_str())
+                                            } else {
+                                                None
+                                            };
+                                            let _ = crate::git::create_checkpoint(
+                                                &root,
+                                                chat_id,
+                                                step,
+                                                &decision.action,
+                                                target_path,
+                                                &format!("Before Step {step}: {}", decision.action),
+                                            );
+                                        }
+
+                                        let (mut tool_result, success) = match execute_tool_outcome_reviewed(
+                                            &root,
+                                            config,
+                                            &decision,
+                                            chat_id,
+                                            &mut approve,
+                                            &mut progress,
+                                            &activity_call_id,
+                                            Some(&mcp_review),
+                                        )
+                                        .await
+                                        {
+                                            Ok(outcome) => {
+                                                if decision.action=="mcp_tool" {mcp_review.record_result(&decision.input.server,&decision.input.tool,&decision.input.arguments,&outcome);}
+                                                outcome_status = Some(outcome.status);
+                                                if !outcome.images.is_empty() { step_images.insert(call_id.clone(), outcome.images); }
+                                                let success = outcome.status == crate::integrations::mcp_result::ToolStatus::Success;
+                                                (outcome.text, success)
+                                            },
+                                            Err(error) => (format!("Error: {}", error), false),
+                                        };
+                                        action_succeeded = success;
+                                        if success {
+                                            invalid_tool_calls.succeeded(&decision.action);
+                                        }
+                                        if let loop_guard::LoopGuardDecision::WarnConsecutiveRepeat { ref notice, .. } = loop_decision {
+                                            tool_result.push_str(&format!("\n\n{notice}"));
+                                        }
+                                        if step >= warning_threshold {
+                                            let remaining = max_steps.saturating_sub(step);
+                                            if remaining == 0 {
+                                                tool_result.push_str("\n\n[CRITICAL STEP LIMIT REACHED - FINAL STEP]: Step budget exhausted. Do not call more tools. Call 'finish' now with your summary.");
+                                            } else {
+                                                tool_result.push_str(&format!(
+                                                    "\n\n[Step Budget Warning]: Step {}/{} ({} step{} remaining). Please begin consolidating your findings and call 'finish'.",
+                                                    step, max_steps, remaining, if remaining == 1 { "" } else { "s" }
+                                                ));
+                                            }
+                                        }
+                                        let hook_messages = crate::hooks::run_post_tool_hooks(
+                                            &hooks,
+                                            &decision.action,
+                                            &input_val,
+                                            &tool_result,
+                                            success,
+                                            &root,
+                                        );
+                                        if hook_messages.is_empty() {
+                                            tool_result
+                                        } else {
+                                            format!(
+                                                "{}\n\n{}",
+                                                tool_result,
+                                                hook_messages
+                                                    .iter()
+                                                    .map(|message| format!("[Hook] {}", message))
+                                                    .collect::<Vec<_>>()
+                                                    .join("\n")
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2757,7 +2975,7 @@ where
                         subagent: None,
                     });
 
-                    let success = action_succeeded && !shell_result_failed(&result);
+                    let success = outcome_status.map(|s| s == crate::mcp_result::ToolStatus::Success).unwrap_or(action_succeeded);
                     let target = if !decision.input.path.is_empty() {
                         decision.input.path.clone()
                     } else if !decision.input.command.is_empty() {
@@ -2786,7 +3004,7 @@ where
                     if action_succeeded {
                         match decision.action.as_str() {
                             "apply_patch" | "write_file" | "note_write" => {
-                                last_modify_step = Some(step);
+                                repetition_guard.notify_state_change();
                                 let path = if let Some(patch) = &decision.input.patch {
                                     patch.path.to_string_lossy().into_owned()
                                 } else if !decision.input.path.is_empty() {
@@ -2811,8 +3029,7 @@ where
                             // actually passed is tracked separately in `last_verify_failed`
                             // and enforced by `unacknowledged_verify_failure` at finish time.
                             "verify" | "run_tests" | "run_typecheck" | "run_linter" => {
-                                last_verify_step = Some(step);
-                                last_verify_failed = Some(shell_result_failed(&result));
+                                last_verify_failed = Some(!success);
                             }
                             _ => {}
                         }
@@ -2845,21 +3062,24 @@ where
                         "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter"
                     ) {
                         if shell_result_failed(&result) {
-                            final_result.push_str(
-                        "\n\n[System Tip: The command failed with a non-zero exit code. \
-                         Analyze the stdout/stderr above to locate the error, read the offending files, \
-                         apply corrected edits (using apply_patch), and run the verification command again. \
-                         Do not finish or stop until the compilation or test errors are resolved!]"
-                    );
+                            if let Some(diag) = diagnostics::diagnose_command_failure(&decision.input.command, &result, None) {
+                                final_result.push_str(&format!("\n\n{diag}"));
+                            } else {
+                                final_result.push_str(
+                                    "\n\n[System Tip: The command failed with a non-zero exit code. \
+                                     Analyze the stdout/stderr above to locate the error, read the offending files, \
+                                     apply corrected edits (using apply_patch), and run the verification command again. \
+                                     If checks cannot pass, finish with completionStatus=blocked/failed/unverified and explain the actual result; never claim they passed.]"
+                                );
+                            }
                         }
                     }
                     if decision.action == "apply_patch" || decision.action == "write_file" {
                         final_result.push_str(
                     "\n\n[System Tip: The file edit was approved and applied successfully. \
                      Before finishing, verify this change with the verify tool (build/test/lint, \
-                     whatever fits this project) — finish will be rejected until you do, unless you \
-                     state in the finish action's verification field why no check applies (e.g. no \
-                     test suite, documentation-only change). Do not broaden the scope, do not make \
+                     whatever fits this project). If no check applies, finish with completionStatus=unverified \
+                     and explain why in verification. A written explanation is not a passed check. Do not broaden the scope, do not make \
                      additional unrelated edits, and do not reread the same file unless you need one \
                      concise verification read.]",
                 );
@@ -2879,8 +3099,32 @@ where
                         &final_result,
                     ));
 
+                    let step_input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+                    let step_status_str = match outcome_status {
+                        Some(crate::integrations::mcp_result::ToolStatus::Success) => "success",
+                        Some(crate::integrations::mcp_result::ToolStatus::Failed) => "failed",
+                        Some(crate::integrations::mcp_result::ToolStatus::TimedOut) => "timed_out",
+                        Some(crate::integrations::mcp_result::ToolStatus::Cancelled) => "cancelled",
+                        Some(crate::integrations::mcp_result::ToolStatus::Skipped) => "skipped",
+                        _ => if success { "success" } else { "failed" },
+                    };
+                    trajectory_run.record_step(StandardTrajectoryStep {
+                        step,
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        thought: decision.thought.clone(),
+                        action: decision.action.clone(),
+                        input: step_input_val,
+                        observation: final_result.clone(),
+                        status: step_status_str.to_string(),
+                        duration_ms: thought_started.elapsed().as_millis() as u64,
+                        tokens: StepTokens {
+                            input_tokens: last_input_tokens,
+                            generated_tokens: response.output_tokens.unwrap_or(0) as u64,
+                        },
+                    });
+
                     step_tool_results.push(ToolResultEntry {
-                        call_id, action:decision.action.clone(), input:tool_progress_input(&root,&decision),
+                        call_id, action:decision.action.clone(), input:serde_json::to_value(&decision.input).unwrap_or(Value::Null),
                         text:final_result, status:outcome_status.unwrap_or(if success {crate::mcp_result::ToolStatus::Success}else{crate::mcp_result::ToolStatus::Failed}),
                     });
                 } // end `for (call_id, decision) in decisions`
@@ -2915,13 +3159,19 @@ where
                     &step_thought_signatures,
                     &step_images,
                 );
+                prune_historic_images_from_native_messages(
+                    &mut native_messages,
+                    MAX_RETAINED_IMAGE_STEPS,
+                );
 
                 if let Some(total_tokens) = response.total_tokens {
                     let window = active_config.context_window_tokens();
                     last_context_pct = Some(
                         ((total_tokens as f64 / window as f64) * 100.0).clamp(0.0, 255.0) as u8,
                     );
-                    if (total_tokens as f64) >= (window as f64) * COMPACTION_TRIGGER_RATIO {
+                    let compaction_needed = (total_tokens as f64) >= (window as f64) * COMPACTION_TRIGGER_RATIO
+                        || (step >= ADAPTIVE_COMPACTION_MIN_STEPS && total_tokens >= ADAPTIVE_COMPACTION_TOKEN_CEILING);
+                    if compaction_needed {
                         let eligible = native_messages.len().saturating_sub(1) / 2 > COMPACTION_KEEP_RECENT_STEPS;
                         if let Ok(Some((compacted, _))) = run_control::run(report_context_compaction(
                             eligible,
@@ -2944,10 +3194,123 @@ where
             rebuild_observation(task, &root, &trajectory, &mut observation);
         }
 
+        progress(AgentProgress::Thought {
+            thought: format!(
+                "[Step Limit Reached] Reached maximum allowed steps ({max_steps}). Synthesizing final findings for user..."
+            ),
+        });
+
+        let (wrapup_config, _, _, _) = resolve_agent_config(config, agent_id, &trajectory);
+        let mut final_streamed_summary = String::new();
+        let mut emit_wrapup_chunk = |chunk| match chunk {
+            AgentStreamChunk::DirectText(delta) | AgentStreamChunk::FinalSummary(delta) => {
+                final_streamed_summary.push_str(&delta);
+                on_chunk(delta);
+            }
+        };
+
+        let synthesis_instruction = format!(
+            "You are an AI assistant completing a multi-step task. The step limit of {max_steps} steps has been reached. \
+             Synthesize all findings, observations, errors encountered, and links discovered so far. \
+             Provide a comprehensive, direct, and well-structured final answer to the user in their requested language."
+        );
+
+        let synthesis_succeeded = if wrapup_config.tool_calling_mode() == ToolCallingMode::Native {
+            let mut final_native = native_messages.clone();
+            final_native.push(ChatMessage {
+                role: ChatRole::User,
+                content: vec![ContentBlock::Text {
+                    text: format!(
+                        "Maximum step limit of {max_steps} reached. Do not call any tools. Please output your final answer and summary of findings now."
+                    ),
+                }],
+            });
+            let wrapup_req = ChatRequest {
+                message: String::new(),
+                system_instruction: synthesis_instruction,
+                chat_id: Some(chat_id.to_owned()),
+                image_data_uri: None,
+                audio_data_uri: None,
+                video_data_uri: None,
+                document_attachment: None,
+                workspace_path: None,
+                agent_id: None,
+                plan_mode: false,
+                pinned_mcp_server: None,
+                messages: Some(final_native),
+                tools: None,
+                temperature: wrapup_config.temperature,
+                ..Default::default()
+            };
+            run_control::run(stream_chat_with_network_retry(
+                &wrapup_config,
+                &wrapup_req,
+                &format!("step-limit-wrapup-{chat_id}"),
+                Instant::now(),
+                fast_mode,
+                &mut progress,
+                false,
+                true,
+                &mut emit_wrapup_chunk,
+            ))
+            .await
+            .is_ok()
+        } else {
+            let wrapup_req = ChatRequest {
+                message: format!(
+                    "Observation: Maximum step limit of {max_steps} reached. Please synthesize your findings and output your final answer now.\nPrevious observation:\n{observation}"
+                ),
+                system_instruction: synthesis_instruction,
+                chat_id: Some(chat_id.to_owned()),
+                image_data_uri: None,
+                audio_data_uri: None,
+                video_data_uri: None,
+                document_attachment: None,
+                workspace_path: None,
+                agent_id: None,
+                plan_mode: false,
+                pinned_mcp_server: None,
+                messages: None,
+                tools: None,
+                temperature: wrapup_config.temperature,
+                ..Default::default()
+            };
+            run_control::run(stream_chat_with_network_retry(
+                &wrapup_config,
+                &wrapup_req,
+                &format!("step-limit-wrapup-{chat_id}"),
+                Instant::now(),
+                fast_mode,
+                &mut progress,
+                false,
+                true,
+                &mut emit_wrapup_chunk,
+            ))
+            .await
+            .is_ok()
+        };
+
+        let summary = if synthesis_succeeded && !final_streamed_summary.trim().is_empty() {
+            final_streamed_summary
+        } else {
+            format!(
+                "Task concluded after reaching the step limit ({} steps). Recent activity:\n{}",
+                max_steps,
+                trajectory.iter().rev().take(5).cloned().collect::<Vec<_>>().join("\n")
+            )
+        };
+
+        trajectory_run.finish(
+            "COMPLETED",
+            turn_total_tokens,
+            started_at.elapsed().as_secs_f64(),
+            files_created.iter().cloned().collect(),
+            files_modified.iter().cloned().collect(),
+        );
         let run_summary = RunTelemetrySummary {
-            run_id: format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
+            run_id: run_id.clone(),
             task: task.to_string(),
-            outcome: "FAILED".to_string(),
+            outcome: "COMPLETED".to_string(),
             total_tokens: turn_total_tokens as usize,
             tool_calls_count: executed_tools.len(),
             files_changed: files_created
@@ -2959,17 +3322,32 @@ where
             duration_secs: started_at.elapsed().as_secs_f64(),
             tool_timeline: executed_tools.clone(),
             retries_count: executed_tools.iter().filter(|t| t.retried).count(),
+            trajectory: Some(trajectory_run),
         };
         progress(AgentProgress::RunCompleted {
             summary: run_summary,
         });
 
-        turn.fail();
-        Err(OrchestrationError::Agent(format!(
-            "code agent reached the limit of {} steps; task incomplete. Last browser state: {}",
-            MAX_STEPS, crate::browser::session_last_state().await
-        )))
-        }).await;
+        turn.complete_with_summary(
+            &summary,
+            &final_provider,
+            &final_model,
+            final_fallback.as_deref(),
+        )?;
+
+        return Ok(AgentResult {
+            provider: final_provider,
+            model: final_model,
+            summary,
+            verification: String::new(),
+            completion_status: "step_limit_reached".to_string(),
+            fallback: final_fallback,
+            fallback_reason: final_fallback_reason,
+            total_tokens: turn_total_tokens,
+            input_tokens: last_input_tokens,
+            generated_tokens: turn_generated_tokens,
+        });
+        }))).await;
             if agent_result.is_err() && !turn.finished {
                 if run_control::cancelled() {
                     turn.interrupt();
@@ -3016,315 +3394,166 @@ fn plan_mode_allows(action: &str, input: &AgentInput) -> bool {
     action == "finish" || crate::prompts::agent::PLAN_MODE_ALLOWED_ACTIONS.contains(&action)
 }
 
-/// Runs one subagent to completion and returns its formatted result text.
-/// Extracted from `execute_tool`'s `"dispatch_subagent"` arm so both the plain
-/// sequential path (a single subagent call, or one mixed in with other actions)
-/// and the parallel path (`decisions_are_parallel_subagent_batch`, driven by
-/// `buffer_unordered` in the main step loop) share one implementation. Takes
-/// the same `&mut dyn FnMut(...)` trait object as `execute_tool` — see the
-/// comment on that function for why a trait object rather than a generic —
-/// which lets the parallel path pass a small Mutex-backed adapter closure so
-/// concurrently-running subagents still share one real approval gate.
-async fn dispatch_one_subagent(
+/// Runs a swarm batch of sub-agents to completion and returns the aggregated dossier.
+pub(super) async fn dispatch_swarm(
     root: &Path,
     config: &MintConfig,
-    chat_id: &str,
-    name: &str,
-    task: &str,
+    parent_chat_id: &str,
+    tasks: Vec<crate::swarm::SwarmTask>,
     approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
     progress: &mut (dyn FnMut(AgentProgress) + Send),
 ) -> Result<String, OrchestrationError> {
-    let Some(definition) = crate::subagents::find_subagent(name, Some(root)) else {
-        return Err(OrchestrationError::Agent(format!(
-            "no subagent named '{name}' found (check .agents/subagents/ or \
-             ~/.config/mint/mint-agents/)"
-        )));
+    let (is_plan_mode, _) = crate::mods::turn_policy(root, parent_chat_id);
+    let effective_cap = crate::swarm::effective_max_parallel(Some(config.swarm_max_parallel));
+    let profiles = |name: &str| crate::subagents::find_subagent(name, Some(root));
+    let ctx = crate::swarm::BatchCtx {
+        parent_chat_id,
+        max_parallel: effective_cap,
+        profiles: &profiles,
+        plan_mode: is_plan_mode,
     };
 
-    let mut sub_config = config.clone();
-    if let Some(provider) = &definition.provider {
-        sub_config.ai_provider = provider.clone();
-    }
-    if let Some(model) = &definition.model {
-        match sub_config.ai_provider.as_str() {
-            "anthropic" => sub_config.anthropic_model = model.clone(),
-            "openai" => sub_config.openai_model = model.clone(),
-            "openrouter" => sub_config.openrouter_model = model.clone(),
-            "deepseek" => sub_config.deepseek_model = model.clone(),
-            "huggingface" => sub_config.hf_model = model.clone(),
-            "local_openai" => sub_config.local_model_name = model.clone(),
-            "ollama" => sub_config.ollama_model = model.clone(),
-            "gemini" => sub_config.gemini_model = model.clone(),
-            _ => {}
-        }
-    }
-
-    // The subagent's own persona/instructions are folded into the task
-    // framing rather than replacing Mint's system prompt (which
-    // `orchestrate_agent_loop` builds internally and isn't a parameter),
-    // so the subagent still follows the same tool-use protocol and
-    // safety rules as any other agent run.
-    let sub_task = format!(
-        "{}\n\nTask from parent agent: {task}",
-        definition.system_prompt
-    );
-    let sub_chat_id = format!("{chat_id}::subagent::{}", definition.name);
-
-    // Docker sandbox: a subagent whose resolved backend is "docker" gets one
-    // container for its whole run, started here and torn down unconditionally
-    // below (success or failure) — never per individual `run_shell` call. See
-    // `docker_sandbox`'s module doc for why this is a session-scoped resource
-    // rather than something `run_shell_command` starts itself. Subagents with
-    // no `run_shell` in their tool list (e.g. `explorer`/`plan`) never need a
-    // container, so skip starting one for them.
-    let allows_run_shell = definition
-        .tools
-        .as_ref()
-        .is_none_or(|tools| tools.iter().any(|t| t == "run_shell"));
-    let backend = definition
-        .sandbox
-        .as_deref()
-        .unwrap_or(&config.sandbox_backend);
-    let docker_started = if backend == "docker" && allows_run_shell {
-        match crate::docker_sandbox::start_session(&sub_chat_id, root, &sub_config) {
-            Ok(()) => true,
-            Err(error) if config.sandbox_mode.trim().eq_ignore_ascii_case("enforce") => {
-                return Err(OrchestrationError::Agent(format!(
-                    "subagent '{}' requires the docker sandbox (sandboxMode=enforce) but it \
-                     failed to start: {error}",
-                    definition.name
-                )));
-            }
-            // "prefer" (or any other non-"enforce" value): fall back to the
-            // subagent's shell commands running unconfined/OS-sandboxed,
-            // matching `run_shell_command`'s own fallback semantics for a
-            // missing OS sandbox binary.
-            Err(_) => false,
-        }
-    } else {
-        false
-    };
-
-    // Recursing into `orchestrate_agent_loop` from inside `execute_tool`
-    // (which it itself calls) requires boxing this one call — Rust
-    // can't compute a finite size for a directly self-referential
-    // async fn cycle otherwise. `approve_cb` is reborrowed rather than
-    // moved so the subagent's mutating actions still go through the
-    // same approval gate as the caller's; `chunk` stays a no-op so the
-    // subagent's own streamed answer text never lands in the parent's chat
-    // — only its final summary (returned below) does. `progress` is *not*
-    // a no-op: `ToolStart`/`ToolEnd` are re-tagged with this subagent's name
-    // and forwarded to the caller's real `progress`, so the CLI/GUI can
-    // render the subagent's own tool calls nested under its
-    // `dispatch_subagent` call — this only affects what's shown in the UI,
-    // never what reaches the parent model's context (that isolation comes
-    // from `sub_chat_id`/`native_messages` staying local to this call, not
-    // from suppressing progress).
-    // `orchestrate_agent_loop` itself returns a boxed `dyn Future`
-    // (see its doc comment) specifically so this recursive call can
-    // just be awaited directly, with no manual boxing needed here.
-    let subagent_name = definition.name.clone();
-    let mut nested_progress = |event: AgentProgress| {
-        let tagged = match event {
-            AgentProgress::ToolStart {
-                action,
-                input,
-                call_id,
-                ..
-            } => AgentProgress::ToolStart {
-                call_id,
-                action,
-                input,
-                subagent: Some(subagent_name.clone()),
-            },
-            AgentProgress::ToolEnd {
-                elapsed_ms,
-                action,
-                input,
-                result,
-                call_id,
-                status,
-                ..
-            } => AgentProgress::ToolEnd {
-                elapsed_ms,
-                call_id,
-                status,
-                action,
-                input,
-                result,
-                subagent: Some(subagent_name.clone()),
-            },
-            AgentProgress::ContextCompaction {
-                status, message, ..
-            } => AgentProgress::ContextCompaction {
-                status,
-                message,
-                subagent: Some(subagent_name.clone()),
-            },
-            other => other,
-        };
-        progress(tagged);
-    };
-    let result = orchestrate_agent_loop(
-        &sub_config,
-        &sub_task,
-        root,
-        None,
-        None,
-        None,
-        Some(&sub_chat_id),
-        None,
-        None,
-        None,
-        true,
-        false,
-        &mut *approve_cb,
-        &mut nested_progress,
-        |_| {},
-    )
-    .await;
-
-    let outcome = match result {
-        Ok(agent_result) => Ok(format!(
-            "[Subagent '{}' result]\n{}",
-            definition.name, agent_result.summary
-        )),
-        Err(error) => Err(OrchestrationError::Agent(format!(
-            "subagent '{}' failed: {error}",
-            definition.name
-        ))),
-    };
-    // Unconditional teardown — runs on both the Ok and Err arms above, since
-    // an orphaned container left running after a failed subagent is exactly
-    // the failure mode a session-scoped sandbox needs to avoid.
-    if docker_started {
-        crate::docker_sandbox::stop_session(&sub_chat_id);
-    }
-    outcome
-}
-
-/// Runs subagent decisions concurrently, capped at `PARALLEL_SUBAGENT_LIMIT`.
-/// Progress and approvals use short Mutex-backed adapters during execution;
-/// action counts and trajectory are updated afterward in decision order.
-#[allow(clippy::too_many_arguments)]
-async fn run_parallel_subagent_batch(
-    decisions: &[(String, AgentDecision)],
-    step: usize,
-    root: &Path,
-    config: &MintConfig,
-    chat_id: &str,
-    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
-    progress: &mut (dyn FnMut(AgentProgress) + Send),
-    action_counts: &mut BTreeMap<String, usize>,
-    trajectory: &mut Vec<String>,
-) -> Vec<ToolResultEntry> {
-    let approve_mutex = std::sync::Mutex::new(approve);
-    // Concurrently-running subagents share one real `progress` sink the same
-    // way they share one real `approve` gate above — each gets a small
-    // Mutex-backed adapter closure so their nested `ToolStart`/`ToolEnd`
-    // events (tagged with their own subagent name in `dispatch_one_subagent`)
-    // still reach the CLI/GUI, interleaved but not corrupted, instead of the
-    // batch staying silent until every item in it finishes.
+    let approve_mutex = std::sync::Mutex::new(approve_cb);
     let progress_mutex = std::sync::Mutex::new(progress);
 
-    let mut dispatches = Vec::with_capacity(decisions.len());
-    for (index, (call_id, decision)) in decisions.iter().enumerate() {
-        let call_id = call_id.clone();
-        let thought = decision.thought.clone();
-        let action = decision.action.clone();
-        let input_val = tool_progress_input(&root, &decision);
-        let action_key = action_fingerprint(decision);
-        let name = decision.input.name.clone();
-        let task_text = decision.input.instruction.clone();
+    let runner = |run: crate::swarm::AgentRun, emitter: crate::swarm::Emitter| {
         let approve_mutex = &approve_mutex;
-        let progress_mutex = &progress_mutex;
-        dispatches.push(async move {
-            let mut progress_adapter = |event: AgentProgress| {
-                let mut guard = progress_mutex.lock().unwrap();
-                (*guard)(event);
-            };
-            progress_adapter(AgentProgress::ToolStart {
-                call_id: Some(call_id.clone()),
-                action: action.clone(),
-                input: input_val.clone(),
-                subagent: None,
-            });
-            let result: Result<String, OrchestrationError> = if name.trim().is_empty() {
-                Err(OrchestrationError::Agent("name is required".into()))
-            } else if task_text.trim().is_empty() {
-                Err(OrchestrationError::Agent("instruction is required".into()))
+        Box::pin(async move {
+            let mut sub_config = config.clone();
+            if let Some(provider) = &run.provider {
+                sub_config.ai_provider = provider.clone();
+            }
+            if let Some(model) = &run.model {
+                match sub_config.ai_provider.as_str() {
+                    "anthropic" => sub_config.anthropic_model = model.clone(),
+                    "openai" => sub_config.openai_model = model.clone(),
+                    "openrouter" => sub_config.openrouter_model = model.clone(),
+                    "deepseek" => sub_config.deepseek_model = model.clone(),
+                    "huggingface" => sub_config.hf_model = model.clone(),
+                    "local_openai" => sub_config.local_model_name = model.clone(),
+                    "ollama" => sub_config.ollama_model = model.clone(),
+                    "gemini" => sub_config.gemini_model = model.clone(),
+                    _ => {}
+                }
+            }
+
+            let allows_run_shell = run.permissions.allows("run_shell");
+            let backend = run.sandbox.as_deref().unwrap_or(&config.sandbox_backend);
+            let docker_started = if backend == "docker" && allows_run_shell {
+                match crate::docker_sandbox::start_session(&run.chat_id, root, &sub_config) {
+                    Ok(()) => true,
+                    Err(error) if config.sandbox_mode.trim().eq_ignore_ascii_case("enforce") => {
+                        return Err(format!(
+                            "agent '{}' requires docker sandbox (sandboxMode=enforce) but failed: {error}",
+                            run.label
+                        ));
+                    }
+                    Err(_) => false,
+                }
             } else {
-                let mut approve_adapter =
-                    |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
-                        let mut guard = approve_mutex.lock().unwrap();
-                        (*guard)(approval)
-                    };
-                dispatch_one_subagent(
-                    root,
-                    config,
-                    chat_id,
-                    &name,
-                    &task_text,
-                    &mut approve_adapter,
-                    &mut progress_adapter,
-                )
-                .await
+                false
             };
-            let tool_result = match result {
-                Ok(text) => text,
-                Err(error) => format!("Error: {}", error),
-            };
-            progress_adapter(AgentProgress::ToolEnd {
-                elapsed_ms: None,
-                call_id: Some(call_id.clone()),
-                status: None,
-                action: action.clone(),
-                input: input_val.clone(),
-                result: tool_result.clone(),
-                subagent: None,
-            });
-            (
-                index,
-                call_id,
-                thought,
-                action,
-                input_val,
-                action_key,
-                tool_result,
-            )
-        });
-    }
 
-    let mut results = futures_util::stream::iter(dispatches)
-        .buffer_unordered(PARALLEL_SUBAGENT_LIMIT)
-        .collect::<Vec<_>>()
-        .await;
-    results.sort_by_key(|(index, ..)| *index);
-    let mut step_tool_results = Vec::with_capacity(results.len());
-    for (_, call_id, thought, action, input_val, action_key, tool_result) in results {
-        let action_count = {
-            let count = action_counts.entry(action_key).or_insert(0);
-            *count += 1;
-            *count
-        };
-        let mut final_result = model_tool_result(&action, &tool_result);
-        if action_count >= 3 && !action.starts_with("browser_") {
-            final_result.push_str(
-                "\n\n[System Tip: You repeated the same tool action three or more times. \
-                 Stop repeating it. If you already have enough information or the requested edit is done, \
-                 use the finish action now. Otherwise choose a different necessary action.]",
+            let subagent_label = run.label.clone();
+            let sub_task = format!(
+                "{}\n\nTask from parent agent: {}",
+                run.system_prompt, run.instruction
             );
-        }
+            let run_chat_id = run.chat_id.clone();
+            let permissions = run.permissions.clone();
 
-        trajectory.push(format_trajectory_step(
-            step,
-            &thought,
-            &action,
-            &final_result,
-        ));
-        step_tool_results.push((call_id, action, input_val, final_result).into());
-    }
-    step_tool_results
+            let steps_counter = std::sync::atomic::AtomicU32::new(1);
+            let mut nested_progress = |event: AgentProgress| {
+                if matches!(event, AgentProgress::ToolStart { .. }) {
+                    steps_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                let tagged = match event {
+                    AgentProgress::ToolStart {
+                        action,
+                        input,
+                        call_id,
+                        ..
+                    } => AgentProgress::ToolStart {
+                        call_id,
+                        action,
+                        input,
+                        subagent: Some(subagent_label.clone()),
+                    },
+                    AgentProgress::ToolEnd {
+                        elapsed_ms,
+                        action,
+                        input,
+                        result,
+                        call_id,
+                        status,
+                        ..
+                    } => AgentProgress::ToolEnd {
+                        elapsed_ms,
+                        call_id,
+                        status,
+                        action,
+                        input,
+                        result,
+                        subagent: Some(subagent_label.clone()),
+                    },
+                    AgentProgress::ContextCompaction {
+                        status, message, ..
+                    } => AgentProgress::ContextCompaction {
+                        status,
+                        message,
+                        subagent: Some(subagent_label.clone()),
+                    },
+                    other => other,
+                };
+                emitter.progress(tagged);
+            };
+
+            let mut nested_approve = |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+                let mut guard = approve_mutex.lock().unwrap();
+                (*guard)(approval)
+            };
+
+            let loop_fut = Box::pin(orchestrate_agent_loop(
+                &sub_config,
+                &sub_task,
+                root,
+                None,
+                None,
+                None,
+                Some(&run_chat_id),
+                None,
+                None,
+                None,
+                true,
+                false,
+                &mut nested_approve,
+                &mut nested_progress,
+                |_| {},
+            ));
+
+            let res = crate::swarm::scope_permissions(Some(permissions), loop_fut).await;
+
+            if docker_started {
+                crate::docker_sandbox::stop_session(&run_chat_id);
+            }
+
+            match res {
+                Ok(agent_result) => Ok(crate::swarm::RunnerOutput {
+                    text: agent_result.summary,
+                    steps: steps_counter.load(std::sync::atomic::Ordering::Relaxed),
+                }),
+                Err(err) => Err(err.to_string()),
+            }
+        })
+    };
+
+    let mut on_event = |event: crate::swarm::SwarmEvent| {
+        let mut guard = progress_mutex.lock().unwrap();
+        (*guard)(event.into());
+    };
+
+    let outcomes = crate::swarm::run_batch(&ctx, tasks, runner, &mut on_event).await;
+    Ok(crate::swarm::format_batch_result(&outcomes))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3358,6 +3587,7 @@ async fn run_parallel_read_only_batch(
         let decision = decision;
 
         tasks.push(async move {
+            let activity_call_id=call_id.clone();
             if !fast_mode && !thought.trim().is_empty() {
                 let t = thought.trim();
                 let mut guard = progress_mutex.lock().unwrap();
@@ -3376,13 +3606,15 @@ async fn run_parallel_read_only_batch(
 
             {
                 let mut guard = progress_mutex.lock().unwrap();
-                (*guard)(AgentProgress::ToolStart { call_id: Some(call_id.clone()),
+                (*guard)(AgentProgress::ToolStart { call_id: Some(activity_call_id.clone()),
                     action: action.clone(),
                     input: input_val.clone(),
                     subagent: None,
                 });
             }
 
+            let mut images=Vec::new();
+            let mut typed_status=None;
             let result: String = if pinned_mcp_server.is_some_and(|p| {
                 (action == "mcp_tool" || action == "mcp_list_tools") && decision.input.server != p
             }) {
@@ -3409,17 +3641,18 @@ async fn run_parallel_read_only_batch(
                             (*guard)(event);
                         };
 
-                        let (tool_result, success) = match execute_tool(
+                        let (tool_result, success) = match execute_tool_outcome(
                             root,
                             config,
                             &decision,
                             chat_id,
                             &mut approve_adapter,
                             &mut progress_adapter,
+                            &activity_call_id,
                         )
                         .await
                         {
-                            Ok(res) => (res, true),
+                            Ok(outcome) => {images=outcome.images;typed_status=Some(outcome.status);(outcome.text,outcome.status==crate::mcp_result::ToolStatus::Success)},
                             Err(err) => (format!("Error: {}", err), false),
                         };
 
@@ -3451,7 +3684,7 @@ async fn run_parallel_read_only_batch(
 
             {
                 let mut guard = progress_mutex.lock().unwrap();
-                (*guard)(AgentProgress::ToolEnd { elapsed_ms: None, call_id: Some(call_id.clone()), status: None,
+                (*guard)(AgentProgress::ToolEnd { elapsed_ms: None, call_id: Some(activity_call_id.clone()), status: typed_status,
                     action: action.clone(),
                     input: input_val.clone(),
                     result: result.clone(),
@@ -3460,7 +3693,7 @@ async fn run_parallel_read_only_batch(
             }
 
             (
-                index, call_id, thought, action, input_val, action_key, result,
+                index, call_id, thought, action, input_val, action_key, result, images, typed_status,
             )
         });
     }
@@ -3473,7 +3706,12 @@ async fn run_parallel_read_only_batch(
     results.sort_by_key(|(index, ..)| *index);
 
     let mut step_tool_results = Vec::with_capacity(results.len());
-    for (_, call_id, thought, action, input_val, action_key, result) in results {
+    for (_, call_id, thought, action, input_val, action_key, result, images, typed_status) in
+        results
+    {
+        if !images.is_empty() {
+            step_images.insert(call_id.clone(), images);
+        }
         let action_count = {
             let count = action_counts.entry(action_key).or_insert(0);
             *count += 1;
@@ -3515,7 +3753,11 @@ async fn run_parallel_read_only_batch(
             &final_result,
         ));
 
-        step_tool_results.push((call_id, action, input_val, final_result).into());
+        let mut entry = ToolResultEntry::from((call_id, action, input_val, final_result));
+        if let Some(status) = typed_status {
+            entry.status = status;
+        }
+        step_tool_results.push(entry);
     }
 
     step_tool_results
@@ -3590,10 +3832,19 @@ async fn execute_tool_outcome_reviewed(
         origin.as_deref(),
     )
     .map_err(OrchestrationError::Agent)?;
-    let result = execute_tool_outcome_reviewed_inner(
+    let execution = execute_tool_outcome_reviewed_inner(
         root, config, decision, chat_id, approve, progress, call_id, expected,
-    )
-    .await;
+    );
+    let result = if matches!(
+        decision.action.as_str(),
+        "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter"
+    ) {
+        // Foreground shell cancellation joins process cleanup and imports any
+        // checkpointed screenshots before the turn is marked interrupted.
+        execution.await
+    } else {
+        run_control::run(Box::pin(execution)).await
+    };
     let _ = crate::mods::event(
         root,
         chat_id,
@@ -3694,6 +3945,67 @@ async fn execute_tool_outcome_reviewed_inner(
     expected: Option<&mcp_review::McpReview>,
 ) -> Result<crate::integrations::mcp_result::ToolOutcome, OrchestrationError> {
     run_control::check()?;
+    if decision.action == "view_image" {
+        if decision.input.path.is_empty() == decision.input.artifact_id.is_empty() {
+            return Err(OrchestrationError::Agent(
+                "Provide exactly one of path or artifactId".into(),
+            ));
+        }
+        let root = root.to_path_buf();
+        let config = config.clone();
+        let chat = chat_id.to_owned();
+        let call = call_id.to_owned();
+        let path = decision.input.path.clone();
+        let artifact_id = decision.input.artifact_id.clone();
+        let out = tokio::task::spawn_blocking(
+            move || -> Result<crate::mcp_result::ToolOutcome, String> {
+                if !artifact_id.is_empty() {
+                    return crate::media::tool_images::view_artifact(&artifact_id, &chat);
+                }
+                let path = agent_read_path(&root, &path, &config).map_err(|e| e.to_string())?;
+                let path = assert_path_capability(&path, Capability::Read, &config)
+                    .map_err(|e| e.to_string())?;
+                if std::fs::metadata(&path).map_err(|e| e.to_string())?.len()
+                    > crate::media::tool_images::ORIGINAL_LIMIT as u64
+                {
+                    return Err("Image exceeds 20 MiB".into());
+                }
+                let mime = match path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase()
+                    .as_str()
+                {
+                    "png" => "image/png",
+                    "jpg" | "jpeg" => "image/jpeg",
+                    "gif" => "image/gif",
+                    "webp" => "image/webp",
+                    "svg" => "image/svg+xml",
+                    _ => return Err("Unsupported image type".into()),
+                };
+                let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+                crate::media::tool_images::save(
+                    &bytes,
+                    mime,
+                    path.file_name().and_then(|n| n.to_str()).unwrap_or("Image"),
+                    &chat,
+                    &call,
+                    "view_image",
+                    None,
+                )
+            },
+        )
+        .await
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?
+        .map_err(OrchestrationError::Agent)?;
+        progress(AgentProgress::ToolArtifacts {
+            call_id: call_id.into(),
+            artifacts: out.artifacts.clone(),
+            warnings: out.warnings.clone(),
+        });
+        return Ok(out);
+    }
     if matches!(decision.action.as_str(), "mcp_tool" | "mcp_list_tools") {
         let mut out = tools::plugins_mcp::execute_reviewed(
             &decision.action,
@@ -3723,9 +4035,134 @@ async fn execute_tool_outcome_reviewed_inner(
         }
         Ok(out)
     } else {
-        execute_tool_text(root, config, decision, chat_id, approve, progress)
+        let mut tool_config = config.clone();
+        let bridge = if decision.action == "run_shell" && !decision.input.background {
+            crate::browser::workflow::ShellBridge::prepare(
+                &decision.input.command,
+                root,
+                &mut tool_config,
+            )
+            .map_err(OrchestrationError::Agent)?
+        } else {
+            None
+        };
+        let checkpoint = reliability::checkpoint();
+        let text = match execute_tool_text(root, &tool_config, decision, chat_id, approve, progress)
             .await
-            .map(Into::into)
+        {
+            Ok(text) => text,
+            Err(error) => {
+                if decision.action.starts_with("browser_") {
+                    reliability::record_browser(&decision.action, None, false);
+                }
+                reliability::complete_tool(&decision.action, call_id, checkpoint, false);
+                return Err(error);
+            }
+        };
+        let mut out = if decision.action == "browser_screenshot"
+            && text.starts_with("data:image/png;base64,")
+        {
+            let bytes = BASE64_STANDARD
+                .decode(text.trim_start_matches("data:image/png;base64,"))
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            let metadata = crate::browser::capture_metadata().await;
+            let out = crate::media::tool_images::save(
+                &bytes,
+                "image/png",
+                &format!("screenshot-{call_id}.png"),
+                chat_id,
+                call_id,
+                "browser",
+                Some(metadata),
+            )
+            .map_err(OrchestrationError::Agent)?;
+            progress(AgentProgress::ToolArtifacts {
+                call_id: call_id.into(),
+                artifacts: out.artifacts.clone(),
+                warnings: out.warnings.clone(),
+            });
+            out
+        } else {
+            crate::mcp_result::ToolOutcome::from(text)
+        };
+        let mut workflow_verified = None;
+        if let Some(bridge) = bridge {
+            match bridge.images(chat_id, call_id) {
+                Ok((images, verified)) => {
+                    workflow_verified = Some(verified);
+                    out.text.push_str(&images.text);
+                    out.images.extend(images.images);
+                    out.artifacts.extend(images.artifacts);
+                    out.warnings.extend(images.warnings);
+                    progress(AgentProgress::ToolArtifacts {
+                        call_id: call_id.into(),
+                        artifacts: out.artifacts.clone(),
+                        warnings: out.warnings.clone(),
+                    });
+                }
+                Err(error) => {
+                    out.text.push_str(&format!("\nWarning: {error}"));
+                    out.warnings.push(error);
+                    workflow_verified = Some(false);
+                }
+            }
+        }
+        if decision.action.starts_with("browser_") {
+            let report = serde_json::from_str::<Value>(&out.text).ok();
+            if report
+                .as_ref()
+                .is_some_and(|r| r.get("error").is_some_and(|e| !e.is_null()))
+            {
+                out.status = crate::mcp_result::ToolStatus::Failed;
+            }
+            reliability::record_browser(
+                &decision.action,
+                report.as_ref(),
+                out.status == crate::mcp_result::ToolStatus::Success,
+            );
+        }
+        let mut entries = reliability::complete_tool(
+            &decision.action,
+            call_id,
+            checkpoint,
+            out.status == crate::mcp_result::ToolStatus::Success,
+        );
+        if let Some(verified) = workflow_verified {
+            entries = reliability::mark_workflow(call_id, verified);
+        }
+        if decision.action == "shell_output" {
+            entries = reliability::for_job(&decision.input.job_id);
+        }
+        if !entries.is_empty() {
+            out.status = if entries
+                .iter()
+                .any(|e| e.state == reliability::ExecutionState::Cancelled)
+            {
+                crate::mcp_result::ToolStatus::Cancelled
+            } else if entries
+                .iter()
+                .any(|e| e.state == reliability::ExecutionState::Failed)
+            {
+                crate::mcp_result::ToolStatus::Failed
+            } else if entries
+                .iter()
+                .any(|e| e.state == reliability::ExecutionState::Running)
+            {
+                crate::mcp_result::ToolStatus::Running
+            } else if entries
+                .iter()
+                .any(|e| e.state == reliability::ExecutionState::Unknown)
+            {
+                crate::mcp_result::ToolStatus::Unknown
+            } else {
+                crate::mcp_result::ToolStatus::Success
+            };
+            progress(AgentProgress::ExecutionUpdate {
+                call_id: call_id.into(),
+                executions: entries,
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -3737,6 +4174,14 @@ async fn execute_tool_text(
     approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
     progress: &mut (dyn FnMut(AgentProgress) + Send),
 ) -> Result<String, OrchestrationError> {
+    if let Some(permissions) = crate::swarm::current_permissions() {
+        if !permissions.allows(&decision.action) {
+            return Err(OrchestrationError::Agent(format!(
+                "action '{}' is not permitted by this subagent's permissions",
+                decision.action
+            )));
+        }
+    }
     let input = &decision.input;
     match decision.action.as_str() {
         "mod_help" | "mod_list" | "mod_validate" | "mod_publish" => {
@@ -3787,11 +4232,6 @@ async fn execute_tool_text(
             )
             .await
         }
-        "conversation_summary" => Ok(serde_json::json!({
-            "status": "acknowledged",
-            "message": "Previous steps summary is already recorded in context."
-        })
-        .to_string()),
         "browser_open"
         | "browser_click"
         | "browser_type"
@@ -3853,7 +4293,7 @@ async fn execute_tool_text(
             .await
         }
         "avatar_signal" => tools::avatar::execute(input).await,
-        "run_plugin" | "dispatch_subagent" | "mcp_tool" | "mcp_list_tools" => {
+        "run_plugin" | "dispatch_agents" | "dispatch_subagent" | "mcp_tool" | "mcp_list_tools" => {
             tools::plugins_mcp::execute(
                 decision.action.as_str(),
                 input,
@@ -3953,7 +4393,23 @@ where
 }
 
 fn parse_tool_input(action: &str, input: Value) -> Result<AgentInput, OrchestrationError> {
-    decode_agent_input(input).map_err(|error| {
+    let normalized = if action == "run_shell" {
+        match &input {
+            Value::String(cmd) if !cmd.trim().is_empty() => {
+                if let Ok(val) = serde_json::from_str::<Value>(cmd)
+                    && val.is_object()
+                {
+                    val
+                } else {
+                    serde_json::json!({ "command": cmd.trim() })
+                }
+            }
+            _ => input,
+        }
+    } else {
+        input
+    };
+    decode_agent_input(normalized).map_err(|error| {
         OrchestrationError::Agent(format!("invalid arguments for tool '{action}': {error}"))
     })
 }
@@ -3994,7 +4450,12 @@ fn append_native_tool_results(
         tool_result_content.push(ContentBlock::ToolResult {
             tool_use_id: call_id.clone(),
             content: final_result.clone(),
-            is_error: *status != crate::mcp_result::ToolStatus::Success,
+            is_error: matches!(
+                *status,
+                crate::mcp_result::ToolStatus::Failed
+                    | crate::mcp_result::ToolStatus::TimedOut
+                    | crate::mcp_result::ToolStatus::Cancelled
+            ),
         });
         if let Some(data_uris) = images.get(call_id) {
             for data_uri in data_uris {
@@ -4019,12 +4480,12 @@ fn append_native_tool_results(
 }
 
 #[derive(Debug, Clone)]
-struct ToolResultEntry {
-    call_id: String,
-    action: String,
-    input: Value,
-    text: String,
-    status: crate::mcp_result::ToolStatus,
+pub(super) struct ToolResultEntry {
+    pub(super) call_id: String,
+    pub(super) action: String,
+    pub(super) input: Value,
+    pub(super) text: String,
+    pub(super) status: crate::mcp_result::ToolStatus,
 }
 
 // Legacy tools determine their outcome once at this adapter; MCP supplies its
@@ -4032,11 +4493,12 @@ struct ToolResultEntry {
 impl From<(String, String, Value, String)> for ToolResultEntry {
     fn from((call_id, action, input, text): (String, String, Value, String)) -> Self {
         let mut status = crate::mcp_result::ToolOutcome::from(text.clone()).status;
-        if text.starts_with("Skipped")
-            || (matches!(
-                action.as_str(),
-                "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter"
-            ) && shell_result_failed(&text))
+        if text.starts_with("Skipped") {
+            status = crate::mcp_result::ToolStatus::Skipped;
+        } else if matches!(
+            action.as_str(),
+            "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter"
+        ) && shell_result_failed(&text)
         {
             status = crate::mcp_result::ToolStatus::Failed;
         }
@@ -4857,7 +5319,7 @@ mod tests {
             "exit: 1\nmode: normal\nsandboxed: true\nstdout:\nfail\nstderr:\n"
         ));
         // A killed/unknown-status process isn't treated as a confirmed failure.
-        assert!(!shell_result_failed(
+        assert!(shell_result_failed(
             "exit: unknown\nmode: normal\nsandboxed: true\nstdout:\nstderr:\n"
         ));
     }
@@ -4882,8 +5344,8 @@ mod tests {
         assert!(unverified_modification(Some(2), Some(1), ""));
         // Edited, verified after — satisfied regardless of what verify found.
         assert!(!unverified_modification(Some(2), Some(3), ""));
-        // Edited, never verified, but explicitly explained why no check applies.
-        assert!(!unverified_modification(
+        // An explanation cannot promote an unchecked edit to verified.
+        assert!(unverified_modification(
             Some(2),
             None,
             "Docs-only change, no test suite."
@@ -4899,9 +5361,8 @@ mod tests {
         // "claims success while a check is actually failing" case.
         assert!(unacknowledged_verify_failure(Some(true), ""));
         assert!(unacknowledged_verify_failure(Some(true), "n/a"));
-        // Verify failed, but the agent explicitly addressed it in the finish
-        // action's verification field (e.g. explaining it's pre-existing).
-        assert!(!unacknowledged_verify_failure(
+        // Even an explanation of pre-existing failures does not make them pass.
+        assert!(unacknowledged_verify_failure(
             Some(true),
             "2 pre-existing test failures unrelated to this change; see notes."
         ));
@@ -5171,8 +5632,8 @@ mod tests {
     }
 
     #[test]
-    fn explicit_written_justification_satisfies_the_gate_without_a_verify_call() {
-        assert!(!unverified_modification(
+    fn explicit_written_justification_does_not_verify_an_unchecked_edit() {
+        assert!(unverified_modification(
             Some(2),
             None,
             "Documentation-only change; no test suite in this repo."
@@ -5199,40 +5660,7 @@ mod tests {
     }
 
     #[test]
-    fn two_or_more_subagent_only_decisions_qualify_for_the_parallel_batch() {
-        let decisions = vec![
-            decision_with_action("dispatch_subagent"),
-            decision_with_action("dispatch_subagent"),
-        ];
-        assert!(decisions_are_parallel_subagent_batch(&decisions));
-
-        let decisions = vec![
-            decision_with_action("dispatch_subagent"),
-            decision_with_action("dispatch_subagent"),
-            decision_with_action("dispatch_subagent"),
-        ];
-        assert!(decisions_are_parallel_subagent_batch(&decisions));
-    }
-
-    #[test]
-    fn a_lone_subagent_dispatch_stays_sequential() {
-        let decisions = vec![decision_with_action("dispatch_subagent")];
-        assert!(!decisions_are_parallel_subagent_batch(&decisions));
-    }
-
-    #[test]
-    fn subagent_dispatch_mixed_with_another_action_stays_sequential() {
-        let decisions = vec![
-            decision_with_action("dispatch_subagent"),
-            decision_with_action("dispatch_subagent"),
-            decision_with_action("read_file"),
-        ];
-        assert!(!decisions_are_parallel_subagent_batch(&decisions));
-    }
-
-    #[test]
     fn empty_decisions_never_qualify_for_the_parallel_batch() {
-        assert!(!decisions_are_parallel_subagent_batch(&[]));
         assert!(!decisions_are_parallel_read_only_batch(&[]));
     }
 
@@ -6087,5 +6515,65 @@ for line in sys.stdin:
         );
         assert!(result.contains("render failed"));
         crate::mcp::close_mcp_session(&server);
+    }
+
+    #[test]
+    fn test_fault_tolerant_null_handling() {
+        let input = serde_json::json!({
+            "command": "curl -sL https://example.com",
+            "city": null,
+            "columns": null,
+            "verification": null,
+            "filter": null
+        });
+        let parsed = decode_agent_input(input).unwrap();
+        assert_eq!(parsed.command, "curl -sL https://example.com");
+        assert_eq!(parsed.city, "");
+        assert_eq!(parsed.verification, "");
+    }
+
+    #[test]
+    fn test_unpack_nested_arguments() {
+        // Stringified JSON arguments
+        let str_args = serde_json::json!({
+            "action": "run_shell",
+            "arguments": "{\"command\": \"ls -la\", \"city\": null}"
+        });
+        let parsed_str = decode_agent_input(str_args).unwrap();
+        assert_eq!(parsed_str.command, "ls -la");
+
+        // Object arguments
+        let obj_args = serde_json::json!({
+            "action": "run_shell",
+            "arguments": { "command": "pwd" }
+        });
+        let parsed_obj = decode_agent_input(obj_args).unwrap();
+        assert_eq!(parsed_obj.command, "pwd");
+    }
+
+    #[test]
+    fn test_shell_command_aliases() {
+        for (alias, expected) in [
+            ("cmd", "echo 1"),
+            ("script", "echo 2"),
+            ("exec", "echo 3"),
+            ("code", "echo 4"),
+            ("bash", "echo 5"),
+            ("sh", "echo 6"),
+        ] {
+            let input = serde_json::json!({ alias: expected });
+            let parsed = decode_agent_input(input).unwrap();
+            assert_eq!(parsed.command, expected, "Failed for alias {alias}");
+        }
+    }
+
+    #[test]
+    fn test_parse_tool_input_raw_shell_string() {
+        let raw = Value::String("curl -sL --max-time 25 https://sndiary02.com".into());
+        let parsed = parse_tool_input("run_shell", raw).unwrap();
+        assert_eq!(
+            parsed.command,
+            "curl -sL --max-time 25 https://sndiary02.com"
+        );
     }
 }

@@ -78,21 +78,31 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
         }
 
         ("GET", "/api/detect-tools") => {
-            let tools_json = serde_json::json!({
-                "docker": crate::config::which("docker"),
-                "git": crate::config::which("git"),
-                "gh": crate::config::which("gh"),
-                "node": crate::config::which("node")
-            });
+            let tools_json = tokio::task::spawn_blocking(|| {
+                serde_json::json!({
+                    "docker": crate::config::which("docker"),
+                    "git": crate::config::which("git"),
+                    "gh": crate::config::which("gh"),
+                    "node": crate::config::which("node")
+                })
+            })
+            .await
+            .unwrap_or_else(|_| serde_json::json!({ "docker": false, "git": false, "gh": false, "node": false }));
             send_json_response(socket, "200 OK", &tools_json.to_string()).await;
         }
 
         ("GET", "/api/system-info") => {
-            send_json_response(socket, "200 OK", &system_info().to_string()).await;
+            let info = tokio::task::spawn_blocking(system_info)
+                .await
+                .unwrap_or_default();
+            send_json_response(socket, "200 OK", &info.to_string()).await;
         }
 
         ("GET", "/api/smart-context") => {
-            send_json_response(socket, "200 OK", &smart_context().to_string()).await;
+            let context = tokio::task::spawn_blocking(smart_context)
+                .await
+                .unwrap_or_default();
+            send_json_response(socket, "200 OK", &context.to_string()).await;
         }
 
         _ => unreachable!(

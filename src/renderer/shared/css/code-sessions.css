@@ -285,7 +285,7 @@
   align-items: center;
   gap: 3px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  color: #34d399;
+  color: var(--status-success-fg);
   font-size: 0.72rem;
   font-weight: 500;
 }
@@ -354,7 +354,7 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.72rem;
   padding: 3px 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-surface-soft);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   border-radius: var(--radius-xs, 6px);
   color: var(--text-muted, #a1a1aa);
@@ -363,8 +363,8 @@
 }
 
 .code-resume-chip:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: var(--border-light, rgba(255, 255, 255, 0.18));
+  background: var(--bg-surface-hover);
+  border-color: var(--border-strong);
   color: var(--text-main, #ffffff);
 }
 
@@ -384,12 +384,12 @@
 
 .code-icon-btn:hover {
   color: var(--text-main, #ffffff);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-surface-hover);
 }
 
 .code-icon-btn.destructive:hover {
-  color: #f87171;
-  background: rgba(239, 68, 68, 0.1);
+  color: var(--hover-delete);
+  background: var(--hover-delete-bg);
 }
 
 .code-open-arrow {
@@ -419,7 +419,7 @@
   align-items: center;
   gap: 6px;
   padding: 10px 14px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--bg-surface-subtle);
   border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06));
 }
 
@@ -427,7 +427,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--border-strong);
 }
 
 .code-terminal-title {
@@ -450,7 +450,7 @@
 }
 
 .code-terminal-codeblock {
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--bg-input);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   border-radius: var(--radius-sm, 8px);
   padding: 12px 14px;

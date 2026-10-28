@@ -29,6 +29,18 @@ export default function AutomationTab({
         </div>
         <div className="form-grid single">
           <div className="setting-row">
+            <label>Agent browser mode</label>
+            <div className="pill-segmented" role="radiogroup" aria-label="Agent browser mode">
+              {[{ id: 'headless', label: 'Headless' }, { id: 'headed', label: 'Show window' }].map(option => <button key={option.id} type="button" role="radio" aria-checked={config.browserAgentMode === option.id} className={`pill-segmented-btn ${config.browserAgentMode === option.id ? 'active' : ''}`} onClick={() => updateField('browserAgentMode', option.id)}>{option.label}</button>)}
+            </div>
+            <p className="hint">Headless runs in the background. Opening Mint Browser yourself still shows its window.</p>
+          </div>
+          <div className="setting-row">
+            <label>Agent browser executable</label>
+            <input type="text" value={config.browserExecutable} placeholder="Auto-detect Chrome / Chromium / Edge" onChange={event => updateField('browserExecutable', event.target.value)} />
+            <p className="hint">Optional executable path for Chromium-based automation. Firefox is not supported by this engine.</p>
+          </div>
+          <div className="setting-row">
             <label>Browser engine</label>
             <div className="pill-segmented" role="radiogroup" aria-label="Browser engine">
               {[
@@ -97,6 +109,35 @@ export default function AutomationTab({
               />
               <span className="settings-toggle-slider"></span>
             </label>
+          </div>
+          <div className="toggle-row" style={{ alignItems: 'center' }}>
+            <div>
+              <label>Agent step limit</label>
+              <p className="hint">Maximum tool execution steps per agent turn (10 to 200, default: 40). Warns 5 steps before limit and enforces graceful wrap-up on the final step.</p>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input
+                type="range"
+                min={10}
+                max={200}
+                step={5}
+                value={config.agentMaxSteps ?? 40}
+                onChange={(e) => updateField('agentMaxSteps', parseInt(e.target.value, 10))}
+                style={{ width: '120px', accentColor: 'var(--accent-color, #10b981)' }}
+              />
+              <input
+                type="number"
+                min={10}
+                max={200}
+                className="bridge-input"
+                value={config.agentMaxSteps ?? 40}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  if (!isNaN(val)) updateField('agentMaxSteps', Math.max(10, Math.min(200, val)));
+                }}
+                style={{ width: '64px', textAlign: 'center', padding: '4px 6px' }}
+              />
+            </div>
           </div>
         </div>
       </section>

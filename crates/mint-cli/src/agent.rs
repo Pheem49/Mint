@@ -10,8 +10,8 @@ use ansi_to_tui::IntoText;
 use anyhow::{Result, anyhow};
 use mint_core::{
     AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption, CHAT_CLI_ID,
-    MemoryStore, MintConfig, OrchestrationError, PermissionDecision, PermissionRule,
-    orchestrate_agent_loop, permission_decision_for,
+    ExecutionState, MemoryStore, MintConfig, OrchestrationError, PermissionDecision,
+    PermissionRule, orchestrate_agent_loop, permission_decision_for,
 };
 use syntect::easy::HighlightLines;
 use syntect::highlighting::ThemeSet;
@@ -132,7 +132,11 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
             )
         }
         "run_shell" => {
-            let command = get_field_alias(input, &["command", "cmd"]).unwrap_or("");
+            let command = get_field_alias(
+                input,
+                &["command", "cmd", "script", "exec", "code", "bash", "sh"],
+            )
+            .unwrap_or("");
             let background = input
                 .get("background")
                 .and_then(|v| v.as_bool())
@@ -195,6 +199,17 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
         "run_plugin" => {
             let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
             (false, format!("[run_plugin] Running plugin: {}...", name))
+        }
+        "dispatch_agents" => {
+            let tasks_len = input
+                .get("tasks")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(1);
+            (
+                false,
+                format!("├── [{CYAN}swarm{RESET}] Dispatching {tasks_len} sub-agent(s)..."),
+            )
         }
         "dispatch_subagent" => {
             let name = input
@@ -551,6 +566,48 @@ pub(crate) fn mcp_progress_notes(event: &AgentProgress) -> Option<Vec<String>> {
                 update.message.as_deref().unwrap_or_default()
             )]
         }
+        AgentProgress::ExecutionUpdate { executions, .. } => executions
+            .iter()
+            .map(|e| {
+                let kind = if e.check { "Check" } else { "Command" };
+                let state_str = match e.state {
+                    ExecutionState::Succeeded => {
+                        format!(
+                            "{}Succeeded{RESET}",
+                            crate::terminal_theme::ANSI_ACCENT_BOLD
+                        )
+                    }
+                    ExecutionState::Failed => {
+                        format!("{}Failed{RESET}", crate::terminal_theme::ANSI_ERROR_BOLD)
+                    }
+                    ExecutionState::Running => {
+                        format!("{}Running{RESET}", crate::terminal_theme::ANSI_BLUE_BOLD)
+                    }
+                    ExecutionState::Cancelled => {
+                        format!("{DIM}Cancelled{RESET}")
+                    }
+                    ExecutionState::Unknown => {
+                        format!("{}Unknown{RESET}", crate::terminal_theme::ANSI_WARNING_BOLD)
+                    }
+                };
+                let exit = e
+                    .exit_code
+                    .map(|c| {
+                        if c == 0 {
+                            format!(" · {DIM}exit {c}{RESET}")
+                        } else {
+                            format!(" · {RED}exit {c}{RESET}")
+                        }
+                    })
+                    .unwrap_or_default();
+                let job = e
+                    .job_id
+                    .as_ref()
+                    .map(|j| format!(" · {DIM}job {j}{RESET}"))
+                    .unwrap_or_default();
+                format!("[{kind}] {state_str} · {}{exit}{job}", e.command)
+            })
+            .collect(),
         AgentProgress::ToolArtifacts {
             artifacts,
             warnings,
@@ -566,13 +623,19 @@ pub(crate) fn mcp_progress_notes(event: &AgentProgress) -> Option<Vec<String>> {
                             .display()
                             .to_string()
                     });
-                    format!("[MCP {}] {}: {location}", artifact.kind, artifact.name)
+                    let tag = match artifact.server.as_str() {
+                        "browser" => "Screenshot".into(),
+                        "view_image" => "Viewed image".into(),
+                        other if !other.is_empty() => format!("MCP {other}"),
+                        _ => format!("MCP {}", artifact.kind),
+                    };
+                    format!("[{tag}] {}: {location}", artifact.name)
                 })
                 .collect::<Vec<_>>();
             notes.extend(
                 warnings
                     .iter()
-                    .map(|warning| format!("[MCP warning] {warning}")),
+                    .map(|warning| format!("[Warning] {warning}")),
             );
             notes
         }
@@ -584,6 +647,11 @@ pub(crate) fn publish_mcp_progress(
     tui: Option<&crate::interactive::TuiHandle>,
     event: &AgentProgress,
 ) -> bool {
+    // In Full-Screen TUI, executions are already rendered as interactive ToolActivity cards.
+    // Suppress redundant [Command]/[Check] text notices in TUI while preserving them for Classic CLI.
+    if tui.is_some() && matches!(event, AgentProgress::ExecutionUpdate { .. }) {
+        return false;
+    }
     let Some(notes) = mcp_progress_notes(event) else {
         return false;
     };
@@ -605,18 +673,18 @@ pub(crate) fn run_summary_lines(
         .iter()
         .filter(|record| !record.success)
         .collect();
-    let outcome = if !failed_tools.is_empty() {
-        format!(
-            "{YELLOW}⚠ Completed with {} failure{}{RESET}",
+    let outcome = match summary.outcome.as_str() {
+        "FAILED" => format!("{RED}✗ Failed{RESET}"),
+        "BLOCKED" => format!("{YELLOW}○ Blocked{RESET}"),
+        "UNVERIFIED" => format!("{YELLOW}? Unverified{RESET}"),
+        "ROLLED_BACK" => format!("{YELLOW}↺ Rolled back{RESET}"),
+        _ if !failed_tools.is_empty() => format!(
+            "{YELLOW}⚠ Completed with {} previous failure{}{RESET}",
             failed_tools.len(),
             if failed_tools.len() == 1 { "" } else { "s" }
-        )
-    } else if summary.outcome == "ROLLED_BACK" {
-        format!("{YELLOW}↺ Rolled back{RESET}")
-    } else if summary.outcome == "FAILED" {
-        format!("{RED}✗ Failed{RESET}")
-    } else {
-        format!("{GREEN}✓ Completed{RESET}")
+        ),
+        "VERIFIED" => format!("{GREEN}✓ Verified{RESET}"),
+        _ => format!("{GREEN}✓ Completed{RESET}"),
     };
     let file_count = summary.files_changed.len();
     let mut lines = vec![format!(
@@ -1083,19 +1151,22 @@ pub async fn run_code_agent_with_options(
                         subagent.as_deref(),
                         Instant::now(),
                     );
-                    if phase == "started" {
-                        status.thinking = Some(compaction_label(Duration::ZERO));
-                    } else {
-                        print_timeline_note(&mut status, &message, started_at.elapsed(), None);
-                        status.context_pct = None;
-                        status.thinking = Some(if let Some(started) = status.compaction_started {
-                            compaction_label(started.elapsed())
+                    if subagent.is_none() {
+                        if phase == "started" {
+                            status.thinking = Some(compaction_label(Duration::ZERO));
                         } else {
-                            format!(
-                                "{thinking_verb} ({} • Esc to interrupt)",
-                                format_elapsed(started_at.elapsed())
-                            )
-                        });
+                            print_timeline_note(&mut status, &message, started_at.elapsed(), None);
+                            status.context_pct = None;
+                            status.thinking =
+                                Some(if let Some(started) = status.compaction_started {
+                                    compaction_label(started.elapsed())
+                                } else {
+                                    format!(
+                                        "{thinking_verb} ({} • Esc to interrupt)",
+                                        format_elapsed(started_at.elapsed())
+                                    )
+                                });
+                        }
                     }
                     render_live_status(&mut status);
                 }
@@ -1392,7 +1463,10 @@ pub async fn run_code_agent_with_options(
             AgentProgress::ToolDiscovery { .. }
             | AgentProgress::DeviceState { .. }
             | AgentProgress::ToolProgress { .. }
-            | AgentProgress::ToolArtifacts { .. } => {}
+            | AgentProgress::ToolArtifacts { .. }
+            | AgentProgress::SubagentStarted { .. }
+            | AgentProgress::SubagentFinished { .. }
+            | AgentProgress::ExecutionUpdate { .. } => {}
             AgentProgress::PlanUpdated { plan } => {
                 if let Ok(mut status) = progress_live_status.lock() {
                     status.thinking = None;
@@ -1557,14 +1631,11 @@ pub async fn run_code_agent_with_options(
         if let Ok(mut status) = live_status.lock()
             && !status.web_sources.is_empty()
         {
-            let sources = status
-                .web_sources
-                .drain(..)
-                .enumerate()
-                .map(|(index, (title, url))| format!("{}. {title}\n   {url}", index + 1))
-                .collect::<Vec<_>>()
-                .join("\n");
-            tui.push_notice(format!("Sources:\n{sources}"));
+            let sources = status.web_sources.drain(..).collect::<Vec<_>>();
+            let text = format_tui_web_sources(&sources, MAX_TUI_WEB_SOURCES);
+            if !text.is_empty() {
+                tui.push_notice(text);
+            }
         }
         tui.push_notice(worked_line);
         avatar_bridge.on_talking(false);
@@ -1881,5 +1952,70 @@ mod skill_card_tests {
     fn memory_recall_result_with_no_skill_hits_yields_nothing() {
         let result = "[2026-08-01] You: hi\nMint: hello";
         assert!(skill_names_from_memory_recall(result).is_empty());
+    }
+
+    #[test]
+    fn execution_update_progress_notes_highlight_succeeded_and_failed() {
+        use mint_core::{ExecutionEvidence, ExecutionState};
+        let update = AgentProgress::ExecutionUpdate {
+            call_id: "test".into(),
+            executions: vec![
+                ExecutionEvidence {
+                    call_id: "test1".into(),
+                    command: "ls -la".into(),
+                    state: ExecutionState::Succeeded,
+                    exit_code: Some(0),
+                    job_id: None,
+                    revision: 1,
+                    check: false,
+                    condition_verified: None,
+                },
+                ExecutionEvidence {
+                    call_id: "test2".into(),
+                    command: "cargo check".into(),
+                    state: ExecutionState::Failed,
+                    exit_code: Some(1),
+                    job_id: None,
+                    revision: 2,
+                    check: true,
+                    condition_verified: None,
+                },
+            ],
+        };
+        let notes = mcp_progress_notes(&update).expect("should produce notes");
+        assert_eq!(notes.len(), 2);
+        assert!(notes[0].contains("[Command]"));
+        assert!(notes[0].contains("Succeeded"));
+        assert!(notes[0].contains("exit 0"));
+        assert!(notes[1].contains("[Check]"));
+        assert!(notes[1].contains("Failed"));
+        assert!(notes[1].contains("exit 1"));
+    }
+
+    #[test]
+    fn format_tui_web_sources_handles_empty_under_limit_and_over_limit() {
+        assert_eq!(format_tui_web_sources(&[], 5), "");
+
+        let three_items = vec![
+            ("Site 1".into(), "https://example.com/1".into()),
+            ("Site 2".into(), "https://example.com/2".into()),
+            ("Site 3".into(), "https://example.com/3".into()),
+        ];
+        let out = format_tui_web_sources(&three_items, 5);
+        assert!(out.starts_with("Sources:\n"));
+        assert!(out.contains("1. Site 1\n   https://example.com/1"));
+        assert!(out.contains("2. Site 2\n   https://example.com/2"));
+        assert!(out.contains("3. Site 3\n   https://example.com/3"));
+        assert!(!out.contains("more sources"));
+        assert!(!out.contains("Ctrl+O details"));
+
+        let eight_items: Vec<_> = (1..=8)
+            .map(|i| (format!("Site {i}"), format!("https://example.com/{i}")))
+            .collect();
+        let out = format_tui_web_sources(&eight_items, 5);
+        assert!(out.contains("1. Site 1\n   https://example.com/1"));
+        assert!(out.contains("5. Site 5\n   https://example.com/5"));
+        assert!(!out.contains("6. Site 6"));
+        assert!(out.contains("… [+3 more sources] · Ctrl+O details"));
     }
 }

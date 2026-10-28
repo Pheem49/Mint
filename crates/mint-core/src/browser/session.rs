@@ -9,7 +9,7 @@ use crate::MintConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::File,
     future::Future,
     hash::{Hash, Hasher},
@@ -63,6 +63,10 @@ pub struct BrowserSession {
     preceding_attempt: Option<ActionAttemptKey>,
     blocked: bool,
     used: bool,
+    runtime: Option<super::runtime::ManagedBrowser>,
+    runtime_config: Option<MintConfig>,
+    owned_tabs: BTreeSet<String>,
+    capture_metadata: Value,
 }
 
 impl Default for BrowserSession {
@@ -78,18 +82,60 @@ impl Default for BrowserSession {
             preceding_attempt: None,
             blocked: false,
             used: false,
+            runtime: None,
+            runtime_config: None,
+            owned_tabs: BTreeSet::new(),
+            capture_metadata: Value::Null,
         }
     }
 }
 
 pub async fn run_session<F: Future>(future: F) -> F::Output {
-    SESSION
-        .scope(Arc::new(Mutex::new(BrowserSession::default())), future)
-        .await
+    let session = Arc::new(Mutex::new(BrowserSession::default()));
+    let result = super::cdp::run_transport(Box::pin(SESSION.scope(session.clone(), future))).await;
+    let mut session = session.lock().await;
+    if session.runtime.is_none() {
+        if let Some(config) = session.runtime_config.clone() {
+            for tab in std::mem::take(&mut session.owned_tabs) {
+                let _ = tab_request(&config, &format!("close/{tab}")).await;
+            }
+        }
+    }
+    if session.runtime.is_some() {
+        session.owned_tabs.clear();
+    }
+    session.runtime.take();
+    result
+}
+
+impl Drop for BrowserSession {
+    fn drop(&mut self) {
+        // Cancellation drops the future before async cleanup can run. Owned
+        // Chrome is killed by its guard; borrowed browsers lose only our tabs.
+        if self.runtime.is_none()
+            && !self.owned_tabs.is_empty()
+            && let Some(config) = self.runtime_config.clone()
+            && let Ok(handle) = tokio::runtime::Handle::try_current()
+        {
+            let tabs = std::mem::take(&mut self.owned_tabs);
+            handle.spawn(async move {
+                for tab in tabs {
+                    let _ = tab_request(&config, &format!("close/{tab}")).await;
+                }
+            });
+        }
+    }
 }
 
 pub(crate) fn selected_tab() -> Option<String> {
     TARGET.try_with(Clone::clone).ok()
+}
+
+pub async fn capture_metadata() -> Value {
+    let Ok(state) = SESSION.try_with(Arc::clone) else {
+        return Value::Null;
+    };
+    state.lock().await.capture_metadata.clone()
 }
 
 // Explicit unlock also releases a briefly inherited descriptor during a
@@ -312,6 +358,7 @@ pub(crate) async fn finish_evidence() -> bool {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) async fn last_state() -> String {
     SESSION
         .try_with(|s| {
@@ -340,7 +387,51 @@ pub fn execute_action<'a>(
         let started = Instant::now();
         let state = SESSION.with(Arc::clone);
         let mut session = state.lock().await;
-        let result = execute_owned(config, action, args, &mut session).await;
+        if config.disabled_tools.iter().any(|tool| tool == action)
+            || config.extra.get("browserAutomationEnabled") == Some(&json!(false))
+        {
+            return Err(format!("Browser tool '{action}' is disabled"));
+        }
+        if action == "browser_open" {
+            super::navigate::validate_url(args["url"].as_str().unwrap_or(""))?;
+        }
+        let starting = session.runtime_config.is_none();
+        if starting {
+            let endpoint = endpoint(config);
+            let parsed = reqwest::Url::parse(endpoint).map_err(|e| e.to_string())?;
+            let external = config.extra.get("browserUseExisting") == Some(&json!(true))
+                || !matches!(
+                    parsed.host_str(),
+                    Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
+                )
+                || parsed.port_or_known_default() != Some(9222);
+            if external {
+                if !super::is_browser_running(config).await {
+                    return Err("Configured browser endpoint is unavailable; start the external browser or remove the endpoint override.".into());
+                }
+                session.runtime_config = Some(config.clone());
+            } else {
+                let runtime = super::runtime::ManagedBrowser::launch(config).await?;
+                let mut run_config = config.clone();
+                run_config
+                    .extra
+                    .insert("browserDebugUrl".into(), json!(runtime.endpoint));
+                run_config
+                    .extra
+                    .insert("__managedBrowser".into(), json!(true));
+                session.runtime_config = Some(run_config);
+                session.runtime = Some(runtime);
+            }
+        }
+        let run_config = session.runtime_config.as_ref().unwrap().clone();
+        let mut result = execute_owned(&run_config, action, args, &mut session).await;
+        if starting
+            && let (Ok(text), Some(runtime)) = (&mut result, session.runtime.as_ref())
+            && let Ok(Value::Object(mut report)) = serde_json::from_str::<Value>(text)
+        {
+            report.insert("runtime".into(), runtime.metadata());
+            *text = Value::Object(report).to_string();
+        }
         let report = result
             .as_ref()
             .ok()
@@ -393,7 +484,13 @@ async fn execute_owned(
             .ok_or("Could not create task tab")?
             .to_owned();
         session.leases.insert(tab.clone(), lease(config, &tab)?);
+        session.owned_tabs.insert(tab.clone());
         session.tab = Some(tab);
+        if config.extra.get("__managedBrowser") == Some(&json!(true)) {
+            TARGET
+                .scope(session.tab.clone().unwrap(), configure_viewport(config))
+                .await?;
+        }
     }
     if action == "browser_tabs" {
         return tabs(config, args, session).await;
@@ -409,8 +506,22 @@ async fn execute_owned(
     TARGET
         .scope(tab.clone(), async {
             if action == "browser_screenshot" {
-                let (data, evidence) = super::evidence::capture(config, &tab).await?;
-                session.screenshot = Some(evidence);
+                let mode=args["mode"].as_str().filter(|s|!s.is_empty()).unwrap_or("viewport");
+                let data=if mode=="viewport" {
+                    let (data,evidence)=super::evidence::capture(config,&tab).await?;
+                    session.screenshot=Some(evidence);data
+                } else {
+                    session.screenshot=None;
+                    let mut options=args.clone();
+                    if mode=="element" {options["selector"]=target(args,session)?.into();}
+                    let token=format!("mint-capture-{}",uuid::Uuid::new_v4());
+                    evaluate(config,format!("(() => {{const s=document.createElement('style');s.id={};s.textContent='#mint-cursor-overlay,#mint-browser-aura{{display:none!important}}';document.documentElement.appendChild(s);return true;}})()",json!(token))).await?;
+                    let image=super::navigate::capture_page(config,&options).await;
+                    let _=evaluate(config,format!("document.getElementById({})?.remove()",json!(token))).await;
+                    image?
+                };
+                let url=evaluate(config,"location.href".into()).await.unwrap_or(Value::Null);
+                session.capture_metadata=json!({"url":url,"capturedAt":chrono::Utc::now().to_rfc3339(),"sessionId":session.id,"tabId":tab,"mode":mode});
                 return Ok(format!("data:image/png;base64,{data}"));
             }
             if action == "browser_read" {
@@ -516,6 +627,9 @@ async fn execute_owned(
                 .into_iter()
                 .filter(|t| !before_tabs.iter().any(|old| old.id == t.id))
                 .collect();
+            for new_tab in &new_tabs {
+                session.owned_tabs.insert(new_tab.id.clone());
+            }
             let mut changes = Vec::new();
             let mut verification = "unverified".to_string();
             let observation = after.ok();
@@ -593,6 +707,28 @@ async fn execute_owned(
         .await
 }
 
+async fn configure_viewport(config: &MintConfig) -> Result<(), String> {
+    let width = config
+        .extra
+        .get("browserViewportWidth")
+        .and_then(Value::as_u64)
+        .unwrap_or(1440)
+        .clamp(320, 7680);
+    let height = config
+        .extra
+        .get("browserViewportHeight")
+        .and_then(Value::as_u64)
+        .unwrap_or(900)
+        .clamp(240, 4320);
+    cdp_call_raw(
+        config,
+        "Emulation.setDeviceMetricsOverride",
+        json!({"width":width,"height":height,"deviceScaleFactor":1,"mobile":false}),
+    )
+    .await?;
+    Ok(())
+}
+
 async fn tabs(
     config: &MintConfig,
     args: &Value,
@@ -612,7 +748,11 @@ async fn tabs(
             let tab = tab_request(config, "new?about:blank").await?;
             let id = tab["id"].as_str().ok_or("Missing tab ID")?.to_owned();
             session.leases.insert(id.clone(), lease(config, &id)?);
+            session.owned_tabs.insert(id.clone());
             session.tab = Some(id.clone());
+            if config.extra.get("__managedBrowser") == Some(&json!(true)) {
+                TARGET.scope(id.clone(), configure_viewport(config)).await?;
+            }
             session.observation = None;
             session.screenshot = None;
             session.preceding_attempt = None;
@@ -637,6 +777,7 @@ async fn tabs(
             if operation == "close" {
                 tab_request(config, &format!("close/{id}")).await?;
                 session.leases.remove(id);
+                session.owned_tabs.remove(id);
                 // Retain the closed ID: later calls must fail instead of choosing a new tab.
             } else {
                 session.tab = Some(id.to_owned());
@@ -870,6 +1011,40 @@ mod tests {
         assert!(!expression.contains("=== `"));
     }
 
+    #[tokio::test]
+    async fn headed_mode_does_not_hijack_running_port_9222_browser_without_explicit_flag() {
+        let mut config = MintConfig::default();
+        config
+            .extra
+            .insert("browserAgentMode".into(), json!("headed"));
+        let endpoint = endpoint(&config);
+        let parsed = reqwest::Url::parse(endpoint).unwrap();
+        let external = config.extra.get("browserUseExisting") == Some(&json!(true))
+            || !matches!(
+                parsed.host_str(),
+                Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
+            )
+            || parsed.port_or_known_default() != Some(9222);
+        assert!(
+            !external,
+            "Headed mode without browserUseExisting must not attach to port 9222"
+        );
+
+        config
+            .extra
+            .insert("browserUseExisting".into(), json!(true));
+        let external_with_flag = config.extra.get("browserUseExisting") == Some(&json!(true))
+            || !matches!(
+                parsed.host_str(),
+                Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
+            )
+            || parsed.port_or_known_default() != Some(9222);
+        assert!(
+            external_with_flag,
+            "Explicit browserUseExisting should allow external attachment"
+        );
+    }
+
     struct BrowserFixture {
         config: MintConfig,
         url: String,
@@ -956,6 +1131,84 @@ mod tests {
             }
             panic!("Chrome debugging endpoint did not become ready");
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "isolated real Chrome; shared engine workflow and all screenshot modes"]
+    async fn managed_workflow_clicks_types_and_captures_without_closing_borrowed_browser() {
+        let fixture = BrowserFixture::start().await;
+        let mut config = MintConfig::default();
+        config
+            .extra
+            .insert("browserLaunchArgs".into(), json!(["--no-sandbox"]));
+        let output =
+            std::env::temp_dir().join(format!("mint-workflow-test-{}", uuid::Uuid::new_v4()));
+        let workflow: super::super::workflow::BrowserWorkflow =
+            serde_json::from_value(json!({"steps":[
+                {"action":"browser_open","input":{"url":fixture.url}},
+                {"action":"browser_fill","input":{"selector":"#query","text":"ทดสอบ"}},
+                {"action":"browser_type","input":{"selector":"#query","text":" Mint"}},
+                {"action":"browser_click","input":{"selector":"#search"}},
+                {"action":"browser_wait","input":{"condition":"text","value":"Matching result"}},
+                {"action":"browser_screenshot","input":{}},
+                {"action":"browser_screenshot","input":{"mode":"fullPage"}},
+                {"action":"browser_screenshot","input":{"mode":"element","selector":"#result"}}
+            ]}))
+            .unwrap();
+        let report = super::super::workflow::run(&config, workflow, &output, false, |_| {})
+            .await
+            .unwrap();
+        assert_eq!(report.status, "succeeded", "{:?}", report.error);
+        assert_eq!(report.steps.len(), 8);
+        assert!(report.steps[2].to_string().contains("ทดสอบ Mint"));
+        assert_eq!(report.screenshots.len(), 3);
+        use image::GenericImageView;
+        let viewport = image::open(&report.screenshots[0].path)
+            .unwrap()
+            .dimensions();
+        let full = image::open(&report.screenshots[1].path)
+            .unwrap()
+            .dimensions();
+        let element = image::open(&report.screenshots[2].path)
+            .unwrap()
+            .dimensions();
+        assert_eq!(viewport, (1440, 900));
+        assert!(full.1 > viewport.1);
+        assert!(element.1 < viewport.1);
+        assert!(super::super::is_browser_running(&fixture.config).await);
+        assert!(!serde_json::to_string(&report).unwrap().contains("base64"));
+        let _ = std::fs::remove_dir_all(output);
+    }
+
+    #[tokio::test]
+    #[ignore = "isolated real Chrome; borrowed-browser tab ownership cleanup"]
+    async fn borrowed_session_closes_its_popup_but_keeps_the_original_tab() {
+        let fixture = BrowserFixture::start().await;
+        let originals = super::super::list_tabs(&fixture.config).await.unwrap();
+        let (main, popup) = run_session(async {
+            let opened = call(&fixture.config, "browser_open", json!({"url":fixture.url})).await;
+            let main = opened["observation"]["tabId"].as_str().unwrap().to_owned();
+            let result = call(
+                &fixture.config,
+                "browser_click",
+                json!({"selector":"#popup"}),
+            )
+            .await;
+            let popup = result["newTabs"][0]["id"].as_str().unwrap().to_owned();
+            (main, popup)
+        })
+        .await;
+        let tabs = super::super::list_tabs(&fixture.config).await.unwrap();
+        assert!(
+            originals
+                .iter()
+                .all(|old| tabs.iter().any(|tab| tab.id == old.id))
+        );
+        assert!(!tabs.iter().any(|tab| tab.id == main));
+        assert!(
+            !tabs.iter().any(|tab| tab.id == popup),
+            "task popup leaked in the borrowed browser"
+        );
     }
 
     const FIXTURE: &str = r#"<!doctype html><html><head><title>Mint Browser Fixture</title></head><body>

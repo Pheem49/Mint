@@ -103,3 +103,21 @@ describe('project selection', () => {
   })
 
 })
+
+it('handoff opens the exact saved conversation with its own workspace', async () => {
+  const { navigateToSavedConversation } = await import('./projectNavigation')
+  const target = session('cli::saved', '/projects/target', '2026-10-18T00:00:00Z', 'cli')
+  const { state, ports } = fixture([target])
+  expect(await navigateToSavedConversation(target.id, ports)).toBe(true)
+  expect(state.activeId).toBe('cli::saved')
+  expect(state.workspace).toBe('/projects/target')
+  expect(state.view).toBe('chat')
+})
+it('a missing or superseded handoff never opens a different conversation', async () => {
+  const { navigateToSavedConversation } = await import('./projectNavigation')
+  const { state, ports } = fixture([session('other', null, '2026-10-18T00:00:00Z')])
+  expect(await navigateToSavedConversation('deleted', ports)).toBe(false)
+  expect(state.activeId).toBe('conversation-origin')
+  expect(await navigateToSavedConversation('other', { ...ports, isCurrent: () => false })).toBe(false)
+  expect(state.activeId).toBe('conversation-origin')
+})

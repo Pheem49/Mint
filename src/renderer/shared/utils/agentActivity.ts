@@ -3,9 +3,9 @@
  * Agent activity parsing and transformation logic.
  * Shared by both Desktop and Web ChatPanel — do NOT duplicate this.
  */
-import type { AgentProgress } from '../types'
+import type { AgentProgress, ActivePlan, RunTelemetrySummary } from '../types'
 import { isInternalCot } from '../agentProgress'
-import { viewedImageDataUri } from './viewedImages'
+import { viewedImageDataUri, viewedImagesFrom, type ViewedImageItem } from './viewedImages'
 
 export interface AgentActivity {
   label: string
@@ -16,6 +16,7 @@ export interface AgentActivity {
   callId?: string
   /** Raw ToolEnd output text, shown when the row is expanded in the UI. */
   result?: string
+  viewedImage?: ViewedImageItem
 }
 
 export interface AgentActivityGroup {
@@ -72,7 +73,50 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     activityDetail(input, 'prompt') ||
     activityDetail(input, 'searchTerm') ||
     activityDetail(input, 'search_term')
-  const command = activityDetail(input, 'command') || activityDetail(input, 'cmd')
+  let command =
+    activityDetail(input, 'command') ||
+    activityDetail(input, 'cmd') ||
+    activityDetail(input, 'script') ||
+    activityDetail(input, 'exec') ||
+    activityDetail(input, 'code') ||
+    activityDetail(input, 'bash') ||
+    activityDetail(input, 'sh')
+
+  if (!command && input && typeof input === 'object') {
+    if (typeof input.arguments === 'object' && input.arguments !== null) {
+      const nested = input.arguments as Record<string, unknown>
+      command =
+        activityDetail(nested, 'command') ||
+        activityDetail(nested, 'cmd') ||
+        activityDetail(nested, 'script') ||
+        activityDetail(nested, 'exec') ||
+        activityDetail(nested, 'code') ||
+        activityDetail(nested, 'bash') ||
+        activityDetail(nested, 'sh')
+    } else if (typeof input.arguments === 'string') {
+      try {
+        const parsed = JSON.parse(input.arguments)
+        if (parsed && typeof parsed === 'object') {
+          command =
+            activityDetail(parsed, 'command') ||
+            activityDetail(parsed, 'cmd') ||
+            activityDetail(parsed, 'script') ||
+            activityDetail(parsed, 'exec') ||
+            activityDetail(parsed, 'code') ||
+            activityDetail(parsed, 'bash') ||
+            activityDetail(parsed, 'sh')
+        }
+      } catch {
+        // best-effort
+      }
+    }
+  }
+
+  if (!command && typeof (input as unknown) === 'string') {
+    const raw = (input as unknown as string).trim()
+    if (raw && !raw.startsWith('{')) command = raw
+  }
+
   const name = activityDetail(input, 'name')
   const tool = activityDetail(input, 'tool')
   const symbol = activityDetail(input, 'symbol') || activityDetail(input, 'ticker')
@@ -281,6 +325,7 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
 
   for (const event of progress) {
     if (event.type === 'ToolStart') {
+      if (event.data.subagent) continue
       const item = describeTool(event.data.action, event.data.input)
       item.callId = event.data.callId
       activities.push(item)
@@ -313,6 +358,7 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
         }
       }
     } else if (event.type === 'ToolEnd') {
+      if (event.data.subagent) continue
       const finished = describeTool(event.data.action, event.data.input)
       for (let index = activities.length - 1; index >= 0; index -= 1) {
         if (activities[index].state !== 'active') continue
@@ -344,9 +390,10 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
         currentGroup.state = hasActive ? 'active' : hasDone ? 'done' : hasRetry ? 'retry' : hasError ? 'error' : 'done'
       }
     } else if (event.type === 'ContextCompaction') {
+      if (event.data.subagent) continue
       if (event.data.status !== 'started') {
         flushGroup()
-        timeline.push({ id: `context-${nextId++}`, kind: 'thought', thought: event.data.subagent ? `[${event.data.subagent}] ${event.data.message}` : event.data.message })
+        timeline.push({ id: `context-${nextId++}`, kind: 'thought', thought: event.data.message })
       }
     } else if (event.type === 'Thought') {
       const text = event.data?.thought?.trim()
@@ -417,6 +464,32 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
       const hasError = item.group.items.some((it) => it.state === 'error')
       const hasRetry = item.group.items.some((it) => it.state === 'retry')
       item.group.state = hasActive ? 'active' : hasDone ? 'done' : hasRetry ? 'retry' : hasError ? 'error' : 'done'
+    }
+  }
+
+  const viewedImages = viewedImagesFrom(progress)
+  if (viewedImages.length > 0) {
+    const byCallId = new Map<string, ViewedImageItem>()
+    const byPath = new Map<string, ViewedImageItem[]>()
+    for (const img of viewedImages) {
+      if (img.id) byCallId.set(img.id, img)
+      if (img.path) {
+        const list = byPath.get(img.path) || []
+        list.push(img)
+        byPath.set(img.path, list)
+      }
+    }
+    for (const act of activities) {
+      if (act.action === 'view_image' && act.state === 'done') {
+        if (act.callId && byCallId.has(act.callId)) {
+          act.viewedImage = byCallId.get(act.callId)
+        } else if (byPath.has(act.target)) {
+          const list = byPath.get(act.target)!
+          if (list.length > 0) {
+            act.viewedImage = list.shift()
+          }
+        }
+      }
     }
   }
 
@@ -494,4 +567,34 @@ export function cleanIntermediateThought(text: string): string {
   // Strip leading bullet characters
   cleaned = cleaned.replace(/^[\s•\-\*]+\s*/, '')
   return cleaned.trim() || text.trim()
+}
+
+export function extractLatestPlan(progress: AgentProgress[]): ActivePlan | undefined {
+  for (let i = progress.length - 1; i >= 0; i--) {
+    const event = progress[i]
+    if (event.type === 'PlanUpdated') {
+      return event.data.plan
+    }
+  }
+  return undefined
+}
+
+export function extractLatestRunSummary(progress: AgentProgress[]): RunTelemetrySummary | undefined {
+  for (let i = progress.length - 1; i >= 0; i--) {
+    const event = progress[i]
+    if (event.type === 'RunCompleted') {
+      return event.data.summary
+    }
+  }
+  return undefined
+}
+
+export function hasSubagentActivity(progress: AgentProgress[]): boolean {
+  return progress.some(
+    (e) =>
+      e.type === 'SubagentStarted' ||
+      e.type === 'SubagentFinished' ||
+      ((e.type === 'ToolStart' || e.type === 'ToolEnd') &&
+        (e.data.subagent || e.data.action === 'dispatch_agents' || e.data.action === 'dispatch_subagent')),
+  )
 }

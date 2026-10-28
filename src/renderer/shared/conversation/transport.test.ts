@@ -160,4 +160,24 @@ describe.each([['Desktop', desktop], ['Web', web]] as const)('%s Conversation tr
       'chat-1', undefined, true)).resolves.toEqual(response)
     expect(captured).toMatchObject({ ownerToken: 'owner-token', request: { chatId: 'chat-1', planMode: true } })
   })
+
+  it('validates the 32 MiB request limit without TextEncoder allocations or double JSON.stringify on native IPC', async () => {
+    const encodeSpy = vi.spyOn(TextEncoder.prototype, 'encode')
+    const stringifySpy = vi.spyOn(JSON, 'stringify')
+    ;(window as any).__TAURI_INTERNALS__ = {}
+    native.invoke.mockResolvedValue(response)
+
+    await expect(adapter.streamChatMessage('hello', () => {}, 'data:image/png;base64,AAAA')).resolves.toEqual(response)
+    expect(encodeSpy).not.toHaveBeenCalled()
+    expect(stringifySpy).not.toHaveBeenCalled()
+
+    const oversized = 'A'.repeat(32 * 1024 * 1024 + 64)
+    await expect(adapter.streamChatMessage('hello', () => {}, oversized)).rejects.toThrow(
+      'Attachments exceed the 32 MiB request limit. Send fewer files at once.',
+    )
+    delete (window as any).__TAURI_INTERNALS__
+    await expect(adapter.streamChatMessage('hello', () => {}, oversized)).rejects.toThrow(
+      'Attachments exceed the 32 MiB request limit. Send fewer files at once.',
+    )
+  })
 })

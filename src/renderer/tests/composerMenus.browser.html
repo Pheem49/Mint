@@ -2,9 +2,9 @@
 <body><div id="menu-fixture"></div><pre id="result">RUNNING</pre><script type="module">
 import React, { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import SlashSuggestions from '../shared/components/SlashSuggestions';
-import SlashChoicePanel from '../shared/components/SlashChoicePanel';
-import ModelSelectorPopover from '../shared/components/ModelSelectorPopover';
+import SlashSuggestions from '../shared/components/chat/SlashSuggestions';
+import SlashChoicePanel from '../shared/components/chat/SlashChoicePanel';
+import ModelSelectorPopover from '../shared/components/chat/ModelSelectorPopover';
 const params = new URLSearchParams(location.search);
 const desktop = params.get('surface') === 'desktop';
 await import('../shared/theme/tokens.css');

@@ -55,6 +55,8 @@ pub fn subagent_name(chat_id: &str) -> Option<&str> {
 pub enum MemoryError {
     #[error("library error: {0}")]
     Library(String),
+    #[error("trajectory error: {0}")]
+    Trajectory(String),
     #[error("unable to determine the user config directory")]
     ConfigDirectoryUnavailable,
     #[error("unable to create database directory {path}: {source}")]
@@ -336,8 +338,8 @@ impl MemoryStore {
         Ok(())
     }
 
-    fn expire_abandoned_turns(&self, chat_id: &str) -> Result<(), MemoryError> {
-        self.connection()?.execute(
+    fn expire_abandoned_turns(connection: &Connection, chat_id: &str) -> Result<(), MemoryError> {
+        connection.execute(
             "UPDATE interaction_memories SET status = 'interrupted', lease_until = 0
              WHERE chat_id = ?1 AND status IN ('queued', 'running') AND lease_until < unixepoch()",
             params![normalized_chat_id(chat_id)],
@@ -385,8 +387,8 @@ impl MemoryStore {
         limit: usize,
     ) -> Result<ConversationChanges, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
-        self.expire_abandoned_turns(&chat_id)?;
         let connection = self.connection()?;
+        Self::expire_abandoned_turns(&connection, &chat_id)?;
         let mut statement = connection.prepare(
             "SELECT c.sequence, c.interaction_id,
                     m.id, m.chat_id, m.user_text, m.ai_text, m.provider, m.model,
@@ -441,8 +443,8 @@ impl MemoryStore {
     }
 
     pub fn latest_conversation_sequence(&self, chat_id: &str) -> Result<i64, MemoryError> {
-        self.expire_abandoned_turns(chat_id)?;
         let connection = self.connection()?;
+        Self::expire_abandoned_turns(&connection, chat_id)?;
         Ok(connection.query_row(
             "SELECT coalesce(max(sequence), 0) FROM conversation_changes WHERE chat_id = ?1",
             params![normalized_chat_id(chat_id)],
@@ -457,8 +459,8 @@ impl MemoryStore {
         limit: usize,
     ) -> Result<ConversationSnapshot, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
-        self.expire_abandoned_turns(&chat_id)?;
         let mut connection = self.connection()?;
+        Self::expire_abandoned_turns(&connection, &chat_id)?;
         let tx = connection.transaction()?;
         let cursor: i64 = tx.query_row(
             "SELECT coalesce(max(sequence), 0) FROM conversation_changes WHERE chat_id = ?1",
@@ -551,6 +553,68 @@ impl MemoryStore {
         )?;
         let rows = statement.query_map(params![chat_id], interaction_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Exports the execution trajectory for a given chat and optional run/interaction ID
+    /// formatted according to the SWE-bench / Agent Protocol StandardTrajectoryRun v1.0.
+    pub fn export_trajectory_json(
+        &self,
+        chat_id: &str,
+        run_id_or_interaction_id: Option<&str>,
+    ) -> Result<String, MemoryError> {
+        let interactions = self.recent_interactions_for_chat(chat_id, 50)?;
+        if interactions.is_empty() {
+            return Err(MemoryError::Trajectory(format!(
+                "No interactions found for chat '{chat_id}'"
+            )));
+        }
+
+        let target = if let Some(id_query) = run_id_or_interaction_id {
+            interactions.into_iter().find(|im| {
+                if im.id.to_string() == id_query {
+                    return true;
+                }
+                if let Some(act) = &im.agent_activity {
+                    let act_str = act.to_string();
+                    if act_str.contains(id_query) {
+                        return true;
+                    }
+                }
+                false
+            })
+        } else {
+            interactions.into_iter().next()
+        };
+
+        let interaction = target.ok_or_else(|| {
+            MemoryError::Trajectory(format!(
+                "No interaction matching identifier '{:?}' found for chat '{}'",
+                run_id_or_interaction_id, chat_id
+            ))
+        })?;
+
+        let activity_val = interaction.agent_activity.as_ref().ok_or_else(|| {
+            MemoryError::Trajectory("No agent activity recorded for this interaction".into())
+        })?;
+
+        let events: Vec<crate::orchestration::AgentProgress> =
+            serde_json::from_value(activity_val.clone()).map_err(|e| {
+                MemoryError::Trajectory(format!("Failed to parse agent activity events: {e}"))
+            })?;
+
+        let fallback_run_id = format!("run-{}", interaction.id);
+        let run =
+            crate::orchestration::trajectory_schema::StandardTrajectoryRun::from_agent_activity(
+                &interaction.chat_id,
+                &fallback_run_id,
+                &interaction.user_text,
+                &interaction.model,
+                &interaction.provider,
+                &events,
+            );
+
+        run.to_json_pretty()
+            .map_err(|e| MemoryError::Trajectory(format!("Failed to serialize trajectory: {e}")))
     }
 
     /// Full-text search over `chat_id`'s past interactions for the turns most
@@ -796,6 +860,9 @@ impl MemoryStore {
         let deleted =
             transaction.execute("DELETE FROM chat_sessions WHERE id = ?1", params![chat_id])?;
         transaction.commit()?;
+        if let Err(error) = crate::mcp_result::delete_chat_artifacts(&chat_id) {
+            eprintln!("Could not remove conversation artifacts: {error}");
+        }
         Ok(deleted)
     }
 
@@ -1780,7 +1847,7 @@ fn interaction_row(row: &rusqlite::Row<'_>) -> Result<InteractionMemory, rusqlit
 
 fn normalized_chat_id(chat_id: &str) -> String {
     let trimmed = chat_id.trim();
-    if trimmed.is_empty() {
+    if trimmed.is_empty() || trimmed == "default" {
         DEFAULT_CONVERSATION_ID.to_owned()
     } else {
         trimmed.to_owned()

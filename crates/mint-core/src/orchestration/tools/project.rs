@@ -29,7 +29,7 @@ pub(in crate::orchestration) async fn execute(
             read_diagnostics(&path, config, chat_id).await
         }
         "view_image" => {
-            let path = workspace_path(root, required(&input.path, "path")?)?;
+            let path = agent_read_path(root, required(&input.path, "path")?, config)?;
             view_image(&path, config)
         }
         "search_docs" => {

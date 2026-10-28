@@ -22,6 +22,7 @@ pub mod orchestration;
 pub mod prompts;
 pub mod search;
 pub mod slash;
+pub mod swarm;
 pub mod system;
 
 pub use agent::agent_loop;
@@ -37,6 +38,7 @@ pub use agent::tasks;
 pub use media::auto_shorts;
 pub use media::gemini_live;
 pub use media::image_gen;
+pub use media::image_proxy;
 pub use media::image_search;
 pub use media::image_workflow;
 pub use media::library;
@@ -81,8 +83,8 @@ pub use system::workspace;
 pub use agent_loop::{AgentActionFuture, AgentLoopError, parse_agent_json, run_agent_loop};
 pub use auth::{
     AuthError, AuthUser, create_session, destroy_session, get_user, login_user,
-    profile_pictures_dir, register_user, save_avatar_file, session_user_id, update_profile,
-    user_db_path,
+    profile_pictures_dir, profile_pictures_dir_path, register_user, resolve_avatar_file_path,
+    save_avatar_file, session_user_id, update_profile, user_db_path,
 };
 pub use chat::{
     ChatError, ChatMessage, ChatRequest, ChatResponse, ChatRole, ChatStreamEvent, ContentBlock,
@@ -109,7 +111,8 @@ pub use code_tools::{
 pub use config::{
     AgentConfig, ConfigError, CustomProvider, CustomProviderHeader, CustomProviderModel,
     MintConfig, PermissionDecision, PermissionRule, ToolCallingMode, config_path,
-    initialize_config, load_config, permission_decision_for, save_config, set_config_value,
+    initialize_config, load_config, mint_config_dir, permission_decision_for, save_config,
+    set_config_value,
 };
 pub use cron::{
     CronError, CronJob, CronJobDraft, CronStore, localize_schedule, start_cron_scheduler,
@@ -169,10 +172,10 @@ pub use mic_transcribe::{
 };
 pub use orchestration::{
     ActivePlan, AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption,
-    MCP_ALLOW_ALL_SENTINEL, OrchestrationError, PlanTaskItem, RunTelemetrySummary,
-    ToolExecutionRecord, compact_agent_progress, orchestrate_agent_loop, orchestrate_chat,
-    orchestrate_chat_stream, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-    with_turn_start_listener,
+    ExecutionEvidence, ExecutionState, MCP_ALLOW_ALL_SENTINEL, OrchestrationError, PlanTaskItem,
+    RunTelemetrySummary, ToolExecutionRecord, compact_agent_progress, orchestrate_agent_loop,
+    orchestrate_chat, orchestrate_chat_stream, orchestrate_chat_stream_with_fallback,
+    orchestrate_chat_with_fallback, with_turn_start_listener,
 };
 pub use pictures::{
     PictureEntry, PictureError, delete_saved_picture, list_saved_pictures, parse_data_uri,

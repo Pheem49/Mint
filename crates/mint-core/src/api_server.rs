@@ -62,9 +62,9 @@ use crate::{
     orchestrate_agent_loop,
     orchestrate_chat_stream_with_fallback,
     orchestrate_chat_with_fallback,
-    profile_pictures_dir,
     register_user,
     render_timeline,
+    resolve_avatar_file_path,
     save_avatar_file,
     save_chat_images,
     save_config,
@@ -115,6 +115,40 @@ pub(crate) fn log_api_err(context: &str, error: &dyn std::fmt::Display) {
     );
 }
 
+pub(crate) fn should_log_api_route(route: &str) -> bool {
+    if !route.starts_with("/api/") {
+        return false;
+    }
+
+    if route.starts_with("/api/pictures/")
+        || route.starts_with("/api/thumbnails/")
+        || route.starts_with("/api/proxy-image")
+        || route.starts_with("/api/background-jobs")
+        || route == "/api/media"
+        || route == "/api/chat"
+        || route == "/api/chat-stream"
+        || route == "/api/image-generate"
+        || route == "/api/video-generate"
+        || route == "/api/action"
+        || route == "/api/config"
+        || route == "/api/gemini-live"
+        || route == "/api/interactions"
+        || route == "/api/conversation-snapshot"
+        || route == "/api/conversation-changes"
+        || route == "/api/conversation-sources"
+        || route == "/api/status"
+        || route == "/api/chat-sessions"
+        || route == "/api/mods"
+        || route.starts_with("/api/mods/")
+        || route == "/api/models"
+        || route.starts_with("/api/models/")
+    {
+        return false;
+    }
+
+    true
+}
+
 /// Binds the local HTTP API on `port` and blocks forever serving requests.
 /// Also starts the messaging bridges and cron scheduler as a side effect —
 /// callers (`mint api`, `mint gateway start --api-port`, ...) must not call
@@ -141,6 +175,31 @@ pub async fn shutdown_on_signal(on_shutdown: impl FnOnce()) {
     };
     shutdown.await;
     on_shutdown();
+}
+
+fn parse_http_request_framing(buf: &[u8]) -> Option<(usize, usize)> {
+    let header_end = buf.windows(4).position(|window| window == b"\r\n\r\n")?;
+    let headers_str = String::from_utf8_lossy(&buf[..header_end]);
+    let content_len = headers_str
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                value.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    Some((header_end, header_end + 4 + content_len))
+}
+
+fn parse_request_line(headers: &str) -> Option<(&str, &str)> {
+    let first_line = headers.split("\r\n").next().unwrap_or(headers);
+    let mut parts = first_line.split_whitespace();
+    let method = parts.next()?;
+    let path = parts.next()?;
+    Some((method, path))
 }
 
 pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
@@ -180,6 +239,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
             Ok(val) => val,
             Err(_) => continue,
         };
+        let _ = socket.set_nodelay(true);
         // Some routes (the native folder picker) only make sense for, and are
         // only safe for, a browser on this same machine — capture that now
         // while we still have the peer address.
@@ -199,7 +259,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
             let outcome = std::panic::AssertUnwindSafe(async move {
             let mut request_bytes = Vec::with_capacity(8192);
             let mut chunk = [0_u8; 8192];
-            let mut expected_len: Option<usize> = None;
+            let mut framing: Option<(usize, usize)> = None;
 
             loop {
                 let n = match socket.read(&mut chunk).await {
@@ -217,31 +277,28 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                     return;
                 }
 
-                let headers_str = String::from_utf8_lossy(&request_bytes);
-                if expected_len.is_none() && headers_str.contains("\r\n\r\n") {
-                    expected_len = headers_str
-                        .to_lowercase()
-                        .find("content-length:")
-                        .and_then(|content_length_pos| {
-                            let sub = &headers_str[content_length_pos..];
-                            let line_end = sub.find("\r\n")?;
-                            sub["content-length:".len()..line_end]
-                                .trim()
-                                .parse::<usize>()
-                                .ok()
-                        })
-                        .and_then(|content_len| {
-                            let header_len = headers_str.find("\r\n\r\n")? + 4;
-                            Some(header_len + content_len)
-                        });
+                if framing.is_none() {
+                    if let Some((header_end, total_len)) = parse_http_request_framing(&request_bytes) {
+                        if total_len > MAX_API_REQUEST_BYTES {
+                            send_json_response(
+                                socket,
+                                "413 Payload Too Large",
+                                "{\"provider\":\"error\",\"model\":\"error\",\"text\":\"Request is too large. Try a smaller image or fewer images.\"}",
+                            )
+                            .await;
+                            return;
+                        }
+                        if total_len > request_bytes.capacity() {
+                            request_bytes.reserve(total_len - request_bytes.len());
+                        }
+                        framing = Some((header_end, total_len));
+                    }
                 }
 
-                if let Some(total_len) = expected_len {
+                if let Some((_, total_len)) = framing {
                     if request_bytes.len() >= total_len {
                         break;
                     }
-                } else if headers_str.contains("\r\n\r\n") {
-                    break;
                 }
             }
 
@@ -249,25 +306,21 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                 return;
             }
 
-            let request_str = String::from_utf8_lossy(&request_bytes);
-            let lines: Vec<&str> = request_str.split("\r\n").collect();
-            if lines.is_empty() {
+            let Some((header_end, total_len)) = framing.or_else(|| parse_http_request_framing(&request_bytes)) else {
                 return;
-            }
-
-            let req_line: Vec<&str> = lines[0].split_whitespace().collect();
-            if req_line.len() < 2 {
-                return;
-            }
-
-            let method = req_line[0];
-            let path = req_line[1];
-
-            let header_end = match request_str.find("\r\n\r\n") {
-                Some(idx) => idx,
-                None => return,
             };
-            let body = &request_str[header_end + 4..];
+            if request_bytes.len() > total_len {
+                request_bytes.truncate(total_len);
+            }
+
+            let request_str = String::from_utf8_lossy(&request_bytes);
+            let Some(str_header_end) = request_str.find("\r\n\r\n") else {
+                return;
+            };
+            let Some((method, path)) = parse_request_line(&request_str[..str_header_end]) else {
+                return;
+            };
+            let body = &request_str[str_header_end + 4..];
 
             if method == "OPTIONS" {
                 let response = "HTTP/1.1 200 OK\r\n\
@@ -290,7 +343,7 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
             {
                 let request = crate::webhooks::Request {
                     method: method.into(), path: path.into(),
-                    headers: request_str[..header_end].into(),
+                    headers: request_str[..str_header_end].into(),
                     body: request_bytes[header_end + 4..].to_vec(),
                 };
                 crate::webhooks::handle(socket, service, config, request).await;
@@ -337,26 +390,21 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                 return;
             }
 
-            if route.starts_with("/api/")
-                && !route.starts_with("/api/pictures/")
-                && !route.starts_with("/api/thumbnails/")
-                && route != "/api/media"
-                && route != "/api/chat"
-                && route != "/api/chat-stream"
-                && route != "/api/image-generate"
-                && route != "/api/video-generate"
-                && route != "/api/action"
-                && route != "/api/config"
-                && route != "/api/gemini-live"
-                && route != "/api/interactions"
-                && route != "/api/conversation-snapshot"
-                && route != "/api/conversation-changes"
-                && route != "/api/status"
-                && route != "/api/chat-sessions"
-            {
+            if should_log_api_route(route) {
                 log_api_req(method, route, "200 OK", Some(&auth_label));
             }
 
+            if method == "POST" && route == "/api/speech" {
+                let result = match serde_json::from_str::<crate::tts::playback::SpeechRequest>(body) {
+                    Ok(request) => crate::tts::playback::request(request).await,
+                    Err(error) => Err(error.to_string()),
+                };
+                match result {
+                    Ok(reply) => send_json_response(socket, "200 OK", &serde_json::to_string(&reply).unwrap()).await,
+                    Err(error) => send_json_response(socket, "400 Bad Request", &json!({"error":error}).to_string()).await,
+                }
+                return;
+            }
             match (method, route) {
                 ("GET" | "POST" | "DELETE", route) if route == "/api/library" || route.starts_with("/api/library/") => {
                     routes::library::execute(routes::RequestCtx { method, route, query, body, request_str: &request_str, request_bytes: &request_bytes, header_end, auth_label: auth_label.clone() }, socket).await;
@@ -366,7 +414,12 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                 }
                 ("GET", route) if route.starts_with("/api/mcp-artifacts/") => {
                     let id = route.trim_start_matches("/api/mcp-artifacts/").to_owned();
-                    let artifact = tokio::task::spawn_blocking(move || crate::integrations::mcp_result::read_artifact(&id)).await;
+                    let chat=reqwest::Url::parse(&format!("http://localhost/?{query}")).ok().and_then(|url|url.query_pairs().find(|(key,_)|key=="chatId").map(|(_,value)|value.into_owned()));
+                    let artifact = tokio::task::spawn_blocking(move || {
+                        let (entry,bytes)=crate::integrations::mcp_result::read_artifact(&id)?;
+                        if chat.as_deref()!=Some(entry.chat_id.as_str()) {return Err(String::from("Artifact unavailable"));}
+                        Ok((entry,bytes))
+                    }).await;
                     match artifact {
                         Ok(Ok((entry, bytes))) => {
                             let mime = if entry.kind == "image" { entry.mime_type.as_str() } else { "application/octet-stream" };
@@ -1120,6 +1173,25 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                     )
                     .await;
                 }
+                                ("GET", route)
+                                    if route == "/api/proxy-image"
+                                        || route.starts_with("/api/proxy-image") =>
+                                {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
                                 ("GET", "/api/config") => {
                     routes::misc::execute(
                         routes::RequestCtx {
@@ -1225,7 +1297,9 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
                 | ("POST", "/api/checkpoints/undo")
                 | ("GET", "/api/workspace-history")
                 | ("POST", "/api/workspace-history/undo")
-                | ("GET", "/api/file/read") => {
+                | ("GET", "/api/file/read")
+                | ("GET", "/api/file/image")
+                | ("GET", "/api/file/media") => {
                     routes::misc::execute(
                         routes::RequestCtx {
                             method,
@@ -1368,22 +1442,32 @@ pub async fn start_api_server_on(addr: SocketAddr) -> Result<(), std::io::Error>
     }
 }
 
+pub(crate) fn resolve_agent_root(workspace_path: Option<&str>) -> std::path::PathBuf {
+    if let Some(path_str) = workspace_path.map(str::trim).filter(|s| !s.is_empty()) {
+        let path = std::path::PathBuf::from(path_str);
+        if let Ok(canonical) = path.canonicalize() {
+            if canonical.is_dir() {
+                return canonical;
+            }
+        } else if path.is_dir() {
+            return path;
+        }
+    }
+    let current = std::env::current_dir().unwrap_or_default();
+    current.canonicalize().unwrap_or(current)
+}
+
 async fn run_web_agent_loop(
     config: &MintConfig,
     request: &ChatRequest,
 ) -> Result<ChatResponse, String> {
-    let root = std::env::current_dir().map_err(|error| error.to_string())?;
+    let root = resolve_agent_root(request.workspace_path.as_deref());
     let fast_mode = config
         .extra
         .get("enableFastMode")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    // Same pre-scoping as `/api/chat-stream`'s agent-mode branch in
-    // routes/chat.rs and for the same reason: `root` above deliberately
-    // stays this server process's own cwd (not the client's workspace), so
-    // `orchestrate_agent_loop`'s self-derivation from `root` alone can't
-    // distinguish workspaces here — scope from the client's `workspace_path`
-    // explicitly instead. Idempotent/safe either way (see `scoped_chat_id`).
+    // Resolve client's workspace path for parity with desktop. Idempotent on scoped_chat_id.
     let scoped_chat_id = crate::agent::memory::scoped_chat_id(
         request
             .chat_id
@@ -1974,5 +2058,46 @@ mod tests {
         let ts = unix_timestamp();
         assert!(ts >= before);
         assert!(ts < before + 5);
+    }
+
+    #[test]
+    fn test_should_log_api_route_exclusions() {
+        // Routine noisy/polling routes should be suppressed from terminal log spam
+        assert!(!should_log_api_route("/api/background-jobs"));
+        assert!(!should_log_api_route("/api/background-jobs/abc"));
+        assert!(!should_log_api_route("/api/mods"));
+        assert!(!should_log_api_route("/api/models"));
+        assert!(!should_log_api_route("/api/status"));
+        assert!(!should_log_api_route("/api/conversation-sources"));
+        assert!(!should_log_api_route("/api/interactions"));
+        assert!(!should_log_api_route("/api/pictures/foo.png"));
+        assert!(!should_log_api_route("/api/thumbnails/bar.jpg"));
+        assert!(!should_log_api_route("/api/proxy-image"));
+        assert!(!should_log_api_route(
+            "/api/proxy-image?url=https://example.com/pic.jpg"
+        ));
+        assert!(!should_log_api_route("/not-api/test"));
+
+        // Standard operational API calls should still be logged
+        assert!(should_log_api_route("/api/library"));
+        assert!(should_log_api_route("/api/system-info"));
+        assert!(should_log_api_route("/api/select-folder"));
+    }
+
+    #[test]
+    fn http_request_framing_parses_headers_once_without_utf8_scanning_binary_or_large_body() {
+        let mut raw = b"POST /api/chat-stream HTTP/1.1\r\nHost: localhost:3000\r\nContent-Length: 10\r\n\r\n1234".to_vec();
+        // Even if the body contains invalid UTF-8 bytes, header framing only inspects the header slice.
+        raw.extend_from_slice(&[0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa]);
+        let (header_end, total_len) = parse_http_request_framing(&raw).expect("headers complete");
+        assert_eq!(&raw[header_end..header_end + 4], b"\r\n\r\n");
+        assert_eq!(total_len, header_end + 4 + 10);
+        assert_eq!(raw.len(), total_len);
+
+        let header_str = std::str::from_utf8(&raw[..header_end]).unwrap();
+        assert_eq!(
+            parse_request_line(header_str),
+            Some(("POST", "/api/chat-stream"))
+        );
     }
 }

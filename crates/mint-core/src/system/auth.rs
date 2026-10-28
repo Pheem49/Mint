@@ -40,19 +40,81 @@ pub struct AuthUser {
 
 /// Path to the shared identity database: `~/.config/mint/mint-user.sqlite`.
 pub fn user_db_path() -> Result<PathBuf, AuthError> {
-    dirs::config_dir()
-        .map(|dir| dir.join("mint").join("mint-user.sqlite"))
+    crate::system::config::mint_config_dir()
+        .map(|dir| dir.join("mint-user.sqlite"))
         .ok_or(AuthError::ConfigDirectoryUnavailable)
 }
 
-/// Path to the shared profile pictures directory:
-/// `~/.config/mint/Pictures/profile`.
+/// Computes the path to the profile pictures directory: `~/.config/mint/profile`,
+/// without creating it on disk. Use for read-only path resolution queries.
+pub fn profile_pictures_dir_path() -> Result<PathBuf, AuthError> {
+    crate::system::config::mint_config_dir()
+        .map(|dir| dir.join("profile"))
+        .ok_or(AuthError::ConfigDirectoryUnavailable)
+}
+
+/// Path to the shared profile pictures directory: `~/.config/mint/profile`,
+/// ensuring the directory exists on disk. Use when saving new avatar files.
 pub fn profile_pictures_dir() -> Result<PathBuf, AuthError> {
-    let dir = dirs::config_dir()
-        .map(|dir| dir.join("mint").join("Pictures").join("profile"))
-        .ok_or(AuthError::ConfigDirectoryUnavailable)?;
+    let dir = profile_pictures_dir_path()?;
     std::fs::create_dir_all(&dir).ok();
     Ok(dir)
+}
+
+/// Legacy path to the profile pictures directory (`~/.config/mint/Pictures/profile`),
+/// used as a fallback to ensure existing user avatars are seamlessly preserved.
+fn legacy_profile_pictures_dir() -> Option<PathBuf> {
+    crate::system::config::mint_config_dir().map(|dir| dir.join("Pictures").join("profile"))
+}
+
+/// Resolves an avatar file path against explicit modern and legacy directories.
+/// When found in legacy storage, automatically copies the file to the modern directory
+/// to achieve self-healing zero-loss migration.
+pub(crate) fn resolve_avatar_file_path_in(
+    modern_dir: &std::path::Path,
+    legacy_dir: Option<&std::path::Path>,
+    filename: &str,
+) -> Option<PathBuf> {
+    let trimmed = filename.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = std::path::Path::new(trimmed);
+    let mut components = path.components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(comp)), None) => {
+            if trimmed.contains('/') || trimmed.contains('\\') {
+                return None;
+            }
+            let clean_name = comp.to_str()?;
+            let modern_path = modern_dir.join(clean_name);
+            if modern_path.is_file() {
+                return Some(modern_path);
+            }
+            if let Some(legacy_dir) = legacy_dir {
+                let legacy_path = legacy_dir.join(clean_name);
+                if legacy_path.is_file() {
+                    // Auto-migrate: copy to modern directory for self-healing persistence
+                    if std::fs::create_dir_all(modern_dir).is_ok()
+                        && std::fs::copy(&legacy_path, &modern_path).is_ok()
+                    {
+                        return Some(modern_path);
+                    }
+                    return Some(legacy_path);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Resolves an avatar file path, checking the modern `~/.config/mint/profile` directory first,
+/// and falling back to the legacy `~/.config/mint/Pictures/profile` directory if it exists there.
+pub fn resolve_avatar_file_path(filename: &str) -> Option<PathBuf> {
+    let modern = profile_pictures_dir_path().ok()?;
+    let legacy = legacy_profile_pictures_dir();
+    resolve_avatar_file_path_in(&modern, legacy.as_deref(), filename)
 }
 
 /// Saves an avatar image into the shared profile pictures directory and
@@ -541,5 +603,92 @@ mod tests {
         )
         .unwrap();
         assert_eq!(session_user_id_with_conn(&conn, &expired_token), None);
+    }
+
+    #[test]
+    fn resolve_avatar_file_path_handles_empty() {
+        assert_eq!(resolve_avatar_file_path(""), None);
+        assert_eq!(resolve_avatar_file_path("   "), None);
+    }
+
+    #[test]
+    fn resolve_avatar_file_path_in_finds_legacy_file_if_not_in_modern() {
+        let root = std::env::temp_dir().join(format!("mint-avatar-test-{}", uuid::Uuid::new_v4()));
+        let modern_dir = root.join("profile");
+        let legacy_dir = root.join("Pictures").join("profile");
+        std::fs::create_dir_all(&modern_dir).unwrap();
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+
+        let filename = "sample-avatar.png";
+        let legacy_file = legacy_dir.join(filename);
+        std::fs::write(&legacy_file, b"legacy-avatar-bytes").unwrap();
+
+        // 1. When modern doesn't have it, auto-migrates to modern file
+        let resolved = resolve_avatar_file_path_in(&modern_dir, Some(&legacy_dir), filename);
+        let modern_file = modern_dir.join(filename);
+        assert_eq!(resolved, Some(modern_file.clone()));
+        assert_eq!(std::fs::read(&modern_file).unwrap(), b"legacy-avatar-bytes");
+
+        // 2. When modern also has it, modern takes priority
+        std::fs::write(&modern_file, b"modern-avatar-bytes").unwrap();
+        let resolved_modern = resolve_avatar_file_path_in(&modern_dir, Some(&legacy_dir), filename);
+        assert_eq!(resolved_modern, Some(modern_file));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_avatar_file_path_in_returns_none_if_file_not_found() {
+        let root =
+            std::env::temp_dir().join(format!("mint-avatar-missing-{}", uuid::Uuid::new_v4()));
+        let modern_dir = root.join("profile");
+        let legacy_dir = root.join("Pictures").join("profile");
+        std::fs::create_dir_all(&modern_dir).unwrap();
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+
+        let resolved =
+            resolve_avatar_file_path_in(&modern_dir, Some(&legacy_dir), "nonexistent.png");
+        assert_eq!(resolved, None);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_avatar_file_path_in_rejects_path_traversal() {
+        let root =
+            std::env::temp_dir().join(format!("mint-avatar-traversal-{}", uuid::Uuid::new_v4()));
+        let modern_dir = root.join("profile");
+        std::fs::create_dir_all(&modern_dir).unwrap();
+
+        assert_eq!(
+            resolve_avatar_file_path_in(&modern_dir, None, "../foo.png"),
+            None
+        );
+        assert_eq!(
+            resolve_avatar_file_path_in(&modern_dir, None, "sub/dir.png"),
+            None
+        );
+        assert_eq!(
+            resolve_avatar_file_path_in(&modern_dir, None, "..\\win.png"),
+            None
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_avatar_file_path_does_not_create_directory_on_read() {
+        let root =
+            std::env::temp_dir().join(format!("mint-avatar-nonexist-{}", uuid::Uuid::new_v4()));
+        let non_existent_modern = root.join("profile");
+        // Ensure directory does not exist prior to read query
+        assert!(!non_existent_modern.exists());
+
+        let resolved = resolve_avatar_file_path_in(&non_existent_modern, None, "test.png");
+        assert_eq!(resolved, None);
+        // Ensure read query did NOT create directory on disk
+        assert!(!non_existent_modern.exists());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

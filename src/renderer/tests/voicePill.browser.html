@@ -2,7 +2,7 @@
 <body style="background:#18181b;color:#f5f5f5;font-family:system-ui;margin:32px"><h1>Mint VoicePill</h1><div id="root" style="padding:24px 140px"></div><pre id="result">RUNNING</pre>
 <script type="module">
 import React from 'react';import {createRoot} from 'react-dom/client';
-import VoicePill from '../shared/components/VoicePill';
+import VoicePill from '../shared/components/chat/VoicePill';
 import {useNativeVoiceInput} from '../shared/utils/useNativeVoiceInput';
 import {useSpeechToText} from '../shared/utils/speech';
 const wait=(ms=60)=>new Promise(done=>setTimeout(done,ms));const lines=[];
@@ -44,7 +44,7 @@ try {
  const calls=[];let ready;
  function NativeFixture(){
   const voice=useNativeVoiceInput({startRecording:()=>new Promise(resolve=>{calls.push('start');ready=resolve}),
-   cancelRecording:async()=>{calls.push('discard')},stopRecordingAndTranscribe:async()=>{calls.push('transcribe');return 'Native words'},onSendVoiceMessage:async text=>calls.push('send:'+text)});
+   cancelRecording:async()=>{calls.push('discard')},stopRecordingAndTranscribe:async()=>{calls.push('transcribe');return 'Native words'},message:'Existing',onSetMessage:text=>calls.push('draft:'+text),onSendVoiceMessage:async text=>calls.push('send:'+text)});
   return React.createElement(VoicePill,{active:voice.isRecording,onStart:voice.startRecognition,
    onStop:e=>['tap','release','key'].includes(e.reason)?voice.stopRecognition():voice.cancelRecognition()});
  }
@@ -54,7 +54,7 @@ try {
  assert(calls.join(',')==='start,discard'&&button().getAttribute('aria-pressed')==='false','native pending-start cancellation discards without transcription');
  pointer('pointerdown');await wait();ready();await wait();pointer('pointerup');await wait();
  assert(button().getAttribute('aria-pressed')==='true','native success opens listening capsule');
- await tap();await wait();assert(calls.at(-2)==='transcribe'&&calls.at(-1)==='send:Native words','normal native stop sends one transcript');
+ await tap();await wait();assert(calls.at(-2)==='transcribe'&&calls.at(-1)==='draft:Existing Native words'&&!calls.some(call=>call.startsWith('send:')),'normal native stop appends transcript to composer without sending');
  root.render(React.createElement('div'));await wait();
  const instances=[],messages=[],sends=[];let denied=false;
  class Recognition {

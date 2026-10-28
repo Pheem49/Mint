@@ -1,4 +1,4 @@
-import SelectField from '../SelectField'
+import SelectField from '../ui/SelectField'
 import React from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
 import { 
@@ -23,6 +23,8 @@ import { setActiveModel } from '../../utils/modelManager'
 import { providerLabel as aiProviderLabel } from '../../utils/providers'
 import ApiKeyInput from './ApiKeyInput'
 import SearchableModelCombobox from './SearchableModelCombobox'
+import CustomProviderLogoPicker from './CustomProviderLogoPicker'
+import AvatarCropModal from './AvatarCropModal'
 import anthropicLogo from '@lobehub/icons-static-svg/icons/anthropic.svg?url'
 import deepseekLogo from '@lobehub/icons-static-svg/icons/deepseek-color.svg?url'
 import geminiLogo from '@lobehub/icons-static-svg/icons/gemini-color.svg?url'
@@ -187,7 +189,11 @@ export default function GeneralTab({
   onSaveWithoutClosing
 }: GeneralTabProps) {
   const [savedProviderId, setSavedProviderId] = React.useState<string | null>(null)
-  const [providerLogoErrors, setProviderLogoErrors] = React.useState<Record<string, string>>({})
+  const [cropModalData, setCropModalData] = React.useState<{
+    imageSrc: string
+    fileName: string
+    onConfirm: (croppedUri: string) => void
+  } | null>(null)
   const [openSections, setOpenSections] = React.useState<Record<string, boolean>>({
     ai_routing: true,
     search: false,
@@ -222,42 +228,6 @@ export default function GeneralTab({
       setSavedProviderId(providerId)
       setTimeout(() => setSavedProviderId(null), 2000)
     }
-  }
-
-  const handleProviderLogoChange = (providerId: string, file?: File) => {
-    if (!file) return
-    const supportedTypes = ['image/png', 'image/jpeg', 'image/webp']
-    if (!supportedTypes.includes(file.type)) {
-      setProviderLogoErrors(prev => ({ ...prev, [providerId]: 'Choose a PNG, JPEG, or WebP image.' }))
-      return
-    }
-    if (file.size > 256 * 1024) {
-      setProviderLogoErrors(prev => ({ ...prev, [providerId]: 'The logo must be 256 KB or smaller.' }))
-      return
-    }
-
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result !== 'string') {
-        setProviderLogoErrors(prev => ({ ...prev, [providerId]: 'Could not read this image.' }))
-        return
-      }
-      const provider = (config.customProviders ?? []).find(item => item.id === providerId)
-      if (!provider) return
-      const updated = (config.customProviders ?? []).map(item =>
-        item.id === providerId ? { ...item, logoDataUrl: reader.result as string } : item
-      )
-      updateField('customProviders', updated)
-      setProviderLogoErrors(prev => {
-        const next = { ...prev }
-        delete next[providerId]
-        return next
-      })
-    }
-    reader.onerror = () => {
-      setProviderLogoErrors(prev => ({ ...prev, [providerId]: 'Could not read this image.' }))
-    }
-    reader.readAsDataURL(file)
   }
 
   const renderCollapsibleSection = (
@@ -686,9 +656,9 @@ export default function GeneralTab({
                                 padding: '0.2rem 0.6rem',
                                 fontSize: '0.75rem',
                                 fontWeight: currentEffort === eff ? 600 : 400,
-                                background: currentEffort === eff ? 'rgba(16, 185, 129, 0.15)' : undefined,
-                                borderColor: currentEffort === eff ? 'var(--accent, #10b981)' : undefined,
-                                color: currentEffort === eff ? 'var(--accent, #10b981)' : undefined,
+                                background: currentEffort === eff ? 'var(--accent-subtle)' : undefined,
+                                borderColor: currentEffort === eff ? 'var(--accent)' : undefined,
+                                color: currentEffort === eff ? 'var(--interactive-fg)' : undefined,
                               }}
                               onClick={() => handleEffortChange(eff)}
                             >
@@ -1507,48 +1477,22 @@ export default function GeneralTab({
                       />
                     </div>
 
-                    <div className="setting-row">
+                    <div className="setting-row stacked">
                       <label>Provider logo (optional)</label>
-                      <div className="custom-provider-logo-picker">
-                        <div className="custom-provider-logo-preview" aria-hidden="true">
-                          {cp.logoDataUrl ? (
-                            <img src={cp.logoDataUrl} alt="" />
-                          ) : (
-                            <span>Logo</span>
-                          )}
-                        </div>
-                        <label className="btn btn-secondary btn-xs custom-provider-logo-select">
-                          {cp.logoDataUrl ? 'Change image' : 'Choose image'}
-                          <input
-                            type="file"
-                            accept="image/png,image/jpeg,image/webp"
-                            onChange={(event) => {
-                              handleProviderLogoChange(cp.id, event.currentTarget.files?.[0])
-                              event.currentTarget.value = ''
-                            }}
-                          />
-                        </label>
-                        {cp.logoDataUrl && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-xs"
-                            onClick={() => {
-                              updateCp({ logoDataUrl: undefined })
-                              setProviderLogoErrors(prev => {
-                                const next = { ...prev }
-                                delete next[cp.id]
-                                return next
-                              })
-                            }}
-                          >
-                            Remove
-                          </button>
-                        )}
-                        <span className="custom-provider-logo-help">PNG, JPEG, or WebP · max 256 KB</span>
-                        {providerLogoErrors[cp.id] && (
-                          <span className="custom-provider-logo-error" role="alert">{providerLogoErrors[cp.id]}</span>
-                        )}
-                      </div>
+                      <CustomProviderLogoPicker
+                        value={cp.logoDataUrl}
+                        onChange={(logoDataUrl) => updateCp({ logoDataUrl })}
+                        providerName={cp.displayName || cp.id}
+                        onRequestCrop={(dataUri, fileName) => {
+                          setCropModalData({
+                            imageSrc: dataUri,
+                            fileName,
+                            onConfirm: (croppedUri) => {
+                              updateCp({ logoDataUrl: croppedUri })
+                            },
+                          })
+                        }}
+                      />
                     </div>
 
                     <div className="setting-row">
@@ -1710,6 +1654,20 @@ export default function GeneralTab({
           </label>
         </div>,
         <span className="section-current-badge">{config.showDesktopWidget ? 'On' : 'Off'}</span>
+      )}
+
+      {cropModalData && (
+        <AvatarCropModal
+          imageSrc={cropModalData.imageSrc}
+          fileName={cropModalData.fileName}
+          title="Crop Provider Logo"
+          outputFormat="image/png"
+          onClose={() => setCropModalData(null)}
+          onConfirm={(croppedUri) => {
+            cropModalData.onConfirm(croppedUri)
+            setCropModalData(null)
+          }}
+        />
       )}
     </div>
   )

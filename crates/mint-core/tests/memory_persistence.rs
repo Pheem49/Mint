@@ -86,6 +86,33 @@ fn stores_and_reads_interaction_agent_activity() {
 }
 
 #[test]
+fn exports_trajectory_json_from_agent_activity() {
+    let store = store("trajectory-export");
+    let interaction_id = store
+        .add_interaction_with_metadata(
+            "Write hello world",
+            "Done",
+            "anthropic",
+            "claude-3-7-sonnet",
+        )
+        .unwrap();
+    store
+        .set_interaction_agent_activity_json(
+            interaction_id,
+            r#"[{"type":"Thought","data":{"thought":"inspect code"}},{"type":"ToolEnd","data":{"action":"write_file","input":{"path":"src/main.rs"},"result":"Written successfully","elapsed_ms":45,"status":"success"}},{"type":"RunCompleted","data":{"summary":{"runId":"run-999","task":"Write hello world","outcome":"SUCCESS","totalTokens":500,"toolCallsCount":1,"filesChanged":["src/main.rs"],"filesCreated":["src/main.rs"],"durationSecs":1.2,"toolTimeline":[],"retriesCount":0}}}]"#,
+        )
+        .unwrap();
+
+    let trajectory_json = store
+        .export_trajectory_json("default", Some("run-999"))
+        .unwrap();
+    assert!(trajectory_json.contains("\"schemaVersion\": \"1.0\""));
+    assert!(trajectory_json.contains("\"runId\": \"run-999\""));
+    assert!(trajectory_json.contains("\"outcome\": \"SUCCESS\""));
+    assert!(trajectory_json.contains("\"action\": \"write_file\""));
+}
+
+#[test]
 fn preserves_chat_history_when_store_is_reopened() {
     let path = test_path("reopen-history", "sqlite");
     let _ = std::fs::remove_file(&path);

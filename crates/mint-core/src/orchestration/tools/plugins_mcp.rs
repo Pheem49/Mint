@@ -324,10 +324,25 @@ pub(in crate::orchestration) async fn execute(
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
             }
         }
-        "dispatch_subagent" => {
-            let name = required(&input.name, "name")?;
-            let task = required(&input.instruction, "instruction")?;
-            dispatch_one_subagent(root, config, chat_id, name, task, approve_cb, progress).await
+        "dispatch_agents" | "dispatch_subagent" => {
+            let tasks: Vec<crate::swarm::SwarmTask> = if !input.tasks.is_empty() {
+                input.tasks.iter().cloned().map(Into::into).collect()
+            } else if !input.instruction.trim().is_empty() {
+                vec![crate::swarm::SwarmTask {
+                    role: None,
+                    base: if input.name.trim().is_empty() {
+                        None
+                    } else {
+                        Some(input.name.clone())
+                    },
+                    instruction: input.instruction.clone(),
+                }]
+            } else {
+                return Err(OrchestrationError::Agent(
+                    "dispatch_agents requires at least one task with an 'instruction'".into(),
+                ));
+            };
+            dispatch_swarm(root, config, chat_id, tasks, approve_cb, progress).await
         }
         "mcp_tool" | "mcp_list_tools" => execute_mcp_outcome(
             action,

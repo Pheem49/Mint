@@ -9,7 +9,25 @@ use crate::native::terminal::TerminalSessions;
 use crate::native::windows::{open_desktop_window, position_widget};
 use crate::{app, background, commands, native};
 use mint_core::{load_config, start_channels, start_cron_scheduler};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
+
+#[derive(Default)]
+struct CompanionNavigation(std::sync::Mutex<Option<String>>);
+
+#[tauri::command]
+fn pending_companion_chat(
+    state: tauri::State<'_, CompanionNavigation>,
+    acknowledged_id: Option<String>,
+) -> Option<String> {
+    let mut pending = state.0.lock().unwrap();
+    if acknowledged_id
+        .as_ref()
+        .is_some_and(|id| pending.as_ref() == Some(id))
+    {
+        *pending = None;
+    }
+    pending.clone()
+}
 
 #[tauri::command]
 pub(crate) fn exit_app(app: AppHandle) {
@@ -64,6 +82,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(CompanionNavigation::default())
         .manage(ApprovalsState::default())
         .manage(GeminiLiveState::default())
         .manage(MicRecordingState::default())
@@ -89,6 +108,26 @@ pub fn run() {
                     eprintln!("[mint] Library startup: {error}")
                 }
             });
+            let navigation_app = app.handle().clone();
+            mint_core::companion::navigation::configure(
+                mint_core::companion::navigation::Surface::Desktop,
+                move |session, _| {
+                    let main = navigation_app
+                        .get_webview_window("main")
+                        .ok_or("Mint window is unavailable")?;
+                    *navigation_app
+                        .state::<CompanionNavigation>()
+                        .0
+                        .lock()
+                        .unwrap() = Some(session.chat_id);
+                    main.show().map_err(|error| error.to_string())?;
+                    main.unminimize().map_err(|error| error.to_string())?;
+                    main.set_focus().map_err(|error| error.to_string())?;
+                    main.emit("companion-open-chat", ())
+                        .map_err(|error| error.to_string())?;
+                    Ok(mint_core::companion::navigation::NavigationOutcome::Opened)
+                },
+            );
             install_tray(app.handle())?;
             install_shortcuts(app.handle())?;
             start_system_events(app.handle().clone());
@@ -112,6 +151,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            pending_companion_chat,
             commands::mods::mods_operation,
             native::notifications::send_mint_notification,
             native::terminal::start_interactive_terminal,
@@ -224,6 +264,7 @@ pub fn run() {
             commands::media::upload_file,
             commands::workspace::open_folder,
             commands::media::get_tts_urls,
+            commands::media::speech_request,
             commands::media::get_weather,
             commands::workspace::propose_desktop_code_edits,
             commands::workspace::apply_desktop_code_edits,
@@ -231,6 +272,8 @@ pub fn run() {
             commands::workspace::rollback_git_checkpoint,
             commands::workspace::undo_git_checkpoint,
             commands::workspace::read_workspace_file,
+            commands::workspace::read_workspace_image,
+            commands::workspace::prepare_workspace_media,
             native::windows::open_window,
             native::windows::hide_desktop_window,
             native::windows::close_desktop_window,

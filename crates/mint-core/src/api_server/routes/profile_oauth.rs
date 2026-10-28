@@ -17,27 +17,32 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
     match (method, route) {
         ("GET", "/api/profile") => {
             let key = query_param(query, "key").unwrap_or_default();
-            let mut value = String::new();
-            if let Ok(memory) = MemoryStore::open_default() {
-                value = memory.get_profile(&key).unwrap_or(None).unwrap_or_default();
-            }
-            if value.trim().is_empty() {
-                if let Ok(cfg) = load_config() {
-                    if key == "veoModel" {
-                        value = crate::media::video_models::active_video_model_for_provider(
-                            &cfg, "veo",
-                        )
-                        .to_string();
-                    } else if key == "videoGenProvider" {
-                        value = cfg
-                            .extra
-                            .get("videoGenProvider")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("veo")
+            let value = tokio::task::spawn_blocking(move || {
+                let mut value = String::new();
+                if let Ok(memory) = MemoryStore::open_default() {
+                    value = memory.get_profile(&key).unwrap_or(None).unwrap_or_default();
+                }
+                if value.trim().is_empty() {
+                    if let Ok(cfg) = load_config() {
+                        if key == "veoModel" {
+                            value = crate::media::video_models::active_video_model_for_provider(
+                                &cfg, "veo",
+                            )
                             .to_string();
+                        } else if key == "videoGenProvider" {
+                            value = cfg
+                                .extra
+                                .get("videoGenProvider")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("veo")
+                                .to_string();
+                        }
                     }
                 }
-            }
+                value
+            })
+            .await
+            .unwrap_or_default();
             send_json_response(
                 socket,
                 "200 OK",
@@ -52,12 +57,16 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 key: String,
                 value: String,
             }
-            if let Ok(req) = serde_json::from_str::<ProfileRequest>(body)
-                && let Ok(memory) = MemoryStore::open_default()
-            {
-                let _ = memory.set_profile(&req.key, &req.value);
-                send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
-                return;
+            if let Ok(req) = serde_json::from_str::<ProfileRequest>(body) {
+                let res = tokio::task::spawn_blocking(move || {
+                    MemoryStore::open_default()
+                        .map(|memory| memory.set_profile(&req.key, &req.value))
+                })
+                .await;
+                if let Ok(Ok(Ok(()))) = res {
+                    send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
+                    return;
+                }
             }
             send_json_response(
                 socket,
@@ -70,7 +79,11 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
         ("GET", "/api/oauth/start") => {
             let provider = query_param(query, "provider").unwrap_or_else(|| "google".to_string());
             let redirect_uri = format!("http://localhost:3000/api/oauth/callback");
-            let config = load_config().unwrap_or_default();
+            let config = tokio::task::spawn_blocking(crate::load_config)
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
 
             let custom_client_id = match provider.as_str() {
                 "google" | "gmail" | "google_calendar" | "youtube_music" => config
@@ -121,7 +134,11 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
             let state = query_param(query, "state").unwrap_or_default();
             let provider = state.split('-').next().unwrap_or("google");
             let redirect_uri = format!("http://localhost:3000/api/oauth/callback");
-            let config = load_config().unwrap_or_default();
+            let config = tokio::task::spawn_blocking(crate::load_config)
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
 
             let (custom_client_id, custom_client_secret) = match provider {
                 "google" | "gmail" | "google_calendar" | "youtube_music" => (

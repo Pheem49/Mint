@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod compact;
+
 use futures_util::{SinkExt, StreamExt};
 use mint_companion_protocol::{Command, Event, HostDescriptor, VERSION};
 use serde::{Deserialize, Serialize};
@@ -27,8 +29,14 @@ fn valid_endpoint(endpoint: &str) -> bool {
 #[serde(default, rename_all = "camelCase")]
 struct Settings {
     host_id: String,
+    host_identity: String,
+    host_peers: Vec<String>,
+    speech_auto: bool,
+    speech_muted: bool,
+    speech_volume: f64,
     chat_id: String,
     scale: f64,
+    offset_y: f64,
     expression: i32,
     accessory: u32,
     locked: bool,
@@ -45,8 +53,14 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             host_id: String::new(),
+            host_identity: String::new(),
+            host_peers: Vec::new(),
+            speech_auto: false,
+            speech_muted: false,
+            speech_volume: 1.0,
             chat_id: String::new(),
             scale: 1.0,
+            offset_y: 0.0,
             expression: -1,
             accessory: 0,
             locked: false,
@@ -73,6 +87,9 @@ struct Client {
 struct Host {
     host_id: String,
     name: String,
+    identity: Option<String>,
+    surface: Option<mint_companion_protocol::Surface>,
+    speech: bool,
 }
 fn settings_path() -> Result<PathBuf, String> {
     dirs::config_dir()
@@ -172,10 +189,15 @@ async fn discover_hosts() -> Result<Vec<Host>, String> {
             Event::Snapshot {
                 host_id,
                 version: VERSION,
+                surface,
+                speech,
                 ..
             } if host_id == id => Some(Host {
                 host_id: id,
                 name: host.name,
+                identity: host.identity,
+                surface,
+                speech,
             }),
             _ => None,
         }
@@ -276,6 +298,84 @@ fn connect_host(
     *state.task.lock().unwrap() = Some(task);
 }
 #[tauri::command]
+async fn open_conversation(
+    host_id: String,
+    chat_id: String,
+    new_terminal: bool,
+) -> Result<mint_companion_protocol::NavigationOutcome, String> {
+    let host = descriptor(&host_id)?;
+    tokio::time::timeout(std::time::Duration::from_secs(12), async {
+        let mut socket = open(&host).await?;
+        let command = Command::OpenChat {
+            chat_id,
+            new_terminal,
+        };
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&command)
+                    .map_err(|error| error.to_string())?
+                    .into(),
+            ))
+            .await
+            .map_err(|error| error.to_string())?;
+        while let Some(message) = socket.next().await {
+            let message = message.map_err(|error| error.to_string())?;
+            if let Message::Text(text) = message {
+                let event: Event =
+                    serde_json::from_str(&text).map_err(|error| error.to_string())?;
+                match event {
+                    Event::Navigation { outcome } => {
+                        let _ = socket.close(None).await;
+                        return Ok(outcome);
+                    }
+                    Event::Error { message, .. } => return Err(message),
+                    _ => {}
+                }
+            }
+        }
+        Err("Mint disconnected before confirming navigation. Try again after checking Mint.".into())
+    })
+    .await
+    .map_err(|_| "Mint did not confirm navigation. Check Mint before trying again.".to_string())?
+}
+
+#[tauri::command]
+async fn speech_request(
+    host_id: String,
+    request: mint_companion_protocol::SpeechRequest,
+) -> Result<mint_companion_protocol::SpeechReply, String> {
+    let host = descriptor(&host_id)?;
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        let mut socket = open(&host).await?;
+        let command = Command::Speech { request };
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&command)
+                    .map_err(|e| e.to_string())?
+                    .into(),
+            ))
+            .await
+            .map_err(|e| e.to_string())?;
+        while let Some(message) = socket.next().await {
+            let message = message.map_err(|e| e.to_string())?;
+            if let Message::Text(text) = message {
+                match serde_json::from_str::<Event>(&text).map_err(|e| e.to_string())? {
+                    Event::Speech { reply } => {
+                        let _ = socket.close(None).await;
+                        return Ok(reply);
+                    }
+                    Event::Error { message, .. } => return Err(message),
+                    _ => {}
+                }
+            }
+        }
+        Err("Mint disconnected while preparing speech".into())
+    })
+    .await
+    .map_err(|_| "Mint speech request timed out".to_string())?
+}
+
+#[tauri::command]
 async fn send_command(state: tauri::State<'_, Client>, command: Command) -> Result<(), String> {
     let sender = state
         .sender
@@ -298,6 +398,11 @@ fn save_settings(
     state: tauri::State<'_, Client>,
     mut settings: Settings,
 ) -> Result<(), String> {
+    settings.speech_volume = if settings.speech_volume.is_finite() {
+        settings.speech_volume.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
     settings.scale = settings.scale.clamp(0.5, 1.5);
     settings.expression = settings.expression.clamp(-1, 5);
     settings.accessory = settings.accessory.min(3);
@@ -323,18 +428,73 @@ fn save_settings(
     Ok(())
 }
 #[tauri::command]
-fn hide_window(app: tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.hide();
-    }
-    let _ = app.emit("companion-visible", false);
-}
-#[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
+#[tauri::command]
+fn window_dimensions(window: tauri::WebviewWindow) -> Result<(u32, u32), String> {
+    let scale = window.scale_factor().map_err(|error| error.to_string())?;
+    let size = window
+        .inner_size()
+        .map_err(|error| error.to_string())?
+        .to_logical::<u32>(scale);
+    Ok((size.width, size.height))
+}
+
+#[tauri::command]
+fn resize_companion(window: tauri::WebviewWindow, width: u32, height: u32) -> Result<(), String> {
+    if window
+        .state::<compact::CompactWindow>()
+        .active
+        .load(Ordering::Acquire)
+    {
+        return Err("Expand Companion before resizing it".into());
+    }
+    window.unmaximize().map_err(|error| error.to_string())?;
+    window
+        .set_size(tauri::LogicalSize::new(
+            width.clamp(340, 2000),
+            height.clamp(560, 2000),
+        ))
+        .map_err(|error| error.to_string())
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelativeCursorPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
+pub fn calculate_relative_cursor(
+    cursor_x: f64,
+    cursor_y: f64,
+    win_x: i32,
+    win_y: i32,
+    scale_factor: f64,
+) -> RelativeCursorPosition {
+    let scale = if scale_factor <= 0.0 || !scale_factor.is_finite() {
+        1.0
+    } else {
+        scale_factor
+    };
+    RelativeCursorPosition {
+        x: (cursor_x - win_x as f64) / scale,
+        y: (cursor_y - win_y as f64) / scale,
+    }
+}
+
+#[tauri::command]
+fn get_cursor_position(window: tauri::WebviewWindow) -> Option<RelativeCursorPosition> {
+    let cursor = window.cursor_position().ok()?;
+    let win_pos = window.outer_position().ok()?;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    Some(calculate_relative_cursor(
+        cursor.x, cursor.y, win_pos.x, win_pos.y, scale,
+    ))
+}
 fn show(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        let _ = compact::set_compact(window.clone(), false);
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -344,6 +504,7 @@ fn show(app: &tauri::AppHandle) {
 fn main() {
     tauri::Builder::default()
         .manage(Client::default())
+        .manage(compact::CompactWindow::default())
         .setup(|app| {
             let settings = read_settings();
             if let Some(window) = app.get_webview_window("main") {
@@ -351,8 +512,8 @@ fn main() {
                 window.set_decorations(settings.normal_window)?;
                 if settings.x.is_some() {
                     window.set_size(tauri::PhysicalSize::new(
-                        settings.width.clamp(340, 3200),
-                        settings.height.clamp(560, 3200),
+                        settings.width.clamp(340, 10000),
+                        settings.height.clamp(560, 10000),
                     ))?;
                 } else {
                     window.set_size(tauri::LogicalSize::new(480.0, 800.0))?;
@@ -408,13 +569,27 @@ fn main() {
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::Moved(position) => {
+                if window
+                    .state::<compact::CompactWindow>()
+                    .active
+                    .load(Ordering::Acquire)
+                {
+                    return;
+                }
                 let state = window.state::<Client>();
                 let mut settings = state.settings.lock().unwrap();
                 settings.x = Some(position.x);
                 settings.y = Some(position.y);
                 let _ = persist(&settings);
             }
-            tauri::WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
+            tauri::WindowEvent::Resized(size) if size.width >= 340 && size.height >= 560 => {
+                if window
+                    .state::<compact::CompactWindow>()
+                    .active
+                    .load(Ordering::Acquire)
+                {
+                    return;
+                }
                 let state = window.state::<Client>();
                 let mut settings = state.settings.lock().unwrap();
                 settings.width = size.width;
@@ -424,13 +599,18 @@ fn main() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
+            compact::set_compact,
+            window_dimensions,
+            resize_companion,
             discover_hosts,
+            open_conversation,
+            speech_request,
             connect_host,
             send_command,
             load_settings,
             save_settings,
-            hide_window,
-            quit_app
+            quit_app,
+            get_cursor_position
         ])
         .run(tauri::generate_context!())
         .expect("Failed to launch Mint Companion");
@@ -464,5 +644,32 @@ mod tests {
         ] {
             assert!(!valid_endpoint(endpoint));
         }
+    }
+    #[test]
+    fn relative_cursor_calculation_handles_offsets_and_dpi_scale() {
+        let origin = calculate_relative_cursor(1440.0, 100.0, 1440, 100, 1.0);
+        assert_eq!(origin, RelativeCursorPosition { x: 0.0, y: 0.0 });
+
+        let left = calculate_relative_cursor(440.0, 50.0, 1440, 100, 1.0);
+        assert_eq!(
+            left,
+            RelativeCursorPosition {
+                x: -1000.0,
+                y: -50.0
+            }
+        );
+
+        let scaled = calculate_relative_cursor(1640.0, 300.0, 1440, 100, 2.0);
+        assert_eq!(scaled, RelativeCursorPosition { x: 100.0, y: 100.0 });
+
+        let fallback = calculate_relative_cursor(1500.0, 200.0, 1440, 100, 0.0);
+        assert_eq!(fallback, RelativeCursorPosition { x: 60.0, y: 100.0 });
+    }
+    #[test]
+    fn settings_deserialization_defaults_offset_y() {
+        let json = r#"{"hostId":"","chatId":"","scale":1.2}"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.offset_y, 0.0);
+        assert_eq!(s.scale, 1.2);
     }
 }

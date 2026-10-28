@@ -315,6 +315,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         "/models" => cmd_models(rest, config),
         "/thinking" | "/think" => cmd_thinking(rest, config),
         "/temperature" | "/temp" => cmd_temperature(rest, config),
+        "/steps" | "/max-steps" => cmd_steps(rest, config),
         // `/searchProvider` is a documented camelCase alias (see UNDOCUMENTED_ALIASES).
         "/search-provider" | "/searchprovider" => cmd_extra_provider(
             "/search-provider",
@@ -585,7 +586,15 @@ fn cmd_bool_toggle(
     config: &mut MintConfig,
 ) -> SlashResponse {
     match parse_on_off(rest) {
-        None if rest.is_empty() => needs_on_off(command, label),
+        None if rest.is_empty() => {
+            let mut response = needs_on_off(command, label);
+            if command == "/autoskill"
+                && let SlashResponse::NeedsChoice { options, .. } = &mut response
+            {
+                options[usize::from(!current)].label.push_str(" (current)");
+            }
+            response
+        }
         None => error(format!("Usage: {command} [on|off]")),
         Some(v) => {
             set(config, v);
@@ -1232,6 +1241,131 @@ fn cmd_temperature(rest: &str, config: &mut MintConfig) -> SlashResponse {
         Ok(_) => error("Temperature must be between 0.0 and 2.0 (e.g. `/temperature 0.6`)."),
         Err(_) => error(format!(
             "Invalid temperature `{temp_str}`. Specify a number between 0.0 and 2.0, or `default`."
+        )),
+    }
+}
+
+fn cmd_steps(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    let raw = rest.trim();
+    let current_steps = config.resolved_agent_max_steps();
+    if raw.is_empty() {
+        return SlashResponse::NeedsChoice {
+            command: "/steps".into(),
+            title: format!(
+                "⏱️ Agent Step Limit: {} steps per turn\nSelect a preset or run `/steps <10-200>`",
+                current_steps
+            ),
+            options: vec![
+                SlashChoice {
+                    label: format!(
+                        "25 steps — Fast & frugal{}",
+                        if current_steps == 25 {
+                            " (current)"
+                        } else {
+                            ""
+                        }
+                    ),
+                    value: "25".into(),
+                },
+                SlashChoice {
+                    label: format!(
+                        "40 steps — Default standard{}",
+                        if current_steps == 40 {
+                            " (current)"
+                        } else {
+                            ""
+                        }
+                    ),
+                    value: "40".into(),
+                },
+                SlashChoice {
+                    label: format!(
+                        "60 steps — Extended workflows{}",
+                        if current_steps == 60 {
+                            " (current)"
+                        } else {
+                            ""
+                        }
+                    ),
+                    value: "60".into(),
+                },
+                SlashChoice {
+                    label: format!(
+                        "80 steps — Heavy deep coding{}",
+                        if current_steps == 80 {
+                            " (current)"
+                        } else {
+                            ""
+                        }
+                    ),
+                    value: "80".into(),
+                },
+                SlashChoice {
+                    label: format!(
+                        "100 steps — Long-running autonomous{}",
+                        if current_steps == 100 {
+                            " (current)"
+                        } else {
+                            ""
+                        }
+                    ),
+                    value: "100".into(),
+                },
+                SlashChoice {
+                    label: "Reset to default (40 steps)".into(),
+                    value: "reset".into(),
+                },
+            ],
+        };
+    }
+
+    if raw.eq_ignore_ascii_case("status") {
+        return message(format!(
+            "⏱️ **Agent Step Budget Status**\n\n\
+             - **Current Limit**: `{}` steps per turn\n\
+             - **Step Warning**: Injected into prompt & observations at step `{}`\n\
+             - **Wrap-up Synthesis**: Enforced on final step `{}` (synthesizes findings without tools)\n\
+             - **Allowed Range**: 10 – 200 steps\n\
+             - **Default**: {} steps\n\n\
+             To adjust: `/steps <number>` or `/steps reset`",
+            current_steps,
+            current_steps.saturating_sub(5),
+            current_steps,
+            crate::system::config::DEFAULT_AGENT_MAX_STEPS
+        ));
+    }
+
+    if raw.eq_ignore_ascii_case("reset") || raw.eq_ignore_ascii_case("default") {
+        config.agent_max_steps = crate::system::config::DEFAULT_AGENT_MAX_STEPS;
+        return SlashResponse::Applied {
+            markdown: format!(
+                "🔄 Agent step limit reset to default (**{}** steps per turn).",
+                crate::system::config::DEFAULT_AGENT_MAX_STEPS
+            ),
+            effects: vec![SlashEffect::ConfigChanged],
+        };
+    }
+
+    match raw.parse::<usize>() {
+        Ok(val) => {
+            if !(10..=200).contains(&val) {
+                return error(format!(
+                    "Step limit must be between 10 and 200 steps (received `{val}`)."
+                ));
+            }
+            config.agent_max_steps = val;
+            SlashResponse::Applied {
+                markdown: format!(
+                    "⏱️ Agent step limit set to **{}** steps per turn (Warning at step {}, Wrap-up at step {}).",
+                    val,
+                    val.saturating_sub(5),
+                    val
+                ),
+                effects: vec![SlashEffect::ConfigChanged],
+            }
+        }
+        Err(_) => error(format!(
+            "Invalid step limit `{raw}`. Please specify a number between 10 and 200, or `reset`."
         )),
     }
 }
@@ -3171,6 +3305,85 @@ mod tests {
                 "expected NeedsChoice, got {:?}",
                 serde_json::to_value(other)
             ),
+        }
+    }
+
+    #[test]
+    fn steps_slash_command_behavior() {
+        let mut cfg = MintConfig::default();
+        assert_eq!(cfg.resolved_agent_max_steps(), 40);
+
+        // 1. Bare /steps returns NeedsChoice with presets
+        match execute(&req("/steps"), &mut cfg) {
+            SlashResponse::NeedsChoice {
+                command, options, ..
+            } => {
+                assert_eq!(command, "/steps");
+                assert!(options.iter().any(|o| o.value == "25"));
+                assert!(
+                    options
+                        .iter()
+                        .any(|o| o.value == "40" && o.label.contains("(current)"))
+                );
+                assert!(options.iter().any(|o| o.value == "60"));
+                assert!(options.iter().any(|o| o.value == "reset"));
+            }
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
+        }
+
+        // 2. /steps status returns informative message
+        match execute(&req("/steps status"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("Agent Step Budget Status"));
+                assert!(markdown.contains("40"));
+                assert!(markdown.contains("35"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 3. /steps 60 sets agent_max_steps to 60 with ConfigChanged effect
+        match execute(&req("/steps 60"), &mut cfg) {
+            SlashResponse::Applied { markdown, effects } => {
+                assert!(markdown.contains("60"));
+                assert_eq!(cfg.agent_max_steps, 60);
+                assert_eq!(cfg.resolved_agent_max_steps(), 60);
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 4. Out-of-bounds rejected
+        match execute(&req("/steps 5"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("between 10 and 200"));
+            }
+            other => panic!(
+                "expected Error Message, got {:?}",
+                serde_json::to_value(other)
+            ),
+        }
+
+        match execute(&req("/steps 250"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("between 10 and 200"));
+            }
+            other => panic!(
+                "expected Error Message, got {:?}",
+                serde_json::to_value(other)
+            ),
+        }
+
+        // 5. /steps reset reverts back to default 40
+        match execute(&req("/steps reset"), &mut cfg) {
+            SlashResponse::Applied { markdown, effects } => {
+                assert!(markdown.contains("40"));
+                assert_eq!(cfg.agent_max_steps, 40);
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
         }
     }
 }

@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
 import { catalogPlatform } from '../../platform'
 import type { DetectedTools, LearnedSkill } from '../../types'
-import McpToolAllowlist from '../McpToolAllowlist'
-import McpRegistryPicker from '../McpRegistryPicker'
+import McpToolAllowlist from '../extensions/McpToolAllowlist'
+import McpRegistryPicker from '../extensions/McpRegistryPicker'
 import {
   getOAuthStatuses,
   startOAuthFlow,
@@ -24,38 +24,115 @@ function isWorkspaceSkill(skill: LearnedSkill): boolean {
 interface PluginsTabProps {
   config: typeof DEFAULT_CONFIG
   updateField: (field: keyof typeof DEFAULT_CONFIG, value: any) => void
-  mcpName: string
-  setMcpName: (val: string) => void
-  mcpCmd: string
-  setMcpCmd: (val: string) => void
-  mcpArgs: string
-  setMcpArgs: (val: string) => void
-  mcpEnv: string
-  setMcpEnv: (val: string) => void
+  updateFields?: (patch: Partial<typeof DEFAULT_CONFIG>) => void
+  mcpName?: string
+  setMcpName?: (val: string) => void
+  mcpCmd?: string
+  setMcpCmd?: (val: string) => void
+  mcpArgs?: string
+  setMcpArgs?: (val: string) => void
+  mcpEnv?: string
+  setMcpEnv?: (val: string) => void
   mcpIcon?: string
   setMcpIcon?: (val: string) => void
-  handleAddMcpServer: (allowAll?: boolean) => void
-  handleRemoveMcpServer: (name: string) => void
+  handleAddMcpServer?: (allowAll?: boolean) => void
+  handleRemoveMcpServer?: (name: string) => void
   handleConnectPlugin: (plugin: string) => void
 }
 
 export default function PluginsTab({
   config,
   updateField,
-  mcpName,
-  setMcpName,
-  mcpCmd,
-  setMcpCmd,
-  mcpArgs,
-  setMcpArgs,
-  mcpEnv,
-  setMcpEnv,
-  mcpIcon = '',
-  setMcpIcon,
-  handleAddMcpServer,
-  handleRemoveMcpServer,
+  updateFields,
+  mcpName: controlledMcpName,
+  setMcpName: controlledSetMcpName,
+  mcpCmd: controlledMcpCmd,
+  setMcpCmd: controlledSetMcpCmd,
+  mcpArgs: controlledMcpArgs,
+  setMcpArgs: controlledSetMcpArgs,
+  mcpEnv: controlledMcpEnv,
+  setMcpEnv: controlledSetMcpEnv,
+  mcpIcon: controlledMcpIcon,
+  setMcpIcon: controlledSetMcpIcon,
+  handleAddMcpServer: controlledHandleAdd,
+  handleRemoveMcpServer: controlledHandleRemove,
   handleConnectPlugin
 }: PluginsTabProps) {
+  const [internalName, setInternalName] = useState('')
+  const [internalCmd, setInternalCmd] = useState('')
+  const [internalArgs, setInternalArgs] = useState('')
+  const [internalEnv, setInternalEnv] = useState('')
+  const [internalIcon, setInternalIcon] = useState('')
+
+  const mcpName = controlledMcpName ?? internalName
+  const setMcpName = controlledSetMcpName ?? setInternalName
+  const mcpCmd = controlledMcpCmd ?? internalCmd
+  const setMcpCmd = controlledSetMcpCmd ?? setInternalCmd
+  const mcpArgs = controlledMcpArgs ?? internalArgs
+  const setMcpArgs = controlledSetMcpArgs ?? setInternalArgs
+  const mcpEnv = controlledMcpEnv ?? internalEnv
+  const setMcpEnv = controlledSetMcpEnv ?? setInternalEnv
+  const mcpIcon = controlledMcpIcon ?? internalIcon
+  const setMcpIcon = controlledSetMcpIcon ?? setInternalIcon
+
+  const handleAddMcpServer = (allowAll?: boolean) => {
+    if (controlledHandleAdd) {
+      controlledHandleAdd(allowAll)
+      return
+    }
+    if (!mcpName.trim() || !mcpCmd.trim()) {
+      alert('Please provide at least a server name and command.')
+      return
+    }
+    let parsedEnv = {}
+    if (mcpEnv.trim()) {
+      try {
+        parsedEnv = JSON.parse(mcpEnv)
+      } catch {
+        alert('Invalid JSON in Environment variable field.')
+        return
+      }
+    }
+    const name = mcpName.trim()
+    const argList = mcpArgs.split(/\s+/).filter(Boolean)
+    const updatedMcp = {
+      ...config.mcpServers,
+      [name]: {
+        command: mcpCmd.trim(),
+        args: argList,
+        env: parsedEnv,
+        icon: mcpIcon.trim() || undefined,
+      },
+    }
+    if (updateFields) {
+      updateFields({
+        mcpServers: updatedMcp,
+        ...(allowAll
+          ? ({ allowedMcpTools: { ...((config as any).allowedMcpTools || {}), [name]: ['*'] } } as any)
+          : {}),
+      })
+    } else {
+      updateField('mcpServers', updatedMcp)
+      if (allowAll) {
+        updateField('allowedMcpTools' as any, { ...((config as any).allowedMcpTools || {}), [name]: ['*'] })
+      }
+    }
+    setMcpName('')
+    setMcpCmd('')
+    setMcpArgs('')
+    setMcpEnv('')
+    setMcpIcon('')
+  }
+
+  const handleRemoveMcpServer = (name: string) => {
+    if (controlledHandleRemove) {
+      controlledHandleRemove(name)
+      return
+    }
+    const updated = { ...config.mcpServers }
+    delete updated[name]
+    updateField('mcpServers', updated)
+  }
   // Local state for learned skills
   const [skills, setSkills] = useState<LearnedSkill[]>([])
   const [newSkillName, setNewSkillName] = useState('')

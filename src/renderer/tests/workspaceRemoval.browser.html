@@ -1,0 +1,66 @@
+<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Workspace list removal checks</title>
+<style>*{box-sizing:border-box}body{margin:16px;background:#101012;color:#eee;font-family:system-ui}#chat{display:flex;align-items:flex-end;height:430px}#code{margin-top:24px}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style></head>
+<body><div id="chat"></div><div id="code"></div><pre id="result">RUNNING</pre><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import '/shared/theme/tokens.css';
+import WorkspaceSelector from '/shared/components/WorkspaceSelector.tsx';
+import CliSessionsView from '/shared/components/CliSessionsView.tsx';
+import {workspaceListPreferences} from '/shared/utils/workspaceListPreferences';
+const current='/projects/Current workspace', other='/projects/Long workspace name with Thai ภาษาไทย/other';
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));const checks=[];
+const assert=(condition,message)=>{if(!condition)throw Error(message);checks.push(message)};
+async function until(predicate){for(let i=0;i<100;i++){if(predicate())return;await wait(20)}throw Error('Timed out waiting for UI')}
+const chat=document.getElementById('chat'),code=document.getElementById('code');
+const rootChat=createRoot(chat),rootCode=createRoot(code);let selectionCalls=0,deletedSessions=0,folderCalls=0;
+const session={id:'cli::kept',kind:'cli',workspacePath:current,title:'Existing session',createdAt:'2026-10-17T00:00:00Z',messageCount:1};
+const render=()=>{
+ rootChat.render(React.createElement(WorkspaceSelector,{currentPath:current,recentPaths:[other,current],onSelectWorkspace:()=>selectionCalls++}));
+ rootCode.render(React.createElement(CliSessionsView,{chatSessions:[session],workspacePath:current,recentWorkspacePaths:[other,current],activeConversationId:'conversation',
+  onSelectSession:()=>selectionCalls++,onDeleteSession:()=>deletedSessions++,onRenameSession:()=>{},onSelectFolder:async()=>{folderCalls++;return current}}));
+};
+const options=host=>[...host.querySelectorAll('.workspace-select-option')].map(button=>button.title);
+const open=async host=>{host.querySelector('.workspace-select-btn').click();await until(()=>host.querySelector('.workspace-select-menu'))};
+const remove=async(host,path)=>{
+ const row=[...host.querySelectorAll('.workspace-select-row')].find(row=>row.querySelector('.workspace-select-option').title===path);
+ const more=row.querySelector('.workspace-select-more');more.click();await until(()=>document.querySelector('[role="menuitem"]'));
+ assert(document.activeElement===document.querySelector('[role="menuitem"]'),'action menu receives keyboard focus');
+ document.querySelector('[role="menuitem"]').click();await until(()=>!options(host).includes(path));
+};
+window.runWorkspaceRemovalChecks=async()=>{
+ try{
+  workspaceListPreferences.restore(current);workspaceListPreferences.restore(other);render();await until(()=>code.querySelector('.code-session-row'));
+  await open(chat);await open(code);
+  assert(options(chat).join('|')===options(code).join('|'),'both pickers start with the same paths');
+  const firstMore=chat.querySelector('.workspace-select-more');const rowHeight=firstMore.closest('.workspace-select-row').getBoundingClientRect().height;firstMore.click();await until(()=>document.querySelector('[role="menuitem"]'));
+  const actions=document.querySelector('.workspace-select-row-menu');
+  assert(!chat.contains(actions)&&firstMore.closest('.workspace-select-row').getBoundingClientRect().height===rowHeight,'actions open as a floating dropdown without moving workspace rows');
+  assert(actions.textContent.includes('Remove from list')&&!/[\u0E00-\u0E7F]/.test(actions.textContent),'workspace dropdown uses English only');
+  actions.querySelector('button').dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));await wait(0);
+  assert(!!chat.querySelector('.workspace-select-menu')&&!!document.querySelector('[role="menuitem"]'),'pointer down inside floating dropdown does not dismiss it before click');
+  document.querySelector('[role="menuitem"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+  await until(()=>!document.querySelector('[role="menuitem"]'));
+  assert(document.activeElement===firstMore&&!!chat.querySelector('.workspace-select-menu'),'Escape closes row actions and restores focus without closing picker');
+  if(!code.querySelector('.workspace-select-menu'))await open(code);
+  await remove(chat,current);
+  await until(()=>!options(code).includes(current));
+  assert(selectionCalls===0&&deletedSessions===0,'removal never selects a project or deletes a session');
+  assert(chat.querySelector('.workspace-select-btn').title===current&&code.querySelector('.workspace-select-btn').title===current,'removing active workspace keeps both active selections');
+  assert(code.querySelectorAll('.code-session-row').length===1,'active project sessions remain visible');
+  assert(document.activeElement===chat.querySelector('input'),'removal returns focus to search');
+  render();await wait(50);
+  assert(!options(chat).includes(current)&&!options(code).includes(current),'session references and rerenders do not reintroduce a removed path');
+  code.querySelector('.workspace-select-open-folder').click();await until(()=>folderCalls===1);await wait(50);
+  assert(options(chat).includes(current),'Open folder restores a removed workspace in the other picker');
+  await open(code);await remove(code,other);await until(()=>!options(chat).includes(other));
+  assert(selectionCalls===0&&deletedSessions===0,'removal from Code sessions also leaves project and session data intact');
+  assert(document.documentElement.scrollWidth<=innerWidth,'workspace controls fit the viewport');
+  workspaceListPreferences.restore(other);
+  const more=chat.querySelector('.workspace-select-more');more.click();await until(()=>document.querySelector('[role="menuitem"]'));
+  const bounds=chat.querySelector('.workspace-select-menu').getBoundingClientRect();
+  assert(bounds.left>=0&&bounds.right<=innerWidth,'workspace menu stays inside the viewport');
+  const dropdown=document.querySelector('.workspace-select-row-menu').getBoundingClientRect();
+  assert(dropdown.left>=0&&dropdown.right<=document.documentElement.clientWidth&&dropdown.top>=0&&dropdown.bottom<=innerHeight,'action dropdown stays inside the viewport');
+  document.getElementById('result').textContent='PASS\n'+checks.join('\n');
+ }catch(error){document.getElementById('result').textContent='FAIL\n'+error.stack+'\n'+checks.join('\n')}
+};
+</script></body></html>

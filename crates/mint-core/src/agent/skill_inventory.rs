@@ -96,7 +96,9 @@ fn discover_from(
             discovered.push(entry);
         }
     };
-    add_layer(memory.learned_skills(100)?, SkillLocation::Database);
+    if let Ok(learned) = memory.learned_skills(100) {
+        add_layer(learned, SkillLocation::Database);
+    }
     if let Some(home) = home {
         let mut rules = Vec::new();
         load_agent_rules_file(&home.join(".gemini/config/AGENTS.md"), &mut rules);

@@ -1,9 +1,9 @@
 import React, { Suspense, useEffect, useState } from 'react'
-import AuthGate from '../shared/components/AuthGate'
-import ChunkErrorBoundary from '../shared/components/ChunkErrorBoundary'
-import ModalErrorBoundary from '../shared/components/ModalErrorBoundary'
+import AuthGate from '../shared/components/app/AuthGate'
+import ChunkErrorBoundary from '../shared/components/app/ChunkErrorBoundary'
+import ModalErrorBoundary from '../shared/components/app/ModalErrorBoundary'
 import PullToRefresh from './components/PullToRefresh'
-import { lazyWithRetry } from '../shared/utils/lazyWithRetry'
+import { lazyWithRetry, scheduleIdlePreload } from '../shared/utils/lazyWithRetry'
 
 const SettingsWindow = lazyWithRetry(() => import('./components/SettingsWindow'))
 const MintDashboard = lazyWithRetry(() => import('./components/MintDashboard'))
@@ -72,11 +72,9 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    // Preload SettingsWindow chunk in background so opening settings is instantaneous
-    const timer = setTimeout(() => {
+    return scheduleIdlePreload(() => {
       import('./components/SettingsWindow').catch(() => {})
-    }, 1200)
-    return () => clearTimeout(timer)
+    })
   }, [])
 
   useEffect(() => {

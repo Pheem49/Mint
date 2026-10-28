@@ -1,72 +1,49 @@
-# Release Notes - Mint Agent v1.16.0
+# Release Notes - Mint Agent v1.17.0
 
-## Highlights
+## Desktop & Web UI / UX
+- **Resilient Media & Image Proxy**: Added local image proxy (`/api/proxy-image`) with disk LRU caching and SSRF protection to bypass ad-blocker false positives; auto-heals unclosed markdown image links (`![alt](url...`), normalizes Twitter/X banner URLs, and displays a graceful fallback card on load errors.
+- **Provider Brand Badges & Logo Picker**: Vector SVG brand logos in chat message footers across 13+ providers; redesigned custom provider logo picker with preset SVGs, emoji selection, and an upload modal with pan/crop/rotate controls.
+- **Theme Refresh (Studio Dark & Charcoal Onyx)**: Introduced IDE-inspired "Studio Dark" palette (`#101010`), refined dark themes with balanced Charcoal Onyx styling, and added sleek neutral gray buttons with subtle mint hover glow.
+- **Configurable Step Limits (`/steps`)**: Control max tool execution steps per turn (10–200, default 40) via `/steps` slash command or Settings across Desktop, Web, and Full-Screen TUI.
+- **Trajectory Export & Diagnostics**: One-click SWE-bench/Agent Protocol v1.0 trajectory export (`.json`); dedicated high-contrast callout styling for self-correction guidance; persistent activity drawer accessible across completed and interrupted turns.
+- **Full-Screen TUI Onboarding Wizard (`mint onboard` & `/onboard`)**:
+  - Overhauled to native Ratatui alternate-screen wizard with responsive edge-to-edge layout and Mint TUI styling.
+  - **Step 1 (Core AI)**: Unified Gemini setup with masked key input (`Ctrl+H`), live model discovery, and integrated model picker.
+  - **Step 2 (Services)**: Grouped checklist with arrow navigation, spacebar toggles, select-all (`a`), and invert (`i`).
+  - **Step 3 (Configurations)**: Paged per-service cards featuring bundled API credentials and real-time model pickers (Anthropic, OpenAI, DeepSeek, Ollama, etc.).
+  - **Step 4 (Summary & Launch)**: Visual configuration overview with direct launch (`Save & Launch Mint`) or exit options.
+  - Added `/onboard` slash command and first-run detection across CLI, Desktop, and Web.
+- **Terminal Polish**: Compact web search citations (top 5 with `Ctrl+O` detail viewer modal), unified command badges, external browser link handling, and non-blocking desktop titlebar during settings.
 
-- Updated the locked `source-map-js` dependency from 1.2.1 to 1.2.2 to fix GHSA-68fv-2mgg-jv7q and restore the CI `npm audit --audit-level=high` check.
+## Performance & Frontend Optimization
+- **Re-render Isolation**: Decoupled message input state to eliminate full-page re-renders while typing.
+- **Component Splitting**: Isolated streaming elapsed timers into leaf components and lazy-loaded secondary modals.
+- **Zero-Allocation Buffers**: Replaced 32 MiB buffers with lightweight UTF-8 estimators and compact attachment fingerprinting.
+- **Adaptive Polling**: Switched background jobs and status polling to idle-aware intervals that pause on inactive tabs.
+- **GPU Compositing Relief**: Removed backdrop blur filters on scrollable chat containers for smooth virtualized scrolling.
 
-- New workspace mods use **`.mint-mods/<id>/`**; existing `mint-mods/<id>/` sources remain supported. The hidden folder takes precedence for duplicate IDs, while legacy edits stay in place. Moved this workspace’s `token-weather` mod into `.mint-mods` with its files unchanged.
-- Added **Mint Mods**: custom panels, commands, and tool guards across CLI, Desktop, and Web, with hot reload, permission review, and import/export.
-- Moved Live2D into the optional **Mint Companion** app, which follows a selected Mint conversation without starting another backend.
-- Changed Mint’s project license to **MIT**. Third-party dependencies and bundled assets retain their own licenses.
+## Core Engine & Web API Server
+- **Step Budget Warning & Wrap-Up Synthesis**: Proactive warning at `max_steps - 5` and graceful synthesis pass (`tools: None`) ensuring a complete final answer instead of abrupt termination.
+- **Fault-Tolerant Tool Call Parsing**: Recovers from Markdown fences, DeepSeek thinking tokens, trailing commas, hallucinated nulls, and shell aliases (`bash`, `sh`, `exec`).
+- **Structured Self-Correction Diagnostics**: Diagnostic engine (`diagnostics.rs`) detecting patch indentation drift, line numbering offsets, and compiler errors (Rust, Python, TypeScript) with actionable recovery suggestions.
+- **Standardized Trajectory Schema v1.0**: Versioned, typed trajectory runs (`StandardTrajectoryRun`) with step tokens, thoughts, and replay support via `/trajectory`.
+- **Head-Tail Truncation**: Dual-bound log clipping (first 35 lines context, last 75 lines error output), cutting token overhead by up to 70% while preserving root-cause errors.
+- **Repetition & Loop Guard**: Detects duplicate tool executions and oscillating loops (A→B→A→B), injecting self-correction guidance without aborting the turn.
+- **Context Compaction Role Alternation**: Alternating `Assistant`/`User` format for summaries, fixing HTTP 400 crashes on reasoning models (DeepSeek, Gemini).
+- **Engine Reliability**: Non-blocking SQLite persistence via `spawn_blocking`, low-latency TCP sockets (`TCP_NODELAY`), and standardized workspace path resolution.
 
-## Terminal and chat
+## Subagents, Swarm Orchestration & Plan Mode
+- **Confirmation-First Planning**: Clarified intent confirmation so conversational acknowledgments ("OK", "understood") don't prematurely trigger code modifications.
+- **Parallel Swarms & Reconnaissance**: Concurrent read-only worker pools (1–8 agents) for multi-file project exploration before plan confirmation.
+- **Transcript Isolation**: Nested subagent micro-actions and child compactions into a dedicated docked status strip and DAG view.
+- **Context Cache Optimization**: Rolling vision window retaining the latest 2 image steps, saving up to 90% in token overhead.
 
-- Corrected parallel tool activity: identical calls retain separate cards and call IDs, blocked calls display failure, and parallel subagent dispatches report live status and actual elapsed time.
+## Agent Tools, Browser Automation & Sandbox
+- **Safe Temp Directory Access**: Persistent Linux sandbox mounts for `/tmp` and OS temporary paths across agent tools.
+- **Headless Browser Automation**: Isolated Chromium automation engine for navigation, clicks, inputs, screenshots, and durable artifacts.
+- **State-Based Execution**: Evidence-backed completion verification replacing unconditional duplicate-command skips.
 
-- TUI `/resume` now restores saved tool cards, full input/output through **Ctrl+O**, reasoning through **Ctrl+T**, and per-turn completion/failure summaries. New tool events persist elapsed time; older activity without timing displays **time unavailable**. Unfinished saved calls display **Interrupted** without restarting a spinner, and reloading or switching sessions clears stale viewers and avoids duplicate history.
-
-- Restored pinned live tool details above the TUI composer after compact tool cards hid them: active counts, abbreviated commands, animated spinners, and elapsed timers stay visible while scrolling the transcript and take priority over older status lines. Finished calls leave this live area while their compact cards remain in history.
-
-- TUI tool calls now use compact three-line cards that update in place on completion, keeping long commands and output out of the default transcript. **Ctrl+O** opens full input/output, **Tab/Shift+Tab** switches calls, and **Ctrl+Y** copies all details. Active counts separate shell commands from other tools without counting completed calls; failures display in red and successful calls in green.
-
-- TUI now streams reasoning into a preview capped at six terminal rows, with a live **Thinking** timer and automatic scrolling to the latest text. Completed blocks collapse to **Thought · … (Ctrl+T to view)**. Ctrl+T opens the full reasoning during and after an agent turn, updates as text arrives, and preserves interrupted reasoning for review.
-
-- Added a startup TUI update menu with **Update now**, **Skip** (selected by default), and **Skip until next version**. Skipped versions persist across launches; newer releases still notify. Installation runs the existing approved npm updater outside the TUI and exits on success so Mint can be restarted. Slow background checks keep a passive notice instead of interrupting chat.
-
-- Improved Full-Screen TUI scrolling, drag selection, Back to bottom, multiline input, and long approval previews.
-- Added collapsible long pastes: **F2** opens or folds the full text for editing without losing submitted content.
-- Improved Desktop/Web chat performance, model selection, slash-command navigation, activity summaries, and responsive layouts.
-- Added clearer context-compaction status and background-terminal counts.
-
-## Workspace and background jobs
-
-- Added persistent file history and **Undo**, including AI edits without Git. File removal uses Trash with confirmation.
-- Fixed project switching and workspace selection so navigation preserves conversation ownership and drafts.
-- Added workspace previews for HTML, Markdown, and images, plus improved Review and Desktop file-pane controls.
-- Added background-job logs, Stop, finished-job removal, and browser launch controls. **`/mint-web`** starts a tracked Web session; **`/shells`** manages jobs across interfaces.
-- Improved shutdown cleanup. Background jobs do not resume across backend restarts.
-
-## Agent, tools, and approvals
-
-- Unified skill discovery, model choices, media storage, messaging webhooks, and approval handling across the shared Rust core.
-- Skill creation and edits now require a separate proposal review; automatic skill suggestions default off.
-- Improved cancellation, plan-mode handling, repeated-tool-failure detection, and stale approval protection.
-- Added schema validation, persistent attachments, and explicit success/failure states for MCP tools, with configurable timeouts and cancellation. Timed-out or cancelled calls may still finish remotely and are not retried automatically.
-- Added opt-in **Mint Device** command verification with a mock connector. Real hardware requires a device-specific adapter; cancellation does not issue a physical stop.
-
-## Desktop and Web
-
-- Added **Sources** beside Tools in the Web chat header. Its mobile-friendly session panel shares Desktop's source loading, attachments, web-search links and favicons, with loading/retry states and Library navigation that preserves drafts.
-- Workspace context Sources now shows website favicons for web-search pages on Desktop/Web, using the existing source metadata. Unavailable favicons fall back to the globe; broken attachment previews use their file-type icon without changing thumbnail sizing.
-- `view_image` now shows viewed images inline in Desktop/Web chat during a run and in saved history, with filenames and an expandable preview. Images remain visible with Activity collapsed, while tool details show a readable status instead of base64. CLI/TUI keeps its text status.
-- Renamed **Pictures** to **Library** on Desktop and Web, with shared All / Images / Videos / Files filters, filename search, current-conversation scope, cursor pagination, previews, original-name downloads, and reversible Library Trash. `/library` is canonical; `/pictures` remains compatible.
-- CLI/TUI uploads now use the same pre-AI Library intake and turn references as Desktop/Web, retaining files on provider failure. Agent-generated images/videos retain their conversation and running-turn references. Library refresh preserves loaded cursor pages while thumbnails update; Sources opens Library inside the app without discarding the composer.
-- Library imports flush original files before acquiring the catalog writer lock, reducing contention during concurrent uploads. Failed catalog batches and duplicate retries clean up their staged files.
-- Library previews now show the saved source message in up to two lines, omitting chat transport and attachment markers; entries without message text omit the excerpt.
-- Added **Remove from Mint** in Library Trash on Desktop and Web. It moves remaining originals and thumbnails to the system Trash on the machine running Mint, then removes their Library entries and source references. Missing-file records can be removed; failed moves retain the entry for retry. Ordinary Library deletion still moves entries to Library Trash for restore.
-- Uploaded chat images, videos, and supported documents/code files are now saved before document extraction or AI calls. Library stores originals once on disk with a SQLite catalog, stable IDs, names, MIME types, sizes, and conversation/turn references. Retries reuse a submission receipt; failed requests retain the composer until acceptance. AI-generated media uses the same catalog.
-- Migrates the old Pictures JSON catalog idempotently, preserves existing IDs and file paths, and keeps a backup of the original index. Missing originals remain visible. Thumbnail work runs asynchronously with at most two workers and pending work resumes at startup.
-- Workspace context **Sources** lists session images, files, videos, and AI web-search results with expandable groups. New attachments link to the same Library original and thumbnail; Trash and missing-file states stay visible. Clearing or deleting chat history removes its references while Library files remain. Earlier metadata-only attachments are retained as metadata; their originals cannot be reconstructed.
-- Moved **Mods** and **Background tasks** from the chat composer into Tools tabs on Desktop and Web, accessible from the launcher and add-tool menu without a duplicate button row below the tabs. Added a Web Tools button and a running-task badge that stays visible while Tools is closed; the Desktop interactive Terminal remains separate. Mod bands and background-job tracking continue while the panel is closed.
-- Refined voice recording, Gemini Live calls, notifications, error recovery, theme styling, and accessibility.
-- Added **Reduce effects** and reduced unnecessary rendering work.
-- Improved Saved Pictures browsing and previews, image-search cards, and MCP settings.
-- Live Translate now uses the selected chat provider and model, including local/custom providers; unsupported image input reports an error instead of switching providers.
-
-## Installation and documentation
-
-- Ignored workspace-local `.mint-mods/` in Git; shareable mod examples remain in `examples/mods/`.
-- Consolidated Desktop launch/build commands and improved source-checkout rebuild detection; failed builds stop before launching an older binary.
-- Development builds read release notes live; shipping builds embed a snapshot.
-- Shortened the README, moved detailed guides into `docs/`, fixed installation navigation, clarified mod sharing, and updated the roadmap around the primary TUI workflow.
-- Condensed these release notes by topic. The original detailed change log is preserved in [v1.16.0 details](docs/releases/v1.16.0-details.md).
+## Mint Companion & Voice Input
+- **Live2D Desktop Companion**: Translucent interface with full-screen character view, OS cursor gaze tracking, and window dragging.
+- **Synchronized TTS Speech**: Centralized speech synthesis with real-time lip-sync and audio leasing.
+- **Non-Destructive Voice Input**: Microphone dictation appends directly to the active draft without auto-submitting.

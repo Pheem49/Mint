@@ -10,7 +10,9 @@ export type VoiceInputOptions = SpeechToTextOptions
 
 export function useVoiceInput(options: VoiceInputOptions) {
   return useNativeVoiceInput({
-    onSendVoiceMessage: options.onSendVoiceMessage,
+    chatId: options.chatId,
+    message: options.message,
+    onSetMessage: options.onSetMessage,
     startRecording: startMicRecording,
     stopRecordingAndTranscribe: stopMicRecordingAndTranscribe,
     cancelRecording: cancelMicRecording,

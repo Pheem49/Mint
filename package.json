@@ -1,6 +1,6 @@
 {
   "name": "@pheem49/mint",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "description": "A native Tauri desktop AI assistant with a Rust backend and React UI.",
   "scripts": {
     "dev:web": "vite --config vite.config.web.ts",
@@ -33,7 +33,7 @@
     "start:rebuild": "npm start -- --rebuild",
     "test": "npm run test:launchers && npm run test:interfaces && npm run test:styles && npm run test:device && npm run test:companion && cargo test -p mint-mod-runtime -p mint-core -p mint-cli -p mint-companion-protocol -p mint-companion",
     "test:launchers": "node --test src/bin/web.test.js src/bin/index.test.js src/bin/desktop.test.js src/bin/package.test.js src/bin/release-notes.test.js",
-    "test:interfaces": "vitest run src/renderer/shared/components/ChatPanel.test.tsx src/renderer/shared/library/controller.test.ts src/renderer/shared/library/transport.test.ts src/renderer/shared/utils/sessionSources.test.ts src/renderer/shared/components/ToolSurfacePage.test.tsx src/renderer/shared/components/SlashSuggestions.test.tsx src/renderer/shared/components/ApprovalCard.test.tsx src/renderer/shared/utils/notificationSettings.test.ts src/renderer/shared/components/Settings/NotificationsTab.test.tsx src/renderer/shared/utils/notifications.test.ts src/renderer/shared/utils/contextCompaction.test.tsx src/renderer/shared/platform.test.ts src/renderer/shared/conversation/coordinator.test.ts src/renderer/shared/conversation/lifecycle.test.ts src/renderer/shared/conversation/transport.test.ts src/renderer/shared/conversation/syncView.test.ts src/renderer/shared/utils/cardJson.test.ts src/renderer/shared/utils/agentActivity.test.ts src/renderer/shared/components/CliSessionsView.test.tsx src/renderer/shared/components/Settings/MemoryTab.test.tsx src/renderer/shared/theme/themeManager.test.ts src/renderer/shared/components/SelectField.test.tsx src/renderer/shared/components/VoicePill.test.tsx src/renderer/shared/utils/nativeRecordingSession.test.ts src/renderer/shared/components/GeminiLiveOverlay.test.tsx src/renderer/shared/utils/mcpResults.test.tsx src/renderer/shared/conversation/projectNavigation.test.ts src/renderer/shared/components/WorkspacePreviewActions.test.tsx src/renderer/shared/utils/workspacePreview.test.ts src/renderer/shared/utils/artifactBrowser.test.ts src/renderer/shared/utils/workspacePane.test.ts src/renderer/shared/utils/workspaceSnapshot.test.ts src/renderer/shared/utils/syntaxHighlight.test.tsx src/renderer/shared/utils/progressCache.test.ts src/renderer/shared/components/ChatMessageItem.test.tsx src/renderer/shared/components/ModUi.test.tsx src/renderer/shared/utils/pastedText.test.ts",
+    "test:interfaces": "vitest run src/renderer/shared/components/extensions/SkillsView.test.tsx src/renderer/shared/components/chat/ChatPanel.test.tsx src/renderer/shared/library/controller.test.ts src/renderer/shared/library/transport.test.ts src/renderer/shared/utils/sessionSources.test.ts src/renderer/shared/components/workspace/ToolSurfacePage.test.tsx src/renderer/shared/components/chat/SlashSuggestions.test.tsx src/renderer/shared/components/chat/ApprovalCard.test.tsx src/renderer/shared/utils/notificationSettings.test.ts src/renderer/shared/components/Settings/NotificationsTab.test.tsx src/renderer/shared/utils/notifications.test.ts src/renderer/shared/utils/contextCompaction.test.tsx src/renderer/shared/platform.test.ts src/renderer/shared/conversation/coordinator.test.ts src/renderer/shared/conversation/lifecycle.test.ts src/renderer/shared/conversation/transport.test.ts src/renderer/shared/conversation/syncView.test.ts src/renderer/shared/utils/cardJson.test.ts src/renderer/shared/utils/agentActivity.test.ts src/renderer/shared/components/extensions/CliSessionsView.test.tsx src/renderer/shared/utils/workspaceListPreferences.test.ts src/renderer/shared/components/Settings/MemoryTab.test.tsx src/renderer/shared/theme/themeManager.test.ts src/renderer/shared/components/ui/SelectField.test.tsx src/renderer/shared/components/chat/VoicePill.test.tsx src/renderer/shared/utils/nativeRecordingSession.test.ts src/renderer/shared/components/chat/GeminiLiveOverlay.test.tsx src/renderer/shared/utils/mcpResults.test.tsx src/renderer/shared/conversation/projectNavigation.test.ts src/renderer/shared/components/workspace/WorkspacePreviewActions.test.tsx src/renderer/shared/utils/workspacePreview.test.ts src/renderer/shared/utils/artifactBrowser.test.ts src/renderer/shared/utils/workspacePane.test.ts src/renderer/shared/utils/workspaceSnapshot.test.ts src/renderer/shared/utils/syntaxHighlight.test.tsx src/renderer/shared/utils/progressCache.test.ts src/renderer/shared/components/chat/ChatMessageItem.test.tsx src/renderer/shared/components/extensions/ModUi.test.tsx src/renderer/shared/utils/pastedText.test.ts src/renderer/shared/components/workspace/BackgroundTerminals.test.tsx",
     "cli": "node src/bin/index.js",
     "prepublishOnly": "npm run build:web",
     "postinstall": "cargo build -p mint-cli --release",
@@ -43,7 +43,7 @@
     "dev:companion": "npm run dev --workspace @mint/companion --",
     "build:companion": "npm run build --workspace @mint/companion --",
     "package:companion": "npm run package --workspace @mint/companion --",
-    "test:companion": "vitest run --root . apps/mint-companion/src/state.test.ts",
+    "test:companion": "vitest run --root . apps/mint-companion/src/state.test.ts apps/mint-companion/src/radial-layout.test.ts apps/mint-companion/src/tracking.test.ts apps/mint-companion/src/speech.test.ts",
     "typecheck:companion": "npm run typecheck --workspace @mint/companion",
     "test:styles": "node --test src/bin/styles.test.js"
   },
@@ -106,6 +106,7 @@
     "material-icon-theme": "5.34.0",
     "mermaid": "^11.17.0",
     "ogl": "^1.0.11",
+    "pdfjs-dist": "^6.4.299",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",
@@ -126,7 +127,8 @@
     "nodemailer": "^9.0.0",
     "uuid": "^11.1.1",
     "brace-expansion": "^5.0.12",
-    "@hono/node-server": "^2.0.5"
+    "@hono/node-server": "^2.0.5",
+    "katex": "^0.19.1"
   },
   "workspaces": [
     "apps/mint-companion"

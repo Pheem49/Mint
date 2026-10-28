@@ -993,9 +993,106 @@ async fn send_openai_style_request(
 // with {} would silently turn a requested directory into the workspace root.
 fn decode_tool_arguments(arguments: &Value) -> Value {
     match arguments.as_str() {
-        Some(raw) => serde_json::from_str(raw).unwrap_or_else(|_| arguments.clone()),
+        Some(raw) => sanitize_and_parse_tool_arguments(raw).unwrap_or_else(|| arguments.clone()),
         None => arguments.clone(),
     }
+}
+
+/// Sanitizes LLM tool call argument string: strips markdown fences, DeepSeek DSML tokens,
+/// thinking tags, extracts inner JSON objects, and handles trailing commas before failing.
+fn sanitize_and_parse_tool_arguments(raw: &str) -> Option<Value> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
+        return Some(val);
+    }
+
+    // 1. Strip markdown code fences if wrapped in ```json ... ```
+    let without_fences = if let Some(stripped) = trimmed.strip_prefix("```json") {
+        stripped.strip_suffix("```").unwrap_or(stripped).trim()
+    } else if let Some(stripped) = trimmed.strip_prefix("```") {
+        stripped.strip_suffix("```").unwrap_or(stripped).trim()
+    } else {
+        trimmed
+    };
+    if let Ok(val) = serde_json::from_str::<Value>(without_fences) {
+        return Some(val);
+    }
+
+    // 2. Strip known special tokens (DeepSeek DSML markers, thinking tags, end of sentence markers)
+    let cleaned = without_fences
+        .replace("</｜｜DSML｜｜", "")
+        .replace("<｜｜DSML｜｜", "")
+        .replace("<｜end of sentence｜>", "")
+        .replace("</think>", "");
+
+    if let Ok(val) = serde_json::from_str::<Value>(&cleaned) {
+        return Some(val);
+    }
+
+    // 3. Extract JSON object boundary between first '{' and last '}'
+    if let (Some(start), Some(end)) = (cleaned.find('{'), cleaned.rfind('}')) {
+        if start < end {
+            let slice = &cleaned[start..=end];
+            if let Ok(val) = serde_json::from_str::<Value>(slice) {
+                return Some(val);
+            }
+            // 4. Strip trailing commas before closing braces/brackets
+            let without_trailing_commas = strip_json_trailing_commas(slice);
+            if let Ok(val) = serde_json::from_str::<Value>(&without_trailing_commas) {
+                return Some(val);
+            }
+        }
+    }
+
+    None
+}
+
+/// Simple non-destructive removal of trailing commas before closing braces/brackets
+fn strip_json_trailing_commas(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    let mut in_str = false;
+    let mut escape = false;
+
+    while let Some(ch) = chars.next() {
+        if in_str {
+            if escape {
+                escape = false;
+            } else if ch == '\\' {
+                escape = true;
+            } else if ch == '"' {
+                in_str = false;
+            }
+            out.push(ch);
+        } else {
+            if ch == '"' {
+                in_str = true;
+                out.push(ch);
+            } else if ch == ',' {
+                // Check if following non-whitespace character is '}' or ']'
+                let mut peek_chars = chars.clone();
+                let mut is_trailing = false;
+                while let Some(next_ch) = peek_chars.next() {
+                    if next_ch.is_whitespace() {
+                        continue;
+                    }
+                    if next_ch == '}' || next_ch == ']' {
+                        is_trailing = true;
+                    }
+                    break;
+                }
+                if !is_trailing {
+                    out.push(ch);
+                }
+            } else {
+                out.push(ch);
+            }
+        }
+    }
+    out
 }
 
 /// Parses an OpenAI Chat Completions-shaped response (`choices[0].message`),
@@ -2791,6 +2888,10 @@ fn openai_native_messages(messages: &[ChatMessage]) -> Result<Vec<Value>, ChatEr
                 };
                 if !tool_calls.is_empty() {
                     entry["tool_calls"] = json!(tool_calls);
+                    // DeepSeek and other reasoning-enabled OpenAI-compatible APIs enforce that
+                    // any assistant message containing `tool_calls` must include `reasoning_content`
+                    // when reasoning/thinking mode is active. Providing `""` prevents HTTP 400 rejection.
+                    entry["reasoning_content"] = json!("");
                 }
                 result.push(entry);
             }
@@ -3419,6 +3520,124 @@ mod tests {
             built[1]["content"][0]["image_url"]["url"],
             "data:image/png;base64,QUJD"
         );
+    }
+
+    #[test]
+    fn openai_native_messages_attaches_reasoning_content_for_tool_calls() {
+        let messages = vec![ChatMessage {
+            role: ChatRole::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "call_abc".into(),
+                name: "read_file".into(),
+                input: json!({"path": "src/main.rs"}),
+                thought_signature: None,
+            }],
+        }];
+        let built = openai_native_messages(&messages).unwrap();
+        assert_eq!(built.len(), 1);
+        assert_eq!(built[0]["role"], "assistant");
+        assert_eq!(built[0]["reasoning_content"], json!(""));
+        assert_eq!(built[0]["tool_calls"][0]["function"]["name"], "read_file");
+    }
+
+    #[test]
+    fn openai_serializes_compacted_history_with_role_alternation() {
+        let messages = vec![
+            ChatMessage::text(ChatRole::User, "Fix the bug"),
+            ChatMessage::text(
+                ChatRole::Assistant,
+                "Summary of earlier steps:\n- read file.rs\n- found syntax error",
+            ),
+            ChatMessage::text(
+                ChatRole::User,
+                "Please continue the task from where you left off based on the summary above.",
+            ),
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call_1".into(),
+                    name: "apply_patch".into(),
+                    input: json!({"path": "file.rs", "patch": "..."}),
+                    thought_signature: None,
+                }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call_1".into(),
+                    content: "Patch applied".into(),
+                    is_error: false,
+                }],
+            },
+        ];
+        let built = openai_native_messages(&messages).unwrap();
+        assert_eq!(built.len(), 5);
+        assert_eq!(built[0]["role"], "user");
+        assert_eq!(built[1]["role"], "assistant");
+        assert_eq!(built[2]["role"], "user");
+        assert_eq!(built[3]["role"], "assistant");
+        assert_eq!(built[4]["role"], "tool");
+    }
+
+    #[test]
+    fn anthropic_serializes_compacted_history_with_role_alternation() {
+        let messages = vec![
+            ChatMessage::text(ChatRole::User, "Fix the bug"),
+            ChatMessage::text(ChatRole::Assistant, "Summary of earlier steps"),
+            ChatMessage::text(ChatRole::User, "Please continue"),
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "toolu_1".into(),
+                    name: "read_file".into(),
+                    input: json!({"path": "file.rs"}),
+                    thought_signature: None,
+                }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "toolu_1".into(),
+                    content: "Code content".into(),
+                    is_error: false,
+                }],
+            },
+        ];
+        let built = anthropic_messages(&messages).unwrap();
+        assert_eq!(built.len(), 5);
+        assert_eq!(built[0]["role"], "user");
+        assert_eq!(built[1]["role"], "assistant");
+        assert_eq!(built[2]["role"], "user");
+        assert_eq!(built[3]["role"], "assistant");
+        assert_eq!(built[4]["role"], "user");
+    }
+
+    #[test]
+    fn gemini_serializes_compacted_history_with_role_alternation() {
+        let messages = vec![
+            ChatMessage::text(ChatRole::User, "Fix the bug"),
+            ChatMessage::text(ChatRole::Assistant, "Summary of earlier steps"),
+            ChatMessage::text(ChatRole::User, "Please continue"),
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call_1".into(),
+                    name: "read_file".into(),
+                    input: json!({"path": "file.rs"}),
+                    thought_signature: None,
+                }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call_1".into(),
+                    content: "Code content".into(),
+                    is_error: false,
+                }],
+            },
+        ];
+        let built = gemini_native_contents(&messages).unwrap();
+        assert!(built.len() >= 4);
     }
 
     #[test]
@@ -4151,5 +4370,25 @@ mod tests {
             reply.thought.as_deref(),
             Some("Ollama internal thinking trace...")
         );
+    }
+
+    #[test]
+    fn decode_tool_arguments_sanitizes_fences_tokens_and_trailing_commas() {
+        // 1. Markdown fences
+        let fenced =
+            Value::String("```json\n{\"command\": \"curl -s https://example.com\"}\n```".into());
+        let decoded = decode_tool_arguments(&fenced);
+        assert_eq!(decoded["command"], "curl -s https://example.com");
+
+        // 2. DeepSeek DSML token
+        let dsml = Value::String("{\"command\": \"ls -la\"}</｜｜DSML｜｜".into());
+        let decoded_dsml = decode_tool_arguments(&dsml);
+        assert_eq!(decoded_dsml["command"], "ls -la");
+
+        // 3. Trailing commas
+        let trailing = Value::String("{\"command\": \"echo ok\", \"flag\": true, }".into());
+        let decoded_trailing = decode_tool_arguments(&trailing);
+        assert_eq!(decoded_trailing["command"], "echo ok");
+        assert_eq!(decoded_trailing["flag"], true);
     }
 }

@@ -381,6 +381,7 @@ pub async fn handle_slash_command(
             | "/shells"
             | "/palette"
             | "/theme"
+            | "/onboard"
             | "/image"
             | "/paste"
             | "/avatar"
@@ -487,6 +488,7 @@ pub async fn handle_slash_command(
                     ui.push_notice(format!("Already in session '{target_id}'."));
                 } else {
                     session.chat_id = target_id.clone();
+                    crate::companion_navigation::set_chat(&session.chat_id);
                     mint_core::live_sync::update_live_sync_chat_id(&session.chat_id);
                     ui.reload_transcript(&session.chat_id, &session.current_dir);
                     if let Ok(memory) = MemoryStore::open_default() {
@@ -608,6 +610,19 @@ pub async fn handle_slash_command(
                     }
                 }
                 Ok(None) => {}
+                Err(error) => ui.report_error(&error),
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/onboard" => {
+            match ui.prompt_onboard(&mut session.config) {
+                Ok(true) => {
+                    ui.push_notice("✔ Configuration updated successfully.");
+                }
+                Ok(false) => {
+                    ui.push_notice("Onboarding cancelled.");
+                }
                 Err(error) => ui.report_error(&error),
             }
             Some(SlashResult::Handled)
@@ -1089,7 +1104,11 @@ pub async fn handle_slash_command(
                 println!(
                     "{DIM}When enabled, the agent proposes a skill after a reusable task. Each proposed diff needs your approval before saving.{RESET}"
                 );
-                let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
+                let options = if session.config.auto_skill_writing {
+                    vec!["on (current)".to_string(), "off".to_string()]
+                } else {
+                    vec!["on".to_string(), "off (current)".to_string()]
+                };
                 let current = if session.config.auto_skill_writing {
                     &options[0]
                 } else {
@@ -1710,6 +1729,17 @@ pub async fn handle_slash_command(
                 .unwrap_or((rest, ""));
 
             match sub {
+                "stop" if arg.is_empty() => {
+                    match mint_core::bg_shell::shells_command(
+                        "stop",
+                        &session.current_dir,
+                        &None,
+                        &session.config,
+                    ) {
+                        Ok(message) => ui.push_notice(message),
+                        Err(error) => ui.push_notice(error.to_string()),
+                    }
+                }
                 "show" if !arg.is_empty() => match mint_core::bg_shell::snapshot(arg) {
                     Ok(job) => {
                         let mut lines =
@@ -1737,7 +1767,7 @@ pub async fn handle_slash_command(
                     Ok(msg) => ui.push_notice(msg),
                     Err(_) => ui.push_notice("No such job."),
                 },
-                _ => ui.push_notice("Usage: /shells [all|show <id>|stop <id>|kill <id>]"),
+                _ => ui.push_notice("Usage: /shells [all|show <id>|stop [<id>]|kill <id>]"),
             }
             Some(SlashResult::Handled)
         }
@@ -1988,9 +2018,15 @@ pub async fn handle_slash_command(
                     }
                 };
                 if unique_skills.is_empty() {
-                    println!("No learned skills found. Use '/learn <path>' to add one.\n");
+                    println!(
+                        "No learned skills found in workspace: {}. Use '/learn <path>' to add one.\n",
+                        session.current_dir.display()
+                    );
                 } else {
-                    println!("Learned AI Skills:");
+                    println!(
+                        "Learned AI Skills (Workspace: {}):",
+                        session.current_dir.display()
+                    );
                     for entry in &unique_skills {
                         let skill = &entry.skill;
                         let name = &skill.name;
@@ -2036,10 +2072,11 @@ pub async fn handle_slash_command(
                     let skills = load_all_available_skills(&session.current_dir);
                     if skills.is_empty() {
                         println!(
-                            "No skills found. Use `/skill add <path|github-repo|url>` to add one.\n"
+                            "No skills found in workspace: {}. Use `/skill add <path|github-repo|url>` to add one.\n",
+                            session.current_dir.display()
                         );
                     } else {
-                        println!("Skills:");
+                        println!("Skills (Workspace: {}):", session.current_dir.display());
                         for skill in &skills {
                             let loc = if skill.source_path.contains("/.config/mint/mint-skills") {
                                 "Global"
@@ -2230,6 +2267,77 @@ pub async fn handle_slash_command(
                 _ => println!(
                     "{WARN}/memory usage: list | facts | forget <id> | promote <id> | clear | get <key> | set <key> <val> | skills{RESET}\n"
                 ),
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/trajectory" => {
+            let memory = match MemoryStore::open_default() {
+                Ok(m) => m,
+                Err(e) => {
+                    println!("{ERROR}Memory error:{RESET} {e}\n");
+                    return Some(SlashResult::Handled);
+                }
+            };
+            let chat_id = mint_core::scoped_chat_id(
+                CHAT_CLI_ID,
+                Some(&session.current_dir.to_string_lossy()),
+            );
+            let (subcmd, args) = rest
+                .split_once(char::is_whitespace)
+                .map(|(c, a)| (c, a.trim()))
+                .unwrap_or((rest, ""));
+
+            match subcmd {
+                "export" => {
+                    let (run_id_opt, path_opt) = if args.is_empty() {
+                        (None, None)
+                    } else if args.starts_with("run-") {
+                        let mut parts = args.split_whitespace();
+                        let r = parts.next();
+                        let p = parts.next();
+                        (r, p)
+                    } else {
+                        (None, Some(args))
+                    };
+
+                    match memory.export_trajectory_json(&chat_id, run_id_opt) {
+                        Ok(json) => {
+                            let default_path = format!("trajectory-{}.json", chrono::Local::now().format("%Y%m%d%H%M%S"));
+                            let dest_path = path_opt.unwrap_or(&default_path);
+                            match std::fs::write(dest_path, &json) {
+                                Ok(_) => println!("{MINT}Exported SWE-bench trajectory to {dest_path}{RESET}\n"),
+                                Err(err) => println!("{ERROR}Failed to write trajectory to {dest_path}:{RESET} {err}\n"),
+                            }
+                        }
+                        Err(e) => println!("{ERROR}Failed to export trajectory:{RESET} {e}\n"),
+                    }
+                }
+                _ => {
+                    match memory.export_trajectory_json(&chat_id, None) {
+                        Ok(json) => {
+                            if let Ok(run) = mint_core::orchestration::trajectory_schema::StandardTrajectoryRun::from_json(&json) {
+                                println!("\n{BLUE}Execution Trajectory (v{}){RESET}", run.schema_version);
+                                println!("  {DIM}Run ID:{RESET} {}", run.run_id);
+                                println!("  {DIM}Task:{RESET} {}", run.task);
+                                println!("  {DIM}Model:{RESET} {} ({})", run.model, run.provider);
+                                println!("  {DIM}Outcome:{RESET} {}", run.outcome);
+                                println!("  {DIM}Metrics:{RESET} {} steps | {} tokens | {:.1}s", run.total_steps, run.total_tokens, run.duration_secs);
+                                if !run.trajectory.is_empty() {
+                                    println!("\n  {BLUE}Step Timeline:{RESET}");
+                                    for s in &run.trajectory {
+                                        let status_color = if s.status == "success" { MINT } else { ERROR };
+                                        println!("    {DIM}Step {:>2}:{RESET} {:<15} {status_color}{:<10}{RESET} ({}ms)", s.step, s.action, s.status, s.duration_ms);
+                                    }
+                                }
+                                println!("\n{DIM}Use '/trajectory export [path.json]' to save SWE-bench JSON.{RESET}\n");
+                            } else {
+                                println!("{DIM}Trajectory JSON ({} bytes). Use '/trajectory export' to save.{RESET}\n", json.len());
+                            }
+                        }
+                        Err(e) => println!("{DIM}No recorded trajectory for this session:{RESET} {e}\n"),
+                    }
+                }
             }
             Some(SlashResult::Handled)
         }

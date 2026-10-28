@@ -3,6 +3,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
+import { pdfjsAssets } from './src/bin/pdfjs-assets.mjs'
 
 export default defineConfig({
   root: resolve(__dirname, 'src/renderer'),
@@ -25,7 +26,7 @@ export default defineConfig({
       ]
     }
   },
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), pdfjsAssets()],
   resolve: {
     alias: {
       '@/components/ui': resolve(__dirname, 'src/renderer/shared/components/ui'),
