@@ -67,6 +67,7 @@ export const DEFAULT_CONFIG = {
   bflApiKey: '',
   bflModel: 'flux-pro-1.1',
   automationBrowser: 'chromium',
+  browserAutomationEnabled: true,
   browserAgentMode: 'headless',
   browserExecutable: '',
   browserViewportWidth: 1440,

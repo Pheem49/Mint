@@ -1,5 +1,12 @@
 # Release Notes - Mint Agent v1.17.0
 
+## Seamless On-Demand Headless Browser Automation (CLI, Desktop, and Web)
+- **Zero-Setup Headless Browsing**: Mint Agent automatically spawns an isolated Chromium instance (`--headless=new`, `--disable-gpu`, `--no-sandbox`, 1440x900 viewport) on demand whenever web inspection or navigation is requested, eliminating the need to run `mint auto` in a separate terminal.
+- **Default Browser Tools**: Enabled `browser_open`, `browser_screenshot`, `browser_read`, `browser_click`, and `browser_observe` by default across all platforms without requiring manual configuration.
+- **Prompt Guidance & Anti-Scraping Rules**: Updated system prompt instructions to prioritize `browser_open` for web URLs / SPAs and strictly forbid writing ad-hoc Python scraping scripts (`urllib`, `requests`) or raw `curl` when inspecting web pages.
+- **Age Gate (18+) & Cookie Consent Protocols**: Automatically dismisses standard Age Verification gates (`"I am 18 or older"`, `"Enter Site"`) and cookie consent banners via `browser_click`; prompts for user confirmation with visual screenshots (`browser_screenshot` + `ask_user`) for sensitive content warnings.
+- **Settings Toggle Parity**: Added the `Browser automation tools` toggle switch in the Automation tab across Desktop and Web Settings (defaulting to enabled).
+
 ## Queued Messages & Steering (CLI, Desktop, and Web)
 - **Queued Prompts Tray & Auto-Dispatching**: Users can now queue instructions and multi-modal attachments while the agent is actively executing (`sending`). Queued messages are displayed in a dedicated tray above the composer and auto-dispatched sequentially as soon as the current turn concludes.
 - **Stop with Paused Queue (Safe Interruption)**: Clicking the Stop button halts the active turn while preserving all queued messages in a `⏸ Queue paused` state, allowing users to inspect, resume, edit, or clear queued items safely.

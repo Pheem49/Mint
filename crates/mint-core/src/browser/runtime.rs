@@ -73,6 +73,12 @@ impl ManagedBrowser {
         ];
         if headless {
             args.push("--headless=new".into());
+            args.push("--disable-gpu".into());
+            if cfg!(target_os = "linux") {
+                args.push("--no-sandbox".into());
+                args.push("--disable-setuid-sandbox".into());
+                args.push("--disable-dev-shm-usage".into());
+            }
         }
         if let Some(extra) = config
             .extra

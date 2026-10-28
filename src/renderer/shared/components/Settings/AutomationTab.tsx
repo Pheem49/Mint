@@ -27,6 +27,22 @@ export default function AutomationTab({
             </h2>
           </div>
         </div>
+        <div className="toggle-card" style={{ marginBottom: '16px' }}>
+          <div className="toggle-row">
+            <div>
+              <label>Browser automation tools</label>
+              <p className="hint">Allows the agent to open web pages, execute JavaScript/SPA, and capture screenshots automatically using headless Chromium.</p>
+            </div>
+            <label className="settings-toggle-switch">
+              <input
+                type="checkbox"
+                checked={config.browserAutomationEnabled ?? true}
+                onChange={(e) => updateField('browserAutomationEnabled', e.target.checked)}
+              />
+              <span className="settings-toggle-slider"></span>
+            </label>
+          </div>
+        </div>
         <div className="form-grid single">
           <div className="setting-row">
             <label>Agent browser mode</label>

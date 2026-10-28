@@ -43,7 +43,7 @@ pub fn enable_browser_tools(config: &mut MintConfig) -> bool {
     changed
 }
 
-pub async fn spawn_automation_browser_with_url(
+async fn spawn_browser_process(
     config: &MintConfig,
     initial_url: Option<&str>,
 ) -> Result<(), String> {
@@ -54,13 +54,6 @@ pub async fn spawn_automation_browser_with_url(
         .unwrap_or("http://127.0.0.1:9222/json/list");
 
     if fetch_pages_endpoint(endpoint).await.is_ok() {
-        if let Some(url) = initial_url {
-            let trimmed = url.trim();
-            if !trimmed.is_empty() {
-                ensure_page_open(config).await?;
-                super::navigate::navigate(config, trimmed).await?;
-            }
-        }
         return Ok(());
     }
 
@@ -77,51 +70,38 @@ pub async fn spawn_automation_browser_with_url(
         .and_then(Value::as_str)
         .unwrap_or("chromium");
 
-    let profile_dir = dirs::config_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("mint")
-        .join("automation-profile");
-    let profile_arg = format!("--user-data-dir={}", profile_dir.to_string_lossy());
+    let args = build_browser_args(config, endpoint, initial_url)?;
 
-    let mut args = vec![
-        format!(
-            "--remote-debugging-port={}",
-            reqwest::Url::parse(endpoint)
-                .map_err(|e| e.to_string())?
-                .port_or_known_default()
-                .ok_or("Missing debugging port")?
-        ),
-        "--no-first-run".to_owned(),
-        "--no-default-browser-check".to_owned(),
-        profile_arg,
-    ];
-
-    if let Some(url) = initial_url {
-        let trimmed = url.trim();
-        if !trimmed.is_empty() {
-            args.push(trimmed.to_owned());
-        }
-    }
+    let custom_exe = config
+        .extra
+        .get("browserExecutable")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
     let mut spawned = false;
-    let executables: Vec<&str> = if cfg!(target_os = "windows") {
-        vec!["chrome.exe", "chromium.exe", "msedge.exe"]
+    let mut executables: Vec<&str> = Vec::new();
+    if let Some(exe) = custom_exe {
+        executables.push(exe);
+    }
+    if cfg!(target_os = "windows") {
+        executables.extend_from_slice(&["chrome.exe", "chromium.exe", "msedge.exe"]);
     } else if cfg!(target_os = "macos") {
-        vec![
+        executables.extend_from_slice(&[
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             "/Applications/Chromium.app/Contents/MacOS/Chromium",
             "chromium",
             "google-chrome",
-        ]
+        ]);
     } else {
-        vec![
+        executables.extend_from_slice(&[
             "chromium",
             "google-chrome-stable",
             "google-chrome",
             "chrome",
             "chromium-browser",
-        ]
-    };
+        ]);
+    }
 
     for exe in executables {
         if std::process::Command::new(exe)
@@ -156,12 +136,12 @@ pub async fn spawn_automation_browser_with_url(
 }
 
 pub async fn spawn_automation_browser(config: &MintConfig) -> Result<(), String> {
-    spawn_automation_browser_with_url(config, None).await
+    spawn_browser_process(config, None).await
 }
 
 pub async fn ensure_page_open(config: &MintConfig) -> Result<(), String> {
     if !is_browser_running(config).await {
-        return Err("Browser automation is not running. Please run 'mint auto' first.".to_string());
+        spawn_browser_process(config, None).await?;
     }
     let endpoint = config
         .extra
@@ -188,4 +168,114 @@ pub async fn ensure_page_open(config: &MintConfig) -> Result<(), String> {
             .map_err(|e| format!("failed to open new tab: {e}"))?;
     }
     Ok(())
+}
+
+pub async fn spawn_automation_browser_with_url(
+    config: &MintConfig,
+    initial_url: Option<&str>,
+) -> Result<(), String> {
+    spawn_browser_process(config, initial_url).await?;
+    if let Some(url) = initial_url {
+        let trimmed = url.trim();
+        if !trimmed.is_empty() {
+            ensure_page_open(config).await?;
+            super::navigate::navigate(config, trimmed).await?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn build_browser_args(
+    config: &MintConfig,
+    endpoint: &str,
+    initial_url: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let agent_mode = config
+        .extra
+        .get("browserAgentMode")
+        .and_then(Value::as_str)
+        .unwrap_or("headless");
+
+    let profile_dir = dirs::config_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("mint")
+        .join("automation-profile");
+    let profile_arg = format!("--user-data-dir={}", profile_dir.to_string_lossy());
+
+    let mut args = vec![
+        format!(
+            "--remote-debugging-port={}",
+            reqwest::Url::parse(endpoint)
+                .map_err(|e| e.to_string())?
+                .port_or_known_default()
+                .ok_or("Missing debugging port")?
+        ),
+        "--no-first-run".to_owned(),
+        "--no-default-browser-check".to_owned(),
+        profile_arg,
+    ];
+
+    if agent_mode == "headless" {
+        args.push("--headless=new".to_owned());
+        args.push("--disable-gpu".to_owned());
+        if cfg!(target_os = "linux") {
+            args.push("--no-sandbox".to_owned());
+            args.push("--disable-setuid-sandbox".to_owned());
+            args.push("--disable-dev-shm-usage".to_owned());
+        }
+    }
+
+    let width = config
+        .extra
+        .get("browserViewportWidth")
+        .and_then(Value::as_u64)
+        .unwrap_or(1440);
+    let height = config
+        .extra
+        .get("browserViewportHeight")
+        .and_then(Value::as_u64)
+        .unwrap_or(900);
+    args.push(format!("--window-size={width},{height}"));
+
+    if let Some(url) = initial_url {
+        let trimmed = url.trim();
+        if !trimmed.is_empty() {
+            args.push(trimmed.to_owned());
+        }
+    }
+
+    Ok(args)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_browser_args_headless_mode() {
+        let config = MintConfig::default();
+        let args = build_browser_args(&config, "http://127.0.0.1:9222/json/list", None).unwrap();
+        assert!(args.contains(&"--headless=new".to_string()));
+        assert!(args.contains(&"--window-size=1440,900".to_string()));
+        assert!(args.iter().any(|a| a.starts_with("--remote-debugging-port=9222")));
+    }
+
+    #[test]
+    fn build_browser_args_headed_mode() {
+        let mut config = MintConfig::default();
+        config
+            .extra
+            .insert("browserAgentMode".into(), serde_json::json!("headed"));
+        config
+            .extra
+            .insert("browserViewportWidth".into(), serde_json::json!(1920));
+        config
+            .extra
+            .insert("browserViewportHeight".into(), serde_json::json!(1080));
+
+        let args = build_browser_args(&config, "http://127.0.0.1:9222/json/list", Some("https://example.com")).unwrap();
+        assert!(!args.contains(&"--headless=new".to_string()));
+        assert!(args.contains(&"--window-size=1920,1080".to_string()));
+        assert!(args.contains(&"https://example.com".to_string()));
+    }
 }
