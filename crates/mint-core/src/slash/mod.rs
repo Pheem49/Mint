@@ -316,6 +316,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         "/thinking" | "/think" => cmd_thinking(rest, config),
         "/temperature" | "/temp" => cmd_temperature(rest, config),
         "/steps" | "/max-steps" => cmd_steps(rest, config),
+        "/browser" => cmd_browser(rest, config),
         // `/searchProvider` is a documented camelCase alias (see UNDOCUMENTED_ALIASES).
         "/search-provider" | "/searchprovider" => cmd_extra_provider(
             "/search-provider",
@@ -1367,6 +1368,150 @@ fn cmd_steps(rest: &str, config: &mut MintConfig) -> SlashResponse {
         Err(_) => error(format!(
             "Invalid step limit `{raw}`. Please specify a number between 10 and 200, or `reset`."
         )),
+    }
+}
+
+fn cmd_browser(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    let raw = rest.trim();
+    let current_enabled = config
+        .extra
+        .get("browserAutomationEnabled")
+        .and_then(serde_json::Value::as_bool)
+        != Some(false);
+    let current_mode = config
+        .extra
+        .get("browserAgentMode")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("headless");
+    let custom_exe = config
+        .extra
+        .get("browserExecutable")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let exe_display = if !custom_exe.trim().is_empty() {
+        custom_exe.trim()
+    } else {
+        "Auto-detect (Chrome / Chromium / Edge)"
+    };
+    let width = config
+        .extra
+        .get("browserViewportWidth")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1440);
+    let height = config
+        .extra
+        .get("browserViewportHeight")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(900);
+    let debug_url = config
+        .extra
+        .get("browserDebugUrl")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("http://127.0.0.1:9222/json/list");
+
+    if raw.is_empty() {
+        return SlashResponse::NeedsChoice {
+            command: "/browser".into(),
+            title: format!(
+                "🌐 Browser Automation Configuration\n• Tools: {}\n• Mode: {}\nSelect an option to configure or run `/browser [on|off|headless|headed|status]`",
+                if current_enabled { "Enabled (on)" } else { "Disabled (off)" },
+                if current_mode == "headless" { "headless Browser" } else { "headed Automation" }
+            ),
+            options: vec![
+                SlashChoice {
+                    label: format!(
+                        "on — Enable browser automation tools{}",
+                        if current_enabled { " (current)" } else { "" }
+                    ),
+                    value: "on".into(),
+                },
+                SlashChoice {
+                    label: format!(
+                        "off — Disable browser automation tools{}",
+                        if !current_enabled { " (current)" } else { "" }
+                    ),
+                    value: "off".into(),
+                },
+                SlashChoice {
+                    label: format!(
+                        "headless Browser — Run silently in background without window{}",
+                        if current_mode == "headless" { " (current)" } else { "" }
+                    ),
+                    value: "headless".into(),
+                },
+                SlashChoice {
+                    label: format!(
+                        "headed Automation — Show browser window on screen{}",
+                        if current_mode == "headed" { " (current)" } else { "" }
+                    ),
+                    value: "headed".into(),
+                },
+                SlashChoice {
+                    label: "status — View current configuration & detected Chrome".into(),
+                    value: "status".into(),
+                },
+            ],
+        };
+    }
+
+    let normalized = raw.to_ascii_lowercase();
+    match normalized.as_str() {
+        "status" => SlashResponse::Message {
+            markdown: format!(
+                "### 🌐 Browser Automation Status\n\n\
+                 - **Tools Enabled**: {}\n\
+                 - **Browser Mode**: {}\n\
+                 - **Viewport Size**: `{}` × `{}`\n\
+                 - **Executable**: `{}`\n\
+                 - **Debugging Endpoint**: `{}`\n\n\
+                 *Use `/browser on` or `/browser off` to toggle tools, and `/browser headless` or `/browser headed` to change display mode.*",
+                if current_enabled { "🟢 **Enabled** (`on`)" } else { "🔴 **Disabled** (`off`)" },
+                if current_mode == "headless" { "🕶️ `headless Browser` (runs in background)" } else { "🖥️ `headed Automation` (shows window)" },
+                width,
+                height,
+                exe_display,
+                debug_url
+            ),
+        },
+        "on" | "enable" => {
+            config
+                .extra
+                .insert("browserAutomationEnabled".into(), serde_json::json!(true));
+            SlashResponse::Applied {
+                markdown: "🟢 **Browser automation tools enabled (`on`)**.\nAgent can inspect web pages and capture screenshots using Headless Chromium.".into(),
+                effects: vec![SlashEffect::ConfigChanged],
+            }
+        }
+        "off" | "disable" => {
+            config
+                .extra
+                .insert("browserAutomationEnabled".into(), serde_json::json!(false));
+            SlashResponse::Applied {
+                markdown: "🔴 **Browser automation tools disabled (`off`)**.".into(),
+                effects: vec![SlashEffect::ConfigChanged],
+            }
+        }
+        "headless" | "headless browser" => {
+            config
+                .extra
+                .insert("browserAgentMode".into(), serde_json::json!("headless"));
+            SlashResponse::Applied {
+                markdown: "🕶️ **Browser mode set to `headless Browser`**.\nAutomation will run silently in the background without opening a window.".into(),
+                effects: vec![SlashEffect::ConfigChanged],
+            }
+        }
+        "headed" | "headed automation" => {
+            config
+                .extra
+                .insert("browserAgentMode".into(), serde_json::json!("headed"));
+            SlashResponse::Applied {
+                markdown: "🖥️ **Browser mode set to `headed Automation`**.\nAutomation will display the browser window on screen in real time.".into(),
+                effects: vec![SlashEffect::ConfigChanged],
+            }
+        }
+        _ => SlashResponse::Message {
+            markdown: "Usage: `/browser [on|off|headless|headed|status]`".into(),
+        },
     }
 }
 
@@ -3382,6 +3527,87 @@ mod tests {
                 assert!(markdown.contains("40"));
                 assert_eq!(cfg.agent_max_steps, 40);
                 assert!(effects.contains(&SlashEffect::ConfigChanged));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+    }
+
+    #[test]
+    fn browser_slash_command_behavior() {
+        let mut cfg = MintConfig::default();
+
+        // 1. Bare /browser returns NeedsChoice with options
+        match execute(&req("/browser"), &mut cfg) {
+            SlashResponse::NeedsChoice {
+                command, options, ..
+            } => {
+                assert_eq!(command, "/browser");
+                assert!(options.iter().any(|o| o.value == "on"));
+                assert!(options.iter().any(|o| o.value == "off"));
+                assert!(options.iter().any(|o| o.value == "headless"));
+                assert!(options.iter().any(|o| o.value == "headed"));
+                assert!(options.iter().any(|o| o.value == "status"));
+            }
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
+        }
+
+        // 2. /browser status returns informative message
+        match execute(&req("/browser status"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("Browser Automation Status"));
+                assert!(markdown.contains("Enabled"));
+                assert!(markdown.contains("headless Browser"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 3. /browser off disables tools
+        match execute(&req("/browser off"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+                assert_eq!(
+                    cfg.extra.get("browserAutomationEnabled"),
+                    Some(&serde_json::json!(false))
+                );
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 4. /browser on re-enables tools
+        match execute(&req("/browser on"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+                assert_eq!(
+                    cfg.extra.get("browserAutomationEnabled"),
+                    Some(&serde_json::json!(true))
+                );
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 5. /browser headed switches mode
+        match execute(&req("/browser headed"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+                assert_eq!(
+                    cfg.extra.get("browserAgentMode"),
+                    Some(&serde_json::json!("headed"))
+                );
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 6. /browser headless switches mode back
+        match execute(&req("/browser headless"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+                assert_eq!(
+                    cfg.extra.get("browserAgentMode"),
+                    Some(&serde_json::json!("headless"))
+                );
             }
             other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
         }
