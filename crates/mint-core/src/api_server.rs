@@ -116,6 +116,7 @@ pub(crate) fn log_api_err(context: &str, error: &dyn std::fmt::Display) {
 }
 
 pub(crate) fn should_log_api_route(route: &str) -> bool {
+    let route = route.split('?').next().unwrap_or(route);
     if !route.starts_with("/api/") {
         return false;
     }
@@ -142,6 +143,9 @@ pub(crate) fn should_log_api_route(route: &str) -> bool {
         || route.starts_with("/api/mods/")
         || route == "/api/models"
         || route.starts_with("/api/models/")
+        || (route.starts_with("/api/library/")
+            && (route.ends_with("/thumbnail") || route.ends_with("/content")))
+        || route.starts_with("/api/mcp-artifacts/")
     {
         return false;
     }
@@ -2077,9 +2081,26 @@ mod tests {
             "/api/proxy-image?url=https://example.com/pic.jpg"
         ));
         assert!(!should_log_api_route("/not-api/test"));
+        assert!(!should_log_api_route(
+            "/api/library/c2db083a-728b-49fb-8e96-ef1c6c4553a0/thumbnail"
+        ));
+        assert!(!should_log_api_route(
+            "/api/library/mint-20261011-130823-512a5fb5/thumbnail"
+        ));
+        assert!(!should_log_api_route(
+            "/api/library/c2db083a-728b-49fb-8e96-ef1c6c4553a0/content"
+        ));
+        assert!(!should_log_api_route("/api/mcp-artifacts/artifact-123"));
 
         // Standard operational API calls should still be logged
         assert!(should_log_api_route("/api/library"));
+        assert!(should_log_api_route("/api/library?kind=file"));
+        assert!(should_log_api_route(
+            "/api/library/c2db083a-728b-49fb-8e96-ef1c6c4553a0"
+        ));
+        assert!(should_log_api_route(
+            "/api/library/c2db083a-728b-49fb-8e96-ef1c6c4553a0/trash"
+        ));
         assert!(should_log_api_route("/api/system-info"));
         assert!(should_log_api_route("/api/select-folder"));
     }
