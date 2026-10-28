@@ -6,6 +6,7 @@
 - **Prompt Guidance & Anti-Scraping Rules**: Updated system prompt instructions to prioritize `browser_open` for web URLs / SPAs and strictly forbid writing ad-hoc Python scraping scripts (`urllib`, `requests`) or raw `curl` when inspecting web pages.
 - **Age Gate (18+) & Cookie Consent Protocols**: Automatically dismisses standard Age Verification gates (`"I am 18 or older"`, `"Enter Site"`) and cookie consent banners via `browser_click`; prompts for user confirmation with visual screenshots (`browser_screenshot` + `ask_user`) for sensitive content warnings.
 - **Settings Toggle Parity**: Added the `Browser automation tools` toggle switch in the Automation tab across Desktop and Web Settings (defaulting to enabled).
+- **Interactive Slash Commands (`/browser` & `/browser status`)**: Added the `/browser` command across CLI TUI, Desktop, and Web. Pressing Enter opens an interactive prompt choice to toggle tools (`on`/`off`), switch between `headless Browser` and `headed Automation`, or view browser status and detected Chrome binary via `/browser status`.
 
 ## Queued Messages & Steering (CLI, Desktop, and Web)
 - **Queued Prompts Tray & Auto-Dispatching**: Users can now queue instructions and multi-modal attachments while the agent is actively executing (`sending`). Queued messages are displayed in a dedicated tray above the composer and auto-dispatched sequentially as soon as the current turn concludes.
