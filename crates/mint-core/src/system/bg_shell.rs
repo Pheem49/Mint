@@ -994,14 +994,17 @@ fn owns_port(_pid: u32, _port: u16) -> bool {
     false
 }
 
+static HTTP_URL_PATTERN: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"http://(?:localhost|127\.0\.0\.1|0\.0\.0\.0):([0-9]{1,5})").unwrap()
+});
+static PYTHON_SERVER_PATTERN: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"-m\s+http\.server(?:\s+(\d+))?").unwrap());
+static SERVING_PATTERN: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"Serving HTTP on .* port (\d+)").unwrap());
+
 fn spawn_readiness(job: Arc<JobRecord>) {
     std::thread::spawn(move || {
-        let pattern =
-            regex::Regex::new(r"http://(?:localhost|127\.0\.0\.1|0\.0\.0\.0):([0-9]{1,5})")
-                .unwrap();
-        let python = regex::Regex::new(r"-m\s+http\.server(?:\s+(\d+))?").unwrap();
-        let serving = regex::Regex::new(r"Serving HTTP on .* port (\d+)").unwrap();
-        let command_port = python.captures(&job.command).and_then(|c| {
+        let command_port = PYTHON_SERVER_PATTERN.captures(&job.command).and_then(|c| {
             c.get(1)
                 .map_or(Some(8000), |p| p.as_str().parse::<u16>().ok())
         });
@@ -1015,11 +1018,11 @@ fn spawn_readiness(job: Arc<JobRecord>) {
                 job.stdout.lock().unwrap().data,
                 job.stderr.lock().unwrap().data
             );
-            let port = pattern
+            let port = HTTP_URL_PATTERN
                 .captures(&text)
                 .and_then(|c| c[1].parse::<u16>().ok())
                 .or_else(|| {
-                    serving
+                    SERVING_PATTERN
                         .captures(&text)
                         .and_then(|c| c[1].parse::<u16>().ok())
                 })

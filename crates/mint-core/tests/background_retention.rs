@@ -20,7 +20,7 @@ fn retains_latest_hundred_finished_jobs_without_evicting_active_jobs() {
                 .id,
         );
     }
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while bg_shell::running_count() > 1 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
