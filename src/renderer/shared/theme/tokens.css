@@ -441,6 +441,10 @@
 
   /* Surfaces */
   --bg-canvas: #101010;
+  --bg-color: #101010;
+  --bg-base: #101010;
+  --app-bg: #101010;
+  --bg-gradient: #101010;
   --sidebar-bg: #161616;
   --bg-surface: #161616;
   --bg-surface-raised: #1c1c1c;
@@ -610,7 +614,8 @@
 :root,
 [data-theme="dark"],
 [data-theme="light"],
-[data-theme="midnight"] {
+[data-theme="midnight"],
+[data-theme="studio"] {
   --bg-color: var(--bg-canvas);
   --bg-base: var(--bg-canvas);
   --app-bg: var(--bg-canvas);

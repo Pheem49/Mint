@@ -13,6 +13,11 @@ body, html, #root {
   background: transparent;
 }
 
+[data-theme="studio"],
+[data-theme="studio"] body {
+  background-color: #101010;
+}
+
 body, html {
   font-family: var(--font-ui, 'Inter', 'Noto Sans Thai', ui-sans-serif, system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
