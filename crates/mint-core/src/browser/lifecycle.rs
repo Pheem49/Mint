@@ -95,11 +95,13 @@ async fn spawn_browser_process(
         ]);
     } else {
         executables.extend_from_slice(&[
-            "chromium",
-            "google-chrome-stable",
             "google-chrome",
+            "google-chrome-stable",
+            "chromium",
             "chrome",
             "chromium-browser",
+            "/opt/google/chrome/google-chrome",
+            "/opt/google/chrome/chrome",
         ]);
     }
 
