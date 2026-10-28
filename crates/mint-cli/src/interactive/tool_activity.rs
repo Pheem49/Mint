@@ -123,6 +123,64 @@ impl ToolActivity {
         title
     }
     pub fn subject(&self) -> String {
+        let extract_field = |keys: &[&str]| -> Option<String> {
+            for &key in keys {
+                if let Some(value) = self.input.get(key).and_then(Value::as_str) {
+                    if let Some(line) = value
+                        .lines()
+                        .find(|l| !l.trim().is_empty() && !mint_core::is_dummy_value(l))
+                    {
+                        return Some(line.trim().to_owned());
+                    }
+                }
+            }
+            if let Some(args) = self.input.get("arguments") {
+                if let Some(obj) = args.as_object() {
+                    for &key in keys {
+                        if let Some(value) = obj.get(key).and_then(Value::as_str) {
+                            if let Some(line) = value
+                                .lines()
+                                .find(|l| !l.trim().is_empty() && !mint_core::is_dummy_value(l))
+                            {
+                                return Some(line.trim().to_owned());
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        };
+
+        if self.shell() {
+            if let Some(cmd) =
+                extract_field(&["command", "cmd", "script", "exec", "code", "bash", "sh"])
+            {
+                return cmd;
+            }
+        } else if matches!(
+            self.action.as_str(),
+            "web_search" | "search_code" | "knowledge_search"
+        ) {
+            if let Some(q) = extract_field(&[
+                "query",
+                "q",
+                "keyword",
+                "search",
+                "prompt",
+                "searchTerm",
+                "search_term",
+            ]) {
+                return q;
+            }
+        } else if matches!(
+            self.action.as_str(),
+            "read_file" | "write_file" | "view_image"
+        ) {
+            if let Some(p) = extract_field(&["path"]) {
+                return p;
+            }
+        }
+
         for key in [
             "description",
             "command",
@@ -138,7 +196,10 @@ impl ToolActivity {
             "url",
         ] {
             if let Some(value) = self.input.get(key).and_then(Value::as_str) {
-                if let Some(line) = value.lines().find(|line| !line.trim().is_empty()) {
+                if let Some(line) = value
+                    .lines()
+                    .find(|line| !line.trim().is_empty() && !mint_core::is_dummy_value(line))
+                {
                     return line.trim().to_owned();
                 }
             }
@@ -147,7 +208,9 @@ impl ToolActivity {
             if let Some(obj) = args.as_object() {
                 for key in ["command", "cmd", "script", "exec", "code", "bash", "sh"] {
                     if let Some(value) = obj.get(key).and_then(Value::as_str) {
-                        if let Some(line) = value.lines().find(|line| !line.trim().is_empty()) {
+                        if let Some(line) = value.lines().find(|line| {
+                            !line.trim().is_empty() && !mint_core::is_dummy_value(line)
+                        }) {
                             return line.trim().to_owned();
                         }
                     }
@@ -549,5 +612,56 @@ mod tests {
         let lines = tool.detail_lines();
         assert!(lines.iter().any(|l| l.to_string() == "Input"));
         assert!(!lines.iter().any(|l| l.to_string() == "Command"));
+    }
+
+    #[test]
+    fn subject_ignores_dummy_null_strings_and_prioritizes_action() {
+        let shell_tool = ToolActivity {
+            entry: 0,
+            call_id: None,
+            action: "run_shell".into(),
+            input: serde_json::json!({
+                "command": "cd /tmp && ls",
+                "path": "null",
+                "query": "null",
+                "name": "null"
+            }),
+            subagent: None,
+            started: Instant::now(),
+            elapsed: None,
+            result: None,
+            status: None,
+        };
+        assert_eq!(shell_tool.subject(), "cd /tmp && ls");
+
+        let search_tool = ToolActivity {
+            entry: 0,
+            call_id: None,
+            action: "web_search".into(),
+            input: serde_json::json!({
+                "query": "Kuuko W",
+                "path": "null",
+                "command": "null"
+            }),
+            subagent: None,
+            started: Instant::now(),
+            elapsed: None,
+            result: None,
+            status: None,
+        };
+        assert_eq!(search_tool.subject(), "Kuuko W");
+
+        let dummy_only = ToolActivity {
+            entry: 0,
+            call_id: None,
+            action: "run_shell".into(),
+            input: serde_json::json!({"command": "null"}),
+            subagent: None,
+            started: Instant::now(),
+            elapsed: None,
+            result: None,
+            status: None,
+        };
+        assert_eq!(dummy_only.subject(), "");
     }
 }

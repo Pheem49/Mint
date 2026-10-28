@@ -173,9 +173,10 @@ pub use mic_transcribe::{
 pub use orchestration::{
     ActivePlan, AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption,
     ExecutionEvidence, ExecutionState, MCP_ALLOW_ALL_SENTINEL, OrchestrationError, PlanTaskItem,
-    RunTelemetrySummary, ToolExecutionRecord, compact_agent_progress, orchestrate_agent_loop,
-    orchestrate_chat, orchestrate_chat_stream, orchestrate_chat_stream_with_fallback,
-    orchestrate_chat_with_fallback, with_turn_start_listener,
+    RunTelemetrySummary, ToolExecutionRecord, compact_agent_progress, is_dummy_value,
+    orchestrate_agent_loop, orchestrate_chat, orchestrate_chat_stream,
+    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    with_turn_start_listener,
 };
 pub use pictures::{
     PictureEntry, PictureError, delete_saved_picture, list_saved_pictures, parse_data_uri,

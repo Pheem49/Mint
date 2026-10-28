@@ -98,8 +98,9 @@ pub async fn run_code_agent_with_image(
 fn get_field_alias<'a>(input: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
     for &k in keys {
         if let Some(v) = input.get(k).and_then(|v| v.as_str()) {
-            if !v.trim().is_empty() {
-                return Some(v.trim());
+            let trimmed = v.trim();
+            if !trimmed.is_empty() && !mint_core::is_dummy_value(trimmed) {
+                return Some(trimmed);
             }
         }
     }

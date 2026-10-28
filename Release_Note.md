@@ -1,6 +1,8 @@
 # Release Notes - Mint Agent v1.17.0
 
 ## Desktop & Web UI / UX
+- **Live Tool Activity Retention**: Fixed an issue where older tool execution groups (e.g. `run_shell`) were temporarily trimmed during live agent turns once non-thought events exceeded 20; preserved all tool lifecycle and orchestration events throughout live streaming without dropping earlier progress.
+- **Action-First Tool Activity Parsing**: Eliminated `null`/`undefined` placeholder strings from displayed tool arguments across CLI, Desktop, and Web by prioritizing action-specific fields and sanitizing dummy strings in `mint-core` and frontend utilities.
 - **Resilient Media & Image Proxy**: Added local image proxy (`/api/proxy-image`) with disk LRU caching and SSRF protection to bypass ad-blocker false positives; auto-heals unclosed markdown image links (`![alt](url...`), normalizes Twitter/X banner URLs, and displays a graceful fallback card on load errors.
 - **Provider Brand Badges & Logo Picker**: Vector SVG brand logos in chat message footers across 13+ providers; redesigned custom provider logo picker with preset SVGs, emoji selection, and an upload modal with pan/crop/rotate controls.
 - **Theme Refresh (Studio Dark & Charcoal Onyx)**: Introduced IDE-inspired "Studio Dark" palette (`#101010`), refined dark themes with balanced Charcoal Onyx styling, and added sleek neutral gray buttons with subtle mint hover glow.

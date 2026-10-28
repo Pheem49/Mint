@@ -1533,7 +1533,10 @@ pub(super) fn ran_command_labels(action: &str, input: &serde_json::Value) -> Opt
             .or_else(|| input.get("bash"))
             .or_else(|| input.get("sh"))
             .and_then(|v| v.as_str())
-            .filter(|command| !command.trim().is_empty())
+            .filter(|command| {
+                let trimmed = command.trim();
+                !trimmed.is_empty() && !mint_core::is_dummy_value(trimmed)
+            })
             .map(|command| vec![command.trim().to_owned()]),
         "shell_output" | "kill_shell" => input
             .get("job_id")

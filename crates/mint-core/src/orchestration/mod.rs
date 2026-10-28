@@ -1391,9 +1391,28 @@ where
         .map(|input| input.unwrap_or_default())
 }
 
+/// Returns true if a string is an AI dummy placeholder such as `"null"`, `"undefined"`, `"none"`, etc.
+pub fn is_dummy_value(s: &str) -> bool {
+    let lower = s.trim().to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "null" | "undefined" | "none" | "nil" | "(null)" | "\"\"" | "''"
+    )
+}
+
 fn prune_null_values(value: &mut Value) {
     if let Value::Object(map) = value {
-        map.retain(|k, v| !(v.is_null() && k != "path"));
+        map.retain(|k, v| {
+            if v.is_null() && k != "path" {
+                return false;
+            }
+            if let Value::String(s) = v {
+                if is_dummy_value(s) {
+                    return false;
+                }
+            }
+            true
+        });
         for v in map.values_mut() {
             prune_null_values(v);
         }
@@ -6575,5 +6594,42 @@ for line in sys.stdin:
             parsed.command,
             "curl -sL --max-time 25 https://sndiary02.com"
         );
+    }
+
+    #[test]
+    fn test_parse_tool_input_prunes_dummy_null_strings() {
+        let raw = serde_json::json!({
+            "command": "curl -sL https://example.com",
+            "path": "null",
+            "query": "null",
+            "name": "null",
+            "title": "undefined",
+            "url": "none"
+        });
+        let parsed = parse_tool_input("run_shell", raw).unwrap();
+        assert_eq!(parsed.command, "curl -sL https://example.com");
+        assert_eq!(parsed.path, "");
+        assert_eq!(parsed.query, "");
+        assert_eq!(parsed.name, "");
+        assert_eq!(parsed.title, "");
+        assert_eq!(parsed.url, "");
+    }
+
+    #[test]
+    fn test_is_dummy_value() {
+        assert!(is_dummy_value("null"));
+        assert!(is_dummy_value("NULL"));
+        assert!(is_dummy_value("  null  "));
+        assert!(is_dummy_value("undefined"));
+        assert!(is_dummy_value("none"));
+        assert!(is_dummy_value("nil"));
+        assert!(is_dummy_value("(null)"));
+        assert!(is_dummy_value("\"\""));
+        assert!(is_dummy_value("''"));
+
+        assert!(!is_dummy_value("echo null"));
+        assert!(!is_dummy_value("cat /dev/null"));
+        assert!(!is_dummy_value("src/main.rs"));
+        assert!(!is_dummy_value("pwd"));
     }
 }
