@@ -259,7 +259,10 @@ mod tests {
         let args = build_browser_args(&config, "http://127.0.0.1:9222/json/list", None).unwrap();
         assert!(args.contains(&"--headless=new".to_string()));
         assert!(args.contains(&"--window-size=1440,900".to_string()));
-        assert!(args.iter().any(|a| a.starts_with("--remote-debugging-port=9222")));
+        assert!(
+            args.iter()
+                .any(|a| a.starts_with("--remote-debugging-port=9222"))
+        );
     }
 
     #[test]
@@ -275,7 +278,12 @@ mod tests {
             .extra
             .insert("browserViewportHeight".into(), serde_json::json!(1080));
 
-        let args = build_browser_args(&config, "http://127.0.0.1:9222/json/list", Some("https://example.com")).unwrap();
+        let args = build_browser_args(
+            &config,
+            "http://127.0.0.1:9222/json/list",
+            Some("https://example.com"),
+        )
+        .unwrap();
         assert!(!args.contains(&"--headless=new".to_string()));
         assert!(args.contains(&"--window-size=1920,1080".to_string()));
         assert!(args.contains(&"https://example.com".to_string()));

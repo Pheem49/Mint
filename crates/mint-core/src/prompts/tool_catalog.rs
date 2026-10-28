@@ -1112,7 +1112,11 @@ mod browser_startup_tests {
             .extra
             .insert("browserAutomationEnabled".into(), json!(false));
         let disabled_tools = tool_catalog(&config, false, Path::new("."), false);
-        assert!(!disabled_tools.iter().any(|tool| tool.name == "browser_open"));
+        assert!(
+            !disabled_tools
+                .iter()
+                .any(|tool| tool.name == "browser_open")
+        );
 
         config
             .extra

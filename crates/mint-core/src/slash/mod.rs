@@ -1414,8 +1414,16 @@ fn cmd_browser(rest: &str, config: &mut MintConfig) -> SlashResponse {
             command: "/browser".into(),
             title: format!(
                 "🌐 Browser Automation Configuration\n• Tools: {}\n• Mode: {}\nSelect an option to configure or run `/browser [on|off|headless|headed|status]`",
-                if current_enabled { "Enabled (on)" } else { "Disabled (off)" },
-                if current_mode == "headless" { "headless Browser" } else { "headed Automation" }
+                if current_enabled {
+                    "Enabled (on)"
+                } else {
+                    "Disabled (off)"
+                },
+                if current_mode == "headless" {
+                    "headless Browser"
+                } else {
+                    "headed Automation"
+                }
             ),
             options: vec![
                 SlashChoice {
@@ -1435,14 +1443,22 @@ fn cmd_browser(rest: &str, config: &mut MintConfig) -> SlashResponse {
                 SlashChoice {
                     label: format!(
                         "headless Browser — Run silently in background without window{}",
-                        if current_mode == "headless" { " (current)" } else { "" }
+                        if current_mode == "headless" {
+                            " (current)"
+                        } else {
+                            ""
+                        }
                     ),
                     value: "headless".into(),
                 },
                 SlashChoice {
                     label: format!(
                         "headed Automation — Show browser window on screen{}",
-                        if current_mode == "headed" { " (current)" } else { "" }
+                        if current_mode == "headed" {
+                            " (current)"
+                        } else {
+                            ""
+                        }
                     ),
                     value: "headed".into(),
                 },
@@ -1465,8 +1481,16 @@ fn cmd_browser(rest: &str, config: &mut MintConfig) -> SlashResponse {
                  - **Executable**: `{}`\n\
                  - **Debugging Endpoint**: `{}`\n\n\
                  *Use `/browser on` or `/browser off` to toggle tools, and `/browser headless` or `/browser headed` to change display mode.*",
-                if current_enabled { "🟢 **Enabled** (`on`)" } else { "🔴 **Disabled** (`off`)" },
-                if current_mode == "headless" { "🕶️ `headless Browser` (runs in background)" } else { "🖥️ `headed Automation` (shows window)" },
+                if current_enabled {
+                    "🟢 **Enabled** (`on`)"
+                } else {
+                    "🔴 **Disabled** (`off`)"
+                },
+                if current_mode == "headless" {
+                    "🕶️ `headless Browser` (runs in background)"
+                } else {
+                    "🖥️ `headed Automation` (shows window)"
+                },
                 width,
                 height,
                 exe_display,
