@@ -24,4 +24,50 @@ describe('conversation coordinator interface', () => {
     state = transitionConversation(state, { type: 'image_attached', image })
     expect(state.imageAttachments).toEqual([image])
   })
+
+  it('manages queued prompts with add, edit, dequeue, remove, and pause operations', () => {
+    let state = initialConversationState()
+    expect(state.queuedPrompts).toEqual([])
+    expect(state.queuePaused).toBe(false)
+
+    const prompt1 = {
+      id: 'q-1',
+      chatId: 'chat-1',
+      text: 'First queued prompt',
+      createdAt: 1000,
+    }
+    const prompt2 = {
+      id: 'q-2',
+      chatId: 'chat-1',
+      text: 'Second queued prompt',
+      imageAttachments: [{ dataUri: 'data:...', name: 'pic.png' }],
+      createdAt: 2000,
+    }
+
+    // Queue first prompt: should clear composer message and add to queuedPrompts
+    state = transitionConversation(state, { type: 'compose', message: 'First queued prompt' })
+    state = transitionConversation(state, { type: 'prompt_queued', prompt: prompt1 })
+    expect(state.message).toBe('')
+    expect(state.queuedPrompts).toHaveLength(1)
+    expect(state.queuedPrompts[0]).toEqual(prompt1)
+
+    // Queue second prompt with image
+    state = transitionConversation(state, { type: 'prompt_queued', prompt: prompt2 })
+    expect(state.queuedPrompts).toHaveLength(2)
+
+    // Pause queue (e.g. when user clicks stop)
+    state = transitionConversation(state, { type: 'queue_paused_set', paused: true })
+    expect(state.queuePaused).toBe(true)
+
+    // Edit second prompt: removes from queue and restores into composer
+    state = transitionConversation(state, { type: 'queued_prompt_restored_to_composer', prompt: prompt2 })
+    expect(state.queuedPrompts).toHaveLength(1)
+    expect(state.queuedPrompts[0].id).toBe('q-1')
+    expect(state.message).toBe('Second queued prompt')
+    expect(state.imageAttachments).toHaveLength(1)
+
+    // Dequeue first prompt
+    state = transitionConversation(state, { type: 'queued_prompt_dequeued', id: 'q-1' })
+    expect(state.queuedPrompts).toHaveLength(0)
+  })
 })

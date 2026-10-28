@@ -1,4 +1,4 @@
-import type { AgentProgress, ChatResponse, DocumentAttachment } from '../types'
+import type { AgentProgress, ChatResponse, DocumentAttachment, QueuedPrompt } from '../types'
 import { reduceLiveAgentProgressBatch } from '../agentProgress'
 
 export interface ImageAttachment { dataUri: string; name: string; previewDataUri?: string; objectUrl?: string }
@@ -10,6 +10,8 @@ export interface ConversationState {
   imageAttachments: ImageAttachment[]
   videoAttachments: VideoAttachment[]
   documentAttachment: DocumentAttachment | null
+  queuedPrompts: QueuedPrompt[]
+  queuePaused: boolean
   sending: boolean
   sendingMessage: string
   sendingImageCount: number
@@ -29,6 +31,13 @@ export type ConversationEvent =
   | { type: 'video_removed'; index: number }
   | { type: 'document_attached'; document: DocumentAttachment | null }
   | { type: 'composer_cleared' }
+  | { type: 'prompt_queued'; prompt: QueuedPrompt }
+  | { type: 'queued_prompt_removed'; id: string }
+  | { type: 'queued_prompt_restored_to_composer'; prompt: QueuedPrompt }
+  | { type: 'queued_prompt_dequeued'; id: string }
+  | { type: 'queued_prompts_cleared' }
+  | { type: 'queue_paused_set'; paused: boolean }
+  | { type: 'queued_prompts_synced'; prompts: QueuedPrompt[]; paused: boolean }
   | { type: 'run_started'; message: string; imageCount: number; videoCount: number }
   | { type: 'chunk_received'; chunk: string }
   | { type: 'response_received'; response: ChatResponse }
@@ -44,7 +53,7 @@ export type ConversationEvent =
 export function initialConversationState(initial: Partial<ConversationState> = {}): ConversationState {
   return {
     workspacePath: '', message: '', imageAttachments: [], videoAttachments: [],
-    documentAttachment: null, sending: false, sendingMessage: '', sendingImageCount: 0,
+    documentAttachment: null, queuedPrompts: [], queuePaused: false, sending: false, sendingMessage: '', sendingImageCount: 0,
     sendingVideoCount: 0, streamedReply: '', streamedResponse: null, agentProgress: [],
     pendingApproval: null, ...initial,
   }
@@ -62,6 +71,45 @@ export function transitionConversation(state: ConversationState, event: Conversa
     case 'video_removed': return { ...state, videoAttachments: state.videoAttachments.filter((_, index) => index !== event.index) }
     case 'document_attached': return { ...state, documentAttachment: event.document }
     case 'composer_cleared': return { ...state, message: '', imageAttachments: [], videoAttachments: [], documentAttachment: null }
+    case 'prompt_queued': return {
+      ...state,
+      message: '',
+      imageAttachments: [],
+      videoAttachments: [],
+      documentAttachment: null,
+      queuedPrompts: [...state.queuedPrompts, event.prompt],
+      queuePaused: false,
+    }
+    case 'queued_prompt_removed': return {
+      ...state,
+      queuedPrompts: state.queuedPrompts.filter((p) => p.id !== event.id),
+    }
+    case 'queued_prompt_restored_to_composer': return {
+      ...state,
+      message: event.prompt.text,
+      imageAttachments: event.prompt.imageAttachments || [],
+      videoAttachments: event.prompt.videoAttachments || [],
+      documentAttachment: event.prompt.documentAttachment || null,
+      queuedPrompts: state.queuedPrompts.filter((p) => p.id !== event.prompt.id),
+    }
+    case 'queued_prompt_dequeued': return {
+      ...state,
+      queuedPrompts: state.queuedPrompts.filter((p) => p.id !== event.id),
+    }
+    case 'queued_prompts_cleared': return {
+      ...state,
+      queuedPrompts: [],
+      queuePaused: false,
+    }
+    case 'queue_paused_set': return {
+      ...state,
+      queuePaused: event.paused,
+    }
+    case 'queued_prompts_synced': return {
+      ...state,
+      queuedPrompts: event.prompts,
+      queuePaused: event.paused,
+    }
     case 'run_started': return { ...state, sending: true, sendingMessage: event.message,
       sendingImageCount: event.imageCount, sendingVideoCount: event.videoCount,
       streamedReply: '', streamedResponse: null, agentProgress: [] }

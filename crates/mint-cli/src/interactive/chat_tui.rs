@@ -495,6 +495,8 @@ pub(crate) struct ChatViewState {
     tool_viewer: Option<usize>,
     watermark_frame: u8,
     watermark_animating: bool,
+    pub(crate) queued_count: usize,
+    pub(crate) queued_preview: Option<String>,
     pub(crate) theme: crate::terminal_theme::TuiTheme,
 }
 
@@ -3853,6 +3855,32 @@ impl ChatViewState {
             if !self.collapsed_pastes.is_empty() || self.expanded_paste.is_some() {
                 input_block = input_block.title_bottom(" F2: open/collapse paste ");
             }
+            if self.queued_count > 0 {
+                let preview = self
+                    .queued_preview
+                    .as_deref()
+                    .unwrap_or("")
+                    .chars()
+                    .take(30)
+                    .collect::<String>();
+                let text = if preview.is_empty() {
+                    format!(" Queued ({}) · Ctrl+D drop ", self.queued_count)
+                } else {
+                    format!(
+                        " Queued ({}): \"{}\" · Ctrl+D drop ",
+                        self.queued_count, preview
+                    )
+                };
+                input_block = input_block.title_bottom(
+                    Line::styled(
+                        text,
+                        Style::default()
+                            .fg(crate::terminal_theme::ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                    .alignment(ratatui::layout::Alignment::Left),
+                );
+            }
             // Rows already wrap at the content width. A second word-wrap
             // pass would change blank-row and cursor/scroll positions.
             frame.render_widget(
@@ -5846,6 +5874,10 @@ impl ChatTui {
         use event::{KeyCode, KeyModifiers};
         loop {
             if let Ok(mut state) = handle.state.lock() {
+                if let Ok(queued) = handle.queued.lock() {
+                    state.queued_count = queued.len();
+                    state.queued_preview = queued.last().cloned();
+                }
                 self.scroll_mouse_selection(&mut state);
                 self.draw_state(&state)?;
             }
@@ -5853,6 +5885,8 @@ impl ChatTui {
                 if let Ok(mut state) = handle.state.lock() {
                     state.finish_live_thought();
                     state.finish_running_tools();
+                    state.queued_count = 0;
+                    state.queued_preview = None;
                 }
                 return Ok(task.await?);
             }
@@ -5921,6 +5955,15 @@ impl ChatTui {
                                 continue;
                             }
                             match key.code {
+                                KeyCode::Char('d')
+                                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                                {
+                                    if let Ok(mut queued) = handle.queued.lock() {
+                                        queued.pop();
+                                        state.queued_count = queued.len();
+                                        state.queued_preview = queued.last().cloned();
+                                    }
+                                }
                                 KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End
                                     if state.navigate_composer(key, composer_width) => {}
                                 KeyCode::End => state.scroll_from_bottom = 0,
@@ -5929,6 +5972,8 @@ impl ChatTui {
                                         let text = state.take_prompt();
                                         if let Ok(mut queued) = handle.queued.lock() {
                                             queued.push(text);
+                                            state.queued_count = queued.len();
+                                            state.queued_preview = queued.last().cloned();
                                         }
                                     }
                                 }
@@ -7593,6 +7638,20 @@ mod dialog_tests {
             vec!["unfinished reasoning"]
         );
         assert_eq!(state.transcript.len(), 1);
+    }
+
+    #[test]
+    fn queued_message_shows_in_composer_bottom_title() {
+        let mut state = ChatViewState::default();
+        state.queued_count = 1;
+        state.queued_preview = Some("run next test".into());
+        let rendered = thought_screen(&state, 80, 24).join("\n");
+        assert!(rendered.contains("Queued (1): \"run next test\" · Ctrl+D drop"));
+
+        state.queued_count = 2;
+        state.queued_preview = Some("deploy app".into());
+        let rendered2 = thought_screen(&state, 80, 24).join("\n");
+        assert!(rendered2.contains("Queued (2): \"deploy app\" · Ctrl+D drop"));
     }
 
     #[test]

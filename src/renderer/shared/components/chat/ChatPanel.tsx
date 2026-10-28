@@ -35,7 +35,7 @@ import { TurnFileChanges, type RewindRequestPayload } from './TurnFileChanges'
 import { SubagentStatusStrip } from '../activity/SubagentStatusStrip'
 import { VirtualChatHistory, type VirtualChatHistoryHandle } from './VirtualChatHistory'
 import type { ArtifactFile } from '../../utils/artifacts'
-import type { AgentProgress, ChatResponse, DiffHunk, FileChange, GitCheckpoint, RuntimeStatus } from '../../types'
+import type { AgentProgress, ChatResponse, DiffHunk, FileChange, GitCheckpoint, QueuedPrompt, RuntimeStatus } from '../../types'
 import { shouldShowSessionDivider, formatSessionDividerLabel } from '../../utils/ui'
 import { useVoiceInput } from '@/voiceInput'
 import VoicePill from './VoicePill'
@@ -48,6 +48,7 @@ import WorkspaceSelector from '../workspace/WorkspaceSelector'
 import ToolsPanelToggle from '../workspace/ToolsPanelToggle'
 import { ModsPanel } from '../extensions/ModsPanel'
 import type { ToolSurface } from '../workspace/ToolSurfacePage'
+import QueuedMessagesBanner from './QueuedMessagesBanner'
 import '../../css/thinking-status.css'
 import '../../css/slash-choice.css'
 
@@ -142,6 +143,8 @@ interface ChatPanelContract {
   chatId: string
   chatEnd: RefObject<HTMLDivElement | null>
   welcomeInteraction: any
+  queuedPrompts?: QueuedPrompt[]
+  queuePaused?: boolean
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   onSelectImage: (event: ChangeEvent<HTMLInputElement>) => void
   onSelectVideo: (event: ChangeEvent<HTMLInputElement>) => void
@@ -183,6 +186,11 @@ interface ChatPanelContract {
   onDismissSlashChoice?: () => void
   subscribeMessage?: (notify: () => void) => () => void
   getMessage?: () => string
+  onRemoveQueuedPrompt?: (id: string) => void
+  onEditQueuedPrompt?: (id: string) => void
+  onClearQueuedPrompts?: () => void
+  onSteerQueuedPrompt?: (id: string) => void
+  onResumeQueue?: () => void
 }
 
 export type ConversationViewModel = Pick<ChatPanelContract,
@@ -194,6 +202,8 @@ export type ConversationViewModel = Pick<ChatPanelContract,
   | 'conversationTitle' | 'slashChoice'
   | 'hasOlder'
   | 'sendingInteractionId'
+  | 'queuedPrompts'
+  | 'queuePaused'
 >
 export type ConversationActions = Omit<ChatPanelContract, keyof ConversationViewModel> & {
   subscribeMessage?: (notify: () => void) => () => void
@@ -289,6 +299,13 @@ export default function ChatPanel({
   onOpenReview,
   onSelectSlashChoice,
   onDismissSlashChoice,
+  queuedPrompts = [],
+  queuePaused = false,
+  onRemoveQueuedPrompt,
+  onEditQueuedPrompt,
+  onClearQueuedPrompts,
+  onSteerQueuedPrompt,
+  onResumeQueue,
   } = { ...conversation, ...actions }
   const message = useComposerDraft(initialMessage, actions.subscribeMessage, actions.getMessage)
   const onThinkingExpandedChange = useLatestCallback(handleThinkingExpandedChange)
@@ -1520,6 +1537,18 @@ export default function ChatPanel({
             </label>
           )}
         </div>
+        {queuedPrompts && queuedPrompts.length > 0 && (
+          <QueuedMessagesBanner
+            queuedPrompts={queuedPrompts}
+            queuePaused={Boolean(queuePaused)}
+            sending={sending}
+            onRemove={onRemoveQueuedPrompt || (() => {})}
+            onEdit={onEditQueuedPrompt || (() => {})}
+            onClear={onClearQueuedPrompts || (() => {})}
+            onSteer={onSteerQueuedPrompt || (() => {})}
+            onResumeQueue={onResumeQueue}
+          />
+        )}
         <form
           id="chat-form"
           className={geminiLiveEnabled ? 'has-live-btn' : ''}
@@ -1794,18 +1823,34 @@ export default function ChatPanel({
             </button>
           )}
           {sending ? (
-            <button
-              id="send-btn"
-              className="stop-btn"
-              type="button"
-              onClick={onCancelMessage}
-              title="Stop generating"
-              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
-              </svg>
-            </button>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              {canSubmit && (
+                <button
+                  id="queue-btn"
+                  className="queue-btn"
+                  type="submit"
+                  title="Add to queue (Enter)"
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                  </svg>
+                </button>
+              )}
+              <button
+                id="send-btn"
+                className="stop-btn"
+                type="button"
+                onClick={onCancelMessage}
+                title="Stop generating"
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                </svg>
+              </button>
+            </div>
           ) : (
             <button id="send-btn" type="submit" disabled={!canSubmit} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

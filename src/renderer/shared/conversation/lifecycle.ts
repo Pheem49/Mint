@@ -3,7 +3,7 @@ import { compactAgentProgressForPersistence, mergeActivitySnapshots } from '../a
 import { requiresExplicitApproval } from '../utils/approval'
 import { navigateToProject } from './projectNavigation'
 import type { MintPlatformApi } from '../platform'
-import type { AgentProgress, ChatResponse, ChatSession, InteractionMemory } from '../types'
+import type { AgentProgress, ChatResponse, ChatSession, InteractionMemory, QueuedPrompt } from '../types'
 
 export type ConversationTransport = Pick<MintPlatformApi,
   | 'getConversationSnapshot' | 'getConversationChanges' | 'listChatSessions'
@@ -88,6 +88,8 @@ export function createConversationLifecycle(
   const pendingSubmissions = new Map<string, { signature: string; requestId: string }>()
   const runs = new Map<string, Run>()
   const subscribers = new Set<() => void>()
+  const conversationQueuedPrompts = new Map<string, QueuedPrompt[]>()
+  const conversationQueuePaused = new Map<string, boolean>()
   const update = (patch: Partial<ConversationView>) => {
     state = { ...state, ...patch }
     subscribers.forEach(notify => notify())
@@ -127,8 +129,11 @@ export function createConversationLifecycle(
     session = { chatId: id }
     cursor = null
     projectSerial++
+    const activePrompts = conversationQueuedPrompts.get(id) || []
+    const activePaused = conversationQueuePaused.get(id) || false
     update({
       ...transitionConversation(state, { type: 'session_switched', draft }), conversationId: id,
+      queuedPrompts: activePrompts, queuePaused: activePaused,
       interactions: [], hasOlderInteractions: false, agentActivitySnapshots: {},
       streamingConversationId: null, activeTurnId: null, sessionAutoApproved: false,
     })
@@ -258,8 +263,10 @@ export function createConversationLifecycle(
       if (origin === session) effects.onError?.(error)
     } finally {
       if (approvalToken) removeApproval(origin.chatId, approvalToken)
+      conversationQueuePaused.set(origin.chatId, true)
       if (origin === session && !runs.has(origin.chatId)) {
         update({ ...transitionConversation(state, { type: 'run_cancelled' }),
+          queuePaused: true,
           streamingConversationId: null, activeTurnId: null, sessionAutoApproved: false })
       }
     }
@@ -351,6 +358,22 @@ export function createConversationLifecycle(
             streamingConversationId: null, activeTurnId: null, sessionAutoApproved: false })
         } else {
           subscribers.forEach(notify => notify())
+        }
+        const isPaused = conversationQueuePaused.get(origin.chatId) || false
+        const chatQueue = conversationQueuedPrompts.get(origin.chatId) || []
+        if (!isPaused && chatQueue.length > 0) {
+          const next = chatQueue.shift()!
+          conversationQueuedPrompts.set(origin.chatId, chatQueue)
+          if (origin === session) {
+            dispatch({ type: 'queued_prompt_dequeued', id: next.id })
+          }
+          void sendPrompt(next.text, {
+            imageAttachments: next.imageAttachments,
+            videoAttachments: next.videoAttachments,
+            documentAttachment: next.documentAttachment,
+            agentMode: options.agentMode,
+            planMode: options.planMode,
+          })
         }
       }
     }
@@ -447,11 +470,97 @@ export function createConversationLifecycle(
     }
   }
 
+  function queuePrompt(data: {
+    text: string
+    imageAttachments?: ConversationState['imageAttachments']
+    videoAttachments?: ConversationState['videoAttachments']
+    documentAttachment?: ConversationState['documentAttachment']
+  }) {
+    const id = `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+    const prompt: QueuedPrompt = {
+      id,
+      chatId: session.chatId,
+      text: data.text,
+      imageAttachments: data.imageAttachments && data.imageAttachments.length > 0 ? [...data.imageAttachments] : undefined,
+      videoAttachments: data.videoAttachments && data.videoAttachments.length > 0 ? [...data.videoAttachments] : undefined,
+      documentAttachment: data.documentAttachment || null,
+      createdAt: Date.now(),
+    }
+    const current = conversationQueuedPrompts.get(session.chatId) || []
+    conversationQueuedPrompts.set(session.chatId, [...current, prompt])
+    conversationQueuePaused.set(session.chatId, false)
+    dispatch({ type: 'prompt_queued', prompt })
+  }
+
+  function removeQueuedPrompt(id: string) {
+    const current = conversationQueuedPrompts.get(session.chatId) || []
+    conversationQueuedPrompts.set(session.chatId, current.filter(p => p.id !== id))
+    dispatch({ type: 'queued_prompt_removed', id })
+  }
+
+  function editQueuedPrompt(id: string) {
+    const current = conversationQueuedPrompts.get(session.chatId) || []
+    const found = current.find(p => p.id === id)
+    if (!found) return
+    conversationQueuedPrompts.set(session.chatId, current.filter(p => p.id !== id))
+    dispatch({ type: 'queued_prompt_restored_to_composer', prompt: found })
+  }
+
+  function clearQueuedPrompts() {
+    conversationQueuedPrompts.delete(session.chatId)
+    conversationQueuePaused.set(session.chatId, false)
+    dispatch({ type: 'queued_prompts_cleared' })
+  }
+
+  function setQueuePaused(paused: boolean) {
+    conversationQueuePaused.set(session.chatId, paused)
+    dispatch({ type: 'queue_paused_set', paused })
+  }
+
+  function resumeQueue() {
+    setQueuePaused(false)
+    if (!state.sending) {
+      const current = conversationQueuedPrompts.get(session.chatId) || []
+      const next = current[0]
+      if (next) {
+        conversationQueuedPrompts.set(session.chatId, current.slice(1))
+        dispatch({ type: 'queued_prompt_dequeued', id: next.id })
+        void sendPrompt(next.text, {
+          imageAttachments: next.imageAttachments,
+          videoAttachments: next.videoAttachments,
+          documentAttachment: next.documentAttachment,
+        })
+      }
+    }
+  }
+
+  async function steerQueuedPrompt(id: string) {
+    const origin = session
+    const current = conversationQueuedPrompts.get(origin.chatId) || []
+    const found = current.find(p => p.id === id)
+    if (!found) return
+    conversationQueuedPrompts.set(origin.chatId, current.filter(p => p.id !== id))
+    conversationQueuePaused.set(origin.chatId, false)
+    if (origin === session) {
+      dispatch({ type: 'queued_prompt_dequeued', id })
+      dispatch({ type: 'queue_paused_set', paused: false })
+    }
+    if (state.sending && runs.has(origin.chatId)) {
+      await cancel()
+    }
+    void sendPrompt(found.text, {
+      imageAttachments: found.imageAttachments,
+      videoAttachments: found.videoAttachments,
+      documentAttachment: found.documentAttachment,
+    })
+  }
+
   return {
     getSnapshot: () => state,
     subscribe: (notify: () => void) => { subscribers.add(notify); return () => { subscribers.delete(notify) } },
     activate, refreshHistory, refreshSessions, syncHistory, loadOlder, sendPrompt, cancel,
     receiveApproval, resolveApproval, clearHistory, selectProject, watch,
+    queuePrompt, removeQueuedPrompt, editQueuedPrompt, clearQueuedPrompts, setQueuePaused, resumeQueue, steerQueuedPrompt,
     appendInteraction: (row: Omit<InteractionMemory, 'chatId' | 'status'> & Partial<Pick<InteractionMemory, 'chatId' | 'status'>>) =>
       update({ interactions: [...state.interactions, { chatId: session.chatId, status: 'completed', ...row }] }),
     compose: (message: string) => dispatch({ type: 'compose', message }),

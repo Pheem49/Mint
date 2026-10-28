@@ -440,3 +440,85 @@ it('adapts polling intervals between idle and active runs in watch', async () =>
   stop()
   expect(vi.getTimerCount()).toBe(0)
 })
+
+describe('Queued messages lifecycle and steering', () => {
+  it('enqueues, edits, and removes queued prompts', () => {
+    const { lifecycle } = setup()
+    expect(lifecycle.getSnapshot().queuedPrompts).toEqual([])
+
+    lifecycle.queuePrompt({ text: 'Hello from queue' })
+    const snapshot1 = lifecycle.getSnapshot()
+    expect(snapshot1.queuedPrompts).toHaveLength(1)
+    expect(snapshot1.queuedPrompts[0].text).toBe('Hello from queue')
+    const promptId = snapshot1.queuedPrompts[0].id
+
+    // Edit restores text to composer and removes from queue
+    lifecycle.editQueuedPrompt(promptId)
+    const snapshot2 = lifecycle.getSnapshot()
+    expect(snapshot2.queuedPrompts).toHaveLength(0)
+    expect(snapshot2.message).toBe('Hello from queue')
+
+    // Re-queue and remove
+    lifecycle.queuePrompt({ text: 'To be removed' })
+    const promptId2 = lifecycle.getSnapshot().queuedPrompts[0].id
+    lifecycle.removeQueuedPrompt(promptId2)
+    expect(lifecycle.getSnapshot().queuedPrompts).toHaveLength(0)
+  })
+
+  it('automatically dispatches the next queued prompt on natural turn completion', async () => {
+    const { lifecycle, streams } = setup()
+    const run1 = lifecycle.sendPrompt('Turn 1')
+    expect(lifecycle.getSnapshot().sending).toBe(true)
+
+    // Queue Turn 2 while Turn 1 is running
+    lifecycle.queuePrompt({ text: 'Turn 2' })
+    expect(lifecycle.getSnapshot().queuedPrompts).toHaveLength(1)
+
+    // Turn 1 completes
+    streams[0].result.resolve(reply)
+    await run1
+
+    // Turn 2 should be automatically popped and dispatched
+    expect(lifecycle.getSnapshot().queuedPrompts).toHaveLength(0)
+    expect(streams).toHaveLength(2)
+    expect(lifecycle.getSnapshot().sending).toBe(true)
+    expect(lifecycle.getSnapshot().sendingMessage).toBe('Turn 2')
+
+    // Turn 2 completes
+    streams[1].result.resolve(reply)
+    await new Promise(r => setTimeout(r, 10))
+    expect(lifecycle.getSnapshot().sending).toBe(false)
+  })
+
+  it('pauses the queue on user cancellation and does not auto-dispatch', async () => {
+    const { lifecycle, streams } = setup()
+    lifecycle.sendPrompt('Turn 1')
+    lifecycle.queuePrompt({ text: 'Turn 2' })
+    expect(lifecycle.getSnapshot().queuePaused).toBe(false)
+
+    // User cancels Turn 1
+    await lifecycle.cancel()
+    expect(lifecycle.getSnapshot().sending).toBe(false)
+    expect(lifecycle.getSnapshot().queuePaused).toBe(true)
+    // The queued prompt must remain preserved in queue
+    expect(lifecycle.getSnapshot().queuedPrompts).toHaveLength(1)
+    expect(lifecycle.getSnapshot().queuedPrompts[0].text).toBe('Turn 2')
+    // No second stream should have been dispatched
+    expect(streams).toHaveLength(1)
+  })
+
+  it('interrupts running turn and steers directly to the selected queued prompt', async () => {
+    const { lifecycle, streams } = setup()
+    lifecycle.sendPrompt('Turn 1')
+    lifecycle.queuePrompt({ text: 'Important Urgent Turn' })
+    const queuedId = lifecycle.getSnapshot().queuedPrompts[0].id
+
+    // Steer queued prompt
+    await lifecycle.steerQueuedPrompt(queuedId)
+    // Turn 1 cancelled, Turn 2 steered immediately
+    expect(lifecycle.getSnapshot().queuedPrompts).toHaveLength(0)
+    expect(lifecycle.getSnapshot().sending).toBe(true)
+    expect(lifecycle.getSnapshot().sendingMessage).toBe('Important Urgent Turn')
+    expect(streams).toHaveLength(2)
+  })
+})
