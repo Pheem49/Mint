@@ -1,6 +1,18 @@
 # Release Notes - Mint Agent v1.17.0
 
+## Queued Messages & Steering (CLI, Desktop, and Web)
+- **Queued Prompts Tray & Auto-Dispatching**: Users can now queue instructions and multi-modal attachments while the agent is actively executing (`sending`). Queued messages are displayed in a dedicated tray above the composer and auto-dispatched sequentially as soon as the current turn concludes.
+- **Stop with Paused Queue (Safe Interruption)**: Clicking the Stop button halts the active turn while preserving all queued messages in a `⏸ Queue paused` state, allowing users to inspect, resume, edit, or clear queued items safely.
+- **Interrupt & Steer (`->`)**: Clicking the Send Now arrow button on any queued prompt immediately interrupts the running turn and steers the agent directly to the selected queued message.
+- **Composer Edit & Recall (`✎`)**: Clicking the edit button removes the prompt from the queue and restores its full text and attachments back into the composer for immediate revision.
+- **Full-Screen TUI Visual Parity (`crates/mint-cli`)**: Pressing `Enter` while a turn is running queues the prompt with live border feedback (`Queued (N): "..." · Ctrl+D drop`), and `Ctrl+D` immediately pops/drops the last queued message.
+
 ## Desktop & Web UI / UX
+- **Clean File Changes Cards**: Extracted repetitive common directory paths to the card header with folder icons, replaced `[NEW FILE]` brackets with sleek rounded green chip badges (`New file`), and redesigned the expander button with a subtle dashed border and rotating chevron icon.
+- **Adaptive Artifact Preview Panel**:
+  - Automatically adapts header tabs based on file capabilities: displays `[Preview | Code]` dual-mode toggles only for renderable formats (`HTML`, `SVG`, `Markdown`), while presenting direct code view with language chip badges (e.g. `[<FileCode /> Python]`, `[<FileCode /> Rust]`) for pure source code and data files.
+  - Image files display dedicated format chip badges (`[🖼️ WEBP]`, `[🖼️ PNG]`, `[🖼️ JPEG]`) along with live image resolution badges (e.g. `1080 × 1620 px`).
+  - Restricted "Open in Mint Browser" action strictly to HTML/Web documents, avoiding misleading browser launches on scripts, code, and images.
 - **Live Tool Activity Retention**: Fixed an issue where older tool execution groups (e.g. `run_shell`) were temporarily trimmed during live agent turns once non-thought events exceeded 20; preserved all tool lifecycle and orchestration events throughout live streaming without dropping earlier progress.
 - **Action-First Tool Activity Parsing**: Eliminated `null`/`undefined` placeholder strings from displayed tool arguments across CLI, Desktop, and Web by prioritizing action-specific fields and sanitizing dummy strings in `mint-core` and frontend utilities.
 - **Resilient Media & Image Proxy**: Added local image proxy (`/api/proxy-image`) with disk LRU caching and SSRF protection to bypass ad-blocker false positives; auto-heals unclosed markdown image links (`![alt](url...`), normalizes Twitter/X banner URLs, and displays a graceful fallback card on load errors.

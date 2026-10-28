@@ -57,23 +57,6 @@ interface Props {
 }
 
 export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props) {
-  const [activeTab, setActiveTab] = useState<'preview' | 'code'>('preview')
-  const [viewport, setViewport] = useState<ViewportMode>('desktop')
-  const [content, setContent] = useState<string>(artifact?.content || '')
-  const [imageUrl, setImageUrl] = useState(artifact?.url || '')
-  const [loading, setLoading] = useState<boolean>(false)
-  const [error, setError] = useState<string | null>(null)
-  const [openingBrowser, setOpeningBrowser] = useState(false)
-  const [browserError, setBrowserError] = useState<string | null>(null)
-  const browserInFlight = useRef(false)
-  const currentArtifact = useRef(artifact)
-  currentArtifact.current = artifact
-  const [copied, setCopied] = useState<boolean>(false)
-
-  const [reloadRevision, setReloadRevision] = useState(0)
-  const requestRevision = useRef(0)
-  const sourceWorkspace = artifact?.workspacePath ?? workspacePath
-
   const filePath = artifact?.path || ''
   const fileName = useMemo(() => {
     if (!filePath) return ''
@@ -86,12 +69,68 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
     return detectArtifactType(filePath)
   }, [artifact, filePath])
 
+  const isDualMode = artifactType === 'html' || artifactType === 'svg' || artifactType === 'markdown'
+
+  const [activeTab, setActiveTab] = useState<'preview' | 'code'>(artifactType === 'code' ? 'code' : 'preview')
+  const [viewport, setViewport] = useState<ViewportMode>('desktop')
+  const [content, setContent] = useState<string>(artifact?.content || '')
+  const [imageUrl, setImageUrl] = useState(artifact?.url || '')
+  const [loading, setLoading] = useState<boolean>(false)
+  const [error, setError] = useState<string | null>(null)
+  const [openingBrowser, setOpeningBrowser] = useState(false)
+  const [browserError, setBrowserError] = useState<string | null>(null)
+  const browserInFlight = useRef(false)
+  const currentArtifact = useRef(artifact)
+  currentArtifact.current = artifact
+  const [copied, setCopied] = useState<boolean>(false)
+  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null)
+
+  const [reloadRevision, setReloadRevision] = useState(0)
+  const requestRevision = useRef(0)
+  const sourceWorkspace = artifact?.workspacePath ?? workspacePath
+
   const language = useMemo(() => getFileLanguage(filePath), [filePath])
   const mediaPreview = artifactType === 'pdf' || artifactType === 'audio' || artifactType === 'video'
+
+  const imageFormatLabel = useMemo(() => {
+    if (artifactType !== 'image') return 'Image'
+    const ext = filePath.split('.').pop()?.toUpperCase() || ''
+    if (ext === 'JPG') return 'JPEG'
+    if (['PNG', 'JPEG', 'WEBP', 'GIF', 'SVG', 'ICO', 'AVIF', 'BMP', 'TIFF'].includes(ext)) {
+      return ext
+    }
+    return 'IMAGE'
+  }, [artifactType, filePath])
+
+  const codeLabel = useMemo(() => {
+    if (!language || language === 'plaintext') return 'Code'
+    const customNames: Record<string, string> = {
+      javascript: 'JavaScript',
+      typescript: 'TypeScript',
+      python: 'Python',
+      rust: 'Rust',
+      json: 'JSON',
+      html: 'HTML',
+      css: 'CSS',
+      cpp: 'C++',
+      csharp: 'C#',
+      php: 'PHP',
+      ruby: 'Ruby',
+      shell: 'Shell',
+      bash: 'Bash',
+      sql: 'SQL',
+      yaml: 'YAML',
+      xml: 'XML',
+      toml: 'TOML',
+      markdown: 'Markdown',
+    }
+    return customNames[language.toLowerCase()] || (language.charAt(0).toUpperCase() + language.slice(1))
+  }, [language])
 
   const fetchContent = useCallback(async (refreshImage = false) => {
     const revision = ++requestRevision.current
     setError(null)
+    setImageDimensions(null)
     setReloadRevision((value) => value + 1)
     if (!filePath) return
     if (refreshImage && activeTab === 'preview' && (artifactType === 'image' || artifactType === 'svg') && artifact?.url?.startsWith('data:image/') && sourceWorkspace) {
@@ -125,22 +164,23 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
   }, [filePath, sourceWorkspace, artifact, artifactType, activeTab, mediaPreview])
 
   useEffect(() => {
-    setActiveTab('preview')
+    setActiveTab(artifactType === 'code' ? 'code' : 'preview')
     setBrowserError(null)
     setContent(artifact?.content ?? '')
     setImageUrl(artifact?.url ?? '')
+    setImageDimensions(null)
     setError(null)
-  }, [artifact])
+  }, [artifact, artifactType])
 
   useEffect(() => {
-    if (artifact?.content !== undefined && activeTab === 'preview') {
+    if (artifact?.content !== undefined && (activeTab === 'preview' || !filePath)) {
       setLoading(false)
       setError(null)
     } else {
       void fetchContent()
     }
     return () => { requestRevision.current += 1 }
-  }, [artifact, activeTab, fetchContent])
+  }, [artifact, activeTab, filePath, fetchContent])
 
   const handleCopyPath = async () => {
     if (!filePath) return
@@ -257,8 +297,8 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
 
         {/* Center: Tabs & Viewport */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {/* Preview vs Code tab toggle */}
-          {artifactType !== 'image' && artifactType !== 'file' && !mediaPreview ? (
+          {/* Dual-mode (Preview vs Code): Only for HTML, SVG, and Markdown */}
+          {isDualMode ? (
             <div
               style={{
                 display: 'inline-flex',
@@ -304,27 +344,65 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
               </button>
             </div>
           ) : (
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '3px 10px',
-                background: artifactType === 'image'
-                  ? 'color-mix(in srgb, var(--accent) 10%, transparent)'
-                  : 'color-mix(in srgb, var(--text-main) 6%, transparent)',
-                borderRadius: '9999px',
-                border: artifactType === 'image'
-                  ? '1px solid color-mix(in srgb, var(--accent) 25%, transparent)'
-                  : '1px solid var(--border)',
-                color: artifactType === 'image' ? 'var(--accent)' : 'var(--text-muted)',
-                fontSize: '0.72rem',
-                fontWeight: 500,
-                letterSpacing: '0.01em',
-              }}
-            >
-              <Eye size={12} strokeWidth={2.2} aria-hidden="true" />
-              <span>{artifactType === 'file' ? 'Details' : 'Preview'}</span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '3px 10px',
+                  background:
+                    artifactType === 'image' || artifactType === 'code'
+                      ? 'color-mix(in srgb, var(--accent) 10%, transparent)'
+                      : 'color-mix(in srgb, var(--text-main) 6%, transparent)',
+                  borderRadius: '9999px',
+                  border:
+                    artifactType === 'image' || artifactType === 'code'
+                      ? '1px solid color-mix(in srgb, var(--accent) 25%, transparent)'
+                      : '1px solid var(--border)',
+                  color: artifactType === 'image' || artifactType === 'code' ? 'var(--accent)' : 'var(--text-muted)',
+                  fontSize: '0.72rem',
+                  fontWeight: 500,
+                  letterSpacing: '0.01em',
+                }}
+              >
+                {artifactType === 'code' ? (
+                  <FileCode size={12} strokeWidth={2.2} aria-hidden="true" />
+                ) : artifactType === 'image' ? (
+                  <ImageIcon size={12} strokeWidth={2.2} aria-hidden="true" />
+                ) : (
+                  <Eye size={12} strokeWidth={2.2} aria-hidden="true" />
+                )}
+                <span>
+                  {artifactType === 'code'
+                    ? codeLabel
+                    : artifactType === 'image'
+                      ? imageFormatLabel
+                      : artifactType === 'file'
+                        ? 'Details'
+                        : 'Preview'}
+                </span>
+              </div>
+              {artifactType === 'image' && imageDimensions && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '3px 9px',
+                    borderRadius: '9999px',
+                    background: 'color-mix(in srgb, var(--text-main) 6%, transparent)',
+                    border: '1px solid var(--border)',
+                    fontSize: '0.7rem',
+                    color: 'var(--text-muted)',
+                    fontFamily: 'var(--font-mono, monospace)',
+                    letterSpacing: '0.01em',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title="Image dimensions (width × height)"
+                >
+                  {imageDimensions.width} × {imageDimensions.height} px
+                </div>
+              )}
             </div>
           )}
 
@@ -426,7 +504,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
             </svg>
           </button>}
 
-          {artifactType !== 'file' && !mediaPreview && !artifact.url?.startsWith('data:image/') && <button
+          {artifactType === 'html' && <button
             type="button"
             onClick={() => { void handleOpenInMintBrowser() }}
             disabled={openingBrowser}
@@ -557,9 +635,23 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
           <div style={{ width: '100%', height: '100%', padding: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
             <img
               key={reloadRevision}
+              ref={(el) => {
+                if (el && el.complete && el.naturalWidth && el.naturalHeight) {
+                  setImageDimensions((prev) => {
+                    if (prev?.width === el.naturalWidth && prev?.height === el.naturalHeight) return prev
+                    return { width: el.naturalWidth, height: el.naturalHeight }
+                  })
+                }
+              }}
               src={imageUrl || artifact.url}
               alt={fileName}
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              onLoad={(e) => {
+                const img = e.currentTarget
+                if (img.naturalWidth && img.naturalHeight) {
+                  setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight })
+                }
+              }}
               onError={() => setError('Unable to load image. Reload the preview or check that the file is still available.')}
             />
           </div>
