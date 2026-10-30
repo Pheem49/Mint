@@ -8,7 +8,7 @@ use mint_core::{
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager};
 
-use mint_core::browser::{click, navigate, read_page_text, type_text};
+use mint_core::browser::{execute_action as run_browser_action, run_session};
 
 const MAX_STEPS: usize = 20;
 const SYSTEM_PROMPT: &str = r#"You are Mint's native background task agent. Return only JSON:
@@ -95,7 +95,7 @@ async fn execute_task(store: &TaskStore, task: &Task) -> Result<String, String> 
     let executor_store = store.clone();
     let executor_task = task.clone();
     let executor_config = config.clone();
-    run_agent_loop(
+    run_session(run_agent_loop(
         &config,
         SYSTEM_PROMPT,
         format!("Task: {}\nChoose the first action.", task.description),
@@ -127,7 +127,7 @@ async fn execute_task(store: &TaskStore, task: &Task) -> Result<String, String> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         },
-    )
+    ))
     .await
     .map_err(|error| error.to_string())
 }
@@ -174,10 +174,21 @@ async fn execute_action(
                 action.target
             ))
         }
-        "open_url" => navigate(config, &action.target).await,
-        "browser_read" => read_page_text(config).await,
-        "browser_click" => click(config, &action.target).await,
-        "browser_type" => type_text(config, &action.target, &action.data).await,
+        "open_url" => {
+            run_browser_action(config, "browser_open", &json!({ "url": &action.target })).await
+        }
+        "browser_read" => run_browser_action(config, "browser_read", &json!({})).await,
+        "browser_click" => {
+            run_browser_action(config, "browser_click", &json!({ "selector": &action.target })).await
+        }
+        "browser_type" => {
+            run_browser_action(
+                config,
+                "browser_type",
+                &json!({ "selector": &action.target, "text": &action.data }),
+            )
+            .await
+        }
         "knowledge_search" => {
             let hits = KnowledgeStore::open_default()
                 .map_err(|error| error.to_string())?

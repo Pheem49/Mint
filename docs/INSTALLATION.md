@@ -130,7 +130,7 @@ Pick one way to get the global `mint` command:
   ```
   If another `mint` command is earlier on PATH, replace that entry or adjust PATH. Back up an existing executable before replacing it.
 
-From a source checkout, `npm run cli -- <command>` and the linked launcher compare CLI/Core source contents and build inputs with the last successful build. Changed inputs trigger a release build; unchanged inputs launch immediately. A failed build displays the compiler error and stops without opening an old binary. The first launch verifies the build once. `mint`, `mint web`, and `mint auto` use the directory where you invoke them as their working directory, even when the source checkout lives elsewhere.
+From a source checkout, `npm run cli -- <command>` and the linked launcher compare CLI/Core source contents and build inputs with the last successful build. Changed inputs trigger a release build; unchanged inputs launch immediately. A failed build displays the compiler error and stops without opening an old binary. The first launch verifies the build once. `mint`, `mint web`, and `mint browser run` use the directory where you invoke them as their working directory, even when the source checkout lives elsewhere.
 
 `npm run build:cli` still builds explicitly. Cargo-installed standalone binaries and distributed npm packages do not automatically rebuild source changes. `MINT_BIN` explicitly selects a binary and bypasses automatic rebuilding.
 

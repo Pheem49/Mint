@@ -358,28 +358,6 @@ fn resolve_tool_signal(action: &str, had_error: bool, is_start: bool) -> Option<
             return None; // silent on success — avatar_signal from the model is the source of truth
         }),
 
-        "browser_open"
-        | "browser_click"
-        | "browser_type"
-        | "browser_read"
-        | "browser_mouse_move"
-        | "browser_mouse_click"
-        | "browser_key_press"
-        | "browser_screenshot" => Some(if is_start {
-            AvatarSignal {
-                action: Some("searching"),
-                prop: Some("magnifying_glass"),
-                ..AvatarSignal::emotions(&[("interest", "high")])
-            }
-        } else if had_error {
-            AvatarSignal {
-                action: Some("dismissive"),
-                ..AvatarSignal::emotions(&[("fear", "medium"), ("surprise", "low")])
-            }
-        } else {
-            return None;
-        }),
-
         "generate_image"
         | "image_studio.generate"
         | "generate_video"

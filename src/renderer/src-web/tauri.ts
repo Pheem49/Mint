@@ -2451,8 +2451,8 @@ export function getBackgroundJob(id: string) { return backgroundRequest<import('
 export function stopBackgroundJob(id: string) { return backgroundRequest<import('../shared/types').BackgroundJob>(`/${encodeURIComponent(id)}/stop`, 'POST') }
 export function deleteBackgroundJob(id: string) { return backgroundRequest<{deleted: boolean}>(`/${encodeURIComponent(id)}`, 'DELETE').then(() => undefined) }
 
-export async function startHtmlPreview(root: string, relativePath: string, mintBrowser = false): Promise<{url: string; jobId: string}> {
-  const response = await authFetch(`${getLocalApiBase()}/html-preview`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, relativePath, mintBrowser}) })
+export async function startHtmlPreview(root: string, relativePath: string, _mintBrowser = false): Promise<{url: string; jobId: string}> {
+  const response = await authFetch(`${getLocalApiBase()}/html-preview`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, relativePath}) })
   const value = await response.json()
   if (!response.ok) throw new Error(value.message || 'Could not start HTML preview')
   return value

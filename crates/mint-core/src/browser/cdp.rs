@@ -159,13 +159,19 @@ pub(super) fn validate_response(value: &Value) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) async fn fetch_pages(config: &MintConfig) -> Result<Vec<Value>, String> {
-    let endpoint = config
+/// Debug endpoint of the managed headless browser for this run. Mint never
+/// borrows a browser on a well-known port: without a managed run the fallback
+/// is an unreachable address so calls fail instead of hijacking another browser.
+pub(super) fn debug_endpoint(config: &MintConfig) -> &str {
+    config
         .extra
         .get("browserDebugUrl")
         .and_then(Value::as_str)
-        .unwrap_or("http://127.0.0.1:9222/json/list");
-    fetch_pages_endpoint(endpoint).await
+        .unwrap_or("http://127.0.0.1:0/json/list")
+}
+
+pub(super) async fn fetch_pages(config: &MintConfig) -> Result<Vec<Value>, String> {
+    fetch_pages_endpoint(debug_endpoint(config)).await
 }
 
 pub(super) async fn fetch_pages_endpoint(endpoint: &str) -> Result<Vec<Value>, String> {

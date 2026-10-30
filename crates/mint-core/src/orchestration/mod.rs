@@ -481,11 +481,24 @@ where
     Ok((response, fallback))
 }
 
+/// `view_image` phase 1 result: content identity, plus file bytes/mime/name when read from disk.
+type LoadedImage = (String, Option<(Vec<u8>, &'static str, String)>);
+
+/// Read-only tools whose *outcome* (not just input) identifies a stuck loop:
+/// image/page observations and headless-Chrome captures run through the shell.
+fn is_observation_action(action: &str, command: &str) -> bool {
+    if action == "view_image" {
+        return true;
+    }
+    action == "run_shell" && {
+        let command = command.to_ascii_lowercase();
+        command.contains("chrome") || command.contains("chromium")
+    }
+}
+
 // Full skill reads must reach the model exactly; other tools keep bounded output.
 fn model_tool_result(action: &str, result: &str) -> String {
-    if action.starts_with("browser_")
-        || (action == "read_file" && result.starts_with("[Loaded skill: "))
-    {
+    if action == "read_file" && result.starts_with("[Loaded skill: ") {
         result.to_owned()
     } else {
         truncation::head_tail_truncate(result, truncation::TruncationConfig::default())
@@ -494,10 +507,6 @@ fn model_tool_result(action: &str, result: &str) -> String {
 
 fn tool_progress_input(root: &Path, decision: &AgentDecision) -> Value {
     let mut input = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
-    if matches!(decision.action.as_str(), "browser_type" | "browser_fill") {
-        input["text"] = "[redacted input]".into();
-        input["query"] = "[redacted input]".into();
-    }
     if decision.action == "read_file"
         && let Some(skill) = crate::skills::skill_for_read_path(root, &decision.input.path)
         && let Some(object) = input.as_object_mut()
@@ -3057,8 +3066,7 @@ where
                     let mut final_result = if result.starts_with("data:image/")
                         && matches!(
                             decision.action.as_str(),
-                            "browser_screenshot"
-                                | "video_filmstrip"
+                            "video_filmstrip"
                                 | "video_waveform"
                                 | "view_image"
                         ) {
@@ -3070,8 +3078,7 @@ where
                             "video_waveform" => "[Waveform generated — see attached image: \
                                 audio amplitude over time]"
                                 .to_string(),
-                            "view_image" => "[Image loaded — see attached image]".to_string(),
-                            _ => "[Screenshot captured — see attached image]".to_string(),
+                            _ => "[Image loaded — see attached image]".to_string(),
                         }
                     } else {
                         model_tool_result(&decision.action, &result)
@@ -3103,7 +3110,19 @@ where
                      concise verification read.]",
                 );
                     }
-                    if action_count >= 3 && !decision.action.starts_with("browser_") {
+                    if is_observation_action(&decision.action, &decision.input.command) {
+                        let mut observed = result.clone();
+                        if let Some(images) = step_images.get(&call_id) {
+                            for image in images {
+                                observed.push_str(image);
+                            }
+                        }
+                        if let Some(notice) = repetition_guard.observe_result(&decision.action, &observed) {
+                            final_result.push_str("\n\n");
+                            final_result.push_str(&notice);
+                        }
+                    }
+                    if action_count >= 3 {
                         final_result.push_str(
                     "\n\n[System Tip: You repeated the same tool action three or more times. \
                      Stop repeating it. If you already have enough information or the requested edit is done, \
@@ -3740,7 +3759,7 @@ async fn run_parallel_read_only_batch(
         let mut final_result = if result.starts_with("data:image/")
             && matches!(
                 action.as_str(),
-                "browser_screenshot" | "video_filmstrip" | "video_waveform" | "view_image"
+                "video_filmstrip" | "video_waveform" | "view_image"
             ) {
             step_images.insert(call_id.clone(), vec![result.clone()]);
             match action.as_str() {
@@ -3757,7 +3776,7 @@ async fn run_parallel_read_only_batch(
             model_tool_result(&action, &result)
         };
 
-        if action_count >= 3 && !action.starts_with("browser_") {
+        if action_count >= 3 {
             final_result.push_str(
                 "\n\n[System Tip: You repeated the same tool action three or more times. \
                  Stop repeating it. If you already have enough information or the requested edit is done, \
@@ -3965,54 +3984,85 @@ async fn execute_tool_outcome_reviewed_inner(
 ) -> Result<crate::integrations::mcp_result::ToolOutcome, OrchestrationError> {
     run_control::check()?;
     if decision.action == "view_image" {
-        if decision.input.path.is_empty() == decision.input.artifact_id.is_empty() {
-            return Err(OrchestrationError::Agent(
-                "Provide exactly one of path or artifactId".into(),
-            ));
-        }
+        use crate::media::tool_images::{self, ViewTarget};
+        let target = tool_images::resolve_view_target(
+            &decision.input.path,
+            &decision.input.artifact_id,
+        )
+        .map_err(OrchestrationError::Agent)?;
         let root = root.to_path_buf();
         let config = config.clone();
         let chat = chat_id.to_owned();
         let call = call_id.to_owned();
-        let path = decision.input.path.clone();
-        let artifact_id = decision.input.artifact_id.clone();
+        let (path, artifact_id) = match target {
+            ViewTarget::Artifact(id) => (String::new(), id.to_owned()),
+            ViewTarget::Path(path) => (path.to_owned(), String::new()),
+        };
+        // Phase 1: validate and identify the image without saving anything, so a
+        // repeat request can be refused before it creates another chat artifact.
+        let loaded = {
+            let (chat, artifact_id) = (chat.clone(), artifact_id.clone());
+            tokio::task::spawn_blocking(
+                move || -> Result<LoadedImage, String> {
+                    if !artifact_id.is_empty() {
+                        let (entry, bytes) = crate::mcp_result::read_artifact(&artifact_id)?;
+                        if entry.chat_id != chat || entry.kind != "image" {
+                            return Err("Image artifact is not available in this conversation.".into());
+                        }
+                        return Ok((tool_images::content_key(&bytes), None));
+                    }
+                    let path = agent_read_path(&root, &path, &config).map_err(|e| e.to_string())?;
+                    let path = assert_path_capability(&path, Capability::Read, &config)
+                        .map_err(|e| e.to_string())?;
+                    if std::fs::metadata(&path).map_err(|e| e.to_string())?.len()
+                        > tool_images::ORIGINAL_LIMIT as u64
+                    {
+                        return Err("Image exceeds 20 MiB".into());
+                    }
+                    let mime = match path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_ascii_lowercase()
+                        .as_str()
+                    {
+                        "png" => "image/png",
+                        "jpg" | "jpeg" => "image/jpeg",
+                        "gif" => "image/gif",
+                        "webp" => "image/webp",
+                        "svg" => "image/svg+xml",
+                        _ => return Err("Unsupported image type".into()),
+                    };
+                    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("Image")
+                        .to_owned();
+                    Ok((tool_images::content_key(&bytes), Some((bytes, mime, name))))
+                },
+            )
+            .await
+            .map_err(|e| OrchestrationError::Agent(e.to_string()))?
+            .map_err(OrchestrationError::Agent)?
+        };
+        let (key, file) = loaded;
+        if !reliability::first_image_view(&key) {
+            return Ok(crate::mcp_result::ToolOutcome::from(
+                "Image already in context: this exact image was shown earlier in this turn, so it \
+                 was not attached again. Use what you saw, capture something different, or call finish."
+                    .to_string(),
+            ));
+        }
+        // Phase 2: attach (and, for files, persist) the image.
         let out = tokio::task::spawn_blocking(
             move || -> Result<crate::mcp_result::ToolOutcome, String> {
-                if !artifact_id.is_empty() {
-                    return crate::media::tool_images::view_artifact(&artifact_id, &chat);
+                match file {
+                    None => tool_images::view_artifact(&artifact_id, &chat),
+                    Some((bytes, mime, name)) => {
+                        tool_images::save(&bytes, mime, &name, &chat, &call, "view_image", None)
+                    }
                 }
-                let path = agent_read_path(&root, &path, &config).map_err(|e| e.to_string())?;
-                let path = assert_path_capability(&path, Capability::Read, &config)
-                    .map_err(|e| e.to_string())?;
-                if std::fs::metadata(&path).map_err(|e| e.to_string())?.len()
-                    > crate::media::tool_images::ORIGINAL_LIMIT as u64
-                {
-                    return Err("Image exceeds 20 MiB".into());
-                }
-                let mime = match path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                    .to_ascii_lowercase()
-                    .as_str()
-                {
-                    "png" => "image/png",
-                    "jpg" | "jpeg" => "image/jpeg",
-                    "gif" => "image/gif",
-                    "webp" => "image/webp",
-                    "svg" => "image/svg+xml",
-                    _ => return Err("Unsupported image type".into()),
-                };
-                let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-                crate::media::tool_images::save(
-                    &bytes,
-                    mime,
-                    path.file_name().and_then(|n| n.to_str()).unwrap_or("Image"),
-                    &chat,
-                    &call,
-                    "view_image",
-                    None,
-                )
             },
         )
         .await
@@ -4071,39 +4121,11 @@ async fn execute_tool_outcome_reviewed_inner(
         {
             Ok(text) => text,
             Err(error) => {
-                if decision.action.starts_with("browser_") {
-                    reliability::record_browser(&decision.action, None, false);
-                }
                 reliability::complete_tool(&decision.action, call_id, checkpoint, false);
                 return Err(error);
             }
         };
-        let mut out = if decision.action == "browser_screenshot"
-            && text.starts_with("data:image/png;base64,")
-        {
-            let bytes = BASE64_STANDARD
-                .decode(text.trim_start_matches("data:image/png;base64,"))
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            let metadata = crate::browser::capture_metadata().await;
-            let out = crate::media::tool_images::save(
-                &bytes,
-                "image/png",
-                &format!("screenshot-{call_id}.png"),
-                chat_id,
-                call_id,
-                "browser",
-                Some(metadata),
-            )
-            .map_err(OrchestrationError::Agent)?;
-            progress(AgentProgress::ToolArtifacts {
-                call_id: call_id.into(),
-                artifacts: out.artifacts.clone(),
-                warnings: out.warnings.clone(),
-            });
-            out
-        } else {
-            crate::mcp_result::ToolOutcome::from(text)
-        };
+        let mut out = crate::mcp_result::ToolOutcome::from(text);
         let mut workflow_verified = None;
         if let Some(bridge) = bridge {
             match bridge.images(chat_id, call_id) {
@@ -4125,20 +4147,6 @@ async fn execute_tool_outcome_reviewed_inner(
                     workflow_verified = Some(false);
                 }
             }
-        }
-        if decision.action.starts_with("browser_") {
-            let report = serde_json::from_str::<Value>(&out.text).ok();
-            if report
-                .as_ref()
-                .is_some_and(|r| r.get("error").is_some_and(|e| !e.is_null()))
-            {
-                out.status = crate::mcp_result::ToolStatus::Failed;
-            }
-            reliability::record_browser(
-                &decision.action,
-                report.as_ref(),
-                out.status == crate::mcp_result::ToolStatus::Success,
-            );
         }
         let mut entries = reliability::complete_tool(
             &decision.action,
@@ -4242,30 +4250,6 @@ async fn execute_tool_text(
         }
         "weather" | "stock" | "calculation" | "memory_recall" => {
             tools::misc::execute(
-                decision.action.as_str(),
-                input,
-                root,
-                config,
-                chat_id,
-                approve_cb,
-            )
-            .await
-        }
-        "browser_open"
-        | "browser_click"
-        | "browser_type"
-        | "browser_read"
-        | "browser_mouse_move"
-        | "browser_mouse_click"
-        | "browser_key_press"
-        | "browser_screenshot"
-        | "browser_tabs"
-        | "browser_observe"
-        | "browser_fill"
-        | "browser_select"
-        | "browser_scroll"
-        | "browser_wait" => {
-            tools::browser::execute(
                 decision.action.as_str(),
                 input,
                 root,

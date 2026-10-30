@@ -6,13 +6,8 @@ use serde_json::json;
 
 use super::BrowserTab;
 use super::cdp::{cdp_call, cdp_call_raw, fetch_pages, response_error};
-use super::lifecycle::{ensure_page_open, is_browser_running};
-use super::logging::log_action;
 
 pub async fn list_tabs(config: &MintConfig) -> Result<Vec<BrowserTab>, String> {
-    if !is_browser_running(config).await {
-        return Err("Browser automation is not running. Please run 'mint auto' first.".to_string());
-    }
     Ok(fetch_pages(config)
         .await?
         .into_iter()
@@ -44,8 +39,6 @@ pub(super) fn validate_url(url: &str) -> Result<(), String> {
 
 pub async fn navigate(config: &MintConfig, url: &str) -> Result<String, String> {
     validate_url(url)?;
-    log_action("NAVIGATE", &format!("Navigating to {url}"));
-    ensure_page_open(config).await?;
     match cdp_call(config, "Page.navigate", json!({ "url": url })).await {
         Ok(response) => {
             if let Some(error) = response["result"]["errorText"].as_str() {
@@ -53,19 +46,13 @@ pub async fn navigate(config: &MintConfig, url: &str) -> Result<String, String> 
             }
             if response["result"]["frameId"].as_str().is_some() {
                 wait_for_page_load(config).await;
-                log_action(
-                    "NAVIGATE_SUCCESS",
-                    &format!("Successfully navigated to {url}"),
-                );
                 Ok(format!("navigating to {url}"))
             } else {
                 let err = response_error(&response);
-                log_action("NAVIGATE_ERROR", &format!("Failed: {err}"));
                 Err(err)
             }
         }
         Err(e) => {
-            log_action("NAVIGATE_ERROR", &format!("Websocket error: {e}"));
             Err(e)
         }
     }
@@ -110,8 +97,6 @@ pub(super) async fn wait_for_page_load(config: &MintConfig) {
 }
 
 pub async fn read_page_text(config: &MintConfig) -> Result<String, String> {
-    log_action("READ", "Reading page text content");
-    ensure_page_open(config).await?;
     match cdp_call(
         config,
         "Runtime.evaluate",
@@ -144,19 +129,13 @@ pub async fn read_page_text(config: &MintConfig) -> Result<String, String> {
     {
         Ok(response) => {
             if let Some(val) = response["result"]["result"]["value"].as_str() {
-                log_action(
-                    "READ_SUCCESS",
-                    &format!("Successfully read {} characters", val.len()),
-                );
                 Ok(val.to_owned())
             } else {
                 let err = response_error(&response);
-                log_action("READ_ERROR", &format!("Failed: {err}"));
                 Err(err)
             }
         }
         Err(e) => {
-            log_action("READ_ERROR", &format!("Websocket error: {e}"));
             Err(e)
         }
     }
@@ -172,9 +151,6 @@ pub(super) async fn capture_page(
     config: &MintConfig,
     args: &serde_json::Value,
 ) -> Result<String, String> {
-    log_action("SCREENSHOT", "Capturing screenshot");
-    ensure_page_open(config).await?;
-
     let mode = args["mode"]
         .as_str()
         .filter(|s| !s.is_empty())
@@ -234,19 +210,13 @@ pub(super) async fn capture_page(
                 if data.len() > crate::media::tool_images::ORIGINAL_LIMIT.div_ceil(3) * 4 + 4 {
                     return Err("Screenshot exceeds 20 MiB; capture a smaller region.".into());
                 }
-                log_action(
-                    "SCREENSHOT_SUCCESS",
-                    &format!("Captured {} base64 bytes", data.len()),
-                );
                 Ok(data.to_owned())
             } else {
                 let err = response_error(&response);
-                log_action("SCREENSHOT_ERROR", &format!("Failed: {err}"));
                 Err(err)
             }
         }
         Err(e) => {
-            log_action("SCREENSHOT_ERROR", &format!("Websocket error: {e}"));
             Err(e)
         }
     }

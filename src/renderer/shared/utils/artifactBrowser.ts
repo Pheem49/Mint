@@ -1,30 +1,28 @@
 import type { ArtifactFile } from './artifacts'
 import { runtimePlatform, workspacePlatform } from '../platform'
 
-interface BrowserApi {
-  desktop: boolean
-  startPreview(root: string, path: string, mintBrowser: boolean): Promise<{ url: string; jobId: string }>
-  openMintBrowser(url: string): Promise<void>
+export interface BrowserApi {
+  desktop?: boolean
+  startPreview?(root: string, path: string): Promise<{ url: string; jobId: string }>
+  openBrowser?(url: string): Promise<void>
 }
 
-export async function openArtifactInMintBrowser(
+export async function openArtifactInBrowser(
   artifact: ArtifactFile,
   workspace: string | undefined,
-  api: BrowserApi = {
-    desktop: runtimePlatform.isTauriRuntime(),
-    startPreview: (root, path, mint) => workspacePlatform.startHtmlPreview(root, path, mint),
-    openMintBrowser: async (url) => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('open_mint_browser', { url })
-    },
-  },
+  api: BrowserApi = {},
 ): Promise<void> {
-  if (api.desktop && artifact.url) {
-    await api.openMintBrowser(artifact.url)
+  const openBrowser = api.openBrowser ?? (async (targetUrl: string) => {
+    await runtimePlatform.openExternal(targetUrl)
+  })
+  const startPreview = api.startPreview ?? ((root: string, targetPath: string) => workspacePlatform.startHtmlPreview(root, targetPath))
+
+  if (artifact.url) {
+    await openBrowser(artifact.url)
     return
   }
   const root = (artifact.workspacePath ?? workspace)?.trim()
-  if (!root) throw new Error('Select a project before opening its preview in Mint Browser')
+  if (!root) throw new Error('Select a project before opening its preview in browser')
   let path = artifact.path.replace(/\\/g, '/')
   if (/^(\/|[a-z]:\/)/i.test(path)) {
     const normalizedRoot = root.replace(/\\/g, '/').replace(/\/+$/, '')
@@ -35,7 +33,7 @@ export async function openArtifactInMintBrowser(
     }
     path = path.slice(prefix.length)
   }
-  // The authenticated local Web endpoint launches the same automation browser on the backend.
-  const preview = await api.startPreview(root, path, !api.desktop)
-  if (api.desktop) await api.openMintBrowser(preview.url)
+  const preview = await startPreview(root, path)
+  await openBrowser(preview.url)
 }
+

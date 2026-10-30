@@ -30,10 +30,49 @@ pub(in crate::orchestration) async fn prevent_duplicate_browser_launch(
 ) -> Result<(), OrchestrationError> {
     if launches_external_url(command) && crate::browser::session_finish_evidence().await {
         return Err(OrchestrationError::Agent(
-            "External URL launch skipped: this task already uses the automation browser. Use browser_observe/browser_read to inspect its current page, browser_screenshot for visual inspection, or browser_open if navigation is still needed. Do not open the same URL in another browser.".into(),
+            "External URL launch skipped: this task already uses an active browser session. Do not open the same URL in another browser.".into(),
         ));
     }
     Ok(())
+}
+
+/// Refuses to capture the same page with the same options twice in one turn:
+/// that is the screenshot → view_image → recapture loop. A `retryReason` is the
+/// model's explicit statement that the page changed, and a deleted capture file
+/// may always be retaken.
+fn repeat_capture_notice(
+    run: &crate::browser::headless::ChromeRun,
+    root: &Path,
+    retry_reason: &str,
+) -> Option<String> {
+    if !retry_reason.trim().is_empty() {
+        return None;
+    }
+    let previous = reliability::recorded_capture(run.key.as_ref()?.as_str())?;
+    match previous {
+        Some(file) if root.join(&file).exists() => Some(format!(
+            "Already captured: this page was captured with the same options earlier in this turn at {file}. \
+             Call view_image on that file once (or read it) instead of capturing again, or pass \
+             retryReason if the page must be fetched again."
+        )),
+        Some(_) => None,
+        None => Some(
+            "Already read: this page was read with the same options earlier in this turn. Reuse that \
+             output, change the options (for example capture a screenshot), or pass retryReason if the \
+             page must be fetched again."
+                .into(),
+        ),
+    }
+}
+
+/// Remembers a successful capture so `repeat_capture_notice` can spot repeats.
+fn record_capture_result(run: &crate::browser::headless::ChromeRun, result: &str) {
+    if let Some(key) = &run.key
+        && !result.starts_with("Skipped")
+        && !shell_result_failed(result)
+    {
+        reliability::record_capture(key.as_str(), run.output.clone());
+    }
 }
 
 /// Handles the subset of `execute_tool` actions related to shell.
@@ -51,6 +90,15 @@ pub(in crate::orchestration) async fn execute(
         "run_shell" => {
             let command = required(&input.command, "command")?;
             prevent_duplicate_browser_launch(command).await?;
+            // Headless Chrome is made reliable (flags, throw-away profile, timeout) and
+            // de-duplicated here, so the model only has to write the plain command.
+            let chrome = crate::browser::headless::prepare(command, config);
+            let command = chrome.as_ref().map_or(command, |run| run.command.as_str());
+            if let Some(run) = &chrome
+                && let Some(notice) = repeat_capture_notice(run, root, &input.retry_reason)
+            {
+                return Ok(notice);
+            }
             let mode = classify_shell_command(command).mode.as_str().to_owned();
             let approved = approve_cb(&AgentApproval::RunShell {
                 command: command.to_owned(),
@@ -85,7 +133,11 @@ pub(in crate::orchestration) async fn execute(
                     ))
                 }
                 ApprovalOutcome::Approved => {
-                    run_shell(root, config, chat_id, command, &input.retry_reason).await
+                    let out = run_shell(root, config, chat_id, command, &input.retry_reason).await?;
+                    if let Some(run) = &chrome {
+                        record_capture_result(run, &out);
+                    }
+                    Ok(out)
                 }
                 ApprovalOutcome::Denied => Ok(format!("User denied shell command: {}", command)),
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
@@ -245,6 +297,63 @@ pub(in crate::orchestration) async fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::browser::headless::{HostEnv, prepare_with};
+
+    fn chrome(command: &str) -> crate::browser::headless::ChromeRun {
+        let host = HostEnv {
+            no_sandbox: false,
+            linux_timeout: false,
+            profile_root: std::env::temp_dir().join("mint-headless-shell-test"),
+        };
+        prepare_with(command, &MintConfig::default(), &host).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_repeated_capture_of_the_same_page_is_refused_until_a_reason_is_given() {
+        let dir = std::env::temp_dir().join(format!("mint-capture-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        reliability::scope(async {
+            let first = chrome("google-chrome --screenshot=a.png https://example.com/shop");
+            assert!(repeat_capture_notice(&first, &dir, "").is_none(), "first capture runs");
+            std::fs::write(dir.join("a.png"), b"png").unwrap();
+            record_capture_result(&first, "");
+
+            let again = chrome("google-chrome --screenshot=b.png https://example.com/shop/");
+            let notice = repeat_capture_notice(&again, &dir, "").expect("repeat refused");
+            assert!(notice.contains("a.png") && notice.contains("view_image"), "{notice}");
+            assert!(
+                repeat_capture_notice(&again, &dir, "page changed after login").is_none(),
+                "a retryReason allows a deliberate recapture"
+            );
+            std::fs::remove_file(dir.join("a.png")).unwrap();
+            assert!(
+                repeat_capture_notice(&again, &dir, "").is_none(),
+                "a deleted capture may be retaken"
+            );
+        })
+        .await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn dom_reads_repeat_detection_and_failed_runs_are_not_recorded() {
+        let dir = std::env::temp_dir();
+        reliability::scope(async {
+            let dom = chrome("google-chrome --dump-dom https://example.com");
+            record_capture_result(&dom, "Error: Chrome failed\nexit: 1\n");
+            assert!(repeat_capture_notice(&dom, &dir, "").is_none(), "failures can be retried");
+            record_capture_result(&dom, "<html></html>");
+            let notice = repeat_capture_notice(&dom, &dir, "").expect("repeat refused");
+            assert!(notice.starts_with("Already read"), "{notice}");
+        })
+        .await;
+    }
+
+    #[test]
+    fn commands_without_a_single_url_are_never_deduplicated() {
+        let run = chrome("google-chrome --dump-dom");
+        assert!(repeat_capture_notice(&run, &std::env::temp_dir(), "").is_none());
+    }
 
     #[test]
     fn external_url_launch_detection_preserves_other_shell_work() {

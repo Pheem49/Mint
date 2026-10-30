@@ -9,7 +9,7 @@ import {
   File,
   Eye,
 } from 'lucide-react'
-import { openArtifactInMintBrowser } from '../../utils/artifactBrowser'
+import { openArtifactInBrowser } from '../../utils/artifactBrowser'
 import { runtimePlatform } from '../../platform'
 import { renderFormattedMessage } from '../../utils/markdown'
 import { ChatCodeBlock } from '../chat/ChatCodeBlock'
@@ -199,7 +199,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
     setOpeningBrowser(true)
     setBrowserError(null)
     try {
-      await openArtifactInMintBrowser(artifact, sourceWorkspace)
+      await openArtifactInBrowser(artifact, sourceWorkspace)
     } catch (reason: unknown) {
       if (currentArtifact.current === artifact) {
         setBrowserError(reason instanceof Error ? reason.message : String(reason))
@@ -508,9 +508,9 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
             type="button"
             onClick={() => { void handleOpenInMintBrowser() }}
             disabled={openingBrowser}
-            aria-label="Open in Mint Browser (Mint Auto)"
+            aria-label="Open preview"
             aria-busy={openingBrowser}
-            title={openingBrowser ? 'Opening Mint Browser…' : 'Open in Mint Browser (Mint Auto)'}
+            title={openingBrowser ? 'Opening preview…' : 'Open preview'}
             style={{
               background: 'none',
               border: 'none',
@@ -554,7 +554,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
 
       {browserError && (
         <div role="alert" style={{ padding: '8px 14px', fontSize: '0.8rem', color: 'var(--status-error, #f87171)', flexShrink: 0 }}>
-          Could not open Mint Browser: {browserError}
+          Could not open preview: {browserError}
         </div>
       )}
 

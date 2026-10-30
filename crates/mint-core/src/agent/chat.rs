@@ -2612,7 +2612,6 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
         "weather",
         "stock",
         "calculation",
-        "browser_open",
         "memory_recall",
         "git_status",
         "git_diff",
@@ -2657,7 +2656,7 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
                         "query": { "type": "STRING", "description": "The search query string (required for search_code, semantic_search, knowledge_search, web_search, stock, memory_recall)" },
                         "city": { "type": "STRING", "description": "The target city or location name (required for weather)" },
                         "expression": { "type": "STRING", "description": "The math expression or percentage calculation (required for calculation)" },
-                        "url": { "type": "STRING", "description": "The target website URL to open (required for browser_open)" },
+                        "url": { "type": "STRING", "description": "The target website URL" },
                         "command": { "type": "STRING", "description": "The local read-only or test shell command to run (required for run_shell)" },
                         "commands": {
                             "type": "ARRAY",
@@ -3495,7 +3494,7 @@ mod tests {
     #[test]
     fn openai_native_payload_forwards_a_screenshot_riding_a_tool_result_as_a_user_turn() {
         // OpenAI's Chat Completions `tool` role only accepts string content, so an
-        // `Image` block attached to a tool result (e.g. `browser_screenshot`) must
+        // `Image` block attached to a tool result (e.g. `view_image`) must
         // surface as a follow-up `user` message instead of being dropped.
         let messages = vec![ChatMessage {
             role: ChatRole::Tool,
@@ -3984,7 +3983,7 @@ mod tests {
     #[test]
     fn ollama_native_messages_forward_a_screenshot_riding_a_tool_result_as_a_user_turn() {
         // Ollama's `/api/chat` `tool` role message has no image field, so an
-        // `Image` block attached to a tool result (e.g. `browser_screenshot`)
+        // `Image` block attached to a tool result (e.g. `view_image`)
         // must surface as a follow-up `user` message with the `images` field.
         let messages = vec![ChatMessage {
             role: ChatRole::Tool,

@@ -41,14 +41,39 @@ struct Ledger {
     modified: bool,
     executions: Vec<ExecutionEvidence>,
     attempts: BTreeMap<String, Attempt>,
-    browser_used: bool,
-    browser_verified: bool,
+    viewed_images: std::collections::BTreeSet<String>,
+    /// Headless-Chrome captures made this turn: capture key -> file written, if any.
+    captures: BTreeMap<String, Option<String>>,
 }
 
 tokio::task_local! { static LEDGER: Mutex<Ledger>; }
 
 pub(super) async fn scope<F: Future>(future: F) -> F::Output {
     LEDGER.scope(Mutex::new(Ledger::default()), future).await
+}
+
+/// True the first time an image identity (content hash or artifact id) is shown
+/// in this turn; later requests for the same image should not be attached again.
+/// Outside a turn scope nothing is suppressed.
+pub(super) fn first_image_view(key: &str) -> bool {
+    LEDGER
+        .try_with(|l| l.lock().unwrap().viewed_images.insert(key.to_owned()))
+        .unwrap_or(true)
+}
+
+/// What this turn already captured for `key` (see `browser::headless::CaptureKey`):
+/// `Some(Some(file))` for a screenshot/PDF, `Some(None)` for stdout-only reads.
+pub(super) fn recorded_capture(key: &str) -> Option<Option<String>> {
+    LEDGER
+        .try_with(|l| l.lock().unwrap().captures.get(key).cloned())
+        .ok()
+        .flatten()
+}
+
+pub(super) fn record_capture(key: &str, output: Option<String>) {
+    let _ = LEDGER.try_with(|l| {
+        l.lock().unwrap().captures.insert(key.to_owned(), output);
+    });
 }
 
 pub(super) fn checkpoint() -> usize {
@@ -69,30 +94,6 @@ pub(super) fn for_job(job: &str) -> Vec<ExecutionEvidence> {
                 .collect()
         })
         .unwrap_or_default()
-}
-
-pub(super) fn record_browser(action: &str, result: Option<&serde_json::Value>, succeeded: bool) {
-    let _ = LEDGER.try_with(|l| {
-        let mut l = l.lock().unwrap();
-        l.browser_used = true;
-        if !succeeded {
-            l.browser_verified = false;
-        } else if let Some(result) = result {
-            if result["verification"] == "verified" {
-                l.browser_verified = true;
-            } else if matches!(
-                action,
-                "browser_click"
-                    | "browser_type"
-                    | "browser_fill"
-                    | "browser_key_press"
-                    | "browser_select"
-                    | "browser_open"
-            ) {
-                l.browser_verified = false;
-            }
-        }
-    });
 }
 
 pub(super) fn mark_workflow(call: &str, verified: bool) -> Vec<ExecutionEvidence> {
@@ -274,7 +275,11 @@ pub(super) fn completion(requested: &str, reason: &str) -> Result<String, String
         if let Some(last)=l.executions.last().filter(|e|!e.check && e.revision==l.revision) {evidence.push(last);}
         let failure=super::verification::unacknowledged_verify_failure(Some(evidence.iter().any(|e|matches!(e.state,ExecutionState::Failed|ExecutionState::Cancelled))), "");
         let pending=checks.values().any(|e|matches!(e.state,ExecutionState::Running|ExecutionState::Unknown)) || evidence.iter().any(|e|matches!(e.state,ExecutionState::Running|ExecutionState::Unknown));
-        let missing=super::verification::unverified_modification(l.modified.then_some(l.revision as usize),(!current.is_empty()).then_some(l.revision as usize),"") || current.iter().any(|e|e.condition_verified==Some(false)) || (l.browser_used && !l.browser_verified);
+        let missing = super::verification::unverified_modification(
+            l.modified.then_some(l.revision as usize),
+            (!current.is_empty()).then_some(l.revision as usize),
+            "",
+        ) || current.iter().any(|e| e.condition_verified == Some(false));
         if requested == "verified" && (failure || pending || missing) {
             return Err("Cannot claim verified: checks failed, are still running, or no check ran after the latest edit. Inspect the actual result, or finish with completionStatus=blocked/unverified/failed and a reason.".into());
         }
@@ -293,6 +298,37 @@ pub(super) fn completion(requested: &str, reason: &str) -> Result<String, String
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn captures_are_remembered_for_the_turn_only() {
+        scope(async {
+            assert_eq!(recorded_capture("dom|default|https://a.io"), None);
+            record_capture("dom|default|https://a.io", None);
+            record_capture("screenshot|default|https://a.io", Some("a.png".into()));
+            assert_eq!(recorded_capture("dom|default|https://a.io"), Some(None));
+            assert_eq!(
+                recorded_capture("screenshot|default|https://a.io"),
+                Some(Some("a.png".into()))
+            );
+        })
+        .await;
+        scope(async { assert_eq!(recorded_capture("dom|default|https://a.io"), None) }).await;
+        record_capture("k", None);
+        assert_eq!(recorded_capture("k"), None, "no turn scope, nothing recorded");
+    }
+    #[tokio::test]
+    async fn an_image_is_only_new_the_first_time_within_a_turn() {
+        scope(async {
+            assert!(first_image_view("sha:aaa"));
+            assert!(!first_image_view("sha:aaa"));
+            assert!(first_image_view("sha:bbb"));
+        })
+        .await;
+        // A new turn starts with a fresh ledger.
+        scope(async { assert!(first_image_view("sha:aaa")) }).await;
+        // Outside any scope nothing is suppressed.
+        assert!(first_image_view("sha:aaa"));
+        assert!(first_image_view("sha:aaa"));
+    }
     #[tokio::test]
     async fn a_different_passing_check_does_not_erase_failed_tests() {
         scope(async {

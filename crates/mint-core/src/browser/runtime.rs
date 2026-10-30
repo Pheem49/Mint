@@ -40,12 +40,11 @@ impl Drop for ManagedBrowser {
 
 impl ManagedBrowser {
     pub fn metadata(&self) -> Value {
-        json!({"mode":if self.headless {"headless"} else {"headed"},"command":self.command,"diagnostics":self.diagnostics.lock().unwrap().as_str()})
+        json!({"mode":"headless","command":self.command,"diagnostics":self.diagnostics.lock().unwrap().as_str()})
     }
 
     pub async fn launch(config: &MintConfig) -> Result<Self, String> {
-        let headless =
-            config.extra.get("browserAgentMode").and_then(Value::as_str) != Some("headed");
+        let headless = true;
         let width = config
             .extra
             .get("browserViewportWidth")
@@ -240,7 +239,6 @@ impl ManagedBrowser {
                 let endpoint = format!("http://127.0.0.1:{port}/json/list");
                 if super::cdp::fetch_pages_endpoint(&endpoint).await.is_ok() {
                     runtime.endpoint = endpoint;
-                    super::logging::log_action("LAUNCH", &runtime.command);
                     return Ok(runtime);
                 }
             }

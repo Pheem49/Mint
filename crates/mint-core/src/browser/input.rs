@@ -7,17 +7,12 @@ use crate::MintConfig;
 use serde_json::json;
 
 use super::cdp::cdp_call_raw;
-use super::lifecycle::ensure_page_open;
-use super::logging::log_action;
 use super::navigate::wait_for_page_load;
 use super::overlay::inject_overlay;
 
 /// Move the real browser mouse cursor to (x, y) via CDP Input.dispatchMouseEvent.
 /// Also ensures overlay exists and updates cursor position.
 pub async fn mouse_move(config: &MintConfig, x: f64, y: f64) -> Result<String, String> {
-    log_action("MOUSE_MOVE", &format!("Moving mouse to ({x:.0},{y:.0})"));
-    ensure_page_open(config).await?;
-
     // Ensure overlay exists
     inject_overlay(config).await;
 
@@ -50,11 +45,9 @@ pub async fn mouse_move(config: &MintConfig, x: f64, y: f64) -> Result<String, S
                 json!({ "expression": cursor_script, "returnByValue": false }),
             )
             .await;
-            log_action("MOUSE_MOVE_SUCCESS", &format!("Moved to ({x:.0},{y:.0})"));
             Ok(format!("mouse moved to ({x:.0},{y:.0})"))
         }
         Err(e) => {
-            log_action("MOUSE_MOVE_ERROR", &format!("Failed: {e}"));
             Err(e)
         }
     }
@@ -68,12 +61,6 @@ pub async fn mouse_click(
     y: f64,
     button: &str,
 ) -> Result<String, String> {
-    log_action(
-        "MOUSE_CLICK",
-        &format!("Clicking ({x:.0},{y:.0}) btn={button}"),
-    );
-    ensure_page_open(config).await?;
-
     let button_str = match button {
         "right" => "right",
         "middle" => "middle",
@@ -114,11 +101,7 @@ pub async fn mouse_click(
             "modifiers": 0
         }),
     )
-    .await
-    .map_err(|e| {
-        log_action("MOUSE_CLICK_ERROR", &format!("mousePressed: {e}"));
-        e
-    })?;
+    .await?;
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -135,16 +118,8 @@ pub async fn mouse_click(
             "modifiers": 0
         }),
     )
-    .await
-    .map_err(|e| {
-        log_action("MOUSE_CLICK_ERROR", &format!("mouseReleased: {e}"));
-        e
-    })?;
+    .await?;
 
-    log_action(
-        "MOUSE_CLICK_SUCCESS",
-        &format!("Clicked ({x:.0},{y:.0}) {button_str}"),
-    );
     // The click may have landed on a link or submit button and triggered a
     // full page navigation — see `wait_for_page_load`'s doc comment.
     wait_for_page_load(config).await;
@@ -155,22 +130,11 @@ pub async fn mouse_click(
 
 /// Type text using CDP Input.insertText (native, supports any Unicode text).
 pub async fn type_text_native(config: &MintConfig, text: &str) -> Result<String, String> {
-    log_action(
-        "TYPE",
-        &format!("Native typing: {} characters", text.chars().count()),
-    );
-    ensure_page_open(config).await?;
-
     match cdp_call_raw(config, "Input.insertText", json!({ "text": text })).await {
         Ok(_) => {
-            log_action(
-                "TYPE_SUCCESS",
-                &format!("Typed {} characters natively", text.len()),
-            );
             Ok(format!("typed {} characters", text.len()))
         }
         Err(e) => {
-            log_action("TYPE_ERROR", &format!("Native type failed: {e}"));
             Err(e)
         }
     }
@@ -183,9 +147,6 @@ pub async fn type_text_native(config: &MintConfig, text: &str) -> Result<String,
 /// PageUp, PageDown, Space, F1–F12.
 /// Also accepts single printable characters.
 pub async fn key_press(config: &MintConfig, key: &str) -> Result<String, String> {
-    log_action("KEY_PRESS", &format!("Pressing key '{key}'"));
-    ensure_page_open(config).await?;
-
     let (key_code, code) = key_to_cdp_params(key);
 
     // keyDown. For Enter specifically, `text`/`unmodifiedText` must be set to
@@ -209,11 +170,7 @@ pub async fn key_press(config: &MintConfig, key: &str) -> Result<String, String>
         key_down["unmodifiedText"] = json!("\r");
     }
     cdp_call_raw(config, "Input.dispatchKeyEvent", key_down)
-        .await
-        .map_err(|e| {
-            log_action("KEY_PRESS_ERROR", &format!("keyDown failed: {e}"));
-            e
-        })?;
+        .await?;
 
     // char event for printable single characters
     if key.chars().count() == 1 && !key.chars().next().map(|c| c.is_control()).unwrap_or(true) {
@@ -248,13 +205,8 @@ pub async fn key_press(config: &MintConfig, key: &str) -> Result<String, String>
             "location": 0
         }),
     )
-    .await
-    .map_err(|e| {
-        log_action("KEY_PRESS_ERROR", &format!("keyUp failed: {e}"));
-        e
-    })?;
+    .await?;
 
-    log_action("KEY_PRESS_SUCCESS", &format!("Pressed '{key}'"));
     if matches!(key, "Enter" | "\n" | "\r") {
         // Enter commonly submits the focused form — see `wait_for_page_load`'s
         // doc comment. Other keys (Tab, Escape, arrows, ...) don't trigger

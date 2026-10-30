@@ -12,7 +12,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use super::agent::{PLAN_MODE_ALLOWED_ACTIONS, base_allowed_actions, browser_tools_enabled};
+use super::agent::{PLAN_MODE_ALLOWED_ACTIONS, base_allowed_actions};
 use crate::MintConfig;
 use crate::chat::ToolSpec;
 use crate::subagents::list_subagents;
@@ -54,9 +54,6 @@ pub fn tool_catalog(
     allow_subagent_dispatch: bool,
 ) -> Vec<ToolSpec> {
     let mut allowed = base_allowed_actions();
-    if browser_tools_enabled(config) {
-        allowed.extend_from_slice(crate::browser::BROWSER_TOOLS);
-    }
     if !config.avatar_token.is_empty() && !config.avatar_signal_disabled {
         allowed.push("avatar_signal");
     }
@@ -354,121 +351,6 @@ fn all_tools() -> Vec<ToolSpec> {
             schema(
                 json!({ "expression": { "type": "string" } }),
                 &["expression"],
-            ),
-        ),
-        tool(
-            "browser_open",
-            "Navigate the automation browser to a URL.",
-            schema(json!({ "url": { "type": "string" } }), &["url"]),
-        ),
-        tool(
-            "browser_click",
-            "Click an observed element. Provide elementRef or selector, not both.",
-            schema(
-                json!({"elementRef":{"type":"string"},"selector":{"type":"string"}}),
-                &[],
-            ),
-        ),
-        tool(
-            "browser_type",
-            "Append text to a field. Provide elementRef or selector, not both.",
-            schema(
-                json!({"elementRef":{"type":"string"},"selector":{"type":"string"},"text":{"type":"string"}}),
-                &["text"],
-            ),
-        ),
-        tool(
-            "browser_fill",
-            "Replace a field's value and verify it.",
-            schema(
-                json!({"elementRef":{"type":"string"},"selector":{"type":"string"},"text":{"type":"string"}}),
-                &["text"],
-            ),
-        ),
-        tool(
-            "browser_select",
-            "Select a native dropdown option by value.",
-            schema(
-                json!({"elementRef":{"type":"string"},"selector":{"type":"string"},"value":{"type":"string"}}),
-                &["value"],
-            ),
-        ),
-        tool(
-            "browser_observe",
-            "Read structured page state and fresh element references. Confirm takeover only after the user has completed it.",
-            schema(
-                json!({"textOffset":{"type":"integer","minimum":0},"elementOffset":{"type":"integer","minimum":0},"takeoverComplete":{"type":"boolean"}}),
-                &[],
-            ),
-        ),
-        tool(
-            "browser_tabs",
-            "List/open/select/close tabs. Selection and closure require explicit tabId; popups are never auto-selected.",
-            schema(
-                json!({"operation":{"type":"string","enum":["list","open","select","close"]},"tabId":{"type":"string"},"url":{"type":"string"}}),
-                &["operation"],
-            ),
-        ),
-        tool(
-            "browser_scroll",
-            "Scroll the viewport or an observed element by pixels.",
-            schema(
-                json!({"elementRef":{"type":"string"},"selector":{"type":"string"},"x":{"type":"number"},"y":{"type":"number"}}),
-                &[],
-            ),
-        ),
-        tool(
-            "browser_wait",
-            "Wait for a URL, text, or element visibility condition; at most 30 seconds.",
-            schema(
-                json!({"condition":{"type":"string","enum":["url","text","visible","hidden"]},"value":{"type":"string"},"elementRef":{"type":"string"},"selector":{"type":"string"},"timeoutMs":{"type":"integer","minimum":1,"maximum":30000}}),
-                &["condition"],
-            ),
-        ),
-        tool(
-            "browser_read",
-            "Read the text content of the active browser page.",
-            schema(json!({}), &[]),
-        ),
-        tool(
-            "browser_mouse_move",
-            "Move the browser cursor to viewport (x, y) coordinates.",
-            schema(
-                json!({ "x": { "type": "number" }, "y": { "type": "number" } }),
-                &["x", "y"],
-            ),
-        ),
-        tool(
-            "browser_mouse_click",
-            "Perform a native mouse click at (x, y). Use browser_screenshot first to find the target position.",
-            schema(
-                json!({
-                    "x": { "type": "number" },
-                    "y": { "type": "number" },
-                    "button": { "type": "string", "description": "left | right | middle. Defaults to left." }
-                }),
-                &["x", "y"],
-            ),
-        ),
-        tool(
-            "browser_key_press",
-            "Press a keyboard key in the automation browser.",
-            schema(
-                json!({
-                    "key": {
-                        "type": "string",
-                        "description": "Enter, Tab, Escape, Backspace, Delete, ArrowUp/Down/Left/Right, F1-F12, Space, ..."
-                    }
-                }),
-                &["key"],
-            ),
-        ),
-        tool(
-            "browser_screenshot",
-            "Capture the current automation browser page as an image.",
-            schema(
-                json!({"mode":{"type":"string","enum":["viewport","fullPage","element"]},"selector":{"type":"string"},"elementRef":{"type":"string"}}),
-                &[],
             ),
         ),
         tool(
@@ -1101,42 +983,13 @@ fn all_tools() -> Vec<ToolSpec> {
 mod browser_startup_tests {
     use super::*;
     #[test]
-    fn browser_tools_are_discoverable_when_browser_automation_enabled() {
-        let mut config = MintConfig::default();
+    fn browser_tools_are_superseded_by_shell_playbook() {
+        let config = MintConfig::default();
         let default_tools = tool_catalog(&config, false, Path::new("."), false);
-        // By default, browser tools are enabled out of the box for real web browsing.
-        assert!(default_tools.iter().any(|tool| tool.name == "browser_open"));
-
-        // Explicitly disabling browser automation removes browser tools.
-        config
-            .extra
-            .insert("browserAutomationEnabled".into(), json!(false));
-        let disabled_tools = tool_catalog(&config, false, Path::new("."), false);
-        assert!(
-            !disabled_tools
-                .iter()
-                .any(|tool| tool.name == "browser_open")
-        );
-
-        config
-            .extra
-            .insert("browserAutomationEnabled".into(), json!(true));
-        config.extra.insert(
-            "browserDebugUrl".into(),
-            json!("http://127.0.0.1:1/json/list"),
-        );
-        let tools = tool_catalog(&config, false, Path::new("."), false);
-        assert!(tools.iter().any(|tool| tool.name == "browser_open"));
-        assert!(
-            crate::prompts::agent::build_system_prompt(&config, false, false, None, None)
-                .contains("browser_open")
-        );
-        config.disabled_tools.push("browser_open".into());
-        assert!(
-            !tool_catalog(&config, false, Path::new("."), false)
-                .iter()
-                .any(|tool| tool.name == "browser_open")
-        );
+        // Agent browser_* tools are removed; web browsing is done via run_shell
+        assert!(!default_tools.iter().any(|tool| tool.name == "browser_open"));
+        assert!(!default_tools.iter().any(|tool| tool.name == "browser_screenshot"));
+        assert!(default_tools.iter().any(|tool| tool.name == "run_shell"));
     }
 }
 

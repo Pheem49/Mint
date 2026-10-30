@@ -2305,9 +2305,9 @@ export async function getBackgroundJob(id: string) { if (isTauriRuntime()) { con
 export async function stopBackgroundJob(id: string) { if (isTauriRuntime()) { const { invoke } = await import('@tauri-apps/api/core'); return invoke<import('../shared/types').BackgroundJob>('stop_background_job', { id, ownerToken: getStoredAuthToken() }) } return backgroundRequest<import('../shared/types').BackgroundJob>(`/${encodeURIComponent(id)}/stop`, 'POST') }
 export async function deleteBackgroundJob(id: string) { if (isTauriRuntime()) { const { invoke } = await import('@tauri-apps/api/core'); await invoke('remove_background_job', { id, ownerToken: getStoredAuthToken() }); return } await backgroundRequest<{deleted: boolean}>(`/${encodeURIComponent(id)}`, 'DELETE') }
 
-export async function startHtmlPreview(root: string, relativePath: string, mintBrowser = false): Promise<{url: string; jobId: string}> {
+export async function startHtmlPreview(root: string, relativePath: string, _mintBrowser = false): Promise<{url: string; jobId: string}> {
   if (isTauriRuntime()) { const { invoke } = await import('@tauri-apps/api/core'); return invoke('start_html_preview', { root, relativePath, ownerToken: getStoredAuthToken() }) }
-  const response = await authFetch(`${getLocalApiBase()}/html-preview`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, relativePath, mintBrowser}) })
+  const response = await authFetch(`${getLocalApiBase()}/html-preview`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({root, relativePath}) })
   const value = await response.json()
   if (!response.ok) throw new Error(value.message || 'Could not start HTML preview')
   return value

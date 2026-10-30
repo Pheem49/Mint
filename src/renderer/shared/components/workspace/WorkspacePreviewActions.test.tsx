@@ -43,9 +43,9 @@ it('renders images fitted inside Preview without a binary code tab and with form
   expect(webpHtml).toContain('WEBP')
 })
 
-it('identifies the browser action as Mint Browser instead of a generic popup', () => {
+it('identifies the browser action as preview in system browser', () => {
   const html = renderToStaticMarkup(<ArtifactPreviewPanel artifact={{ path: 'site/index.html', url: 'http://127.0.0.1:12345/site/index.html' }} onClose={() => {}} />)
-  expect(html).toContain('aria-label="Open in Mint Browser (Mint Auto)"')
+  expect(html).toContain('aria-label="Open preview"')
 })
 
 it('renders pure code files in code mode with language chip and without preview toggle or browser button', () => {
@@ -62,7 +62,7 @@ it('renders pure code files in code mode with language chip and without preview 
   expect(html).toContain('import')
   expect(html).toContain('json')
   expect(html).toContain('hello')
-  expect(html).not.toContain('aria-label="Open in Mint Browser (Mint Auto)"')
+  expect(html).not.toContain('aria-label="Open preview"')
 })
 
 it('renders dual-mode toggles for markdown, svg, and html without showing browser button for non-html', () => {
@@ -71,19 +71,19 @@ it('renders dual-mode toggles for markdown, svg, and html without showing browse
   )
   expect(mdHtml).toMatch(/>Preview<\/button>/)
   expect(mdHtml).toMatch(/>Code<\/button>/)
-  expect(mdHtml).not.toContain('aria-label="Open in Mint Browser (Mint Auto)"')
+  expect(mdHtml).not.toContain('aria-label="Open preview"')
 
   const svgHtml = renderToStaticMarkup(
     <ArtifactPreviewPanel artifact={{ path: 'icons/logo.svg', content: '<svg></svg>' }} onClose={() => {}} />,
   )
   expect(svgHtml).toMatch(/>Preview<\/button>/)
   expect(svgHtml).toMatch(/>Code<\/button>/)
-  expect(svgHtml).not.toContain('aria-label="Open in Mint Browser (Mint Auto)"')
+  expect(svgHtml).not.toContain('aria-label="Open preview"')
 
   const webHtml = renderToStaticMarkup(
     <ArtifactPreviewPanel artifact={{ path: 'index.html', content: '<h1>Hi</h1>' }} onClose={() => {}} />,
   )
   expect(webHtml).toMatch(/>Preview<\/button>/)
   expect(webHtml).toMatch(/>Code<\/button>/)
-  expect(webHtml).toContain('aria-label="Open in Mint Browser (Mint Auto)"')
+  expect(webHtml).toContain('aria-label="Open preview"')
 })

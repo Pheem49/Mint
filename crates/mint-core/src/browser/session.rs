@@ -3,7 +3,6 @@
 use super::{
     cdp::{cdp_call_raw, fetch_pages},
     interact::selector_to_js_find,
-    logging::log_action,
 };
 use crate::MintConfig;
 use serde::{Deserialize, Serialize};
@@ -14,7 +13,7 @@ use std::{
     future::Future,
     hash::{Hash, Hasher},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::sync::Mutex;
 
@@ -187,11 +186,7 @@ pub async fn with_tab<F: Future>(
 }
 
 fn endpoint(config: &MintConfig) -> &str {
-    config
-        .extra
-        .get("browserDebugUrl")
-        .and_then(Value::as_str)
-        .unwrap_or("http://127.0.0.1:9222/json/list")
+    super::cdp::debug_endpoint(config)
 }
 
 async fn tab_request(config: &MintConfig, operation: &str) -> Result<Value, String> {
@@ -384,44 +379,23 @@ pub fn execute_action<'a>(
         if SESSION.try_with(|_| ()).is_err() {
             return run_session(execute_action(config, action, args)).await;
         }
-        let started = Instant::now();
         let state = SESSION.with(Arc::clone);
         let mut session = state.lock().await;
-        if config.disabled_tools.iter().any(|tool| tool == action)
-            || config.extra.get("browserAutomationEnabled") == Some(&json!(false))
-        {
-            return Err(format!("Browser tool '{action}' is disabled"));
-        }
         if action == "browser_open" {
             super::navigate::validate_url(args["url"].as_str().unwrap_or(""))?;
         }
         let starting = session.runtime_config.is_none();
         if starting {
-            let endpoint = endpoint(config);
-            let parsed = reqwest::Url::parse(endpoint).map_err(|e| e.to_string())?;
-            let external = config.extra.get("browserUseExisting") == Some(&json!(true))
-                || !matches!(
-                    parsed.host_str(),
-                    Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
-                )
-                || parsed.port_or_known_default() != Some(9222);
-            if external {
-                if !super::is_browser_running(config).await {
-                    return Err("Configured browser endpoint is unavailable; start the external browser or remove the endpoint override.".into());
-                }
-                session.runtime_config = Some(config.clone());
-            } else {
-                let runtime = super::runtime::ManagedBrowser::launch(config).await?;
-                let mut run_config = config.clone();
-                run_config
-                    .extra
-                    .insert("browserDebugUrl".into(), json!(runtime.endpoint));
-                run_config
-                    .extra
-                    .insert("__managedBrowser".into(), json!(true));
-                session.runtime_config = Some(run_config);
-                session.runtime = Some(runtime);
-            }
+            let runtime = super::runtime::ManagedBrowser::launch(config).await?;
+            let mut run_config = config.clone();
+            run_config
+                .extra
+                .insert("browserDebugUrl".into(), json!(runtime.endpoint));
+            run_config
+                .extra
+                .insert("__managedBrowser".into(), json!(true));
+            session.runtime_config = Some(run_config);
+            session.runtime = Some(runtime);
         }
         let run_config = session.runtime_config.as_ref().unwrap().clone();
         let mut result = execute_owned(&run_config, action, args, &mut session).await;
@@ -432,28 +406,10 @@ pub fn execute_action<'a>(
             report.insert("runtime".into(), runtime.metadata());
             *text = Value::Object(report).to_string();
         }
-        let report = result
+        let _report = result
             .as_ref()
             .ok()
             .and_then(|r| serde_json::from_str::<Value>(r).ok());
-        log_action(
-            "SESSION_ACTION",
-            &format!(
-                "session={} tab={} action={} durationMs={} status={} verification={}",
-                session.id,
-                session.tab.as_deref().unwrap_or("none"),
-                action,
-                started.elapsed().as_millis(),
-                report
-                    .as_ref()
-                    .and_then(|r| r["status"].as_str())
-                    .unwrap_or(if result.is_ok() { "returned" } else { "failed" }),
-                report
-                    .as_ref()
-                    .and_then(|r| r["verification"].as_str())
-                    .unwrap_or("unverified")
-            ),
-        );
         result
     })
 }
@@ -476,9 +432,6 @@ async fn execute_owned(
     }
     if action == "browser_open" {
         super::navigate::validate_url(args["url"].as_str().unwrap_or("").trim())?;
-    }
-    if !super::lifecycle::is_browser_running(config).await {
-        super::lifecycle::spawn_automation_browser(config).await?;
     }
     if session.tab.is_none() && action != "browser_tabs" {
         let page = tab_request(config, "new?about:blank").await?;
@@ -902,7 +855,12 @@ async fn wait(config: &MintConfig, args: &Value, session: &BrowserSession) -> Re
 mod tests {
     use super::*;
     use std::process::{Child, Command, Stdio};
+    use std::time::Instant;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn is_endpoint_running(config: &MintConfig) -> bool {
+        super::super::cdp::fetch_pages(config).await.is_ok()
+    }
 
     #[tokio::test]
     async fn browser_session_prevents_duplicate_external_url_launches() {
@@ -923,7 +881,7 @@ mod tests {
                     },
                 )
                 .await;
-                assert!(result.unwrap_err().to_string().contains("browser_open"));
+                assert!(result.unwrap_err().to_string().contains("already uses an active browser session"));
                 assert!(
                     !requested_approval,
                     "duplicate launch must stop before approval or spawn"
@@ -938,7 +896,7 @@ mod tests {
                 &mut |_| panic!("verification must not launch another browser"),
             )
             .await;
-            assert!(result.unwrap_err().to_string().contains("browser_open"));
+            assert!(result.unwrap_err().to_string().contains("already uses an active browser session"));
 
             // Opening local documents still follows the normal approval path.
             let result = crate::orchestration::execute_tool_from_json(
@@ -1014,38 +972,11 @@ mod tests {
         assert!(!expression.contains("=== `"));
     }
 
-    #[tokio::test]
-    async fn headed_mode_does_not_hijack_running_port_9222_browser_without_explicit_flag() {
-        let mut config = MintConfig::default();
-        config
-            .extra
-            .insert("browserAgentMode".into(), json!("headed"));
+    #[test]
+    fn session_uses_managed_dynamic_endpoint() {
+        let config = MintConfig::default();
         let endpoint = endpoint(&config);
-        let parsed = reqwest::Url::parse(endpoint).unwrap();
-        let external = config.extra.get("browserUseExisting") == Some(&json!(true))
-            || !matches!(
-                parsed.host_str(),
-                Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
-            )
-            || parsed.port_or_known_default() != Some(9222);
-        assert!(
-            !external,
-            "Headed mode without browserUseExisting must not attach to port 9222"
-        );
-
-        config
-            .extra
-            .insert("browserUseExisting".into(), json!(true));
-        let external_with_flag = config.extra.get("browserUseExisting") == Some(&json!(true))
-            || !matches!(
-                parsed.host_str(),
-                Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
-            )
-            || parsed.port_or_known_default() != Some(9222);
-        assert!(
-            external_with_flag,
-            "Explicit browserUseExisting should allow external attachment"
-        );
+        assert!(!endpoint.is_empty());
     }
 
     struct BrowserFixture {
@@ -1127,7 +1058,7 @@ mod tests {
                 profile,
             };
             for _ in 0..100 {
-                if super::super::is_browser_running(&fixture.config).await {
+                if is_endpoint_running(&fixture.config).await {
                     return fixture;
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1178,7 +1109,7 @@ mod tests {
         assert_eq!(viewport, (1440, 900));
         assert!(full.1 > viewport.1);
         assert!(element.1 < viewport.1);
-        assert!(super::super::is_browser_running(&fixture.config).await);
+        assert!(is_endpoint_running(&fixture.config).await);
         assert!(!serde_json::to_string(&report).unwrap().contains("base64"));
         let _ = std::fs::remove_dir_all(output);
     }

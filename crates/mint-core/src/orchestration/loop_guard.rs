@@ -42,7 +42,14 @@ pub struct RepetitionGuard {
     max_history: usize,
     warn_threshold: usize,
     intercept_threshold: usize,
+    /// Hashes of the most recent read-only tool results (see `observe_result`).
+    result_window: VecDeque<[u8; 32]>,
+    /// Armed when one outcome repeated `intercept_threshold` times; consumed by the next `check`.
+    pending_result_intercept: bool,
 }
+
+/// How many recent read-only results are compared for "nothing new" loops.
+const RESULT_WINDOW: usize = 8;
 
 impl Default for RepetitionGuard {
     fn default() -> Self {
@@ -53,6 +60,8 @@ impl Default for RepetitionGuard {
             max_history: 16,
             warn_threshold: 2,
             intercept_threshold: 3,
+            result_window: VecDeque::with_capacity(RESULT_WINDOW),
+            pending_result_intercept: false,
         }
     }
 }
@@ -66,6 +75,8 @@ impl RepetitionGuard {
             max_history: 16,
             warn_threshold,
             intercept_threshold,
+            result_window: VecDeque::with_capacity(RESULT_WINDOW),
+            pending_result_intercept: false,
         }
     }
 
@@ -73,6 +84,24 @@ impl RepetitionGuard {
     pub fn check(&mut self, action: &str, input: &Value) -> LoopGuardDecision {
         if action == "finish" {
             return LoopGuardDecision::Allow;
+        }
+
+        if self.pending_result_intercept {
+            self.pending_result_intercept = false;
+            self.result_window.clear();
+            return LoopGuardDecision::InterceptStuckLoop {
+                action: action.to_string(),
+                reason: "Recent read-only calls kept returning the same result.".to_string(),
+                instruction: format!(
+                    "[Stuck-Loop Guard: Intercepted '{action}']\n\
+                     The last several observations (screenshots, page text, images) were identical even \
+                     though the inputs changed, so another call would not teach you anything new.\n\
+                     NEXT STEPS:\n\
+                     1. Answer from the information you already have, or\n\
+                     2. Take a genuinely different approach (different URL, a text/DOM read instead of an image), or\n\
+                     3. Call 'finish' and explain the blocker."
+                ),
+            };
         }
 
         let fp = compute_action_fingerprint(action, input);
@@ -155,6 +184,40 @@ impl RepetitionGuard {
         self.last_fingerprint = None;
         self.consecutive_streak = 0;
         self.history.clear();
+        self.result_window.clear();
+        self.pending_result_intercept = false;
+    }
+
+    /// Records the observable result of a read-only tool call (text plus any
+    /// attached image bytes, hashed by the caller into `result`). Catches loops
+    /// whose *inputs* differ each time (new screenshot filename, new scroll
+    /// offset) but whose *outcome* never changes. Returns a notice to append to
+    /// the tool result when the same outcome repeats; the third repeat also arms
+    /// an intercept of the next non-`finish` call.
+    pub fn observe_result(&mut self, action: &str, result: &str) -> Option<String> {
+        let mut hasher = Sha256::new();
+        hasher.update(result.trim().as_bytes());
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&hasher.finalize());
+
+        if self.result_window.len() >= RESULT_WINDOW {
+            self.result_window.pop_front();
+        }
+        self.result_window.push_back(hash);
+        let count = self.result_window.iter().filter(|h| **h == hash).count();
+
+        if count >= self.intercept_threshold {
+            self.pending_result_intercept = true;
+        }
+        if count >= self.warn_threshold {
+            Some(format!(
+                "[Loop Notice: '{action}' returned the same result {count} times in recent steps \
+                 even though its inputs changed. Nothing new is being learned. Use the information \
+                 you already have, change approach, or call finish.]"
+            ))
+        } else {
+            None
+        }
     }
 }
 
@@ -307,6 +370,77 @@ mod tests {
 
         // After state change, running test again is allowed!
         assert_eq!(guard.check("run_shell", &input), LoopGuardDecision::Allow);
+    }
+
+    #[test]
+    fn identical_results_across_different_inputs_trigger_intercept() {
+        // screenshot -> view_image -> scroll cycle: every input differs but the
+        // observed result (same image) never changes.
+        let mut guard = RepetitionGuard::default();
+        let calls = [
+            ("run_shell", json!({"command": "chrome --screenshot=/tmp/a.png u"})),
+            ("view_image", json!({"path": "/tmp/a.png"})),
+            ("run_shell", json!({"command": "chrome --screenshot=/tmp/b.png u"})),
+        ];
+        let mut notices = Vec::new();
+        for (action, input) in &calls {
+            assert_eq!(guard.check(action, input), LoopGuardDecision::Allow);
+            notices.push(guard.observe_result(action, "same-page-bytes"));
+        }
+        assert!(notices[0].is_none());
+        assert!(notices[1].as_deref().is_some_and(|n| n.contains("Loop Notice")));
+        assert!(notices[2].is_some());
+
+        // The next non-finish call is intercepted even though its input is new.
+        assert!(matches!(
+            guard.check("view_image", &json!({"path": "/tmp/c.png"})),
+            LoopGuardDecision::InterceptStuckLoop { .. }
+        ));
+        // `finish` is never blocked.
+        assert_eq!(
+            guard.check("finish", &json!({})),
+            LoopGuardDecision::Allow
+        );
+    }
+
+    #[test]
+    fn distinct_results_never_trigger_result_guard() {
+        let mut guard = RepetitionGuard::default();
+        for i in 0..10 {
+            let input = json!({"path": format!("f{i}")});
+            assert_eq!(guard.check("read_file", &input), LoopGuardDecision::Allow);
+            assert!(guard.observe_result("read_file", &format!("body {i}")).is_none());
+        }
+    }
+
+    #[test]
+    fn state_change_clears_result_window_and_pending_intercept() {
+        let mut guard = RepetitionGuard::default();
+        for _ in 0..3 {
+            guard.observe_result("view_image", "same");
+        }
+        guard.notify_state_change();
+        assert_eq!(
+            guard.check("view_image", &json!({"path": "x"})),
+            LoopGuardDecision::Allow
+        );
+        assert!(guard.observe_result("view_image", "same").is_none());
+    }
+
+    #[test]
+    fn intercept_fires_once_then_guard_resets() {
+        let mut guard = RepetitionGuard::default();
+        for _ in 0..3 {
+            guard.observe_result("view_image", "same");
+        }
+        assert!(matches!(
+            guard.check("scroll", &json!({"y": 1})),
+            LoopGuardDecision::InterceptStuckLoop { .. }
+        ));
+        assert_eq!(
+            guard.check("read_file", &json!({"path": "a"})),
+            LoopGuardDecision::Allow
+        );
     }
 
     #[test]

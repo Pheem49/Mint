@@ -36,27 +36,30 @@ pub struct WorkflowReport {
     pub error: Option<String>,
 }
 
+pub(crate) const WORKFLOW_PLAN_MODE_ALLOWED: &[&str] = &[
+    "browser_read",
+    "browser_observe",
+    "browser_screenshot",
+    "browser_tabs",
+    "browser_wait",
+];
+
 pub fn validate(
     workflow: &BrowserWorkflow,
-    config: &MintConfig,
+    _config: &MintConfig,
     plan_mode: bool,
 ) -> Result<(), String> {
     if workflow.steps.is_empty() || workflow.steps.len() > 100 {
         return Err("A browser workflow must contain between 1 and 100 steps".into());
     }
     for step in &workflow.steps {
-        if !super::lifecycle::BROWSER_TOOLS.contains(&step.action.as_str())
-            || config.disabled_tools.contains(&step.action)
-            || config.extra.get("browserAutomationEnabled") == Some(&json!(false))
-        {
+        if !super::lifecycle::WORKFLOW_ACTIONS.contains(&step.action.as_str()) {
             return Err(format!(
-                "Browser action '{}' is unavailable or disabled",
+                "Browser action '{}' is not a recognized workflow action",
                 step.action
             ));
         }
-        if plan_mode
-            && !crate::prompts::agent::PLAN_MODE_ALLOWED_ACTIONS.contains(&step.action.as_str())
-        {
+        if plan_mode && !WORKFLOW_PLAN_MODE_ALLOWED.contains(&step.action.as_str()) {
             return Err(format!(
                 "Browser action '{}' is not allowed in Plan Mode",
                 step.action
@@ -175,15 +178,10 @@ impl ShellBridge {
             .join(uuid::Uuid::new_v4().to_string());
         let mut policy = json!({"disabledTools":config.disabled_tools,"allowedReadPaths":config.allowed_read_paths,"allowedWritePaths":config.allowed_write_paths,"safetyEnabled":config.safety_enabled});
         for key in [
-            "browserAutomationEnabled",
-            "browserAgentMode",
             "browserExecutable",
-            "automationBrowser",
             "browserViewportWidth",
             "browserViewportHeight",
             "browserLaunchArgs",
-            "browserDebugUrl",
-            "browserUseExisting",
         ] {
             if let Some(value) = config.extra.get(key) {
                 policy[key] = value.clone();
@@ -363,18 +361,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
     #[test]
-    fn workflow_rejects_shell_actions_disabled_tools_and_plan_mutations() {
+    fn workflow_rejects_non_workflow_actions_and_plan_mutations() {
         let workflow = BrowserWorkflow {
             steps: vec![BrowserStep {
                 action: "browser_click".into(),
                 input: json!({"selector":"#submit"}),
             }],
         };
-        let mut config = MintConfig::default();
+        let config = MintConfig::default();
+        // Valid in execution mode
         assert!(validate(&workflow, &config, false).is_ok());
+        // Rejected in plan mode because browser_click mutates
         assert!(validate(&workflow, &config, true).is_err());
-        config.disabled_tools.push("browser_click".into());
-        assert!(validate(&workflow, &config, false).is_err());
+
+        // Read-only workflow action is allowed in plan mode
+        let read_workflow = BrowserWorkflow {
+            steps: vec![BrowserStep {
+                action: "browser_read".into(),
+                input: json!({}),
+            }],
+        };
+        assert!(validate(&read_workflow, &config, true).is_ok());
+
+        // Unknown / non-workflow actions are rejected
         let invalid = BrowserWorkflow {
             steps: vec![BrowserStep {
                 action: "run_shell".into(),

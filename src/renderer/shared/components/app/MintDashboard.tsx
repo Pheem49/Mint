@@ -751,33 +751,25 @@ export default function MintDashboard() {
   }
 
   const openMintBrowser = async (url: string, throwOnError = false) => {
-    if (!isDesktopApp) {
-      window.open(url, '_blank', 'noopener,noreferrer')
-      return
-    }
     try {
-      showToast('Opening Co-browsing browser (Mint Auto)...')
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('open_mint_browser', { url })
+      showToast('Opening in system browser...')
+      await runtimePlatform.openExternal(url)
     } catch (error) {
       if (throwOnError) throw error
       showToast(`Could not open browser: ${String(error)}`)
     }
   }
 
-  const openHtmlFile = async (root: string, relativePath: string, mode: 'external' | 'mint') => {
+  const openHtmlFile = async (root: string, relativePath: string, _mode: 'external' | 'mint' = 'external') => {
     if (!isDesktopApp && !['localhost', '127.0.0.1', '[::1]', '::1'].includes(window.location.hostname)) {
       throw new Error('HTML preview requires a browser on the same machine as the Mint backend.')
     }
-    const popup = !isDesktopApp && mode === 'external' ? window.open('about:blank', '_blank') : null
+    const popup = !isDesktopApp ? window.open('about:blank', '_blank') : null
     if (popup) popup.opener = null
     try {
-      const preview = await workspacePlatform.startHtmlPreview(root, relativePath, !isDesktopApp && mode === 'mint')
-      if (mode === 'mint') {
-        if (isDesktopApp) await openMintBrowser(preview.url, true)
-      } else if (isDesktopApp) {
-        const { invoke } = await import('@tauri-apps/api/core')
-        await invoke('run_desktop_action', { action: { type: 'open_url', target: preview.url } })
+      const preview = await workspacePlatform.startHtmlPreview(root, relativePath)
+      if (isDesktopApp) {
+        await runtimePlatform.openExternal(preview.url)
       } else {
         if (!popup) throw new Error('Allow browser popups, then open the HTML file again.')
         popup.location.replace(preview.url)

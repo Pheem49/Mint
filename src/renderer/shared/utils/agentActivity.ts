@@ -182,13 +182,6 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     case 'stock':
       rawTarget = query || symbol || '(symbol)'
       break
-    case 'browser_open':
-    case 'browser_navigate':
-      rawTarget = url || '(url)'
-      break
-    case 'browser_click':
-      rawTarget = selector || '(element)'
-      break
     case 'mcp_tool':
       rawTarget = tool ? (server ? `${server}/${tool}` : tool) : (name || 'mcp tool')
       break

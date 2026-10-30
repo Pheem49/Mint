@@ -1,14 +1,6 @@
 use super::persona;
 use crate::MintConfig;
 
-pub(crate) fn browser_tools_enabled(config: &MintConfig) -> bool {
-    config
-        .extra
-        .get("browserAutomationEnabled")
-        .and_then(serde_json::Value::as_bool)
-        != Some(false)
-}
-
 pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "list_files",
     "read_file",
@@ -146,10 +138,6 @@ pub fn build_system_prompt(
 ) -> String {
     let mut allowed_actions = base_allowed_actions();
 
-    if browser_tools_enabled(config) {
-        allowed_actions.extend_from_slice(crate::browser::BROWSER_TOOLS);
-    }
-
     if !config.avatar_token.is_empty() {
         allowed_actions.push("avatar_signal");
     }
@@ -235,34 +223,6 @@ pub fn build_system_prompt(
     }
     if allowed_actions.contains(&"calculation") {
         input_formats.push("- calculation: {\"expression\":\"math or percentage expression e.g. 25% of 8500 or 100 * 3.5\"}");
-    }
-    if allowed_actions.contains(&"browser_open") {
-        input_formats.push("- browser_open: {\"url\":\"https://example.com\"}");
-    }
-    if allowed_actions.contains(&"browser_observe") {
-        input_formats.push("- browser_observe: {textOffset?:number,elementOffset?:number,takeoverComplete?:boolean}; browser_tabs: {operation:list|open|select|close,tabId?:string,url?:string}; browser_fill: {elementRef?:string,selector?:string,text:string}; browser_select: {elementRef?:string,selector?:string,value:string}; browser_scroll: {elementRef?:string,selector?:string,x?:number,y?:number}; browser_wait: {condition:url|text|visible|hidden,value?:string,elementRef?:string,selector?:string,timeoutMs?:number}. browser_click/browser_type also accept elementRef instead of selector.");
-    }
-    if allowed_actions.contains(&"browser_click") {
-        input_formats.push("- browser_click: {\"selector\":\"button.submit-btn\"} (CSS selector, or text=Login, contains=Submit, xpath=//button)");
-    }
-    if allowed_actions.contains(&"browser_type") {
-        input_formats
-            .push("- browser_type: {\"selector\":\"input.search-bar\", \"text\":\"search query\"} (CSS selector, or text=Placeholder, contains=Label)");
-    }
-    if allowed_actions.contains(&"browser_read") {
-        input_formats.push("- browser_read: {}");
-    }
-    if allowed_actions.contains(&"browser_mouse_move") {
-        input_formats.push("- browser_mouse_move: {\"x\":640,\"y\":360}");
-    }
-    if allowed_actions.contains(&"browser_mouse_click") {
-        input_formats.push("- browser_mouse_click: {\"x\":640,\"y\":360,\"button\":\"left\"}");
-    }
-    if allowed_actions.contains(&"browser_key_press") {
-        input_formats.push("- browser_key_press: {\"key\":\"Enter\"} (keys: Enter,Tab,Escape,Backspace,Delete,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,F1-F12,Space)");
-    }
-    if allowed_actions.contains(&"browser_screenshot") {
-        input_formats.push("- browser_screenshot: {mode?:viewport|fullPage|element,selector?:string,elementRef?:string}");
     }
     if allowed_actions.contains(&"memory_recall") {
         input_formats.push("- memory_recall: {\"query\":\"what did user say about X\"}");
@@ -497,7 +457,9 @@ pub fn build_system_prompt(
         rules.push("6. Verify code changes when possible. If compile or test commands fail (exit status is not 0), analyze the stdout/stderr to locate the bug, edit the code to fix it, and verify again. Do not stop or give up until the errors are resolved.");
     }
     if allowed_actions.contains(&"web_search") {
-        rules.push("7. Use web_search when the user asks to look something up online or needs current information.");
+        rules.push("7. Use web_search when the user asks to look something up online or needs current information.\n\
+- Information Sufficiency: If web_search results already contain the direct answer, official links, social profiles, or overview the user asked for, synthesize the final answer and call `finish` immediately. Do NOT run redundant searches or launch headless Chrome.\n\
+- Follow-up Gate: If search results are incomplete, ambiguous, or if further research could be explored, DO NOT run arbitrary loops or crawl pages autonomously. Instead, summarize what you found so far and call `ask_user` with clear options to confirm whether the user wants to search further and what specific topics or links to explore next.");
     }
     if allowed_actions.contains(&"image_search") {
         rules.push("7i. Use image_search when the user explicitly wants to see, browse, or find pictures/photos of something. Do NOT use it just to decorate a text answer — web_search already attaches a thumbnail automatically when relevant. ALWAYS copy the ```image_search_json ... ``` block from the tool observation into your final summary text so the UI card renders.");
@@ -517,37 +479,8 @@ pub fn build_system_prompt(
     if allowed_actions.contains(&"avatar_signal") {
         rules.push("7v. A Project Avatar is connected. Call avatar_signal when your reply carries an emotional beat the automatic tool-based reactions can't express — greeting, joking, apologizing, thinking something over. Don't call it for routine tool-driven turns (shell, browser, image/video generation); those already react on their own.");
     }
-    if allowed_actions.contains(&"run_shell") && !allowed_actions.contains(&"browser_open") {
-        rules.push("7a. For browsing, viewing, or capturing websites/webpages: use run_shell to run headless browser commands directly (e.g. google-chrome --headless=new --screenshot=screenshot.png <url>). ALWAYS call view_image with the generated image path (e.g. view_image(path: \"screenshot.png\")) immediately after capturing a screenshot so you and the user can inspect the visual result. Do NOT write ad-hoc Python scraping scripts (urllib, requests) or raw curl to scrape modern web pages when browser tools or headless chrome commands are available.");
-    }
-    if allowed_actions.contains(&"browser_open") {
-        rules.push("7a. Use browser_open to open websites; Mint starts an isolated browser session automatically (headless by default). Inspect the returned page observation, then use browser_observe/browser_read to read the page or browser_screenshot for visual inspection; verify the requested URL/content with browser_wait before finishing. A successful browser_open already opens the website for the user: do not also launch it through run_shell, xdg-open, open, Start-Process, or another browser. Keep website navigation and interaction in the automation browser. If the user explicitly requests an external browser, use that route instead of first opening the website in automation. If automation is unavailable or blocked, report that and ask the user before switching browsers. For a predefined command-line workflow, write a JSON steps file and run mint browser run --file <file> through run_shell; --headed explicitly shows its window. Use the shared engine rather than hand-written browser scripts. Web scraping restriction: NEVER write ad-hoc Python scripts (e.g., using urllib, requests, BeautifulSoup) or raw curl commands to scrape or inspect web pages. Modern websites require JavaScript rendering via the browser engine. Always prioritize browser_open when given a web URL.");
-    }
-    if allowed_actions.contains(&"browser_click") {
-        rules.push("7b. Use browser_click to click elements. Selector can be: CSS selector (button.class, #id, [attr=val]), text=ExactText to find by visible text, contains=PartialText for partial match, or xpath=//expr for XPath. Prefer text= or contains= when the element has visible text but no unique CSS class.");
-    }
-    if allowed_actions.contains(&"browser_type") {
-        rules.push("7c. Use browser_type to enter text into form fields or search boxes. Selector supports the same formats as browser_click.");
-    }
-    if allowed_actions.contains(&"browser_read") {
-        rules.push(
-            "7d. Use browser_read to read the text content of the active page to analyze it.",
-        );
-    }
-    if allowed_actions.contains(&"browser_mouse_move") {
-        rules.push("7e. Use browser_mouse_move to move the real mouse cursor to absolute (x,y) coordinates.");
-    }
-    if allowed_actions.contains(&"browser_mouse_click") {
-        rules.push("7f. Use browser_mouse_click to perform a native mouse click at (x,y) coordinates. Use browser_screenshot first to find the target position.");
-    }
-    if allowed_actions.contains(&"browser_key_press") {
-        rules.push("7g. Use browser_key_press to press a keyboard key (e.g. Enter, Tab, Escape, ArrowDown). Use after browser_type or browser_mouse_click to interact with focused elements.");
-    }
-    if allowed_actions.contains(&"browser_screenshot") {
-        rules.push("7h. Use browser_screenshot to capture the page as a durable image artifact, shown in chat and attached to the model. Use it to inspect the visual state of the page before deciding where to click, and to capture visual verification of page content for the user.");
-    }
-    if allowed_actions.contains(&"browser_observe") {
-        rules.push("7i. Browser workflow: browser_observe -> action -> inspect the returned observation -> verify the expected result with browser_wait. Each run starts in its own tab. Use browser_tabs to list/open/select/close tabs; select new popup tabs explicitly. Prefer elementRef from the most recent observation over guessing selectors. Old refs expire after observation refresh, navigation, removed nodes, or tab selection. browser_fill replaces text; browser_type appends. browser_select handles native dropdowns; browser_scroll scrolls the viewport or a target. browser_wait accepts condition url/text/visible/hidden, value or target, and timeoutMs (default 10000, maximum 30000). Observations support textOffset and elementOffset pagination. Coordinate actions require a screenshot of the selected tab within 30 seconds. Never retry an ambiguous click or submission automatically; observe and check the result first. input_dispatched is not task completion. Cite observed URL/text/field evidence in finish.verification, or say the task is unverified/blocked. Age Gate & Cookie Consent Handling: If an age gate (18+ confirmation), cookie banner, or disclaimer modal blocks page content, locate standard confirmation buttons (e.g. \"I am 18 or older\", \"Enter Site\", \"Yes\", \"Agree\", \"Accept\") and dismiss it using browser_click. If the overlay presents sensitive warnings requiring explicit user discretion or consent, capture a browser_screenshot and use ask_user to confirm before proceeding. If blocked by login, CAPTCHA, or repeated lack of progress, ask_user for manual takeover; only after user confirmation call browser_observe with takeoverComplete=true.");
+    if allowed_actions.contains(&"run_shell") {
+        rules.push("7a. Headless Chrome through run_shell is for deep webpage inspection or rendering, NOT for routine web searches. Use it ONLY when: (a) the user explicitly requests inspecting, reading, or scraping a specific webpage/URL, (b) web_search snippets were blocked or insufficient and direct page reading is required, or (c) rendering local HTML. Never recursively crawl external links found on a page. Mint adds the reliability flags, a throw-away profile and a timeout for you, so write the plain command. (1) Read a page first with `google-chrome --dump-dom <url>` (runs JavaScript, so SPAs work; far cheaper than an image). (2) Only when the visual layout matters: `google-chrome --screenshot=<file>.png <url>` (add --window-size=W,H for a tall or narrow view), then call view_image with that path exactly once per image; a repeated image is not attached again. (3) Never capture the same URL with the same options twice in a turn; Mint refuses repeats unless you pass retryReason because the page really changed. If a result is not what you need, change the URL or options instead of repeating. (4) For clicking, typing or multi-step flows, write a JSON steps file and run `mint browser run --file <file>`. Do NOT scrape modern pages with ad-hoc Python (urllib, requests) or raw curl.");
     }
     if allowed_actions.contains(&"memory_recall") {
         rules.push("8. Use memory_recall to search past interactions before asking the user to repeat context.");
@@ -591,9 +524,7 @@ For every JSON-backed card, ensure all properties stay inside their intended obj
 - Feature showcases: use fenced ```ui-card with JSON array:\n```ui-card\n[{\"title\": \"...\", \"subtitle\": \"...\", \"icon\": \"file-text\", \"badge\": \"...\", \"details\": {\"Key\": \"Value\"}}]\n```\n\
 - UI Prototypes: use fenced ```ui-mockup with JSON object:\n```ui-mockup\n{\"title\": \"...\", \"subtitle\": \"...\", \"dropzoneText\": \"...\", \"metrics\": {...}}\n```\n\
 - Key insights / alerts: use GitHub callouts (> [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING]). Always converse naturally and smoothly; never prefix conversational phrases or greetings with artificial status tags or badge pills. Always put opening and closing ``` fences on their own separate lines.");
-    if allowed_actions.contains(&"browser_open") {
-        rules.push("12. Shell commands may open local files/folders or launch apps when requested. For websites, follow rule 7a and verify the automation browser's observed page; a shell launch is not evidence that a browser task is complete.");
-    } else if native {
+    if native {
         rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the finish tool immediately.");
     } else {
         rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately.");
@@ -639,4 +570,42 @@ For every JSON-backed card, ensure all properties stay inside their intended obj
         ));
     }
     prompt
+}
+
+#[cfg(test)]
+mod headless_playbook_tests {
+    use super::*;
+
+    fn shell_mode_prompt() -> String {
+        let config = MintConfig::default();
+        build_system_prompt(&config, false, false, None, None)
+    }
+
+    #[test]
+    fn shell_mode_teaches_the_headless_chrome_playbook() {
+        let prompt = shell_mode_prompt();
+        for needle in [
+            "--dump-dom",
+            "--screenshot=",
+            "view_image",
+            "once per image",
+            "same URL",
+            "mint browser run",
+        ] {
+            assert!(prompt.contains(needle), "playbook is missing {needle:?}");
+        }
+        assert!(!prompt.contains("browser_open"), "no browser_* tools in shell mode");
+    }
+
+    #[test]
+    fn web_search_playbook_enforces_information_sufficiency_and_ask_user_gate() {
+        let prompt = shell_mode_prompt();
+        for needle in [
+            "Information Sufficiency",
+            "call `ask_user` with clear options",
+            "Never recursively crawl",
+        ] {
+            assert!(prompt.contains(needle), "web search playbook is missing {needle:?}");
+        }
+    }
 }

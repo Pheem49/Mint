@@ -1,6 +1,5 @@
 //! Native platform IO, windows, terminal ownership and Desktop integrations.
 pub(crate) mod actions;
-pub(crate) mod browser;
 pub(crate) mod capture;
 pub(crate) mod discord_rpc;
 pub(crate) mod integrations;

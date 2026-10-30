@@ -97,9 +97,9 @@ pub use auto_shorts::{
     MakeShortsResult, ShortClipInfo, ai_edit_video, make_shorts,
 };
 pub use browser::{
-    BrowserTab, click, enable_browser_tools, get_element_coordinates, is_browser_running,
+    BrowserTab, click, get_element_coordinates,
     key_press, list_tabs, mouse_click, mouse_move, navigate, read_page_text, screenshot,
-    spawn_automation_browser, spawn_automation_browser_with_url, type_text, type_text_native,
+    type_text, type_text_native,
 };
 pub use calculation::{CalculationError, CalculationReport, calculate};
 pub use code_tools::{

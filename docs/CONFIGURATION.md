@@ -46,11 +46,7 @@ The optional browser smart-context helper can provide active-tab context from:
 http://127.0.0.1:3212/context
 ```
 
-Chromium automation uses the local debugging endpoint:
-
-```text
-http://127.0.0.1:9222/json/list
-```
+Browser automation is headless-only. Agents run headless Chrome through `run_shell`, and `mint browser run` starts a managed headless browser on a dynamic loopback port with a temporary profile. Set `browserExecutable` to choose a specific Chromium-based binary. See [Headless Browser](HEADLESS_BROWSER.md).
 
 ## Webhook Integrations
 

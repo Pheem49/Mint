@@ -71,8 +71,9 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ---
 
-### 10. <img src="../assets/tools.svg" width="18" height="18" valign="middle" /> Browser Automation (`mint auto`)
-- Drives a dedicated, isolated Chromium instance (port `9222`): open URLs, click, type, and extract page content — the agent registers these tools automatically once it detects the automation browser is running.
+### 10. <img src="../assets/tools.svg" width="18" height="18" valign="middle" /> Headless Browser Automation & Workflows
+- Autonomous agents execute web inspection, DOM extraction (`--dump-dom`), and visual captures (`--screenshot`) directly via headless Chromium in shell with managed temporary profiles, sandboxing, and loop guards.
+- Run deterministic multi-step testing and automation workflows from JSON files headlessly via `mint browser run --file <workflow.json>`. See [Headless Browser Guide](HEADLESS_BROWSER.md).
 
 ---
 
