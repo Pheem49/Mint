@@ -3340,7 +3340,7 @@ impl OnboardWizard {
             chunks[0],
         );
         frame.render_widget(
-            Paragraph::new("Mint v1.17.0  ")
+            Paragraph::new("Mint v1.18.0  ")
                 .style(Style::default().fg(SUBTLE))
                 .alignment(Alignment::Right),
             chunks[1],
