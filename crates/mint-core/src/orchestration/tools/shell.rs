@@ -25,6 +25,19 @@ fn launches_external_url(command: &str) -> bool {
         })
 }
 
+/// Deletes a Chrome run's throw-away profile once the tool call is over, however
+/// it ends (success, denial, repeat refusal, error). Background jobs outlive the
+/// call, so they disarm it and rely on the stale-profile sweep instead.
+struct ProfileCleanup<'a>(Option<&'a crate::browser::headless::ChromeRun>);
+
+impl Drop for ProfileCleanup<'_> {
+    fn drop(&mut self) {
+        if let Some(run) = self.0 {
+            run.discard_profile();
+        }
+    }
+}
+
 pub(in crate::orchestration) async fn prevent_duplicate_browser_launch(
     command: &str,
 ) -> Result<(), OrchestrationError> {
@@ -93,6 +106,7 @@ pub(in crate::orchestration) async fn execute(
             // Headless Chrome is made reliable (flags, throw-away profile, timeout) and
             // de-duplicated here, so the model only has to write the plain command.
             let chrome = crate::browser::headless::prepare(command, config);
+            let mut cleanup = ProfileCleanup(chrome.as_ref());
             let command = chrome.as_ref().map_or(command, |run| run.command.as_str());
             if let Some(run) = &chrome
                 && let Some(notice) = repeat_capture_notice(run, root, &input.retry_reason)
@@ -117,6 +131,7 @@ pub(in crate::orchestration) async fn execute(
                         || crate::bg_shell::start_background(root, config, command),
                     )
                     .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+                    cleanup.0 = None;
                     reliability::record(
                         command,
                         reliability::ExecutionState::Running,

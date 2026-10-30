@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime};
 const RUN_TIMEOUT_SECS: u64 = 45;
 /// Virtual time Chrome may spend letting a SPA settle before capturing.
 const VIRTUAL_TIME_BUDGET_MS: u32 = 8000;
-/// Throw-away profiles older than this are removed on the next `prepare`.
+/// Backstop for profiles never discarded (background jobs, crashes): removed on the next `prepare`.
 const STALE_PROFILE_AGE: Duration = Duration::from_secs(60 * 60);
 
 const CHROME_PROGRAMS: &[&str] = &[
@@ -49,6 +49,17 @@ pub struct ChromeRun {
     pub key: Option<CaptureKey>,
     /// File the command writes (`--screenshot` / `--print-to-pdf`), as the model wrote it.
     pub output: Option<String>,
+    /// Throw-away profile directory created for this run (never one the model chose).
+    pub profile: Option<PathBuf>,
+}
+
+impl ChromeRun {
+    /// Deletes this run's throw-away profile; safe to call more than once.
+    pub fn discard_profile(&self) {
+        if let Some(profile) = &self.profile {
+            let _ = std::fs::remove_dir_all(profile);
+        }
+    }
 }
 
 /// Host facts that change which flags are needed. Injected so tests are deterministic.
@@ -137,11 +148,13 @@ pub fn prepare_with(command: &str, config: &MintConfig, host: &HostEnv) -> Optio
         inject.push("--no-sandbox".into());
         inject.push("--disable-setuid-sandbox".into());
     }
+    let mut profile = None;
     if !has("--user-data-dir") {
         sweep_stale_profiles(&host.profile_root, STALE_PROFILE_AGE);
-        let profile = host.profile_root.join(uuid::Uuid::new_v4().to_string());
-        let _ = std::fs::create_dir_all(&profile);
-        inject.push(format!("--user-data-dir={}", quote(&profile.to_string_lossy())));
+        let dir = host.profile_root.join(uuid::Uuid::new_v4().to_string());
+        let _ = std::fs::create_dir_all(&dir);
+        inject.push(format!("--user-data-dir={}", quote(&dir.to_string_lossy())));
+        profile = Some(dir);
     }
     for flag in ["--no-first-run", "--no-default-browser-check"] {
         if !has(flag) {
@@ -196,7 +209,7 @@ pub fn prepare_with(command: &str, config: &MintConfig, host: &HostEnv) -> Optio
         ))
     });
 
-    Some(ChromeRun { command: out, key, output })
+    Some(ChromeRun { command: out, key, output, profile })
 }
 
 fn configured_program(config: &MintConfig) -> Option<String> {
@@ -487,6 +500,25 @@ mod tests {
         assert_eq!(std::fs::read_dir(&env.profile_root).unwrap().count(), 2);
         sweep_stale_profiles(&env.profile_root, Duration::ZERO);
         assert_eq!(std::fs::read_dir(&env.profile_root).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&env.profile_root);
+    }
+
+    #[test]
+    fn discarding_a_run_removes_only_its_own_profile() {
+        let config = MintConfig::default();
+        let env = host();
+        let first = prepare_with("chromium --dump-dom https://a.io", &config, &env).unwrap();
+        let second = prepare_with("chromium --dump-dom https://b.io", &config, &env).unwrap();
+        assert_eq!(std::fs::read_dir(&env.profile_root).unwrap().count(), 2);
+        first.discard_profile();
+        first.discard_profile(); // idempotent
+        assert_eq!(std::fs::read_dir(&env.profile_root).unwrap().count(), 1);
+        assert!(second.profile.as_ref().unwrap().exists());
+        second.discard_profile();
+        assert_eq!(std::fs::read_dir(&env.profile_root).unwrap().count(), 0);
+        // A profile the model chose itself is never touched.
+        let own = prepare_with("chromium --dump-dom --user-data-dir=/tmp/keep https://c.io", &config, &env).unwrap();
+        assert!(own.profile.is_none());
         let _ = std::fs::remove_dir_all(&env.profile_root);
     }
 }

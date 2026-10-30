@@ -29,60 +29,17 @@ pub async fn smart_context() -> SmartContext {
         captured_at: unix_timestamp().to_string(),
         platform: std::env::consts::OS,
         host: hostname(),
-        browser: browser_context(&active_window).await,
+        browser: browser_context().await,
         active_window,
         current_app,
         selected_text: selected_text(),
     }
 }
 
-async fn browser_context(active_window: &Option<Value>) -> Option<Value> {
-    let is_chromium = active_window
-        .as_ref()
-        .and_then(|window| window["appName"].as_str())
-        .map(str::to_ascii_lowercase)
-        .is_some_and(|name| {
-            ["chrome", "chromium", "brave", "edge"]
-                .iter()
-                .any(|browser| name.contains(browser))
-        });
-    if is_chromium && let Some(context) = chromium_context().await {
-        return Some(context);
-    }
+/// Active-tab context comes from the optional browser extension only; Mint no
+/// longer reads a remote-debugging port.
+async fn browser_context() -> Option<Value> {
     browser_extension_context().await
-}
-
-async fn chromium_context() -> Option<Value> {
-    let endpoint = load_config()
-        .ok()
-        .and_then(|config| {
-            config
-                .extra
-                .get("browserDebugUrl")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| "http://127.0.0.1:9222/json/list".into());
-    let pages: Value = mint_core::HTTP_CLIENT
-        .clone()
-        .get(endpoint)
-        .send()
-        .await
-        .ok()?
-        .json()
-        .await
-        .ok()?;
-    pages
-        .as_array()?
-        .iter()
-        .find(|page| page["type"] == "page")
-        .map(|page| {
-            json!({
-                "title": page["title"],
-                "url": page["url"],
-                "source": "chromium-remote-debug"
-            })
-        })
 }
 
 async fn browser_extension_context() -> Option<Value> {
