@@ -217,7 +217,6 @@ pub(super) async fn run_shell(
     command: &str,
     retry_reason: &str,
 ) -> Result<String, OrchestrationError> {
-    tools::shell::prevent_duplicate_browser_launch(command).await?;
     run_control::check()?;
     if let Err(reason) = reliability::before_shell(command, retry_reason) {
         return Ok(format!("Skipped: {reason}"));

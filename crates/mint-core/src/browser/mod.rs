@@ -12,17 +12,13 @@ pub mod runtime;
 mod session;
 pub mod workflow;
 
-pub use session::{
-    BrowserActionResult, BrowserObservation, BrowserSession, capture_metadata, execute_action,
-    run_session, with_tab,
-};
-pub(crate) use session::{finish_evidence as session_finish_evidence, selected_tab};
+pub(crate) use session::{capture_metadata, execute_action, run_session, selected_tab};
+
+pub(crate) use input::{key_press, mouse_click, mouse_move};
+pub(crate) use interact::{click, get_element_coordinates, type_text};
+pub(crate) use navigate::{list_tabs, navigate, read_page_text, screenshot};
 
 use serde::Serialize;
-
-pub use input::{key_press, mouse_click, mouse_move, type_text_native};
-pub use interact::{click, get_element_coordinates, type_text};
-pub use navigate::{list_tabs, navigate, read_page_text, screenshot};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

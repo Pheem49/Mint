@@ -152,15 +152,13 @@ where
     }
 }
 
-/// Keep browser targeting, evidence, and recovery state for the entire voice
-/// task, including successive tool-call batches and spoken turns. Dropping the
-/// task releases its tab leases; the next voice session starts independently.
+/// Spawns a live voice task session.
 pub(crate) fn spawn_live_session<F>(future: F) -> tokio::task::JoinHandle<F::Output>
 where
     F: std::future::Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    tokio::spawn(crate::browser::run_session(future))
+    tokio::spawn(future)
 }
 
 fn resolve_api_key(config: &MintConfig) -> String {

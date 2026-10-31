@@ -8,12 +8,10 @@ use mint_core::{
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager};
 
-use mint_core::browser::{execute_action as run_browser_action, run_session};
-
 const MAX_STEPS: usize = 20;
 const SYSTEM_PROMPT: &str = r#"You are Mint's native background task agent. Return only JSON:
-{"thought":"short progress note","action":"done|propose_folder|propose_write_file|open_url|browser_read|browser_click|browser_type|knowledge_search|propose_bash","target":"path, URL, selector, query, command, or final result","data":"optional file content"}
-Use only one action per response. Background tasks never mutate the filesystem or execute shell commands. Use propose_folder, propose_write_file, and propose_bash so Mint can record a proposal for explicit user approval."#;
+{"thought":"short progress note","action":"done|propose_folder|propose_write_file|propose_url|knowledge_search|propose_bash","target":"path, URL, query, command, or final result","data":"optional file content"}
+Use only one action per response. Background tasks never mutate the filesystem or execute shell commands. Use propose_folder, propose_write_file, propose_url, and propose_bash so Mint can record a proposal for explicit user approval."#;
 
 #[derive(Debug, Deserialize)]
 struct AgentAction {
@@ -95,7 +93,7 @@ async fn execute_task(store: &TaskStore, task: &Task) -> Result<String, String> 
     let executor_store = store.clone();
     let executor_task = task.clone();
     let executor_config = config.clone();
-    run_session(run_agent_loop(
+    run_agent_loop(
         &config,
         SYSTEM_PROMPT,
         format!("Task: {}\nChoose the first action.", task.description),
@@ -127,7 +125,7 @@ async fn execute_task(store: &TaskStore, task: &Task) -> Result<String, String> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         },
-    ))
+    )
     .await
     .map_err(|error| error.to_string())
 }
@@ -174,20 +172,17 @@ async fn execute_action(
                 action.target
             ))
         }
-        "open_url" => {
-            run_browser_action(config, "browser_open", &json!({ "url": &action.target })).await
-        }
-        "browser_read" => run_browser_action(config, "browser_read", &json!({})).await,
-        "browser_click" => {
-            run_browser_action(config, "browser_click", &json!({ "selector": &action.target })).await
-        }
-        "browser_type" => {
-            run_browser_action(
-                config,
-                "browser_type",
-                &json!({ "selector": &action.target, "text": &action.data }),
-            )
-            .await
+        "propose_url" | "open_url" => {
+            store
+                .add_artifact(
+                    &task.id,
+                    json!({ "type": "url_proposal", "url": action.target, "description": format!("Proposed by native task step {step}; explicit approval required") }),
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(format!(
+                "url proposal recorded but not opened: {}",
+                action.target
+            ))
         }
         "knowledge_search" => {
             let hits = KnowledgeStore::open_default()

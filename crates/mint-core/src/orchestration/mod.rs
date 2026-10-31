@@ -1973,7 +1973,7 @@ where
             );
             let mut mod_usage = crate::mods::UsageTracker::new(&root, chat_id, companion_turn_id);
             let resolved_task = resolve_github_links(task, config).await;
-            let agent_result = reliability::scope(Box::pin(crate::browser::run_session(async {
+            let agent_result = reliability::scope(Box::pin(async {
         // Subagent runs use a synthetic `{parent_chat_id}::subagent::{name}` chat id
         // (see the `dispatch_subagent` arm in `execute_tool`) so their own memory
         // interaction doesn't leak into the parent conversation's history. That
@@ -2580,13 +2580,6 @@ where
                                 &response.text,
                                 err_msg,
                             );
-                            continue 'steps;
-                        }
-                        if crate::browser::session_finish_evidence().await && meaningful_verification(&decision.input.verification).is_empty() {
-                            let error = "Browser tasks require observed evidence in finish.verification. Describe the observed outcome, or explicitly state that completion is unverified or blocked.";
-                            trajectory.push(format_trajectory_step(step, &decision.thought, &decision.action, error));
-                            rebuild_observation(task, &root, &trajectory, &mut observation);
-                            reject_native_finish(tool_mode, &mut native_messages, &response.text, error);
                             continue 'steps;
                         }
                         let completion_status = match reliability::completion(&decision.input.completion_status, &decision.input.verification) {
@@ -3385,7 +3378,7 @@ where
             input_tokens: last_input_tokens,
             generated_tokens: turn_generated_tokens,
         });
-        }))).await;
+        })).await;
             if agent_result.is_err() && !turn.finished {
                 if run_control::cancelled() {
                     turn.interrupt();

@@ -2,33 +2,16 @@ use std::path::Path;
 
 use super::super::*;
 
-/// Catch ordinary URL launcher commands, not arbitrary shell programs. This is
-/// a workflow guard, not a shell security boundary.
-fn launches_external_url(command: &str) -> bool {
-    let Some(tokens) = shlex::split(command) else {
-        return false;
-    };
-    let Some(program) = tokens.first() else {
-        return false;
-    };
-    let program = program.rsplit(['/', '\\']).next().unwrap_or(program);
-    let launcher = match program.to_ascii_lowercase().as_str() {
-        "xdg-open" | "open" | "wslview" | "sensible-browser" | "start-process" | "start" => true,
-        "gio" => tokens.get(1).is_some_and(|arg| arg == "open"),
-        _ => false,
-    };
-    launcher
-        && tokens.iter().skip(1).any(|arg| {
-            reqwest::Url::parse(arg).is_ok_and(|url| {
-                matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
-            })
-        })
-}
-
 /// Deletes a Chrome run's throw-away profile once the tool call is over, however
 /// it ends (success, denial, repeat refusal, error). Background jobs outlive the
 /// call, so they disarm it and rely on the stale-profile sweep instead.
 struct ProfileCleanup<'a>(Option<&'a crate::browser::headless::ChromeRun>);
+
+impl ProfileCleanup<'_> {
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
 
 impl Drop for ProfileCleanup<'_> {
     fn drop(&mut self) {
@@ -36,17 +19,6 @@ impl Drop for ProfileCleanup<'_> {
             run.discard_profile();
         }
     }
-}
-
-pub(in crate::orchestration) async fn prevent_duplicate_browser_launch(
-    command: &str,
-) -> Result<(), OrchestrationError> {
-    if launches_external_url(command) && crate::browser::session_finish_evidence().await {
-        return Err(OrchestrationError::Agent(
-            "External URL launch skipped: this task already uses an active browser session. Do not open the same URL in another browser.".into(),
-        ));
-    }
-    Ok(())
 }
 
 /// Refuses to capture the same page with the same options twice in one turn:
@@ -102,7 +74,6 @@ pub(in crate::orchestration) async fn execute(
     match action {
         "run_shell" => {
             let command = required(&input.command, "command")?;
-            prevent_duplicate_browser_launch(command).await?;
             // Headless Chrome is made reliable (flags, throw-away profile, timeout) and
             // de-duplicated here, so the model only has to write the plain command.
             let chrome = crate::browser::headless::prepare(command, config);
@@ -131,7 +102,7 @@ pub(in crate::orchestration) async fn execute(
                         || crate::bg_shell::start_background(root, config, command),
                     )
                     .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-                    cleanup.0 = None;
+                    cleanup.disarm();
                     reliability::record(
                         command,
                         reliability::ExecutionState::Running,
@@ -368,39 +339,5 @@ mod tests {
     fn commands_without_a_single_url_are_never_deduplicated() {
         let run = chrome("google-chrome --dump-dom");
         assert!(repeat_capture_notice(&run, &std::env::temp_dir(), "").is_none());
-    }
-
-    #[test]
-    fn external_url_launch_detection_preserves_other_shell_work() {
-        for command in [
-            "xdg-open 'https://example.com/watch?v=1&list=2'",
-            "/usr/bin/xdg-open https://example.com &",
-            "open -a Firefox https://example.com",
-            "gio open https://example.com",
-            "wslview https://example.com",
-            "Start-Process https://example.com",
-        ] {
-            assert!(launches_external_url(command), "{command}");
-        }
-        for command in [
-            "xdg-open /tmp/report.pdf",
-            "open /tmp",
-            "curl https://example.com",
-            "echo xdg-open https://example.com",
-            "gio info https://example.com",
-            "cargo test",
-        ] {
-            assert!(!launches_external_url(command), "{command}");
-        }
-    }
-
-    #[tokio::test]
-    async fn external_url_launch_allowed_without_browser_use() {
-        crate::browser::run_session(async {
-            prevent_duplicate_browser_launch("xdg-open https://example.com")
-                .await
-                .unwrap();
-        })
-        .await;
     }
 }

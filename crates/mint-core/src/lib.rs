@@ -96,11 +96,6 @@ pub use auto_shorts::{
     AiEditStepResult, AiEditVideoRequest, AiEditVideoResult, AutoShortsError, MakeShortsRequest,
     MakeShortsResult, ShortClipInfo, ai_edit_video, make_shorts,
 };
-pub use browser::{
-    BrowserTab, click, get_element_coordinates,
-    key_press, list_tabs, mouse_click, mouse_move, navigate, read_page_text, screenshot,
-    type_text, type_text_native,
-};
 pub use calculation::{CalculationError, CalculationReport, calculate};
 pub use code_tools::{
     AppliedCodeEdit, CodeEdit, CodeEditPreview, CodeEditProposal, CodeFile, CodeInspectionError,
