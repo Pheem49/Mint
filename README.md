@@ -95,10 +95,16 @@ Use `/help` to explore commands. See the [usage guide](docs/USAGE.md) for more.
   and install or create reusable agent skills.
 - **Connect and customize:** add MCP servers, ecosystem plugins, and Mint Mods
   for custom panels, commands, and tool guards.
-- **Automate other tasks:** schedule work, control a browser, analyze screenshots,
+- **Automate other tasks:** schedule work, run headless browser automation, analyze screenshots,
   generate images, or connect optional video-editing and avatar integrations.
 
 See [features and integrations](docs/FEATURES.md) for details.
+
+### Headless Browser & Future Vision
+
+Mint v1.18.0 retires the legacy headed Mint Browser window (`mint auto`, port 9222 interception) in favor of a modern, decoupled **Headless Browser** architecture (`mint browser run` deterministic workflows and headless Chrome shell playbook). External links and generated HTML artifacts now open seamlessly in your system's default browser.
+
+This headless foundation ensures high reliability, clean isolation, and zero UI bloat today, while laying the groundwork for a reimagined, superior Mint Browser in future releases.
 
 ## Choose an interface
 
