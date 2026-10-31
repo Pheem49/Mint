@@ -6,7 +6,6 @@ mod evidence;
 pub mod headless;
 mod input;
 mod interact;
-pub(crate) mod lifecycle;
 mod navigate;
 mod overlay;
 pub mod runtime;

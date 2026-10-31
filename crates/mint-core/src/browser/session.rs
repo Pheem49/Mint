@@ -294,17 +294,18 @@ fn target(args: &Value, session: &BrowserSession) -> Result<String, String> {
 }
 
 fn modifying(action: &str) -> bool {
+    let action = super::workflow::normalize_action(action);
     matches!(
         action,
-        "browser_open"
-            | "browser_click"
-            | "browser_type"
-            | "browser_fill"
-            | "browser_select"
-            | "browser_scroll"
-            | "browser_mouse_click"
-            | "browser_key_press"
-            | "browser_mouse_move"
+        "open"
+            | "click"
+            | "type"
+            | "fill"
+            | "select"
+            | "scroll"
+            | "mouse_click"
+            | "key_press"
+            | "mouse_move"
     )
 }
 
@@ -324,16 +325,17 @@ async fn target_state(config: &MintConfig, selector: Option<&str>) -> Result<Val
 }
 
 fn attempt_arguments(action: &str, args: &Value) -> String {
+    let action = super::workflow::normalize_action(action);
     match action {
-        "browser_type" | "browser_fill" => json!([args["text"].as_str().unwrap_or("")]),
-        "browser_select" => json!([args["value"].as_str().unwrap_or("")]),
-        "browser_open" => json!([args["url"].as_str().unwrap_or("").trim()]),
-        "browser_key_press" => json!([args["key"].as_str().unwrap_or("")]),
-        "browser_scroll" => json!([
+        "type" | "fill" => json!([args["text"].as_str().unwrap_or("")]),
+        "select" => json!([args["value"].as_str().unwrap_or("")]),
+        "open" => json!([args["url"].as_str().unwrap_or("").trim()]),
+        "key_press" => json!([args["key"].as_str().unwrap_or("")]),
+        "scroll" => json!([
             args["x"].as_f64().unwrap_or(0.0),
             args["y"].as_f64().unwrap_or(600.0)
         ]),
-        "browser_mouse_click" | "browser_mouse_move" => json!([
+        "mouse_click" | "mouse_move" => json!([
             args["x"],
             args["y"],
             args["button"]
@@ -379,9 +381,10 @@ pub fn execute_action<'a>(
         if SESSION.try_with(|_| ()).is_err() {
             return run_session(execute_action(config, action, args)).await;
         }
+        let action = super::workflow::normalize_action(action);
         let state = SESSION.with(Arc::clone);
         let mut session = state.lock().await;
-        if action == "browser_open" {
+        if action == "open" {
             super::navigate::validate_url(args["url"].as_str().unwrap_or(""))?;
         }
         let starting = session.runtime_config.is_none();
@@ -420,20 +423,21 @@ async fn execute_owned(
     args: &Value,
     session: &mut BrowserSession,
 ) -> Result<String, String> {
+    let action = super::workflow::normalize_action(action);
     session.used = true;
     let tab_operation = args["operation"].as_str().unwrap_or("list");
     if session.blocked
         && (modifying(action)
-            || (action == "browser_tabs" && matches!(tab_operation, "open" | "close")))
+            || (action == "tabs" && matches!(tab_operation, "open" | "close")))
     {
         return Err(
             "browser_blocked: three attempts without progress; ask the user for takeover".into(),
         );
     }
-    if action == "browser_open" {
+    if action == "open" {
         super::navigate::validate_url(args["url"].as_str().unwrap_or("").trim())?;
     }
-    if session.tab.is_none() && action != "browser_tabs" {
+    if session.tab.is_none() && action != "tabs" {
         let page = tab_request(config, "new?about:blank").await?;
         let tab = page["id"]
             .as_str()
@@ -448,7 +452,7 @@ async fn execute_owned(
                 .await?;
         }
     }
-    if action == "browser_tabs" {
+    if action == "tabs" {
         return tabs(config, args, session).await;
     }
     let tab = session.tab.clone().ok_or("tab_unavailable")?;
@@ -461,7 +465,7 @@ async fn execute_owned(
     }
     TARGET
         .scope(tab.clone(), async {
-            if action == "browser_screenshot" {
+            if action == "screenshot" {
                 let mode=args["mode"].as_str().filter(|s|!s.is_empty()).unwrap_or("viewport");
                 let data=if mode=="viewport" {
                     let (data,evidence)=super::evidence::capture(config,&tab).await?;
@@ -480,10 +484,10 @@ async fn execute_owned(
                 session.capture_metadata=json!({"url":url,"capturedAt":chrono::Utc::now().to_rfc3339(),"sessionId":session.id,"tabId":tab,"mode":mode});
                 return Ok(format!("data:image/png;base64,{data}"));
             }
-            if action == "browser_read" {
+            if action == "read" {
                 return super::read_page_text(config).await;
             }
-            if action == "browser_observe" {
+            if action == "observe" {
                 let observation = observe_retry(config, &tab, args).await?;
                 session.observation = Some(observation.clone());
                 session.last_known = Some(observation.clone());
@@ -495,7 +499,7 @@ async fn execute_owned(
                 }
                 return serde_json::to_string(&observation).map_err(|e| e.to_string());
             }
-            if action == "browser_wait" {
+            if action == "wait" {
                 wait(config, args, session).await?;
                 if let Some(key) = session.preceding_attempt.take() {
                     session.attempts.remove(&key);
@@ -515,8 +519,8 @@ async fn execute_owned(
             }
             let mut selector = if matches!(
                 action,
-                "browser_click" | "browser_type" | "browser_fill" | "browser_select"
-            ) || (action == "browser_scroll"
+                "click" | "type" | "fill" | "select"
+            ) || (action == "scroll"
                 && (args["elementRef"].as_str().is_some_and(|s| !s.is_empty())
                     || args["selector"].as_str().is_some_and(|s| !s.is_empty())))
             {
@@ -524,20 +528,20 @@ async fn execute_owned(
             } else {
                 None
             };
-            if matches!(action, "browser_mouse_click" | "browser_mouse_move") {
+            if matches!(action, "mouse_click" | "mouse_move") {
                 let evidence = session
                     .screenshot
                     .as_ref()
                     .ok_or("screenshot_required: capture this tab before coordinate input")?;
                 super::evidence::validate(config, evidence, &tab, args).await?;
             }
-            if matches!(action, "browser_mouse_click" | "browser_mouse_move") {
+            if matches!(action, "mouse_click" | "mouse_move") {
                 selector = Some(format!(
                     "mint-point={},{}",
                     args["x"].as_f64().ok_or("x required")?,
                     args["y"].as_f64().ok_or("y required")?
                 ));
-            } else if action == "browser_key_press" {
+            } else if action == "key_press" {
                 selector = Some("mint-focus=".into());
             }
             let relevant_before = target_state(config, selector.as_deref()).await?;
@@ -606,7 +610,7 @@ async fn execute_owned(
                     || (!relevant_before.is_null()
                         && relevant_before["id"] == relevant_after["id"]
                         && relevant_before != relevant_after)
-                    || (action == "browser_scroll"
+                    || (action == "scroll"
                         && (viewport_changed
                             || result.as_ref().is_ok_and(|v| v == "scroll_verified")));
                 if progress {
@@ -753,17 +757,18 @@ async fn perform(
     args: &Value,
     selector: Option<&str>,
 ) -> Result<String, String> {
+    let action = super::workflow::normalize_action(action);
     let text = args["text"].as_str().unwrap_or("");
     match action {
-        "browser_open" => {
+        "open" => {
             super::navigate(config, args["url"].as_str().ok_or("url required")?.trim()).await
         }
-        "browser_click" => super::click(config, selector.ok_or("target required")?).await,
-        "browser_type" => super::type_text(config, selector.ok_or("target required")?, text).await,
-        "browser_fill" => {
+        "click" => super::click(config, selector.ok_or("target required")?).await,
+        "type" => super::type_text(config, selector.ok_or("target required")?, text).await,
+        "fill" => {
             super::interact::edit_text(config, selector.ok_or("target required")?, text, true).await
         }
-        "browser_select" => {
+        "select" => {
             let selector = selector.ok_or("target required")?;
             super::get_element_coordinates(config, selector).await?;
             let value = args["value"].as_str().ok_or("value required")?;
@@ -774,7 +779,7 @@ async fn perform(
             }
             Ok("value_verified".into())
         }
-        "browser_scroll" => {
+        "scroll" => {
             let x = args["x"].as_f64().unwrap_or(0.0);
             let y = args["y"].as_f64().unwrap_or(600.0);
             let expression = if let Some(selector) = selector {
@@ -795,16 +800,16 @@ async fn perform(
             }
             .into())
         }
-        "browser_mouse_move" | "browser_mouse_click" => {
+        "mouse_move" | "mouse_click" => {
             let x = args["x"].as_f64().ok_or("x required")?;
             let y = args["y"].as_f64().ok_or("y required")?;
-            if action == "browser_mouse_move" {
+            if action == "mouse_move" {
                 super::mouse_move(config, x, y).await
             } else {
                 super::mouse_click(config, x, y, args["button"].as_str().unwrap_or("left")).await
             }
         }
-        "browser_key_press" => {
+        "key_press" => {
             super::key_press(config, args["key"].as_str().ok_or("key required")?).await
         }
         _ => Err(format!("Unsupported browser action: {action}")),

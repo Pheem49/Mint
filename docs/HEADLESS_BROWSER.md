@@ -73,37 +73,37 @@ mint browser run --file workflow.json
 
 ### Workflow File Format
 
-A workflow file specifies an array of steps using supported browser actions:
+A workflow file specifies an array of steps using concise, intuitive action names (or legacy `browser_*` aliases):
 
 ```json
 {
   "steps": [
-    { "action": "browser_open", "input": { "url": "http://localhost:3000" } },
-    { "action": "browser_fill", "input": { "selector": "input[name=username]", "text": "testuser" } },
-    { "action": "browser_click", "input": { "selector": "button[type=submit]" } },
-    { "action": "browser_wait", "input": { "condition": "text", "value": "Dashboard" } },
-    { "action": "browser_screenshot", "input": { "mode": "fullPage" } }
+    { "action": "open", "input": { "url": "http://localhost:3000" } },
+    { "action": "fill", "input": { "selector": "input[name=username]", "text": "testuser" } },
+    { "action": "click", "input": { "selector": "button[type=submit]" } },
+    { "action": "wait", "input": { "condition": "text", "value": "Dashboard" } },
+    { "action": "screenshot", "input": { "mode": "fullPage" } }
   ]
 }
 ```
 
 ### Supported Workflow Actions
 
-The workflow runner supports 14 headless browser actions:
-- `browser_open`: Navigate to a URL.
-- `browser_fill`: Replace an input field's value.
-- `browser_type`: Type characters into an active field.
-- `browser_click`: Click an element matching a CSS or XPath selector.
-- `browser_select`: Select an option in a dropdown menu.
-- `browser_scroll`: Scroll the page or target element.
-- `browser_wait`: Wait for text, URL, or element visibility/invisibility.
-- `browser_screenshot`: Capture viewport or full-page screenshots to `.mint/browser-runs/`.
-- `browser_observe`: Extract structured page state and controls.
-- `browser_tabs`: Manage browser tabs (`list`, `open`, `select`, `close`).
-- `browser_read`: Extract text content from the page.
-- `browser_hover`: Hover over a selector.
-- `browser_press_key`: Send keyboard key combinations.
-- `browser_evaluate`: Run JavaScript expressions in the page context.
+The workflow runner supports 14 headless actions (both clean short names and legacy `browser_*` aliases are accepted):
+- `open` (`browser_open`): Navigate to a URL.
+- `fill` (`browser_fill`): Replace an input field's value.
+- `type` (`browser_type`): Type characters into an active field.
+- `click` (`browser_click`): Click an element matching a CSS or XPath selector.
+- `select` (`browser_select`): Select an option in a dropdown menu.
+- `scroll` (`browser_scroll`): Scroll the page or target element.
+- `wait` (`browser_wait`): Wait for text, URL, or element visibility/invisibility.
+- `screenshot` (`browser_screenshot`): Capture viewport or full-page screenshots to `.mint/browser-runs/`.
+- `observe` (`browser_observe`): Extract structured page state and controls.
+- `tabs` (`browser_tabs`): Manage browser tabs (`list`, `open`, `select`, `close`).
+- `read` (`browser_read`): Extract text content from the page.
+- `mouse_move` (`browser_mouse_move`): Move mouse coordinates.
+- `mouse_click` (`browser_mouse_click`): Click mouse at coordinates.
+- `key_press` (`browser_key_press`): Send keyboard key combinations.
 
 ### Execution Boundaries
 
