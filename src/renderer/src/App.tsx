@@ -2,6 +2,7 @@ import React, { lazy, Suspense, useEffect, useState } from 'react'
 import AuthGate from '../shared/components/app/AuthGate'
 import ChunkErrorBoundary from '../shared/components/app/ChunkErrorBoundary'
 import ModalErrorBoundary from '../shared/components/app/ModalErrorBoundary'
+import { ErrorRecovery } from '../shared/components/ui/error-recovery'
 import { lazyWithRetry, scheduleIdlePreload } from '../shared/utils/lazyWithRetry'
 import { listen } from './tauri'
 
@@ -97,6 +98,19 @@ export default function App() {
       <Suspense fallback={null}>
         <LiveTranslateControls />
       </Suspense>
+    )
+  }
+
+  if (route.startsWith('/error-preview') || route.startsWith('/error-recovery')) {
+    return (
+      <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-canvas, #09090b)' }}>
+        <ErrorRecovery
+          onBackToChat={() => {
+            window.location.hash = '#/'
+          }}
+          onRefresh={() => window.location.reload()}
+        />
+      </div>
     )
   }
 
