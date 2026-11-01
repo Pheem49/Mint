@@ -1,3 +1,4 @@
+use super::format::truncate_to_width;
 use super::*;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::tty::IsTty;
@@ -6,27 +7,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use std::path::Path;
 use unicode_width::UnicodeWidthStr;
-
-pub(super) fn truncate_to_width(text: &str, max_width: usize) -> String {
-    if UnicodeWidthStr::width(text) <= max_width {
-        return text.to_owned();
-    }
-    if max_width == 0 {
-        return String::new();
-    }
-    let mut result = String::new();
-    let mut width = 0usize;
-    for character in text.chars() {
-        let character_width = UnicodeWidthStr::width(character.to_string().as_str());
-        if width + character_width > max_width.saturating_sub(1) {
-            break;
-        }
-        result.push(character);
-        width += character_width;
-    }
-    result.push('…');
-    result
-}
 
 pub(super) fn format_relative_time(timestamp_str: &str) -> String {
     let parse_res = chrono::DateTime::parse_from_rfc3339(timestamp_str)
@@ -83,15 +63,377 @@ pub(super) fn format_relative_time(timestamp_str: &str) -> String {
     format!("{years} years ago")
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ResumePickerCore {
+    pub sessions: Vec<mint_core::ChatSession>,
+    pub current_workspace: String,
+    pub current_branch: Option<String>,
+    pub active_chat_id: String,
+    pub show_all_projects: bool,
+    pub only_current_branch: bool,
+    pub sort_by_created: bool,
+    pub showing_preview: bool,
+    pub renaming: bool,
+    pub rename_query: String,
+}
+
+impl ResumePickerCore {
+    pub fn new(
+        sessions: Vec<mint_core::ChatSession>,
+        current_workspace: String,
+        current_branch: Option<String>,
+        active_chat_id: String,
+    ) -> Self {
+        let show_all_projects = !sessions
+            .iter()
+            .any(|session| session.workspace_path.as_deref() == Some(&current_workspace));
+        Self {
+            sessions,
+            current_workspace,
+            current_branch,
+            active_chat_id,
+            show_all_projects,
+            only_current_branch: false,
+            sort_by_created: false,
+            showing_preview: false,
+            renaming: false,
+            rename_query: String::new(),
+        }
+    }
+
+    pub fn filtered_indices(&self, filter: &[char]) -> Vec<usize> {
+        let query: String = filter.iter().collect::<String>().to_lowercase();
+        let mut indices: Vec<usize> = self
+            .sessions
+            .iter()
+            .enumerate()
+            .filter(|(_, session)| {
+                if !self.show_all_projects
+                    && session.workspace_path.as_deref() != Some(&self.current_workspace)
+                {
+                    return false;
+                }
+                if self.only_current_branch {
+                    match self.current_branch.as_deref() {
+                        Some(branch) if session.git_branch.as_deref() == Some(branch) => {}
+                        _ => return false,
+                    }
+                }
+                if !query.is_empty() {
+                    let searchable = [
+                        session.title.as_str(),
+                        session.id.as_str(),
+                        session.git_branch.as_deref().unwrap_or_default(),
+                        session.main_language.as_deref().unwrap_or_default(),
+                    ]
+                    .join(" ")
+                    .to_lowercase();
+                    if !searchable.contains(&query) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .map(|(index, _)| index)
+            .collect();
+        indices.sort_by(|left, right| {
+            let left = &self.sessions[*left];
+            let right = &self.sessions[*right];
+            let (left_time, right_time) = if self.sort_by_created {
+                (&left.created_at, &right.created_at)
+            } else {
+                (&left.updated_at, &right.updated_at)
+            };
+            right_time.cmp(left_time)
+        });
+        indices
+    }
+
+    pub fn render_lines(
+        &self,
+        filter: &[char],
+        selected: usize,
+        scroll_offset: usize,
+        width: u16,
+        height: u16,
+    ) -> Vec<Line<'static>> {
+        let filtered = self.filtered_indices(filter);
+        let count = filtered.len();
+        let total = self.sessions.len();
+        let muted = Style::default().fg(crate::terminal_theme::MUTED);
+        let selected_chip = Style::default()
+            .fg(crate::terminal_theme::SELECTION_TEXT)
+            .bg(crate::terminal_theme::SELECTION_BACKGROUND)
+            .add_modifier(Modifier::BOLD);
+
+        if self.renaming {
+            return vec![
+                Line::styled(
+                    "Rename session title:",
+                    Style::default()
+                        .fg(crate::terminal_theme::TEXT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Line::from(vec![
+                    Span::styled("> ", Style::default().fg(crate::terminal_theme::SUBTLE)),
+                    Span::raw(self.rename_query.clone()),
+                    Span::styled("█", Style::default().fg(crate::terminal_theme::TEXT)),
+                ]),
+                Line::styled("(Press Enter to save, Esc to cancel)", muted),
+            ];
+        }
+
+        if self.showing_preview
+            && let Some(&orig_idx) = filtered.get(selected)
+            && let Some(target_session) = self.sessions.get(orig_idx)
+        {
+            let mut lines = vec![
+                Line::from(vec![
+                    Span::styled("Session: ", muted),
+                    Span::styled(
+                        target_session.title.clone(),
+                        Style::default()
+                            .fg(crate::terminal_theme::TEXT)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(format!(" ({})", target_session.id), muted),
+                ]),
+                Line::raw(""),
+            ];
+            if let Ok(memory) = mint_core::MemoryStore::open_default()
+                && let Ok(recent) = memory.get_session_preview(&target_session.id, 2)
+            {
+                if recent.is_empty() {
+                    lines.push(Line::styled(
+                        "  (No messages recorded in this session)",
+                        muted,
+                    ));
+                } else {
+                    for item in recent.iter().rev() {
+                        let u_snippet = crate::interactive::truncate_utf8(&item.user_text, 100);
+                        let a_snippet = crate::interactive::truncate_utf8(&item.ai_text, 140);
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                "  User › ",
+                                Style::default()
+                                    .fg(crate::terminal_theme::SUBTLE)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::raw(u_snippet.replace('\n', " ")),
+                        ]));
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                "  Assistant › ",
+                                Style::default().fg(crate::terminal_theme::SUBTLE),
+                            ),
+                            Span::styled(
+                                a_snippet.replace('\n', " "),
+                                Style::default().fg(crate::terminal_theme::TEXT),
+                            ),
+                        ]));
+                        lines.push(Line::raw(""));
+                    }
+                }
+            }
+            lines.push(Line::styled(
+                "Press Space or Esc to close preview · Enter to resume",
+                muted,
+            ));
+            return lines;
+        }
+
+        let selected_position = if count == 0 {
+            0
+        } else {
+            (selected + 1).min(count)
+        };
+
+        let mut lines = vec![Line::from(vec![
+            Span::styled(
+                "Resume Session",
+                Style::default()
+                    .fg(crate::terminal_theme::TEXT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!(" ({selected_position}/{count})"), muted),
+        ])];
+
+        let mut filters = vec![
+            Span::styled("Project: ", muted),
+            Span::styled(
+                " Cwd ",
+                if self.show_all_projects {
+                    muted
+                } else {
+                    selected_chip
+                },
+            ),
+            Span::styled(
+                " All ",
+                if self.show_all_projects {
+                    selected_chip
+                } else {
+                    muted
+                },
+            ),
+            Span::styled("  ·  Branch: ", muted),
+            Span::styled(
+                " All ",
+                if self.only_current_branch {
+                    muted
+                } else {
+                    selected_chip
+                },
+            ),
+            Span::styled(
+                " Current ",
+                if self.only_current_branch {
+                    selected_chip
+                } else {
+                    muted
+                },
+            ),
+            Span::styled("  ·  Sort: ", muted),
+            Span::styled(
+                " Updated ",
+                if self.sort_by_created {
+                    muted
+                } else {
+                    selected_chip
+                },
+            ),
+            Span::styled(
+                " Created ",
+                if self.sort_by_created {
+                    selected_chip
+                } else {
+                    muted
+                },
+            ),
+        ];
+        if self.only_current_branch && self.current_branch.is_none() {
+            filters.push(Span::styled(" (no branch)", muted));
+        }
+        lines.push(Line::from(filters));
+
+        let query: String = filter.iter().collect();
+        lines.push(Line::from(vec![
+            Span::styled("⌕  ", Style::default().fg(crate::terminal_theme::SUBTLE)),
+            Span::styled(
+                if query.is_empty() {
+                    "Type to search".to_string()
+                } else {
+                    query.clone()
+                },
+                if query.is_empty() {
+                    muted
+                } else {
+                    Style::default().fg(crate::terminal_theme::TEXT)
+                },
+            ),
+            if query.is_empty() {
+                Span::raw("")
+            } else {
+                Span::styled("█", Style::default().fg(crate::terminal_theme::TEXT))
+            },
+        ]));
+
+        let project_name = std::path::Path::new(&self.current_workspace)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.current_workspace.clone());
+        let project_label = if self.show_all_projects {
+            "All projects"
+        } else {
+            &project_name
+        };
+        let session_word = if count == 1 { "session" } else { "sessions" };
+        lines.push(Line::styled(
+            format!("{project_label} · {count} of {total} {session_word}"),
+            muted,
+        ));
+        lines.push(Line::styled(
+            "─".repeat(width as usize),
+            Style::default().fg(crate::terminal_theme::MUTED),
+        ));
+
+        let available_rows = (height as usize).saturating_sub(8).max(1);
+        let scroll_offset = if selected < scroll_offset {
+            selected
+        } else if selected >= scroll_offset + available_rows {
+            selected + 1 - available_rows
+        } else {
+            scroll_offset
+        }
+        .min(count.saturating_sub(available_rows));
+        let end = (scroll_offset + available_rows).min(count);
+
+        if count == 0 {
+            lines.push(Line::styled("No matching sessions", muted));
+        } else {
+            for position in scroll_offset..end {
+                let session = &self.sessions[filtered[position]];
+                let time = truncate_to_width(&format_relative_time(&session.updated_at), 10);
+                let message_count = format!("{} msgs", session.message_count);
+                let current_tag = if session.id == self.active_chat_id {
+                    " (current)"
+                } else {
+                    ""
+                };
+                let fixed_width = 2
+                    + 10
+                    + 2
+                    + UnicodeWidthStr::width(message_count.as_str())
+                    + 2
+                    + UnicodeWidthStr::width(current_tag);
+                let title_width = (width as usize).saturating_sub(fixed_width);
+                let title = truncate_to_width(&session.title, title_width);
+                let is_selected = position == selected;
+                if is_selected {
+                    let text = format!("› {time:>10}  {title}{current_tag}  {message_count}");
+                    let text_width = UnicodeWidthStr::width(text.as_str());
+                    let padded = format!(
+                        "{text}{}",
+                        " ".repeat((width as usize).saturating_sub(text_width))
+                    );
+                    lines.push(Line::styled(padded, selected_chip));
+                } else {
+                    let row = format!("  {time:>10}  {title}{current_tag}  {message_count}");
+                    let row_width = UnicodeWidthStr::width(row.as_str());
+                    lines.push(Line::from(vec![
+                        Span::styled("  ", Style::default().fg(crate::terminal_theme::SUBTLE)),
+                        Span::styled(format!("{time:>10}  "), muted),
+                        Span::styled(
+                            format!("{title}{current_tag}"),
+                            Style::default().fg(crate::terminal_theme::TEXT),
+                        ),
+                        Span::styled(format!("  {message_count}"), muted),
+                        Span::raw(" ".repeat((width as usize).saturating_sub(row_width))),
+                    ]));
+                }
+            }
+        }
+
+        while lines.len() + 2 < height.saturating_sub(1) as usize {
+            lines.push(Line::raw(""));
+        }
+        lines.push(Line::styled(
+            "Enter resume · Space preview · Ctrl+R rename · ↑/↓ navigate · Esc cancel",
+            muted,
+        ));
+        lines.push(Line::styled(
+            "Ctrl+A project · Ctrl+B branch · Tab sort · Type to search",
+            muted,
+        ));
+        lines
+    }
+}
+
 pub fn prompt_resume_session_picker_with_ui(
     ui: &mut dyn CommandUi,
     current_dir: &Path,
     active_chat_id: &str,
 ) -> Result<Option<String>> {
-    if ui.uses_inline_resume_picker() {
-        return prompt_resume_session_picker(current_dir, active_chat_id);
-    }
-
     let memory = match mint_core::MemoryStore::open_default() {
         Ok(m) => m,
         Err(err) => {

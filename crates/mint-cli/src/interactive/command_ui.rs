@@ -36,13 +36,13 @@ impl ChoiceItem {
 }
 
 pub trait CommandUi {
-    fn uses_inline_resume_picker(&self) -> bool {
-        false
-    }
     fn push_notice_str(&mut self, text: &str);
     fn push_command_output_str(&mut self, text: &str);
     fn set_status(&mut self, lines: Vec<String>);
     fn clear_status(&mut self);
+    fn open_thought_viewer(&mut self) -> Result<()> {
+        Ok(())
+    }
     fn prompt_choice(
         &mut self,
         title: &str,
@@ -243,6 +243,13 @@ impl CommandUi for FullScreenCommandUi<'_> {
         }
     }
 
+    fn open_thought_viewer(&mut self) -> Result<()> {
+        if let Ok(mut state) = self.state.lock() {
+            state.open_thought_modal();
+        }
+        Ok(())
+    }
+
     fn reload_transcript(&mut self, chat_id: &str, workspace: &std::path::Path) {
         if let Ok(mut state) = self.state.lock() {
             state.reload_transcript(chat_id, workspace);
@@ -260,8 +267,23 @@ impl ClassicCommandUi {
 }
 
 impl CommandUi for ClassicCommandUi {
-    fn uses_inline_resume_picker(&self) -> bool {
-        true
+    fn open_thought_viewer(&mut self) -> Result<()> {
+        if let Some(record) = crate::interactive::get_last_thought() {
+            let _ = crate::interactive::show_thought_viewer(&record.thought, &record.elapsed_str);
+        } else {
+            self.push_notice_str("No recent thought process recorded for this turn.");
+        }
+        Ok(())
+    }
+
+    fn prompt_resume_picker(
+        &mut self,
+        _sessions: Vec<mint_core::ChatSession>,
+        current_dir: &std::path::Path,
+        _current_branch: Option<String>,
+        active_chat_id: &str,
+    ) -> Result<Option<String>> {
+        crate::interactive::prompt_resume_session_picker(current_dir, active_chat_id)
     }
 
     fn push_notice_str(&mut self, text: &str) {

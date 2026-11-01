@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 mod chat_tui;
 pub mod command_ui;
 mod commands;
+mod composer;
 mod confirm;
 mod format;
 mod input_box;

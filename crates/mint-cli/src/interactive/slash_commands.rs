@@ -531,14 +531,15 @@ pub async fn handle_slash_command(
             };
             if rest.is_empty() {
                 if checkpoints.is_empty() {
-                    println!("\n{DIM}No git checkpoints recorded for this CLI session yet.{RESET}");
-                    println!(
-                        "{DIM}Checkpoints are created automatically before mutating file actions (write_file, apply_patch).{RESET}\n"
+                    ui.push_notice(
+                        "No git checkpoints recorded for this CLI session yet.\nCheckpoints are created automatically before mutating file actions (write_file, apply_patch).",
                     );
                 } else {
-                    println!("\n{BLUE}────────────────────────────────────────────{RESET}");
-                    println!("{MINT}  ↺ Available Git Checkpoints (Time Machine){RESET}");
-                    println!("{BLUE}────────────────────────────────────────────{RESET}");
+                    let mut lines = vec![
+                        format!("{BLUE}────────────────────────────────────────────{RESET}"),
+                        format!("{MINT}  ↺ Available Git Checkpoints (Time Machine){RESET}"),
+                        format!("{BLUE}────────────────────────────────────────────{RESET}"),
+                    ];
                     for cp in checkpoints.iter().rev() {
                         let hash_short = if cp.commit_hash.len() >= 7 {
                             &cp.commit_hash[..7]
@@ -546,24 +547,21 @@ pub async fn handle_slash_command(
                             &cp.commit_hash
                         };
                         let target = cp.target_path.as_deref().unwrap_or("-");
-                        println!(
+                        lines.push(format!(
                             "  {MINT}Step {:<3}{RESET} {DIM}[{}]{RESET} {:<20} {DIM}({}){RESET}",
                             cp.step, hash_short, cp.action, target
-                        );
+                        ));
                     }
-                    println!(
-                        "\n{DIM}Use {RESET}{MINT}/rewind <step>{RESET}{DIM} to restore workspace to before that step, or {RESET}{MINT}/rewind undo{RESET}{DIM} to recover from rescue snapshot.{RESET}\n"
-                    );
+                    lines.push(format!(
+                        "\n{DIM}Use {RESET}{MINT}/rewind <step>{RESET}{DIM} to restore workspace to before that step, or {RESET}{MINT}/rewind undo{RESET}{DIM} to recover from rescue snapshot.{RESET}"
+                    ));
+                    ui.push_command_output(lines.join("\n"));
                 }
                 Some(SlashResult::Handled)
             } else if rest.trim().eq_ignore_ascii_case("undo") {
                 match mint_core::git::undo_rollback(&session.current_dir) {
-                    Ok(msg) => {
-                        println!("\n{MINT}{msg}{RESET}\n");
-                    }
-                    Err(err) => {
-                        println!("\n{ERROR}Failed to undo rewind:{RESET} {err}\n");
-                    }
+                    Ok(msg) => ui.push_notice(msg),
+                    Err(err) => ui.push_notice(format!("Failed to undo rewind: {err}")),
                 }
                 Some(SlashResult::Handled)
             } else {
@@ -574,18 +572,14 @@ pub async fn handle_slash_command(
                             &target_rewind_chat_id,
                             step,
                         ) {
-                            Ok(msg) => {
-                                println!("\n{MINT}{msg}{RESET}\n");
-                            }
-                            Err(err) => {
-                                println!("\n{ERROR}Failed to rollback:{RESET} {err}\n");
-                            }
+                            Ok(msg) => ui.push_notice(msg),
+                            Err(err) => ui.push_notice(format!("Failed to rollback: {err}")),
                         }
                     }
                     Err(_) => {
-                        println!(
-                            "\n{ERROR}Invalid step number:{RESET} \"{rest}\". Usage: /rewind <step> or /rewind undo\n"
-                        );
+                        ui.push_notice(format!(
+                            "Invalid step number: \"{rest}\". Usage: /rewind <step> or /rewind undo"
+                        ));
                     }
                 }
                 Some(SlashResult::Handled)
@@ -702,10 +696,8 @@ pub async fn handle_slash_command(
         }
 
         "/thought" | "/think" => {
-            if let Some(record) = get_last_thought() {
-                let _ = show_thought_viewer(&record.thought, &record.elapsed_str);
-            } else {
-                ui.push_notice("No recent thought process recorded for this turn.");
+            if let Err(err) = ui.open_thought_viewer() {
+                ui.push_notice(format!("Could not open thought viewer: {err}"));
             }
             Some(SlashResult::Handled)
         }
@@ -789,18 +781,18 @@ pub async fn handle_slash_command(
         "/models" => {
             let selected_provider = if rest.is_empty() {
                 let providers = session.config.available_providers();
-                match prompt_interactive_select(
-                    "Select AI provider",
-                    &providers,
-                    &session.config.ai_provider,
-                ) {
-                    Ok(Some(p)) => Some(p),
+                let choices: Vec<ChoiceItem> = providers
+                    .iter()
+                    .map(|p| ChoiceItem::new(p.clone(), p.clone()))
+                    .collect();
+                match ui.prompt_choice("Select AI provider", "", &choices) {
+                    Ok(Some(idx)) => providers.get(idx).cloned(),
                     Ok(None) => {
-                        println!("Cancelled provider selection.\n");
+                        ui.push_notice("Cancelled provider selection.");
                         None
                     }
                     Err(e) => {
-                        println!("{ERROR}Error selecting provider:{RESET} {e}\n");
+                        ui.push_notice(format!("Error selecting provider: {e}"));
                         None
                     }
                 }
@@ -809,25 +801,16 @@ pub async fn handle_slash_command(
             };
 
             if let Some(provider) = selected_provider {
-                // Switch provider first so `active_model()` reflects that
-                // provider's own default/last-used model, then offer a
-                // second picker (when a model list is known for it) so the
-                // user isn't stuck with the default after choosing a provider.
                 match session.config.set_active_model(&provider, None) {
                     Ok(mut display_name) => {
-                        // Try live fetch from the provider API; fall back to
-                        // static presets if the network is unavailable or the
-                        // user hasn't entered an API key yet.
-                        print!("{DIM}Fetching available models for {provider}...{RESET}\r");
-                        let _ = std::io::Write::flush(&mut std::io::stdout());
+                        ui.set_status(vec![format!("Fetching available models for {provider}...")]);
                         let mut model_options =
                             mint_core::slash::models::model_options_for_provider_async(
                                 &session.config,
                                 &provider,
                             )
                             .await;
-                        print!("\r\x1b[2K");
-                        let _ = std::io::Write::flush(&mut std::io::stdout());
+                        ui.clear_status();
                         let current_model = session.config.active_model().to_string();
                         if !current_model.is_empty()
                             && !model_options.iter().any(|m| m == &current_model)
@@ -836,32 +819,40 @@ pub async fn handle_slash_command(
                         }
 
                         if !model_options.is_empty() {
-                            match prompt_interactive_select(
+                            let choices: Vec<ChoiceItem> = model_options
+                                .iter()
+                                .map(|m| ChoiceItem::new(m.clone(), m.clone()))
+                                .collect();
+                            match ui.prompt_choice(
                                 &format!("Select {provider} model"),
-                                &model_options,
-                                &current_model,
+                                "",
+                                &choices,
                             ) {
-                                Ok(Some(model)) if model != current_model => {
-                                    match session.config.set_active_model(&provider, Some(&model)) {
-                                        Ok(name) => display_name = name,
-                                        Err(error) => {
-                                            println!("{ERROR}Config error:{RESET} {error}")
+                                Ok(Some(idx)) => {
+                                    if let Some(model) = model_options.get(idx)
+                                        && model != &current_model
+                                    {
+                                        match session
+                                            .config
+                                            .set_active_model(&provider, Some(model))
+                                        {
+                                            Ok(name) => display_name = name,
+                                            Err(error) => {
+                                                ui.push_notice(format!("Config error: {error}"));
+                                            }
                                         }
                                     }
                                 }
-                                Ok(_) => {}
+                                Ok(None) => {}
                                 Err(e) => {
-                                    println!("{ERROR}Error selecting model:{RESET} {e}\n")
+                                    ui.push_notice(format!("Error selecting model: {e}"));
                                 }
                             }
                         }
 
-                        println!(
-                            "\n{DIM}───{RESET} {MINT}{}{RESET} {DIM}───{RESET}\n",
-                            display_name
-                        );
+                        ui.push_notice(format!("Active model: {display_name}"));
                     }
-                    Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
+                    Err(error) => ui.push_notice(format!("Config error: {error}")),
                 }
             }
             Some(SlashResult::Handled)
@@ -871,29 +862,31 @@ pub async fn handle_slash_command(
             if rest == "on" || rest == "off" {
                 session.config.enable_agent_collaboration = rest == "on";
                 match mint_core::save_config(&session.config) {
-                    Ok(()) => println!(
-                        "{DIM}Multi-Agent collaboration set to: {}{RESET}\n",
+                    Ok(()) => ui.push_notice(format!(
+                        "Multi-Agent collaboration set to: {}",
                         if session.config.enable_agent_collaboration {
                             "Enabled"
                         } else {
                             "Disabled"
                         }
-                    ),
-                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                    )),
+                    Err(error) => ui.push_notice(format!("Config error: {error}")),
                 }
             } else if !rest.is_empty() {
-                println!("{WARN}Usage: /multi-agent [on|off]{RESET}\n");
+                ui.push_notice("Usage: /multi-agent [on|off]");
             } else {
-                println!("\n{BLUE}Multi-Agent System Settings:{RESET}");
                 let collab_status = if session.config.enable_agent_collaboration {
                     format!("{MINT}Enabled (on){RESET}")
                 } else {
                     format!("{DIM}Disabled (off){RESET}")
                 };
-                println!("  Global Collaboration: {collab_status}");
-                println!("\n{BLUE}Configured Agents:{RESET}");
+                let mut lines = vec![
+                    format!("{BLUE}Multi-Agent System Settings:{RESET}"),
+                    format!("  Global Collaboration: {collab_status}"),
+                    format!("\n{BLUE}Configured Agents:{RESET}"),
+                ];
                 if session.config.agents.is_empty() {
-                    println!("  No agents configured.");
+                    lines.push("  No agents configured.".to_string());
                 } else {
                     for agent in &session.config.agents {
                         let status_label = if agent.enabled {
@@ -901,10 +894,10 @@ pub async fn handle_slash_command(
                         } else {
                             format!("{DIM}[Disabled]{RESET}")
                         };
-                        println!(
+                        lines.push(format!(
                             "  {:<15} {}  Provider: {:<12} Model: {}",
                             agent.name, status_label, agent.provider, agent.model
-                        );
+                        ));
                         let truncated_instruction = if agent.system_instruction.chars().count() > 60
                         {
                             let head: String = agent.system_instruction.chars().take(60).collect();
@@ -912,38 +905,34 @@ pub async fn handle_slash_command(
                         } else {
                             agent.system_instruction.replace('\n', " ")
                         };
-                        println!("    {DIM}Instruction: {truncated_instruction}{RESET}");
+                        lines.push(format!(
+                            "    {DIM}Instruction: {truncated_instruction}{RESET}"
+                        ));
                     }
                 }
-                println!();
+                ui.push_command_output(lines.join("\n"));
 
-                let options = vec![
-                    "Keep current status".to_string(),
-                    "on (enable collaboration)".to_string(),
-                    "off (disable collaboration)".to_string(),
+                let choices = vec![
+                    ChoiceItem::new("Keep current status", "keep"),
+                    ChoiceItem::new("on (enable collaboration)", "on"),
+                    ChoiceItem::new("off (disable collaboration)", "off"),
                 ];
-                let current = &options[0];
-                match prompt_interactive_select("Toggle Collaboration Status?", &options, current) {
-                    Ok(Some(sel)) => {
-                        if sel.starts_with("on") {
-                            session.config.enable_agent_collaboration = true;
-                            match mint_core::save_config(&session.config) {
-                                Ok(()) => println!(
-                                    "{DIM}Multi-Agent collaboration set to: Enabled{RESET}\n"
-                                ),
-                                Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
-                            }
-                        } else if sel.starts_with("off") {
-                            session.config.enable_agent_collaboration = false;
-                            match mint_core::save_config(&session.config) {
-                                Ok(()) => println!(
-                                    "{DIM}Multi-Agent collaboration set to: Disabled{RESET}\n"
-                                ),
-                                Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
-                            }
+                if let Ok(Some(idx)) =
+                    ui.prompt_choice("Toggle Collaboration Status?", "", &choices)
+                {
+                    if idx == 1 {
+                        session.config.enable_agent_collaboration = true;
+                        match mint_core::save_config(&session.config) {
+                            Ok(()) => ui.push_notice("Multi-Agent collaboration set to: Enabled"),
+                            Err(error) => ui.push_notice(format!("Config error: {error}")),
+                        }
+                    } else if idx == 2 {
+                        session.config.enable_agent_collaboration = false;
+                        match mint_core::save_config(&session.config) {
+                            Ok(()) => ui.push_notice("Multi-Agent collaboration set to: Disabled"),
+                            Err(error) => ui.push_notice(format!("Config error: {error}")),
                         }
                     }
-                    _ => {}
                 }
             }
             Some(SlashResult::Handled)
@@ -954,19 +943,21 @@ pub async fn handle_slash_command(
 
             // Soft toggle: `avatar_signal_disabled` hides the tool while keeping
             // the token so the paired viewer never needs re-linking.
-            let set_signal_disabled = |session: &mut InteractiveSession, disabled: bool| {
+            let set_signal_disabled = |session: &mut InteractiveSession,
+                                       ui: &mut dyn CommandUi,
+                                       disabled: bool| {
                 session.config.avatar_signal_disabled = disabled;
                 match mint_core::save_config(&session.config) {
                     Ok(()) => {
                         if disabled {
-                            println!(
-                                "{DIM}[Avatar] avatar_signal disabled (token kept — run /avatar to re-enable).{RESET}\n"
-                            );
+                            ui.push_notice(
+                                    "[Avatar] avatar_signal disabled (token kept — run /avatar to re-enable).",
+                                );
                         } else {
-                            println!("{DIM}[Avatar] avatar_signal enabled.{RESET}\n");
+                            ui.push_notice("[Avatar] avatar_signal enabled.");
                         }
                     }
-                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                    Err(error) => ui.push_notice(format!("Config error: {error}")),
                 }
             };
 
@@ -976,33 +967,33 @@ pub async fn handle_slash_command(
                 "web" | "link web" => "web",
                 "desktop" | "link desktop" => "desktop",
                 "on" | "enable" => {
-                    set_signal_disabled(session, false);
+                    set_signal_disabled(session, ui, false);
                     return Some(SlashResult::Handled);
                 }
                 "off" | "disable" => {
-                    set_signal_disabled(session, true);
+                    set_signal_disabled(session, ui, true);
                     return Some(SlashResult::Handled);
                 }
                 "" | "link" => {
                     let options = vec![
-                        "No".to_string(),
-                        "Off (disable avatar_signal)".to_string(),
-                        "Web browser".to_string(),
-                        "Desktop app".to_string(),
+                        ChoiceItem::new("Web browser", "web"),
+                        ChoiceItem::new("Desktop app", "desktop"),
+                        ChoiceItem::new("Off (disable avatar_signal)", "off"),
+                        ChoiceItem::new("No", "no"),
                     ];
-                    match prompt_interactive_select("Avatar output", &options, &options[2]) {
-                        Ok(Some(sel)) if sel == "No" => return Some(SlashResult::Handled),
-                        Ok(Some(sel)) if sel.starts_with("Off") => {
-                            set_signal_disabled(session, true);
-                            return Some(SlashResult::Handled);
-                        }
-                        Ok(Some(sel)) if sel.starts_with("Desktop") => "desktop",
-                        Ok(Some(_)) => "web",
-                        // Cancelled / no TTY — the picker has an explicit "No",
-                        // so treat a cancel as "do nothing".
+                    match ui.prompt_choice("Avatar output", "", &options) {
+                        Ok(Some(idx)) => match options[idx].value.as_str() {
+                            "no" => return Some(SlashResult::Handled),
+                            "off" => {
+                                set_signal_disabled(session, ui, true);
+                                return Some(SlashResult::Handled);
+                            }
+                            "desktop" => "desktop",
+                            _ => "web",
+                        },
                         Ok(None) => return Some(SlashResult::Handled),
                         Err(e) => {
-                            println!("{ERROR}Error selecting target:{RESET} {e}\n");
+                            ui.push_notice(format!("Error selecting target: {e}"));
                             return Some(SlashResult::Handled);
                         }
                     }
@@ -1010,44 +1001,41 @@ pub async fn handle_slash_command(
                 "status" => {
                     let cfg = AvatarBridgeConfig::from_mint_config(&session.config);
                     if !cfg.enabled {
-                        println!("{WARN}[Avatar] No token yet — run /avatar link first.{RESET}\n");
+                        ui.push_notice("[Avatar] No token yet — run /avatar link first.");
                     } else {
-                        println!(
-                            "{DIM}[Avatar] avatar_signal tool: {}{RESET}",
-                            if session.config.avatar_signal_disabled {
-                                "disabled"
-                            } else {
-                                "enabled"
-                            }
-                        );
+                        let tool_state = if session.config.avatar_signal_disabled {
+                            "disabled"
+                        } else {
+                            "enabled"
+                        };
                         match fetch_channel_state(&cfg).await {
                             Ok(state) => {
                                 let now_ms = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .map(|d| d.as_millis() as i64)
                                     .unwrap_or(0);
-                                println!("\n{BLUE}[Avatar] Channel status:{RESET}");
-                                println!(
-                                    "  Model:       {}",
-                                    state.model.unwrap_or_else(|| "not selected".into())
-                                );
-                                println!("  Viewers:     {}", state.connected_clients);
-                                println!(
-                                    "  Last event:  {}\n",
-                                    state
-                                        .last_agent_event_at
-                                        .map(|t| format!("{}s ago", (now_ms - t).max(0) / 1000))
-                                        .unwrap_or_else(|| "never".into())
-                                );
+                                let last_ev = state
+                                    .last_agent_event_at
+                                    .map(|t| format!("{}s ago", (now_ms - t).max(0) / 1000))
+                                    .unwrap_or_else(|| "never".into());
+                                ui.push_command_output(format!(
+                                    "{DIM}[Avatar] avatar_signal tool: {tool_state}{RESET}\n\
+                                     {BLUE}[Avatar] Channel status:{RESET}\n  \
+                                     Model:       {}\n  \
+                                     Viewers:     {}\n  \
+                                     Last event:  {last_ev}",
+                                    state.model.unwrap_or_else(|| "not selected".into()),
+                                    state.connected_clients
+                                ));
                             }
-                            Err(error) => println!("{ERROR}[Avatar] {error}{RESET}\n"),
+                            Err(error) => ui.push_notice(format!("[Avatar] {error}")),
                         }
                     }
                     return Some(SlashResult::Handled);
                 }
                 _ => {
-                    println!(
-                        "{WARN}Usage: /avatar [web|desktop|on|off|status] — connects agent activity to Project Avatar{RESET}\n"
+                    ui.push_notice(
+                        "Usage: /avatar [web|desktop|on|off|status] — connects agent activity to Project Avatar",
                     );
                     return Some(SlashResult::Handled);
                 }
@@ -1060,179 +1048,185 @@ pub async fn handle_slash_command(
                 session.config.avatar_token = AvatarBridgeConfig::generate_token();
             }
             if let Err(error) = mint_core::save_config(&session.config) {
-                println!("{ERROR}Config error:{RESET} {error}\n");
+                ui.push_notice(format!("Config error: {error}"));
                 return Some(SlashResult::Handled);
             }
             let cfg = AvatarBridgeConfig::from_mint_config(&session.config);
             let token = session.config.avatar_token.clone();
             if target == "desktop" {
-                println!(
-                    "\n{MINT}[Avatar] Desktop app:{RESET}\n\
+                ui.push_command_output(format!(
+                    "{MINT}[Avatar] Desktop app:{RESET}\n\
                      1. Open the Project Avatar desktop app.\n\
                      2. It has no address bar, so on first launch it generates its \
                      own token — paste this one into its \"Paste existing token...\" \
                      field instead so it connects to the same channel Mint pushes to:\n\
                      {DIM}{token}{RESET}\n\
-                     It remembers the token after that; you won't need to paste it again.\n"
-                );
+                     It remembers the token after that; you won't need to paste it again."
+                ));
             } else {
-                println!(
-                    "\n{MINT}[Avatar] Share link:{RESET}\n{}\n",
+                ui.push_command_output(format!(
+                    "{MINT}[Avatar] Share link:{RESET}\n{}",
                     cfg.share_link().expect("token was just ensured non-empty")
-                );
+                ));
             }
             Some(SlashResult::Handled)
         }
 
         "/autoskill" => {
-            if rest == "on" || rest == "off" {
-                session.config.auto_skill_writing = rest == "on";
+            let apply = |session: &mut InteractiveSession, ui: &mut dyn CommandUi, on: bool| {
+                session.config.auto_skill_writing = on;
                 match mint_core::save_config(&session.config) {
-                    Ok(()) => println!(
-                        "{DIM}Skill suggestions (approval required to save) set to: {}{RESET}\n",
-                        if session.config.auto_skill_writing {
-                            "Enabled"
-                        } else {
-                            "Disabled"
-                        }
-                    ),
-                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                    Ok(()) => ui.push_notice(format!(
+                        "Skill suggestions (approval required to save) set to: {}",
+                        if on { "Enabled" } else { "Disabled" }
+                    )),
+                    Err(error) => ui.push_notice(format!("Config error: {error}")),
                 }
+            };
+            if rest == "on" || rest == "off" {
+                apply(session, ui, rest == "on");
             } else if !rest.is_empty() {
-                println!("{WARN}Usage: /autoskill [on|off]{RESET}\n");
+                ui.push_notice("Usage: /autoskill [on|off]");
             } else {
-                println!(
-                    "{DIM}When enabled, the agent proposes a skill after a reusable task. Each proposed diff needs your approval before saving.{RESET}"
-                );
                 let options = if session.config.auto_skill_writing {
-                    vec!["on (current)".to_string(), "off".to_string()]
+                    vec![
+                        ChoiceItem::new("on (current)", "on"),
+                        ChoiceItem::new("off", "off"),
+                    ]
                 } else {
-                    vec!["on".to_string(), "off (current)".to_string()]
+                    vec![
+                        ChoiceItem::new("off (current)", "off"),
+                        ChoiceItem::new("on", "on"),
+                    ]
                 };
-                let current = if session.config.auto_skill_writing {
-                    &options[0]
-                } else {
-                    &options[1]
-                };
-                match prompt_interactive_select("Skill Suggestions", &options, current) {
-                    Ok(Some(sel)) => {
-                        session.config.auto_skill_writing = sel.starts_with("on");
-                        match mint_core::save_config(&session.config) {
-                            Ok(()) => println!(
-                                "{DIM}Skill suggestions (approval required to save) set to: {}{RESET}\n",
-                                if session.config.auto_skill_writing {
-                                    "Enabled"
-                                } else {
-                                    "Disabled"
-                                }
-                            ),
-                            Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
-                        }
-                    }
-                    Ok(None) => println!("{DIM}Cancelled.{RESET}\n"),
-                    Err(e) => println!("{ERROR}Error selecting option:{RESET} {e}\n"),
+                match ui.prompt_choice(
+                    "Skill Suggestions",
+                    "When enabled, the agent proposes a skill after a reusable task. Each proposed diff needs your approval before saving.",
+                    &options,
+                ) {
+                    Ok(Some(idx)) => apply(session, ui, options[idx].value == "on"),
+                    Ok(None) => ui.push_notice("Cancelled."),
+                    Err(e) => ui.push_notice(format!("Error selecting option: {e}")),
                 }
             }
             Some(SlashResult::Handled)
         }
 
         "/autorecall" => {
-            let apply = |session: &mut InteractiveSession, on: bool| {
+            let apply = |session: &mut InteractiveSession, ui: &mut dyn CommandUi, on: bool| {
                 session.config.memory_recall = on;
                 match mint_core::save_config(&session.config) {
-                    Ok(()) => println!(
-                        "{DIM}Memory recall set to: {}{RESET}\n",
+                    Ok(()) => ui.push_notice(format!(
+                        "Memory recall set to: {}",
                         if on { "Enabled" } else { "Disabled" }
-                    ),
-                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                    )),
+                    Err(error) => ui.push_notice(format!("Config error: {error}")),
                 }
             };
             if rest == "on" || rest == "off" {
-                apply(session, rest == "on");
+                apply(session, ui, rest == "on");
             } else if !rest.is_empty() {
-                println!("{WARN}Usage: /autorecall [on|off]{RESET}\n");
+                ui.push_notice("Usage: /autorecall [on|off]");
             } else {
-                println!(
-                    "{DIM}When enabled, each turn full-text-searches this conversation's older messages and injects the few most relevant to what you just said.{RESET}"
-                );
-                let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
-                let current = if session.config.memory_recall {
-                    &options[0]
+                let options = if session.config.memory_recall {
+                    vec![
+                        ChoiceItem::new("on (enable)", "on"),
+                        ChoiceItem::new("off (disable)", "off"),
+                    ]
                 } else {
-                    &options[1]
+                    vec![
+                        ChoiceItem::new("off (disable)", "off"),
+                        ChoiceItem::new("on (enable)", "on"),
+                    ]
                 };
-                match prompt_interactive_select("Memory Recall", &options, current) {
-                    Ok(Some(sel)) => apply(session, sel.starts_with("on")),
-                    Ok(None) => println!("{DIM}Cancelled.{RESET}\n"),
-                    Err(e) => println!("{ERROR}Error selecting option:{RESET} {e}\n"),
+                match ui.prompt_choice(
+                    "Memory Recall",
+                    "When enabled, each turn full-text-searches this conversation's older messages and injects the few most relevant to what you just said.",
+                    &options,
+                ) {
+                    Ok(Some(idx)) => apply(session, ui, options[idx].value == "on"),
+                    Ok(None) => ui.push_notice("Cancelled."),
+                    Err(e) => ui.push_notice(format!("Error selecting option: {e}")),
                 }
             }
             Some(SlashResult::Handled)
         }
 
         "/autofacts" => {
-            let apply = |session: &mut InteractiveSession, on: bool| {
+            let apply = |session: &mut InteractiveSession, ui: &mut dyn CommandUi, on: bool| {
                 session.config.auto_fact_extraction = on;
                 match mint_core::save_config(&session.config) {
-                    Ok(()) => println!(
-                        "{DIM}Auto fact extraction set to: {}{RESET}\n",
+                    Ok(()) => ui.push_notice(format!(
+                        "Auto fact extraction set to: {}",
                         if on { "Enabled" } else { "Disabled" }
-                    ),
-                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                    )),
+                    Err(error) => ui.push_notice(format!("Config error: {error}")),
                 }
             };
             if rest == "on" || rest == "off" {
-                apply(session, rest == "on");
+                apply(session, ui, rest == "on");
             } else if !rest.is_empty() {
-                println!("{WARN}Usage: /autofacts [on|off]{RESET}\n");
+                ui.push_notice("Usage: /autofacts [on|off]");
             } else {
-                println!(
-                    "{DIM}When enabled, a turn that states a durable preference, naming, or standing instruction triggers a background pass that saves it to long-term memory.{RESET}"
-                );
-                let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
-                let current = if session.config.auto_fact_extraction {
-                    &options[0]
+                let options = if session.config.auto_fact_extraction {
+                    vec![
+                        ChoiceItem::new("on (enable)", "on"),
+                        ChoiceItem::new("off (disable)", "off"),
+                    ]
                 } else {
-                    &options[1]
+                    vec![
+                        ChoiceItem::new("off (disable)", "off"),
+                        ChoiceItem::new("on (enable)", "on"),
+                    ]
                 };
-                match prompt_interactive_select("Auto Fact Extraction", &options, current) {
-                    Ok(Some(sel)) => apply(session, sel.starts_with("on")),
-                    Ok(None) => println!("{DIM}Cancelled.{RESET}\n"),
-                    Err(e) => println!("{ERROR}Error selecting option:{RESET} {e}\n"),
+                match ui.prompt_choice(
+                    "Auto Fact Extraction",
+                    "When enabled, a turn that states a durable preference, naming, or standing instruction triggers a background pass that saves it to long-term memory.",
+                    &options,
+                ) {
+                    Ok(Some(idx)) => apply(session, ui, options[idx].value == "on"),
+                    Ok(None) => ui.push_notice("Cancelled."),
+                    Err(e) => ui.push_notice(format!("Error selecting option: {e}")),
                 }
             }
             Some(SlashResult::Handled)
         }
 
         "/factrecall" => {
-            let apply = |session: &mut InteractiveSession, on: bool| {
+            let apply = |session: &mut InteractiveSession, ui: &mut dyn CommandUi, on: bool| {
                 session.config.semantic_fact_recall = on;
                 match mint_core::save_config(&session.config) {
-                    Ok(()) => println!(
-                        "{DIM}Semantic fact recall set to: {}{RESET}\n",
+                    Ok(()) => ui.push_notice(format!(
+                        "Semantic fact recall set to: {}",
                         if on { "Enabled" } else { "Disabled" }
-                    ),
-                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                    )),
+                    Err(error) => ui.push_notice(format!("Config error: {error}")),
                 }
             };
             if rest == "on" || rest == "off" {
-                apply(session, rest == "on");
+                apply(session, ui, rest == "on");
             } else if !rest.is_empty() {
-                println!("{WARN}Usage: /factrecall [on|off]{RESET}\n");
+                ui.push_notice("Usage: /factrecall [on|off]");
             } else {
-                println!(
-                    "{DIM}When your stored facts overflow their per-turn budget, this fills the overflow with the facts most relevant to your message instead of just the newest ones (the newest few are always kept).{RESET}"
-                );
-                let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
-                let current = if session.config.semantic_fact_recall {
-                    &options[0]
+                let options = if session.config.semantic_fact_recall {
+                    vec![
+                        ChoiceItem::new("on (enable)", "on"),
+                        ChoiceItem::new("off (disable)", "off"),
+                    ]
                 } else {
-                    &options[1]
+                    vec![
+                        ChoiceItem::new("off (disable)", "off"),
+                        ChoiceItem::new("on (enable)", "on"),
+                    ]
                 };
-                match prompt_interactive_select("Semantic Fact Recall", &options, current) {
-                    Ok(Some(sel)) => apply(session, sel.starts_with("on")),
-                    Ok(None) => println!("{DIM}Cancelled.{RESET}\n"),
-                    Err(e) => println!("{ERROR}Error selecting option:{RESET} {e}\n"),
+                match ui.prompt_choice(
+                    "Semantic Fact Recall",
+                    "When your stored facts overflow their per-turn budget, this fills the overflow with the facts most relevant to your message instead of just the newest ones (the newest few are always kept).",
+                    &options,
+                ) {
+                    Ok(Some(idx)) => apply(session, ui, options[idx].value == "on"),
+                    Ok(None) => ui.push_notice("Cancelled."),
+                    Err(e) => ui.push_notice(format!("Error selecting option: {e}")),
                 }
             }
             Some(SlashResult::Handled)
@@ -1253,25 +1247,25 @@ pub async fn handle_slash_command(
                 ("user", None, rest)
             };
             if body.is_empty() {
-                println!("{WARN}Usage: /remember [here] <text>{RESET}\n");
+                ui.push_notice("Usage: /remember [here] <text>");
                 return Some(SlashResult::Handled);
             }
             match MemoryStore::open_default() {
                 Ok(memory) => {
                     match memory.add_fact(scope, project_path.as_deref(), body, None, None) {
-                        Ok(Some(_)) => println!(
-                            "{DIM}Remembered{}.{RESET}\n",
+                        Ok(Some(_)) => ui.push_notice(format!(
+                            "Remembered{}.",
                             if scope == "project" {
                                 " (this project)"
                             } else {
                                 ""
                             }
-                        ),
-                        Ok(None) => println!("{DIM}Already remembered.{RESET}\n"),
-                        Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                        )),
+                        Ok(None) => ui.push_notice("Already remembered."),
+                        Err(e) => ui.push_notice(format!("Error: {e}")),
                     }
                 }
-                Err(e) => println!("{ERROR}Memory error:{RESET} {e}\n"),
+                Err(e) => ui.push_notice(format!("Memory error: {e}")),
             }
             Some(SlashResult::Handled)
         }
@@ -1301,42 +1295,45 @@ pub async fn handle_slash_command(
             }
 
             let selected_provider = if rest.is_empty() {
-                let options: Vec<String> = available.iter().map(|s| s.to_string()).collect();
-                match prompt_interactive_select(
-                    "Select Image Generation provider",
-                    &options,
-                    &session.config.image_gen_provider,
-                ) {
-                    Ok(Some(p)) => Some(p),
+                let mut options: Vec<ChoiceItem> =
+                    available.iter().map(|s| ChoiceItem::new(*s, *s)).collect();
+                if let Some(pos) = options
+                    .iter()
+                    .position(|o| o.value == session.config.image_gen_provider)
+                    && pos > 0
+                {
+                    let item = options.remove(pos);
+                    options.insert(0, item);
+                }
+                match ui.prompt_choice("Select Image Generation provider", "", &options) {
+                    Ok(Some(idx)) => Some(options[idx].value.clone()),
                     Ok(None) => {
-                        println!("Cancelled image provider selection.\n");
+                        ui.push_notice("Cancelled image provider selection.");
                         None
                     }
                     Err(e) => {
-                        println!("{ERROR}Error selecting provider:{RESET} {e}\n");
+                        ui.push_notice(format!("Error selecting provider: {e}"));
                         None
                     }
                 }
+            } else if available.contains(&rest) {
+                Some(rest.to_owned())
             } else {
-                if available.contains(&rest) {
-                    Some(rest.to_owned())
-                } else {
-                    println!("{ERROR}Provider '{rest}' is not configured or invalid.{RESET}\n");
-                    None
-                }
+                ui.push_notice(format!("Provider '{rest}' is not configured or invalid."));
+                None
             };
 
             if let Some(provider) = selected_provider {
-                print!("{DIM}Fetching available image models for {provider}...{RESET}\r");
-                let _ = std::io::Write::flush(&mut std::io::stdout());
+                ui.set_status(vec![format!(
+                    "Fetching available image models for {provider}..."
+                )]);
                 let mut model_options =
                     mint_core::media::image_models::image_model_options_for_provider_async(
                         &session.config,
                         &provider,
                     )
                     .await;
-                print!("\r\x1b[2K");
-                let _ = std::io::Write::flush(&mut std::io::stdout());
+                ui.clear_status();
 
                 let current_model =
                     mint_core::media::image_models::active_image_model_for_provider(
@@ -1349,19 +1346,29 @@ pub async fn handle_slash_command(
                 }
 
                 if !model_options.is_empty() {
-                    match prompt_interactive_select(
+                    let mut choices: Vec<ChoiceItem> = model_options
+                        .iter()
+                        .map(|m| ChoiceItem::new(m.clone(), m.clone()))
+                        .collect();
+                    if let Some(pos) = choices.iter().position(|c| c.value == current_model)
+                        && pos > 0
+                    {
+                        let item = choices.remove(pos);
+                        choices.insert(0, item);
+                    }
+                    match ui.prompt_choice(
                         &format!(
                             "Select {} model",
                             mint_core::media::image_models::image_provider_display_name(&provider)
                         ),
-                        &model_options,
-                        &current_model,
+                        "",
+                        &choices,
                     ) {
-                        Ok(Some(model)) => {
+                        Ok(Some(idx)) => {
                             mint_core::media::image_models::set_active_image_provider_model(
                                 &mut session.config,
                                 &provider,
-                                Some(&model),
+                                Some(&choices[idx].value),
                             );
                         }
                         Ok(None) => {
@@ -1372,7 +1379,7 @@ pub async fn handle_slash_command(
                             );
                         }
                         Err(e) => {
-                            println!("{ERROR}Error selecting image model:{RESET} {e}\n");
+                            ui.push_notice(format!("Error selecting image model: {e}"));
                         }
                     }
                 } else {
@@ -1390,13 +1397,13 @@ pub async fn handle_slash_command(
                                 &session.config,
                                 &provider,
                             );
-                        println!(
-                            "{DIM}Switched default image provider to: {} • {}{RESET}\n",
+                        ui.push_notice(format!(
+                            "Switched default image provider to: {} • {}",
                             mint_core::media::image_models::image_provider_display_name(&provider),
                             active
-                        );
+                        ));
                     }
-                    Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
+                    Err(error) => ui.push_notice(format!("Config error: {error}")),
                 }
             }
             Some(SlashResult::Handled)
@@ -1412,49 +1419,24 @@ pub async fn handle_slash_command(
                 available.push("veo");
             }
 
-            let current_provider = session
-                .config
-                .extra
-                .get("videoGenProvider")
-                .and_then(|v| v.as_str())
-                .unwrap_or("veo")
-                .to_string();
-
             let selected_provider = if rest.is_empty() {
-                let options = vec!["Google Veo (Gemini Videos)".to_string()];
-                let current_display = if current_provider == "veo" {
-                    "Google Veo (Gemini Videos)"
-                } else {
-                    &current_provider
-                };
-                match prompt_interactive_select(
-                    "Select Video Generation provider",
-                    &options,
-                    current_display,
-                ) {
-                    Ok(Some(p)) => {
-                        if p == "Google Veo (Gemini Videos)" {
-                            Some("veo".to_string())
-                        } else {
-                            Some(p)
-                        }
-                    }
+                let options = vec![ChoiceItem::new("Google Veo (Gemini Videos)", "veo")];
+                match ui.prompt_choice("Select Video Generation provider", "", &options) {
+                    Ok(Some(idx)) => Some(options[idx].value.clone()),
                     Ok(None) => {
-                        println!("Cancelled video provider selection.\n");
+                        ui.push_notice("Cancelled video provider selection.");
                         None
                     }
                     Err(e) => {
-                        println!("{ERROR}Error selecting provider:{RESET} {e}\n");
+                        ui.push_notice(format!("Error selecting provider: {e}"));
                         None
                     }
                 }
+            } else if rest == "veo" || rest == "Google Veo (Gemini Videos)" {
+                Some("veo".to_string())
             } else {
-                if rest == "veo" || rest == "Google Veo (Gemini Videos)" {
-                    Some("veo".to_string())
-                } else {
-                    println!("{ERROR}Provider '{rest}' is not configured or invalid.{RESET}\n");
-                    None
-                }
+                ui.push_notice(format!("Provider '{rest}' is not configured or invalid."));
+                None
             };
 
             if let Some(provider) = selected_provider {
@@ -1469,12 +1451,11 @@ pub async fn handle_slash_command(
                         } else {
                             &provider
                         };
-                        println!(
-                            "{DIM}Switched default video provider to: {}{RESET}\n",
-                            display_name
-                        );
+                        ui.push_notice(format!(
+                            "Switched default video provider to: {display_name}"
+                        ));
                     }
-                    Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
+                    Err(error) => ui.push_notice(format!("Config error: {error}")),
                 }
             }
             Some(SlashResult::Handled)
@@ -1517,8 +1498,8 @@ pub async fn handle_slash_command(
             }
 
             if available.is_empty() {
-                println!(
-                    "{ERROR}No search provider is configured yet.{RESET} Run onboarding or set a Google/Brave key or SearXNG URL in Settings first.\n"
+                ui.push_notice(
+                    "No search provider is configured yet. Run onboarding or set a Google/Brave key or SearXNG URL in Settings first.",
                 );
                 return Some(SlashResult::Handled);
             }
@@ -1532,30 +1513,24 @@ pub async fn handle_slash_command(
                 .to_string();
 
             let selected_provider = if rest.is_empty() {
-                let options: Vec<String> = available
+                let mut options: Vec<ChoiceItem> = available
                     .iter()
-                    .map(|(_, label)| label.to_string())
+                    .map(|(key, label)| ChoiceItem::new(*label, *key))
                     .collect();
-                let current_display = available
-                    .iter()
-                    .find(|(key, _)| *key == current_provider)
-                    .map(|(_, label)| *label)
-                    .unwrap_or(available[0].1);
-                match prompt_interactive_select(
-                    "Select Web Search provider",
-                    &options,
-                    current_display,
-                ) {
-                    Ok(Some(label)) => available
-                        .iter()
-                        .find(|(_, l)| *l == label)
-                        .map(|(key, _)| key.to_string()),
+                if let Some(pos) = options.iter().position(|o| o.value == current_provider)
+                    && pos > 0
+                {
+                    let item = options.remove(pos);
+                    options.insert(0, item);
+                }
+                match ui.prompt_choice("Select Web Search provider", "", &options) {
+                    Ok(Some(idx)) => Some(options[idx].value.clone()),
                     Ok(None) => {
-                        println!("Cancelled search provider selection.\n");
+                        ui.push_notice("Cancelled search provider selection.");
                         None
                     }
                     Err(e) => {
-                        println!("{ERROR}Error selecting provider:{RESET} {e}\n");
+                        ui.push_notice(format!("Error selecting provider: {e}"));
                         None
                     }
                 }
@@ -1565,7 +1540,7 @@ pub async fn handle_slash_command(
             {
                 Some(key.to_string())
             } else {
-                println!("{ERROR}Provider '{rest}' is not configured or invalid.{RESET}\n");
+                ui.push_notice(format!("Provider '{rest}' is not configured or invalid."));
                 None
             };
 
@@ -1581,12 +1556,11 @@ pub async fn handle_slash_command(
                             .find(|(key, _)| *key == provider)
                             .map(|(_, label)| *label)
                             .unwrap_or(&provider);
-                        println!(
-                            "{DIM}Switched default web search provider to: {}{RESET}\n",
-                            display_name
-                        );
+                        ui.push_notice(format!(
+                            "Switched default web search provider to: {display_name}"
+                        ));
                     }
-                    Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
+                    Err(error) => ui.push_notice(format!("Config error: {error}")),
                 }
             }
             Some(SlashResult::Handled)
