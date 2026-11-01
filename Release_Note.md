@@ -1,5 +1,10 @@
 # Release Notes - Mint Agent v1.18.0
 
+## MCP Tool Execution UI Consolidation (Desktop and Web)
+- **Eliminated Raw Execution Dumps from Chat Messages**: Suppressed raw unstyled MCP call logs (`Failed`, `Completed`, and internal `Tool definition ready` discovery lines) from leaking into the main chat message bubble.
+- **Consolidated into Agent Activity Accordion**: Integrated detailed MCP tool invocations, statuses, outputs, and artifacts strictly inside the `Executed X mcp_tool` group accordion in `AgentActivityTable`, keeping the chat conversation surface completely clean and focused on user queries and synthesized AI responses.
+- **Artifacts-Only Bubble Passthrough**: Allowed downloadable artifacts (images, files) and critical warning banners to pass through safely without polluting the interface with intermediate debug text.
+
 ## Tool & Environment Setup Wizard Redesign (`mint setup`)
 - **Full-Screen Ratatui TUI Modernization**: Replaced the legacy raw ANSI script and aggressive clear-screen flickering in `setup.rs` with a smooth, double-buffered Ratatui Full-Screen TUI wizard adhering to the workspace rule.
 - **Categorized 49 Agent Tools**: Grouped all 49 agent tools into 7 clear categories (Files & Workspace, Code & Repository, Search & Knowledge, Productivity & Utilities, Planning & Safety, Execution & MCP, and Media & Audio/Video) with auto-scrolling viewports and real-time enabled counts.

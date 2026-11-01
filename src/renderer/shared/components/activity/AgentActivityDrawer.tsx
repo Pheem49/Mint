@@ -174,7 +174,7 @@ export const AgentActivityDrawer = memo(function AgentActivityDrawer({
       {viewMode === 'dag' && hasSubagents ? (
         <SubagentDagView progress={effectiveProgress} isLive={!isHistorical} />
       ) : activityView.items.length > 0 || (activityView.timeline && activityView.timeline.length > 0) ? (
-        <AgentActivityTable activityView={activityView} chatId={chatId} onOpenArtifact={onOpenArtifact} />
+        <AgentActivityTable activityView={activityView} progress={effectiveProgress} chatId={chatId} onOpenArtifact={onOpenArtifact} />
       ) : null}
     </>
   )

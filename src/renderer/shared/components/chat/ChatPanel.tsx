@@ -1188,7 +1188,7 @@ export default function ChatPanel({
                 />
               )}
               <div className="message-bubble">
-                <McpToolResults progress={agentProgress} running chatId={chatId} />
+                <McpToolResults progress={agentProgress} running chatId={chatId} mode="artifacts-only" />
                 <ViewedImages progress={agentProgress} chatId={chatId} onOpenArtifact={openArtifact} />
                 <span>
                   {compaction ? (

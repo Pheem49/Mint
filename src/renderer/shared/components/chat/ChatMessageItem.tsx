@@ -145,7 +145,7 @@ const ChatMessageItem = React.memo(
               {interaction.status === 'running' && <span>Mint is responding…</span>}
               {interaction.status === 'failed' && <span>This turn failed. Send the prompt again to retry.</span>}
               {interaction.status === 'interrupted' && <span>This turn was interrupted. Send the prompt again to retry.</span>}
-              <McpToolResults progress={progress} running={interaction.status === 'running'} interrupted={interaction.status === 'interrupted'} chatId={props.chatId || interaction.chatId} />
+              <McpToolResults progress={progress} running={interaction.status === 'running'} interrupted={interaction.status === 'interrupted'} chatId={props.chatId || interaction.chatId} mode="artifacts-only" />
               <ViewedImages progress={progress} chatId={props.chatId || interaction.chatId} onOpenArtifact={onOpenArtifact} />
               <ToolResultCards progress={progress} aiText={interaction.aiText} />
               {memoizedAiContent}

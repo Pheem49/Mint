@@ -46,7 +46,21 @@ function Artifact({ artifact, chatId }: { artifact: McpArtifact; chatId?: string
   </div>
 }
 
-export default memo(function McpToolResults({ progress, running = false, interrupted = false, chatId }: { progress: AgentProgress[]; running?: boolean; interrupted?: boolean; chatId?: string }) {
+export interface McpToolResultsProps {
+  progress: AgentProgress[]
+  running?: boolean
+  interrupted?: boolean
+  chatId?: string
+  mode?: 'full' | 'artifacts-only'
+}
+
+export default memo(function McpToolResults({
+  progress,
+  running = false,
+  interrupted = false,
+  chatId,
+  mode = 'full',
+}: McpToolResultsProps) {
   const [, tick] = useState(0)
   const started = useRef(new Map<string, number>())
   const { calls, discovery, artifacts, warnings } = useMemo(() => {
@@ -86,8 +100,31 @@ export default memo(function McpToolResults({ progress, running = false, interru
     const timer = setInterval(() => tick(n => n + 1), 1000)
     return () => clearInterval(timer)
   }, [hasActiveCalls])
-  if (!calls.size && !displayedArtifacts.length && !warnings.size && !discovery.size) return null
   const isOnlyWarnings = !calls.size && !displayedArtifacts.length && !discovery.size && warnings.size > 0
+
+  if (mode === 'artifacts-only') {
+    if (!displayedArtifacts.length && !warnings.size) return null
+    const artifactsOnlyWarnings = !displayedArtifacts.length && warnings.size > 0
+    return (
+      <section className={`mcp-results${artifactsOnlyWarnings ? ' mcp-results-compact' : ''}`} aria-label="MCP results">
+        {displayedArtifacts.length > 0 && (
+          <div className="mcp-artifacts">
+            {displayedArtifacts.map(artifact => (
+              <Artifact key={artifact.id} artifact={artifact} chatId={chatId} />
+            ))}
+          </div>
+        )}
+        {[...warnings].map(warning => (
+          <div key={warning} className="mcp-warning-banner" role="status">
+            <Info size={14} className="mcp-warning-icon" aria-hidden="true" />
+            <span className="mcp-warning-text">{warning}</span>
+          </div>
+        ))}
+      </section>
+    )
+  }
+
+  if (!calls.size && !displayedArtifacts.length && !warnings.size && !discovery.size) return null
   return <section className={`mcp-results${isOnlyWarnings ? ' mcp-results-compact' : ''}`} aria-label="MCP results">
     {[...discovery].map(([label,message])=><div key={label} className="mcp-call-status" role="status"><strong>{label}</strong><span>{message}</span></div>)}
     {[...calls].map(([id, call]) => {

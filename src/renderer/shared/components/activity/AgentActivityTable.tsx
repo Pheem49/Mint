@@ -5,6 +5,8 @@ import { cleanIntermediateThought, groupActivities } from '../../utils/agentActi
 import { materialFileIcon, materialFolderIcon, getExtension } from '../../utils/fileIcons'
 import { renderFormattedMessage } from '../../utils/markdown'
 import { ViewedImage } from './ViewedImages'
+import type { AgentProgress } from '../../types'
+import McpToolResults from './McpToolResults'
 
 export function InlineThoughtNote({ thought }: { thought: string }) {
   const cleaned = cleanIntermediateThought(thought)
@@ -32,6 +34,7 @@ import {
 
 interface Props {
   activityView: AgentActivityView
+  progress?: AgentProgress[]
   chatId?: string
   onOpenArtifact?: (artifact: ArtifactFile) => void
 }
@@ -97,7 +100,7 @@ function renderStatusIndicator(state: AgentActivity['state']) {
   return <Check size={12} className="agent-activity-status-check" />
 }
 
-export function AgentActivityTable({ activityView, chatId, onOpenArtifact }: Props) {
+export function AgentActivityTable({ activityView, progress, chatId, onOpenArtifact }: Props) {
   const groups: AgentActivityGroup[] = activityView.groups || groupActivities(activityView.items)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const [expandedIndices, setExpandedIndices] = useState<Record<string, boolean>>({})
@@ -267,6 +270,11 @@ export function AgentActivityTable({ activityView, chatId, onOpenArtifact }: Pro
                 </Fragment>
               )
             })}
+            {group.action === 'mcp_tool' && progress && (
+              <div className="agent-activity-mcp-details" style={{ padding: '4px 12px 10px 24px' }}>
+                <McpToolResults progress={progress} chatId={chatId} mode="artifacts-only" />
+              </div>
+            )}
           </div>
         )}
       </div>
