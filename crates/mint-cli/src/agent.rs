@@ -25,7 +25,7 @@ mod diff_render;
 mod live_status;
 mod markdown_render;
 use approval_prompts::*;
-use diff_render::*;
+pub(crate) use diff_render::*;
 pub(crate) use live_status::*;
 pub(crate) use markdown_render::*;
 

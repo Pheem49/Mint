@@ -20,42 +20,7 @@ pub fn is_table_line(line: &str) -> bool {
 }
 
 pub fn unicode_width(s: &str) -> usize {
-    let mut count = 0;
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\u{1b}' && chars.peek() == Some(&'[') {
-            chars.next();
-            for c2 in chars.by_ref() {
-                if c2.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-            continue;
-        }
-        let val = c as u32;
-        if (0x0E31..=0x0E31).contains(&val)
-            || (0x0E34..=0x0E3A).contains(&val)
-            || (0x0E47..=0x0E4E).contains(&val)
-        {
-            continue;
-        }
-        if is_cjk(c) {
-            count += 2;
-        } else {
-            count += 1;
-        }
-    }
-    count
-}
-
-pub fn is_cjk(c: char) -> bool {
-    let val = c as u32;
-    (0x4E00..=0x9FFF).contains(&val)
-        || (0x3400..=0x4DBF).contains(&val)
-        || (0x20000..=0x2A6DF).contains(&val)
-        || (0xAC00..=0xD7AF).contains(&val)
-        || (0x3040..=0x309F).contains(&val)
-        || (0x30A0..=0x30FF).contains(&val)
+    crate::interactive::display_width(s)
 }
 
 /// Splits `text` into lines that each fit within `max_width` (measured with
@@ -150,7 +115,7 @@ pub fn render_markdown_table(table_lines: &[String]) -> String {
     render_markdown_table_with_width(table_lines, term_width)
 }
 
-fn render_markdown_table_with_width(table_lines: &[String], term_width: u16) -> String {
+pub(crate) fn render_markdown_table_with_width(table_lines: &[String], term_width: u16) -> String {
     let mut rows: Vec<Vec<String>> = Vec::new();
     for line in table_lines {
         let trimmed = line.trim();

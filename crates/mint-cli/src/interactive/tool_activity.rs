@@ -6,7 +6,7 @@ use ratatui::{
 };
 use serde_json::Value;
 use std::time::{Duration, Instant};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug)]
 pub(super) struct ToolActivity {
@@ -218,6 +218,34 @@ impl ToolActivity {
             }
         }
         String::new()
+    }
+
+    pub fn subagent_action_summary(action: &str, input: &Value) -> String {
+        for key in [
+            "description",
+            "command",
+            "cmd",
+            "path",
+            "query",
+            "pattern",
+            "url",
+        ] {
+            if let Some(val) = input.get(key).and_then(Value::as_str) {
+                if let Some(line) = val.lines().find(|l| !l.trim().is_empty()) {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || mint_core::is_dummy_value(trimmed) {
+                        continue;
+                    }
+                    return match key {
+                        "command" | "cmd" => format!("Running `{trimmed}`"),
+                        "pattern" | "query" => format!("Searching for {trimmed}"),
+                        "path" => format!("Reading {trimmed}"),
+                        _ => trimmed.to_string(),
+                    };
+                }
+            }
+        }
+        action.replace('_', " ")
     }
     pub fn lines(&self, width: u16) -> Vec<Line<'static>> {
         let output = self
@@ -438,23 +466,7 @@ pub(super) fn running_summary(tools: &[ToolActivity]) -> Option<String> {
 }
 
 fn clip(text: &str, width: usize) -> String {
-    if UnicodeWidthStr::width(text) <= width {
-        return text.to_owned();
-    }
-    let mut used = 0;
-    let mut clipped = String::new();
-    for ch in text.chars() {
-        let next = ch.width().unwrap_or(0);
-        if used + next > width.saturating_sub(1) {
-            break;
-        }
-        used += next;
-        clipped.push(ch);
-    }
-    if width > 0 {
-        clipped.push('…');
-    }
-    clipped
+    super::format::truncate_to_width(text, width)
 }
 
 #[cfg(test)]

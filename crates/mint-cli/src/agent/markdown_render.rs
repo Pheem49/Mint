@@ -273,7 +273,41 @@ fn try_render_single_line_custom_block(raw: &str, term_width: usize) -> Option<V
 
 pub(crate) fn format_markdown_bold(text: &str) -> String {
     let (term_width, _) = markdown::terminal_size_or_default();
-    let term_width = term_width as usize;
+    format_markdown_bold_with_width(text, term_width as usize)
+}
+
+pub(crate) fn render_markdown_to_lines(
+    text: &str,
+    term_width: usize,
+) -> (Vec<ratatui::text::Line<'static>>, Vec<String>) {
+    if text.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let processed = format_markdown_bold_with_width(text, term_width.max(20));
+    if let Ok(parsed) = processed.into_text() {
+        let rendered = parsed.lines;
+        let plain: Vec<String> = rendered
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect();
+        (rendered, plain)
+    } else {
+        let rendered: Vec<ratatui::text::Line<'static>> = text
+            .lines()
+            .map(|l| ratatui::text::Line::raw(l.to_string()))
+            .collect();
+        let plain: Vec<String> = text.lines().map(str::to_owned).collect();
+        (rendered, plain)
+    }
+}
+
+pub(crate) fn format_markdown_bold_with_width(text: &str, term_width: usize) -> String {
+    let term_width = term_width.max(20);
 
     let mut formatted_lines = Vec::new();
     let mut in_code_block = false;
@@ -282,7 +316,7 @@ pub(crate) fn format_markdown_bold(text: &str) -> String {
     let mut custom_block_buffer: Vec<String> = Vec::new();
     let mut active_alert_color: Option<&'static str> = None;
     // Markdown table buffering: collect consecutive `|...|` lines so we can
-    // flush them through `render_markdown_table` as a unit (same as classic
+    // flush them through `render_markdown_table_with_width` as a unit (same as classic
     // mode in `render_live_summary`).
     let mut table_buffer: Vec<String> = Vec::new();
 
@@ -290,7 +324,10 @@ pub(crate) fn format_markdown_bold(text: &str) -> String {
     macro_rules! flush_table {
         () => {
             if !table_buffer.is_empty() {
-                let rendered = markdown::render_markdown_table(&table_buffer);
+                let rendered = markdown::render_markdown_table_with_width(
+                    &table_buffer,
+                    term_width.min(u16::MAX as usize) as u16,
+                );
                 for tl in rendered.split('\n') {
                     formatted_lines.push(tl.to_string());
                 }
