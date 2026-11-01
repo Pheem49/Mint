@@ -244,9 +244,13 @@ pub(super) async fn run_shell(
         .map_err(|e| OrchestrationError::Agent(format!("shell command task panicked: {e}")))?
         .map_err(|e| OrchestrationError::Agent(e.to_string()))?
     };
-    let status_str = output
-        .status
-        .map_or_else(|| "unknown".into(), |status| status.to_string());
+    let status_str = if let Some(job_id) = &output.job_id {
+        format!("running_in_background (job_id: {job_id})")
+    } else {
+        output
+            .status
+            .map_or_else(|| "unknown".into(), |status| status.to_string())
+    };
 
     reliability::record_shell(&output);
 
@@ -256,9 +260,18 @@ pub(super) async fn run_shell(
         .map(|warning| format!("\n[Warning] {warning}"))
         .unwrap_or_default();
 
+    let notice = if let Some(job_id) = &output.job_id {
+        format!(
+            "\n[SYSTEM NOTICE] The command exceeded 180s and is STILL RUNNING in the background (job_id: {job_id}). \
+             DO NOT retry or run an alternative script. Use shell_output(job_id: \"{job_id}\") to monitor its progress.\n"
+        )
+    } else {
+        String::new()
+    };
+
     Ok(format!(
-        "exit: {}\nmode: {}\nsandboxed: {}{}\nstdout:\n{}\nstderr:\n{}",
-        status_str, output.mode, output.sandboxed, warning_line, output.stdout, output.stderr
+        "exit: {}\nmode: {}\nsandboxed: {}{}{}\nstdout:\n{}\nstderr:\n{}",
+        status_str, output.mode, output.sandboxed, warning_line, notice, output.stdout, output.stderr
     ))
 }
 

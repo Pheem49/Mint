@@ -64,7 +64,10 @@ impl ToolActivity {
             }
             if result.lines().any(|line| {
                 line.strip_prefix("exit: ")
-                    .is_some_and(|code| !matches!(code.trim(), "0" | "unknown"))
+                    .is_some_and(|code| {
+                        let c = code.trim();
+                        !matches!(c, "0" | "unknown") && !c.starts_with("running_in_background")
+                    })
             }) || ["error:", "blocked:", "blocked by hook:"]
                 .iter()
                 .any(|prefix| result.trim_start().to_ascii_lowercase().starts_with(prefix))

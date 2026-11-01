@@ -33,6 +33,12 @@
 - **Search Sources Popover Ergonomics**: Improved domain source popover positioning with dynamic viewport detection, scroll/resize tracking, and containment within message bubbles across Desktop and Web.
 - **Error Recovery Preview Route (`#/error-preview`)**: Added a dedicated preview route across Desktop and Web to inspect the live error recovery interface anytime with seamless full-viewport centering and uniform background styling without triggering an actual runtime crash.
 
+## Shell Execution & Background Job Promotion Safeguards
+- **Background Shell Status Reporting**: When synchronous `run_shell` commands exceed 180s and are promoted to background jobs, the output status is now explicitly formatted as `exit: running_in_background (job_id: <job_id>)` instead of ambiguous `exit: unknown`.
+- **System Guard & Anti-Retry Notice**: Injected an explicit `[SYSTEM NOTICE]` into the tool output alerting the agent that the process is actively running in the background and strictly prohibiting redundant re-runs or alternative scripts.
+- **Agent System Prompt Rules**: Added rule 12b and updated execution evidence guidelines in `agent.rs` to prevent retry loops on long-running tasks and enforce `shell_output` monitoring.
+- **TUI Tool Activity Status Parity**: Updated Full-Screen TUI's `ToolActivity` in `mint-cli` to recognize `running_in_background` as active rather than misclassifying it as a failure.
+
 ## 🚀 Architecture Evolution & Future Roadmap
 - **Retirement of Legacy Mint Browser**: We have officially decommissioned the legacy headed Mint Browser subsystem (including the `mint auto` CLI command, CDP port 9222 takeover, and custom embedded browser window frames in Desktop and Web).
 - **Modern Headless Browser Foundation**: In its place, Mint v1.18.0 establishes a clean, decoupled **Headless Browser** architecture powered by deterministic shell automation and the headless workflow runner (`mint browser run`). Web previews and generated HTML artifacts now open cleanly in your system default browser.
