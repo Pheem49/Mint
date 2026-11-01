@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useRef, useEffect, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import type { WebSearchSource } from '../../utils/agentActivity'
 import { resolveMediaUrl } from '../../utils/markdown'
 import { runtimePlatform } from '../../platform'
@@ -52,6 +53,14 @@ export function groupSourcesByDomain(sources: WebSearchSource[]): DomainGroup[] 
 export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function SourcesBlock({ sources }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [openDropdownDomain, setOpenDropdownDomain] = useState<string | null>(null)
+  const [popoverPos, setPopoverPos] = useState<{
+    top: number
+    left: number
+    width: number
+    maxHeight: number
+  }>({ top: 0, left: 0, width: 280, maxHeight: 320 })
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const popoverRef = useRef<HTMLDivElement | null>(null)
 
   const domainGroups = useMemo(() => {
     const groups = groupSourcesByDomain(sources)
@@ -63,6 +72,91 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
       return bHasImage - aHasImage
     })
   }, [sources])
+
+  const updatePopoverPosition = (domain: string) => {
+    const el = cardRefs.current.get(domain)
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    if (r.bottom < 0 || r.top > window.innerHeight) {
+      setOpenDropdownDomain(null)
+      return
+    }
+    const popoverWidth = Math.min(280, window.innerWidth - 32)
+    const below = Math.max(0, window.innerHeight - r.bottom - 12)
+    const above = Math.max(0, r.top - 12)
+    const openUpward = below < 240 && above > below
+    const maxHeight = Math.min(320, openUpward ? above : below)
+
+    let left = r.left
+    if (left + popoverWidth > window.innerWidth - 16) {
+      left = Math.max(16, r.right - popoverWidth)
+    }
+    left = Math.max(16, Math.min(left, window.innerWidth - popoverWidth - 16))
+
+    const top = openUpward ? Math.max(8, r.top - 6 - maxHeight) : r.bottom + 6
+
+    setPopoverPos({
+      top,
+      left,
+      width: popoverWidth,
+      maxHeight,
+    })
+  }
+
+  const toggleDropdown = (domain: string) => {
+    if (openDropdownDomain === domain) {
+      setOpenDropdownDomain(null)
+      return
+    }
+    updatePopoverPosition(domain)
+    setOpenDropdownDomain(domain)
+  }
+
+  useLayoutEffect(() => {
+    if (!openDropdownDomain) return
+    updatePopoverPosition(openDropdownDomain)
+
+    const onScrollOrResize = (e: Event) => {
+      if (popoverRef.current?.contains(e.target as Node)) return
+      updatePopoverPosition(openDropdownDomain)
+    }
+
+    window.addEventListener('resize', onScrollOrResize)
+    window.addEventListener('scroll', onScrollOrResize, true)
+    return () => {
+      window.removeEventListener('resize', onScrollOrResize)
+      window.removeEventListener('scroll', onScrollOrResize, true)
+    }
+  }, [openDropdownDomain])
+
+  useEffect(() => {
+    if (!openDropdownDomain) return
+
+    const handlePointerDown = (e: PointerEvent) => {
+      const target = e.target as Node
+      const currentCardEl = cardRefs.current.get(openDropdownDomain)
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(target) &&
+        (!currentCardEl || !currentCardEl.contains(target))
+      ) {
+        setOpenDropdownDomain(null)
+      }
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpenDropdownDomain(null)
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [openDropdownDomain])
 
   if (!sources || sources.length === 0) return null
 
@@ -76,9 +170,21 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
     .reduce((sum, g) => sum + g.items.length, 0)
   const remainingSourcesCount = sources.length - shownSourcesCount
   const hiddenGroups = domainGroups.slice(MAX_INITIAL_CARDS)
+  const activeGroup = openDropdownDomain ? domainGroups.find((g) => g.domain === openDropdownDomain) : null
 
   return (
-    <div className="sources-block" style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px', marginTop: '4px' }}>
+    <div
+      className="sources-block"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        marginBottom: '12px',
+        marginTop: '4px',
+        position: openDropdownDomain ? 'relative' : undefined,
+        zIndex: openDropdownDomain ? 30 : undefined,
+      }}
+    >
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <svg
@@ -113,10 +219,19 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
           const extraCount = group.items.length - 1
           const isDropdownOpen = openDropdownDomain === group.domain
 
-          return (
+          const activeGroup = openDropdownDomain ? domainGroups.find((g) => g.domain === openDropdownDomain) : null
+
+  return (
             <div
               key={group.domain}
-              className="source-card-group"
+              ref={(el) => {
+                if (el) cardRefs.current.set(group.domain, el)
+                else cardRefs.current.delete(group.domain)
+              }}
+              className={`source-card-group${isDropdownOpen ? ' is-open' : ''}`}
+              style={{
+                zIndex: isDropdownOpen ? 50 : undefined,
+              }}
             >
               <div
                 className="source-card"
@@ -136,7 +251,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                   const target = e.target as HTMLElement
                   if (extraCount > 0 && target.closest('.extra-badge-btn')) {
                     e.stopPropagation()
-                    setOpenDropdownDomain(isDropdownOpen ? null : group.domain)
+                    toggleDropdown(group.domain)
                     return
                   }
                   // Otherwise open primary link
@@ -245,7 +360,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                         }}
                         onClick={(e) => {
                           e.stopPropagation()
-                          setOpenDropdownDomain(isDropdownOpen ? null : group.domain)
+                          toggleDropdown(group.domain)
                         }}
                       >
                         +{extraCount}
@@ -258,85 +373,6 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                   </div>
                 </div>
               </div>
-
-              {/* Sub-links Popover Dropdown when multi-item domain card clicked */}
-              {isDropdownOpen && extraCount > 0 && (
-                <div
-                  className="source-links-popover"
-                  style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    marginTop: '6px',
-                    background: 'var(--bg-overlay)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: '14px',
-                    boxShadow: 'var(--shadow-lg)',
-                    zIndex: 40,
-                    padding: '6px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '4px 6px',
-                      borderBottom: '1px solid var(--border-subtle)',
-                    }}
-                  >
-                    <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-                      All links from {group.domain} ({group.items.length})
-                    </span>
-                    <button
-                      type="button"
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-muted)',
-                        cursor: 'pointer',
-                        fontSize: '0.8rem',
-                        padding: '0 2px',
-                      }}
-                      onClick={() => setOpenDropdownDomain(null)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  {group.items.map((item, itemIdx) => (
-                    <a
-                      key={itemIdx}
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '2px',
-                        padding: '6px 8px',
-                        borderRadius: '6px',
-                        color: 'var(--text-primary)',
-                        textDecoration: 'none',
-                        fontSize: '0.75rem',
-                        background: 'var(--bg-surface-soft)',
-                        transition: 'background 0.15s',
-                      }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = 'var(--bg-surface-hover)' }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = 'var(--bg-surface-soft)' }}
-                    >
-                      <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {itemIdx + 1}. {item.title}
-                      </div>
-                      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {item.url}
-                      </div>
-                    </a>
-                  ))}
-                </div>
-              )}
             </div>
           )
         })}
@@ -427,6 +463,116 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
             Show less
           </button>
         </div>
+      )}
+
+      {/* Sub-links Popover Dropdown portaled to document.body so it floats on top of everything */}
+      {activeGroup && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={popoverRef}
+          className="source-links-popover"
+          style={{
+            position: 'fixed',
+            top: popoverPos.top,
+            left: popoverPos.left,
+            width: popoverPos.width,
+            maxHeight: popoverPos.maxHeight,
+            background: 'var(--bg-overlay)',
+            border: '1px solid var(--border-default)',
+            borderRadius: '14px',
+            boxShadow: '0 16px 36px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.4)',
+            zIndex: 10000,
+            padding: '6px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px',
+            boxSizing: 'border-box',
+            overflow: 'hidden',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '4px 6px',
+              borderBottom: '1px solid var(--border-subtle)',
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+              All links from {activeGroup.domain} ({activeGroup.items.length})
+            </span>
+            <button
+              type="button"
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                fontSize: '0.85rem',
+                padding: '0 4px',
+                lineHeight: 1,
+                borderRadius: '4px',
+              }}
+              onClick={() => setOpenDropdownDomain(null)}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+          <div
+            className="source-links-popover-list"
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px',
+              paddingRight: '2px',
+              overscrollBehavior: 'contain',
+            }}
+          >
+            {activeGroup.items.map((item, itemIdx) => (
+              <a
+                key={itemIdx}
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '2px',
+                  padding: '6px 8px',
+                  borderRadius: '8px',
+                  color: 'var(--text-primary)',
+                  textDecoration: 'none',
+                  fontSize: '0.75rem',
+                  background: 'var(--bg-surface-soft)',
+                  transition: 'background 0.15s',
+                  flexShrink: 0,
+                }}
+                onClick={(e) => {
+                  e.preventDefault()
+                  void runtimePlatform.openExternal(item.url).catch((err) => {
+                    console.error('Failed to open source URL:', err)
+                    window.open(item.url, '_blank', 'noopener,noreferrer')
+                  })
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = 'var(--bg-surface-hover)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = 'var(--bg-surface-soft)' }}
+              >
+                <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {itemIdx + 1}. {item.title}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {item.url}
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   )

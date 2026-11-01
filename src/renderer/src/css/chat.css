@@ -126,6 +126,10 @@
   align-self: stretch;
   width: 100%;
 }
+.message:has(.source-links-popover) {
+  position: relative;
+  z-index: 30;
+}
 .message.ai-message:has(.agent-activity-history) > .bubble-wrapper,
 .agent-activity-history { width: 100%; }
 
