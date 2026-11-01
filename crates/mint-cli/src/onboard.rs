@@ -18,8 +18,11 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
 use std::sync::mpsc;
 use std::time::Duration;
+use unicode_width::UnicodeWidthStr;
 
-use crate::terminal_theme::{self, ACCENT, BLUE, MUTED, SUBTLE, TEXT};
+use crate::terminal_theme::{
+    self, ACCENT, BLUE, MUTED, SELECTION_BACKGROUND, SELECTION_TEXT, SUBTLE, TEXT,
+};
 use mint_core::slash::models::HUGGINGFACE_MODEL_PRESETS;
 use mint_core::{MintConfig, load_config, save_config};
 
@@ -2232,10 +2235,10 @@ impl OnboardWizard {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(BLUE))
+            .border_style(Style::default().fg(SUBTLE))
             .title(Span::styled(
                 " Mint Setup Wizard ",
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ));
 
         let paragraph = Paragraph::new(header_line)
@@ -2250,14 +2253,14 @@ impl OnboardWizard {
             Span::styled(
                 format!(" [{title}] "),
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(ACCENT)
+                    .fg(SELECTION_TEXT)
+                    .bg(SELECTION_BACKGROUND)
                     .add_modifier(Modifier::BOLD),
             )
         } else if is_done {
             Span::styled(
                 format!(" ✔ {title} "),
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             )
         } else {
             Span::styled(format!(" {title} "), Style::default().fg(MUTED))
@@ -2275,7 +2278,7 @@ impl OnboardWizard {
             .border_style(Style::default().fg(SUBTLE))
             .title(Span::styled(
                 " Step 1: Core AI (Google Gemini) ",
-                Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ));
 
         let inner = block.inner(area);
@@ -2301,19 +2304,25 @@ impl OnboardWizard {
         frame.render_widget(subtitle, chunks[0]);
 
         // Key Input Box
-        let key_disp = if self.gemini_key.is_empty() {
-            Span::styled(
+        let is_key_focused = self.gemini_focus == 0;
+        let mut key_spans = Vec::new();
+        if self.gemini_key.is_empty() {
+            key_spans.push(Span::styled(
                 "(Paste your Gemini API key here with Ctrl+V)",
                 Style::default().fg(MUTED),
-            )
+            ));
         } else if self.gemini_masked {
-            Span::styled(
+            key_spans.push(Span::styled(
                 "•".repeat(self.gemini_key.chars().count().min(50)),
                 Style::default().fg(TEXT),
-            )
+            ));
         } else {
-            Span::styled(&self.gemini_key, Style::default().fg(TEXT))
-        };
+            key_spans.push(Span::styled(&self.gemini_key, Style::default().fg(TEXT)));
+        }
+        if is_key_focused {
+            key_spans.push(Span::styled("█", Style::default().fg(TEXT)));
+        }
+        let key_disp = Line::from(key_spans);
 
         let mask_hint = if self.gemini_masked {
             "[Ctrl+H: Show]"
@@ -2321,38 +2330,60 @@ impl OnboardWizard {
             "[Ctrl+H: Hide]"
         };
 
-        let key_border_color = if self.gemini_focus == 0 {
-            ACCENT
+        let key_border_color = if is_key_focused { TEXT } else { SUBTLE };
+        let key_title = if is_key_focused {
+            Line::from(vec![
+                Span::styled(
+                    " API Key ",
+                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " [ EDITING ] ",
+                    Style::default()
+                        .fg(SELECTION_TEXT)
+                        .bg(SELECTION_BACKGROUND)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+                Span::styled(mask_hint, Style::default().fg(BLUE)),
+            ])
+        } else if !self.gemini_key.is_empty() {
+            Line::from(vec![
+                Span::styled(
+                    " ✔ API Key (Configured · Tab to edit) ",
+                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(mask_hint, Style::default().fg(MUTED)),
+            ])
         } else {
-            SUBTLE
+            Line::from(vec![
+                Span::styled(" API Key (Tab to edit) ", Style::default().fg(MUTED)),
+                Span::styled(mask_hint, Style::default().fg(MUTED)),
+            ])
         };
+
         let key_block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(key_border_color))
-            .title(Line::from(vec![
-                Span::styled(
-                    " API Key ",
-                    Style::default()
-                        .fg(if self.gemini_focus == 0 { ACCENT } else { TEXT })
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(mask_hint, Style::default().fg(BLUE)),
-            ]));
+            .title(key_title);
 
         frame.render_widget(Paragraph::new(key_disp).block(key_block), chunks[1]);
 
         // Tip line
+        let tip_text = if is_key_focused {
+            "Paste with Ctrl+V. Press [Enter] or [Tab] to switch to model list."
+        } else {
+            "Use [↑/↓] to select a model. Press [Enter] to continue, or [Tab] to edit API key."
+        };
         let tip_line = Line::from(vec![
             Span::styled("• Tip: ", Style::default().fg(MUTED)),
-            Span::styled(
-                "You can paste from clipboard with Ctrl+V. Press Tab or ↓ to jump to model list.",
-                Style::default().fg(MUTED),
-            ),
+            Span::styled(tip_text, Style::default().fg(MUTED)),
         ]);
         frame.render_widget(Paragraph::new(tip_line), chunks[2]);
 
         // Vertical Model List
+        let is_model_focused = self.gemini_focus == 1;
         let model_items: Vec<ListItem> = self
             .gemini_models
             .iter()
@@ -2360,7 +2391,7 @@ impl OnboardWizard {
             .map(|(i, model)| {
                 let is_sel = i == self.gemini_model_idx;
                 let radio = if is_sel { " ◉ " } else { " ○ " };
-                let cursor = if is_sel { " ❯ " } else { "   " };
+                let cursor = if is_sel { " › " } else { "   " };
 
                 let desc = match model.as_str() {
                     "gemini-2.5-flash" => "Recommended · Ultra-fast, multipurpose, thinking",
@@ -2373,25 +2404,58 @@ impl OnboardWizard {
                     _ => "",
                 };
 
-                let name_style = if is_sel {
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                if is_model_focused && is_sel {
+                    let line = Line::from(vec![
+                        Span::styled(
+                            cursor,
+                            Style::default()
+                                .fg(SELECTION_TEXT)
+                                .bg(SELECTION_BACKGROUND)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            radio,
+                            Style::default()
+                                .fg(SELECTION_TEXT)
+                                .bg(SELECTION_BACKGROUND)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<20}", model),
+                            Style::default()
+                                .fg(SELECTION_TEXT)
+                                .bg(SELECTION_BACKGROUND)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            "  ",
+                            Style::default().fg(SELECTION_TEXT).bg(SELECTION_BACKGROUND),
+                        ),
+                        Span::styled(
+                            desc,
+                            Style::default().fg(SELECTION_TEXT).bg(SELECTION_BACKGROUND),
+                        ),
+                    ]);
+                    ListItem::new(line).style(Style::default().bg(SELECTION_BACKGROUND))
+                } else if is_sel {
+                    let line = Line::from(vec![
+                        Span::styled(" › ", Style::default().fg(SUBTLE)),
+                        Span::styled(radio, Style::default().fg(SUBTLE)),
+                        Span::styled(format!("{:<20}", model), Style::default().fg(TEXT)),
+                        Span::raw("  "),
+                        Span::styled(format!("{desc} (selected)"), Style::default().fg(MUTED)),
+                    ]);
+                    ListItem::new(line)
                 } else {
-                    Style::default().fg(TEXT)
-                };
-
-                let line = Line::from(vec![
-                    Span::styled(cursor, Style::default().fg(ACCENT)),
-                    Span::styled(
-                        radio,
-                        Style::default()
-                            .fg(if is_sel { ACCENT } else { MUTED })
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(format!("{:<20}", model), name_style),
-                    Span::raw("  "),
-                    Span::styled(desc, Style::default().fg(MUTED)),
-                ]);
-                ListItem::new(line)
+                    let line = Line::from(vec![
+                        Span::raw("   "),
+                        Span::styled(radio, Style::default().fg(MUTED)),
+                        Span::styled(format!("{:<20}", model), Style::default().fg(TEXT)),
+                        Span::raw("  "),
+                        Span::styled(desc, Style::default().fg(MUTED)),
+                    ]);
+                    ListItem::new(line)
+                }
             })
             .collect();
 
@@ -2408,27 +2472,44 @@ impl OnboardWizard {
             )
         };
 
-        let model_border_color = if self.gemini_focus == 1 {
-            ACCENT
-        } else {
-            SUBTLE
-        };
-        let list_block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(model_border_color))
-            .title(Line::from(vec![
+        let model_border_color = if is_model_focused { TEXT } else { SUBTLE };
+        let model_title = if is_model_focused {
+            Line::from(vec![
                 Span::styled(
-                    " Default Model (↑/↓ to select) ",
+                    " Default Model ",
+                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " [ SELECTING ] ",
                     Style::default()
-                        .fg(if self.gemini_focus == 1 { ACCENT } else { TEXT })
+                        .fg(SELECTION_TEXT)
+                        .bg(SELECTION_BACKGROUND)
                         .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" (↑/↓ to choose) ", Style::default().fg(MUTED)),
+                Span::styled(
+                    format!(" {model_status} "),
+                    Style::default().fg(if self.is_verifying { ACCENT } else { BLUE }),
+                ),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(
+                    " Default Model (Press Tab or ↓ to select) ",
+                    Style::default().fg(MUTED),
                 ),
                 Span::styled(
                     format!(" {model_status} "),
                     Style::default().fg(if self.is_verifying { ACCENT } else { BLUE }),
                 ),
-            ]));
+            ])
+        };
+
+        let list_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(model_border_color))
+            .title(model_title);
 
         let mut list_state = ListState::default();
         list_state.select(Some(self.gemini_model_idx));
@@ -2440,38 +2521,79 @@ impl OnboardWizard {
 
         // Custom Model Input Box
         if self.is_custom_gemini_model {
+            let is_custom_focused = self.gemini_focus == 1;
+            let custom_border_color = if is_custom_focused { TEXT } else { SUBTLE };
+            let custom_title = if is_custom_focused {
+                Line::from(vec![
+                    Span::styled(
+                        " Custom Model Identifier ",
+                        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        " [ EDITING ] ",
+                        Style::default()
+                            .fg(SELECTION_TEXT)
+                            .bg(SELECTION_BACKGROUND)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ])
+            } else {
+                Line::from(vec![Span::styled(
+                    " Custom Model Identifier ",
+                    Style::default().fg(MUTED),
+                )])
+            };
             let custom_block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(ACCENT))
-                .title(Span::styled(
-                    " Custom Model Identifier ",
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                ));
-            let custom_val = if self.custom_gemini_model.is_empty() {
-                Span::styled(
+                .border_style(Style::default().fg(custom_border_color))
+                .title(custom_title);
+            let mut custom_spans = Vec::new();
+            if self.custom_gemini_model.is_empty() {
+                custom_spans.push(Span::styled(
                     "(Type custom model identifier, e.g. gemini-2.0-flash-exp)",
                     Style::default().fg(MUTED),
-                )
+                ));
             } else {
-                Span::styled(&self.custom_gemini_model, Style::default().fg(TEXT))
-            };
-            frame.render_widget(Paragraph::new(custom_val).block(custom_block), chunks[4]);
+                custom_spans.push(Span::styled(
+                    &self.custom_gemini_model,
+                    Style::default().fg(TEXT),
+                ));
+            }
+            if is_custom_focused {
+                custom_spans.push(Span::styled("█", Style::default().fg(TEXT)));
+            }
+            frame.render_widget(
+                Paragraph::new(Line::from(custom_spans)).block(custom_block),
+                chunks[4],
+            );
         }
 
         // Bottom Action Hint
-        let action_hint = Paragraph::new(Line::from(vec![
-            Span::styled(" [ Esc: Cancel ] ", Style::default().fg(MUTED)),
-            Span::raw("   "),
-            Span::styled(
-                " [ Enter: Continue to Services ➔ ] ",
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]))
-        .alignment(Alignment::Right);
+        let action_hint = if is_key_focused {
+            Paragraph::new(Line::from(vec![
+                Span::styled(" [ Esc: Cancel ] ", Style::default().fg(MUTED)),
+                Span::raw("   "),
+                Span::styled(
+                    " [ Enter / Tab: Select Model ➔ ] ",
+                    Style::default().fg(TEXT),
+                ),
+            ]))
+            .alignment(Alignment::Right)
+        } else {
+            Paragraph::new(Line::from(vec![
+                Span::styled(" [ Tab: Back to API Key ] ", Style::default().fg(MUTED)),
+                Span::raw("   "),
+                Span::styled(
+                    " [ Enter: Continue to Services ➔ ] ",
+                    Style::default()
+                        .fg(SELECTION_TEXT)
+                        .bg(SELECTION_BACKGROUND)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]))
+            .alignment(Alignment::Right)
+        };
         frame.render_widget(action_hint, chunks[5]);
     }
 
@@ -2486,7 +2608,7 @@ impl OnboardWizard {
             .border_style(Style::default().fg(SUBTLE))
             .title(Span::styled(
                 " Step 2: QuickStart Services & Providers ",
-                Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ));
 
         let inner = block.inner(area);
@@ -2511,20 +2633,12 @@ impl OnboardWizard {
         // Build list items with category headers
         let mut list_items = Vec::new();
         let mut cur_category = "";
+        let list_inner_width = chunks[1].width.saturating_sub(2) as usize;
 
         for (i, svc) in self.services.iter().enumerate() {
             let is_cursor = i == self.service_cursor;
             let check_icon = if svc.enabled { " ◉ " } else { " ○ " };
-            let check_color = if svc.enabled { ACCENT } else { MUTED };
-
-            let cursor_prefix = if is_cursor { " ❯ " } else { "   " };
-            let name_style = if is_cursor {
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-            } else if svc.enabled {
-                Style::default().fg(TEXT)
-            } else {
-                Style::default().fg(MUTED)
-            };
+            let cursor_prefix = if is_cursor { " › " } else { "   " };
 
             let mut lines = Vec::new();
             if svc.category != cur_category {
@@ -2535,32 +2649,94 @@ impl OnboardWizard {
                 )]));
             }
 
-            lines.push(Line::from(vec![
-                Span::styled(cursor_prefix, Style::default().fg(ACCENT)),
-                Span::styled(
-                    check_icon,
-                    Style::default()
-                        .fg(check_color)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(svc.name, name_style),
-                Span::styled(
-                    format!("  — {}", svc.description),
-                    Style::default().fg(MUTED),
-                ),
-            ]));
+            if is_cursor {
+                let check_style = Style::default()
+                    .fg(if svc.enabled {
+                        Color::Black
+                    } else {
+                        Color::DarkGray
+                    })
+                    .bg(SELECTION_BACKGROUND)
+                    .add_modifier(Modifier::BOLD);
 
-            list_items.push(ListItem::new(lines));
+                let desc_part = format!("  — {}", svc.description);
+                let full_row_text = format!("{cursor_prefix}{check_icon}{}{desc_part}", svc.name);
+                let visual_width = UnicodeWidthStr::width(full_row_text.as_str());
+                let pad_len = list_inner_width.saturating_sub(visual_width);
+
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        cursor_prefix,
+                        Style::default()
+                            .fg(SELECTION_TEXT)
+                            .bg(SELECTION_BACKGROUND)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(check_icon, check_style),
+                    Span::styled(
+                        svc.name,
+                        Style::default()
+                            .fg(SELECTION_TEXT)
+                            .bg(SELECTION_BACKGROUND)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        desc_part,
+                        Style::default().fg(SELECTION_TEXT).bg(SELECTION_BACKGROUND),
+                    ),
+                    Span::styled(
+                        " ".repeat(pad_len),
+                        Style::default().bg(SELECTION_BACKGROUND),
+                    ),
+                ]));
+                list_items.push(ListItem::new(lines));
+            } else {
+                let name_style = if svc.enabled {
+                    Style::default().fg(TEXT)
+                } else {
+                    Style::default().fg(MUTED)
+                };
+                let check_color = if svc.enabled { ACCENT } else { MUTED };
+
+                lines.push(Line::from(vec![
+                    Span::raw(cursor_prefix),
+                    Span::styled(
+                        check_icon,
+                        Style::default()
+                            .fg(check_color)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(svc.name, name_style),
+                    Span::styled(
+                        format!("  — {}", svc.description),
+                        Style::default().fg(MUTED),
+                    ),
+                ]));
+                list_items.push(ListItem::new(lines));
+            }
         }
 
         let list_block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(ACCENT))
-            .title(Span::styled(
-                " Available Services [Space: Toggle | a: All | i: Invert] ",
-                Style::default().fg(ACCENT),
-            ));
+            .border_style(Style::default().fg(TEXT))
+            .title(Line::from(vec![
+                Span::styled(
+                    " Available Services ",
+                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " [ SELECTING ] ",
+                    Style::default()
+                        .fg(SELECTION_TEXT)
+                        .bg(SELECTION_BACKGROUND)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " [Space: Toggle | a: All | i: Invert] ",
+                    Style::default().fg(MUTED),
+                ),
+            ]));
 
         let mut list_state = ListState::default();
         list_state.select(Some(self.service_cursor));
@@ -2582,8 +2758,8 @@ impl OnboardWizard {
             Span::styled(
                 " [ Enter: Configure Selected Services ➔ ] ",
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(ACCENT)
+                    .fg(SELECTION_TEXT)
+                    .bg(SELECTION_BACKGROUND)
                     .add_modifier(Modifier::BOLD),
             ),
         ]))
@@ -2603,14 +2779,14 @@ impl OnboardWizard {
                 .border_style(Style::default().fg(SUBTLE))
                 .title(Span::styled(
                     " Step 3: Service Configurations ",
-                    Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
                 ));
             let inner = block.inner(area);
             frame.render_widget(block, area);
             let notice = Paragraph::new(
                 "\n  ✔ Core AI (Gemini) is configured.\n\n  No additional services were selected in Step 2.\n  Press [Enter] to proceed to Summary and Save.",
             )
-            .style(Style::default().fg(ACCENT));
+            .style(Style::default().fg(TEXT));
             frame.render_widget(notice, inner);
             return;
         }
@@ -2630,7 +2806,7 @@ impl OnboardWizard {
             .border_style(Style::default().fg(SUBTLE))
             .title(Span::styled(
                 title,
-                Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ));
 
         let inner = block.inner(area);
@@ -2648,6 +2824,9 @@ impl OnboardWizard {
             {
                 // Unified: Key on top, Model picker below
                 let is_custom = f1.is_custom;
+                let is_f0_focused = focused_rel == 0;
+                let is_f1_focused = focused_rel == 1;
+
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
                     .margin(1)
@@ -2669,19 +2848,23 @@ impl OnboardWizard {
                 frame.render_widget(subtitle, chunks[0]);
 
                 // Field 0: Text Input
-                let val_disp = if f0.value.is_empty() {
-                    Span::styled(
+                let mut val_spans = Vec::new();
+                if f0.value.is_empty() {
+                    val_spans.push(Span::styled(
                         format!("(Type or paste {} here)", f0.label),
                         Style::default().fg(MUTED),
-                    )
+                    ));
                 } else if f0.is_secret && !f0.show_secret {
-                    Span::styled(
+                    val_spans.push(Span::styled(
                         "•".repeat(f0.value.chars().count().min(50)),
                         Style::default().fg(TEXT),
-                    )
+                    ));
                 } else {
-                    Span::styled(&f0.value, Style::default().fg(TEXT))
-                };
+                    val_spans.push(Span::styled(&f0.value, Style::default().fg(TEXT)));
+                }
+                if is_f0_focused {
+                    val_spans.push(Span::styled("█", Style::default().fg(TEXT)));
+                }
 
                 let mask_badge = if f0.is_secret {
                     if f0.show_secret {
@@ -2693,29 +2876,60 @@ impl OnboardWizard {
                     ""
                 };
 
-                let f0_border = if focused_rel == 0 { ACCENT } else { SUBTLE };
+                let f0_border = if is_f0_focused { TEXT } else { SUBTLE };
+                let f0_title = if is_f0_focused {
+                    Line::from(vec![
+                        Span::styled(
+                            format!(" {} ", f0.label),
+                            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            " [ EDITING ] ",
+                            Style::default()
+                                .fg(SELECTION_TEXT)
+                                .bg(SELECTION_BACKGROUND)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(mask_badge, Style::default().fg(BLUE)),
+                    ])
+                } else if !f0.value.is_empty() {
+                    Line::from(vec![
+                        Span::styled(
+                            format!(" ✔ {} (Configured · Tab to edit) ", f0.label),
+                            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(mask_badge, Style::default().fg(MUTED)),
+                    ])
+                } else {
+                    Line::from(vec![
+                        Span::styled(
+                            format!(" {} (Tab to edit) ", f0.label),
+                            Style::default().fg(MUTED),
+                        ),
+                        Span::styled(mask_badge, Style::default().fg(MUTED)),
+                    ])
+                };
+
                 let f0_block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(f0_border))
-                    .title(Line::from(vec![
-                        Span::styled(
-                            format!(" {} ", f0.label),
-                            Style::default()
-                                .fg(if focused_rel == 0 { ACCENT } else { TEXT })
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(mask_badge, Style::default().fg(BLUE)),
-                    ]));
+                    .title(f0_title);
 
-                frame.render_widget(Paragraph::new(val_disp).block(f0_block), chunks[1]);
+                frame.render_widget(
+                    Paragraph::new(Line::from(val_spans)).block(f0_block),
+                    chunks[1],
+                );
 
+                let tip_text = if is_f0_focused {
+                    "Press [Enter] or [Tab] to switch to model selection."
+                } else {
+                    "Press [↑/↓] to change model. Press [Enter] to continue, or [Tab] to edit key."
+                };
                 let tip = Line::from(vec![
                     Span::styled("• Tip: ", Style::default().fg(MUTED)),
-                    Span::styled(
-                        "Press [Tab] or [↓] to switch between API key and model selection.",
-                        Style::default().fg(MUTED),
-                    ),
+                    Span::styled(tip_text, Style::default().fg(MUTED)),
                 ]);
                 frame.render_widget(Paragraph::new(tip), chunks[2]);
 
@@ -2731,25 +2945,49 @@ impl OnboardWizard {
                         .map(|(i, opt)| {
                             let is_sel = i == selected;
                             let radio = if is_sel { " ◉ " } else { " ○ " };
-                            let cursor = if is_sel { " ❯ " } else { "   " };
+                            let cursor = if is_sel { " › " } else { "   " };
 
-                            let name_style = if is_sel {
-                                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                            if is_f1_focused && is_sel {
+                                let line = Line::from(vec![
+                                    Span::styled(
+                                        cursor,
+                                        Style::default()
+                                            .fg(SELECTION_TEXT)
+                                            .bg(SELECTION_BACKGROUND)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                    Span::styled(
+                                        radio,
+                                        Style::default()
+                                            .fg(SELECTION_TEXT)
+                                            .bg(SELECTION_BACKGROUND)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                    Span::styled(
+                                        opt,
+                                        Style::default()
+                                            .fg(SELECTION_TEXT)
+                                            .bg(SELECTION_BACKGROUND)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                ]);
+                                ListItem::new(line).style(Style::default().bg(SELECTION_BACKGROUND))
+                            } else if is_sel {
+                                let line = Line::from(vec![
+                                    Span::styled(" › ", Style::default().fg(SUBTLE)),
+                                    Span::styled(radio, Style::default().fg(SUBTLE)),
+                                    Span::styled(opt, Style::default().fg(TEXT)),
+                                    Span::styled(" (selected)", Style::default().fg(MUTED)),
+                                ]);
+                                ListItem::new(line)
                             } else {
-                                Style::default().fg(TEXT)
-                            };
-
-                            let line = Line::from(vec![
-                                Span::styled(cursor, Style::default().fg(ACCENT)),
-                                Span::styled(
-                                    radio,
-                                    Style::default()
-                                        .fg(if is_sel { ACCENT } else { MUTED })
-                                        .add_modifier(Modifier::BOLD),
-                                ),
-                                Span::styled(opt, name_style),
-                            ]);
-                            ListItem::new(line)
+                                let line = Line::from(vec![
+                                    Span::raw("   "),
+                                    Span::styled(radio, Style::default().fg(MUTED)),
+                                    Span::styled(opt, Style::default().fg(TEXT)),
+                                ]);
+                                ListItem::new(line)
+                            }
                         })
                         .collect();
 
@@ -2764,17 +3002,35 @@ impl OnboardWizard {
                         )
                     };
 
-                    let f1_border = if focused_rel == 1 { ACCENT } else { SUBTLE };
-                    let list_block = Block::default()
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
-                        .border_style(Style::default().fg(f1_border))
-                        .title(Line::from(vec![
+                    let f1_border = if is_f1_focused { TEXT } else { SUBTLE };
+                    let f1_title = if is_f1_focused {
+                        Line::from(vec![
                             Span::styled(
-                                format!(" Default {} (↑/↓ to select) ", f1.label),
+                                format!(" Default {} ", f1.label),
+                                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                " [ SELECTING ] ",
                                 Style::default()
-                                    .fg(if focused_rel == 1 { ACCENT } else { TEXT })
+                                    .fg(SELECTION_TEXT)
+                                    .bg(SELECTION_BACKGROUND)
                                     .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(" (↑/↓ to select) ", Style::default().fg(MUTED)),
+                            Span::styled(
+                                format!(" {status_badge} "),
+                                Style::default().fg(if self.is_fetching_service_models {
+                                    ACCENT
+                                } else {
+                                    BLUE
+                                }),
+                            ),
+                        ])
+                    } else {
+                        Line::from(vec![
+                            Span::styled(
+                                format!(" Default {} (Press Tab or ↓ to select) ", f1.label),
+                                Style::default().fg(MUTED),
                             ),
                             Span::styled(
                                 format!(" {status_badge} "),
@@ -2784,7 +3040,14 @@ impl OnboardWizard {
                                     BLUE
                                 }),
                             ),
-                        ]));
+                        ])
+                    };
+
+                    let list_block = Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .border_style(Style::default().fg(f1_border))
+                        .title(f1_title);
 
                     let mut list_state = ListState::default();
                     list_state.select(Some(selected));
@@ -2795,24 +3058,49 @@ impl OnboardWizard {
                     );
 
                     if is_custom {
+                        let custom_border = if is_f1_focused { TEXT } else { SUBTLE };
+                        let custom_title = if is_f1_focused {
+                            Line::from(vec![
+                                Span::styled(
+                                    format!(" Custom {} Identifier ", f1.label),
+                                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                                ),
+                                Span::styled(
+                                    " [ EDITING ] ",
+                                    Style::default()
+                                        .fg(SELECTION_TEXT)
+                                        .bg(SELECTION_BACKGROUND)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                            ])
+                        } else {
+                            Line::from(vec![Span::styled(
+                                format!(" Custom {} Identifier ", f1.label),
+                                Style::default().fg(MUTED),
+                            )])
+                        };
+
                         let custom_block = Block::default()
                             .borders(Borders::ALL)
                             .border_type(BorderType::Rounded)
-                            .border_style(Style::default().fg(ACCENT))
-                            .title(Span::styled(
-                                format!(" Custom {} Identifier ", f1.label),
-                                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                            ));
-                        let custom_val = if f1.custom_value.is_empty() {
-                            Span::styled(
+                            .border_style(Style::default().fg(custom_border))
+                            .title(custom_title);
+
+                        let mut custom_spans = Vec::new();
+                        if f1.custom_value.is_empty() {
+                            custom_spans.push(Span::styled(
                                 "(Type custom model identifier)",
                                 Style::default().fg(MUTED),
-                            )
+                            ));
                         } else {
-                            Span::styled(&f1.custom_value, Style::default().fg(TEXT))
-                        };
+                            custom_spans
+                                .push(Span::styled(&f1.custom_value, Style::default().fg(TEXT)));
+                        }
+                        if is_f1_focused {
+                            custom_spans.push(Span::styled("█", Style::default().fg(TEXT)));
+                        }
                         frame.render_widget(
-                            Paragraph::new(custom_val).block(custom_block),
+                            Paragraph::new(Line::from(custom_spans)).block(custom_block),
                             chunks[4],
                         );
                     }
@@ -2824,18 +3112,30 @@ impl OnboardWizard {
                     " [ Enter: Continue to Finish ➔ ] "
                 };
 
-                let action_hint = Paragraph::new(Line::from(vec![
-                    Span::styled(" [ Esc: Back ] ", Style::default().fg(MUTED)),
-                    Span::raw("   "),
-                    Span::styled(
-                        next_label,
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(ACCENT)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]))
-                .alignment(Alignment::Right);
+                let action_hint = if is_f0_focused {
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(" [ Esc: Back ] ", Style::default().fg(MUTED)),
+                        Span::raw("   "),
+                        Span::styled(
+                            " [ Enter / Tab: Next Field (Select Model) ➔ ] ",
+                            Style::default().fg(TEXT),
+                        ),
+                    ]))
+                    .alignment(Alignment::Right)
+                } else {
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(" [ Tab: Back to Key ] ", Style::default().fg(MUTED)),
+                        Span::raw("   "),
+                        Span::styled(
+                            next_label,
+                            Style::default()
+                                .fg(SELECTION_TEXT)
+                                .bg(SELECTION_BACKGROUND)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]))
+                    .alignment(Alignment::Right)
+                };
                 frame.render_widget(action_hint, chunks[5]);
                 return;
             } else {
@@ -2862,19 +3162,24 @@ impl OnboardWizard {
                 frame.render_widget(subtitle, chunks[0]);
 
                 for (slot, (f, idx_rel)) in [(&f0, 0), (&f1, 1)].into_iter().enumerate() {
-                    let val_disp = if f.value.is_empty() {
-                        Span::styled(
+                    let is_active = focused_rel == idx_rel;
+                    let mut val_spans = Vec::new();
+                    if f.value.is_empty() {
+                        val_spans.push(Span::styled(
                             format!("(Type or paste {} here)", f.label),
                             Style::default().fg(MUTED),
-                        )
+                        ));
                     } else if f.is_secret && !f.show_secret {
-                        Span::styled(
+                        val_spans.push(Span::styled(
                             "•".repeat(f.value.chars().count().min(50)),
                             Style::default().fg(TEXT),
-                        )
+                        ));
                     } else {
-                        Span::styled(&f.value, Style::default().fg(TEXT))
-                    };
+                        val_spans.push(Span::styled(&f.value, Style::default().fg(TEXT)));
+                    }
+                    if is_active {
+                        val_spans.push(Span::styled("█", Style::default().fg(TEXT)));
+                    }
 
                     let mask_badge = if f.is_secret {
                         if f.show_secret {
@@ -2886,28 +3191,52 @@ impl OnboardWizard {
                         ""
                     };
 
-                    let border_color = if focused_rel == idx_rel {
-                        ACCENT
+                    let border_color = if is_active { TEXT } else { SUBTLE };
+
+                    let title = if is_active {
+                        Line::from(vec![
+                            Span::styled(
+                                format!(" {} ", f.label),
+                                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                " [ EDITING ] ",
+                                Style::default()
+                                    .fg(SELECTION_TEXT)
+                                    .bg(SELECTION_BACKGROUND)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::raw(" "),
+                            Span::styled(mask_badge, Style::default().fg(BLUE)),
+                        ])
+                    } else if !f.value.is_empty() {
+                        Line::from(vec![
+                            Span::styled(
+                                format!(" ✔ {} (Configured · Tab to edit) ", f.label),
+                                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(mask_badge, Style::default().fg(MUTED)),
+                        ])
                     } else {
-                        SUBTLE
+                        Line::from(vec![
+                            Span::styled(
+                                format!(" {} (Tab to edit) ", f.label),
+                                Style::default().fg(MUTED),
+                            ),
+                            Span::styled(mask_badge, Style::default().fg(MUTED)),
+                        ])
                     };
+
                     let b = Block::default()
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
                         .border_style(Style::default().fg(border_color))
-                        .title(Line::from(vec![
-                            Span::styled(
-                                format!(" {} ", f.label),
-                                Style::default()
-                                    .fg(if focused_rel == idx_rel { ACCENT } else { TEXT })
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(mask_badge, Style::default().fg(BLUE)),
-                        ]));
+                        .title(title);
 
                     let chunk_input = if slot == 0 { chunks[1] } else { chunks[3] };
                     let chunk_hint = if slot == 0 { chunks[2] } else { chunks[4] };
-                    frame.render_widget(Paragraph::new(val_disp).block(b), chunk_input);
+                    frame
+                        .render_widget(Paragraph::new(Line::from(val_spans)).block(b), chunk_input);
                     frame.render_widget(
                         Paragraph::new(format!("  Example / Hint: {}", f.hint))
                             .style(Style::default().fg(MUTED)),
@@ -2921,18 +3250,27 @@ impl OnboardWizard {
                     " [ Enter: Continue to Finish ➔ ] "
                 };
 
-                let action_hint = Paragraph::new(Line::from(vec![
-                    Span::styled(" [ Esc: Back ] ", Style::default().fg(MUTED)),
-                    Span::raw("   "),
-                    Span::styled(
-                        next_label,
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(ACCENT)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]))
-                .alignment(Alignment::Right);
+                let action_hint = if focused_rel == 0 {
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(" [ Esc: Back ] ", Style::default().fg(MUTED)),
+                        Span::raw("   "),
+                        Span::styled(" [ Enter / Tab: Next Field ➔ ] ", Style::default().fg(TEXT)),
+                    ]))
+                    .alignment(Alignment::Right)
+                } else {
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(" [ Tab: Back to Field 1 ] ", Style::default().fg(MUTED)),
+                        Span::raw("   "),
+                        Span::styled(
+                            next_label,
+                            Style::default()
+                                .fg(SELECTION_TEXT)
+                                .bg(SELECTION_BACKGROUND)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]))
+                    .alignment(Alignment::Right)
+                };
                 frame.render_widget(action_hint, chunks[6]);
                 return;
             }
@@ -2966,40 +3304,68 @@ impl OnboardWizard {
                     .map(|(i, opt)| {
                         let is_sel = i == *selected;
                         let radio = if is_sel { " ◉ " } else { " ○ " };
-                        let cursor = if is_sel { " ❯ " } else { "   " };
+                        let cursor = if is_sel { " › " } else { "   " };
 
-                        let name_style = if is_sel {
-                            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                        if is_sel {
+                            let line = Line::from(vec![
+                                Span::styled(
+                                    cursor,
+                                    Style::default()
+                                        .fg(SELECTION_TEXT)
+                                        .bg(SELECTION_BACKGROUND)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                Span::styled(
+                                    radio,
+                                    Style::default()
+                                        .fg(SELECTION_TEXT)
+                                        .bg(SELECTION_BACKGROUND)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                Span::styled(
+                                    opt,
+                                    Style::default()
+                                        .fg(SELECTION_TEXT)
+                                        .bg(SELECTION_BACKGROUND)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                            ]);
+                            ListItem::new(line).style(Style::default().bg(SELECTION_BACKGROUND))
                         } else {
-                            Style::default().fg(TEXT)
-                        };
-
-                        let line = Line::from(vec![
-                            Span::styled(cursor, Style::default().fg(ACCENT)),
-                            Span::styled(
-                                radio,
-                                Style::default()
-                                    .fg(if is_sel { ACCENT } else { MUTED })
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(opt, name_style),
-                        ]);
-                        ListItem::new(line)
+                            let line = Line::from(vec![
+                                Span::raw("   "),
+                                Span::styled(radio, Style::default().fg(MUTED)),
+                                Span::styled(opt, Style::default().fg(TEXT)),
+                            ]);
+                            ListItem::new(line)
+                        }
                     })
                     .collect();
 
                 let list_block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(ACCENT))
-                    .title(Span::styled(
-                        format!(
-                            " Default {} (↑/↓ to select) [✓ {} models loaded] ",
-                            f0.label,
-                            options.len().saturating_sub(1).max(1)
+                    .border_style(Style::default().fg(TEXT))
+                    .title(Line::from(vec![
+                        Span::styled(
+                            format!(" Default {} ", f0.label),
+                            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
                         ),
-                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                    ));
+                        Span::styled(
+                            " [ SELECTING ] ",
+                            Style::default()
+                                .fg(SELECTION_TEXT)
+                                .bg(SELECTION_BACKGROUND)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!(
+                                " (↑/↓ to select) [✓ {} models loaded] ",
+                                options.len().saturating_sub(1).max(1)
+                            ),
+                            Style::default().fg(MUTED),
+                        ),
+                    ]));
 
                 let mut list_state = ListState::default();
                 list_state.select(Some(*selected));
@@ -3013,17 +3379,35 @@ impl OnboardWizard {
                     let custom_block = Block::default()
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
-                        .border_style(Style::default().fg(ACCENT))
-                        .title(Span::styled(
-                            format!(" Custom {} Identifier ", f0.label),
-                            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                        .border_style(Style::default().fg(TEXT))
+                        .title(Line::from(vec![
+                            Span::styled(
+                                format!(" Custom {} Identifier ", f0.label),
+                                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                " [ EDITING ] ",
+                                Style::default()
+                                    .fg(SELECTION_TEXT)
+                                    .bg(SELECTION_BACKGROUND)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ]));
+                    let mut custom_spans = Vec::new();
+                    if f0.custom_value.is_empty() {
+                        custom_spans.push(Span::styled(
+                            "(Type custom model identifier)",
+                            Style::default().fg(MUTED),
                         ));
-                    let custom_val = if f0.custom_value.is_empty() {
-                        Span::styled("(Type custom model identifier)", Style::default().fg(MUTED))
                     } else {
-                        Span::styled(&f0.custom_value, Style::default().fg(TEXT))
-                    };
-                    frame.render_widget(Paragraph::new(custom_val).block(custom_block), chunks[2]);
+                        custom_spans
+                            .push(Span::styled(&f0.custom_value, Style::default().fg(TEXT)));
+                    }
+                    custom_spans.push(Span::styled("█", Style::default().fg(TEXT)));
+                    frame.render_widget(
+                        Paragraph::new(Line::from(custom_spans)).block(custom_block),
+                        chunks[2],
+                    );
                 }
 
                 let next_label = if curr_idx < total_services {
@@ -3038,8 +3422,8 @@ impl OnboardWizard {
                     Span::styled(
                         next_label,
                         Style::default()
-                            .fg(Color::Black)
-                            .bg(ACCENT)
+                            .fg(SELECTION_TEXT)
+                            .bg(SELECTION_BACKGROUND)
                             .add_modifier(Modifier::BOLD),
                     ),
                 ]))
@@ -3066,19 +3450,21 @@ impl OnboardWizard {
                 .style(Style::default().fg(MUTED));
                 frame.render_widget(subtitle, chunks[0]);
 
-                let val_disp = if f0.value.is_empty() {
-                    Span::styled(
+                let mut val_spans = Vec::new();
+                if f0.value.is_empty() {
+                    val_spans.push(Span::styled(
                         format!("(Type or paste {} here)", f0.label),
                         Style::default().fg(MUTED),
-                    )
+                    ));
                 } else if f0.is_secret && !f0.show_secret {
-                    Span::styled(
+                    val_spans.push(Span::styled(
                         "•".repeat(f0.value.chars().count().min(50)),
                         Style::default().fg(TEXT),
-                    )
+                    ));
                 } else {
-                    Span::styled(&f0.value, Style::default().fg(TEXT))
-                };
+                    val_spans.push(Span::styled(&f0.value, Style::default().fg(TEXT)));
+                }
+                val_spans.push(Span::styled("█", Style::default().fg(TEXT)));
 
                 let mask_badge = if f0.is_secret {
                     if f0.show_secret {
@@ -3093,16 +3479,27 @@ impl OnboardWizard {
                 let f0_block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(ACCENT))
+                    .border_style(Style::default().fg(TEXT))
                     .title(Line::from(vec![
                         Span::styled(
                             format!(" {} ", f0.label),
-                            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
                         ),
+                        Span::styled(
+                            " [ EDITING ] ",
+                            Style::default()
+                                .fg(SELECTION_TEXT)
+                                .bg(SELECTION_BACKGROUND)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" "),
                         Span::styled(mask_badge, Style::default().fg(BLUE)),
                     ]));
 
-                frame.render_widget(Paragraph::new(val_disp).block(f0_block), chunks[1]);
+                frame.render_widget(
+                    Paragraph::new(Line::from(val_spans)).block(f0_block),
+                    chunks[1],
+                );
                 frame.render_widget(
                     Paragraph::new(format!("Example / Hint: {}", f0.hint))
                         .style(Style::default().fg(MUTED)),
@@ -3121,8 +3518,8 @@ impl OnboardWizard {
                     Span::styled(
                         next_label,
                         Style::default()
-                            .fg(Color::Black)
-                            .bg(ACCENT)
+                            .fg(SELECTION_TEXT)
+                            .bg(SELECTION_BACKGROUND)
                             .add_modifier(Modifier::BOLD),
                     ),
                 ]))
@@ -3275,30 +3672,30 @@ impl OnboardWizard {
             Span::styled(
                 " [ Save & Launch Mint ] ",
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(ACCENT)
+                    .fg(SELECTION_TEXT)
+                    .bg(SELECTION_BACKGROUND)
                     .add_modifier(Modifier::BOLD),
             )
         } else {
-            Span::styled(" [ Save & Launch Mint ] ", Style::default().fg(ACCENT))
+            Span::styled(" [ Save & Launch Mint ] ", Style::default().fg(TEXT))
         };
         let btn_exit = if self.summary_action == 1 {
             Span::styled(
                 " [ Save & Exit ] ",
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(BLUE)
+                    .fg(SELECTION_TEXT)
+                    .bg(SELECTION_BACKGROUND)
                     .add_modifier(Modifier::BOLD),
             )
         } else {
-            Span::styled(" [ Save & Exit ] ", Style::default().fg(BLUE))
+            Span::styled(" [ Save & Exit ] ", Style::default().fg(MUTED))
         };
         let btn_back = if self.summary_action == 2 {
             Span::styled(
                 " [ ⬅ Back to Edit ] ",
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(SUBTLE)
+                    .fg(SELECTION_TEXT)
+                    .bg(SELECTION_BACKGROUND)
                     .add_modifier(Modifier::BOLD),
             )
         } else {
@@ -3319,15 +3716,36 @@ impl OnboardWizard {
     fn render_footer(&self, frame: &mut ratatui::Frame, area: Rect) {
         let shortcuts = match self.step {
             OnboardStep::CoreAi => {
-                "[Tab] Switch Field  [↑/↓] Select Model  [Ctrl+H] Mask  [Enter] Continue  [Esc] Cancel"
+                if self.gemini_focus == 0 {
+                    "Focus: [API Key] · Type to edit · [Ctrl+V] Paste · [Enter/Tab] Model List · [Ctrl+H] Mask · [Esc] Cancel"
+                } else {
+                    "Focus: [Model List] · [↑/↓] Select Model · [Enter] Continue · [Tab] API Key · [Esc] Cancel"
+                }
             }
             OnboardStep::Services => {
-                "[↑/↓] Move  [Space] Toggle  [a] All  [i] Invert  [Enter] Next  [Esc] Back"
+                "Focus: [Services Checklist] · [↑/↓] Move · [Space] Toggle · [a] All · [i] Invert · [Enter] Next · [Esc] Back"
             }
             OnboardStep::Config => {
-                "[Tab] Switch Field  [↑/↓] Select Model  [Ctrl+H] Mask  [Enter] Continue  [Esc] Back"
+                if self.service_groups.is_empty() {
+                    "[Enter] Continue to Finish · [Esc] Back"
+                } else {
+                    let group = &self.service_groups[self.service_group_idx];
+                    let focused_rel = group.focused_field;
+                    let field_idx = group.field_indices.get(focused_rel).copied().unwrap_or(0);
+                    let is_choice = matches!(
+                        self.fields.get(field_idx).map(|f| &f.field_type),
+                        Some(FieldType::Choice { .. })
+                    );
+                    if is_choice {
+                        "Focus: [Model List] · [↑/↓] Select Model · [Enter] Next · [Tab] Key · [Esc] Back"
+                    } else {
+                        "Focus: [Input Field] · Type to edit · [Tab] Next Field · [Enter] Next · [Ctrl+H] Mask · [Esc] Back"
+                    }
+                }
             }
-            OnboardStep::Summary => "[←/→ / Tab] Select Action  [Enter] Confirm  [Esc] Back",
+            OnboardStep::Summary => {
+                "Focus: [Action Selection] · [←/→ / Tab] Select Action · [Enter] Confirm · [Esc] Back"
+            }
         };
 
         let chunks = Layout::default()
