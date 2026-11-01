@@ -1,5 +1,19 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Tool & Environment Setup Wizard Redesign (`mint setup`)
+- **Full-Screen Ratatui TUI Modernization**: Replaced the legacy raw ANSI script and aggressive clear-screen flickering in `setup.rs` with a smooth, double-buffered Ratatui Full-Screen TUI wizard adhering to the workspace rule.
+- **Categorized 49 Agent Tools**: Grouped all 49 agent tools into 7 clear categories (Files & Workspace, Code & Repository, Search & Knowledge, Productivity & Utilities, Planning & Safety, Execution & MCP, and Media & Audio/Video) with auto-scrolling viewports and real-time enabled counts.
+- **High-Contrast Monochrome Theme Parity**: Integrated the Solid Gray Bar highlight (`bg: Gray, fg: Black`), pill badges (`[ SELECTING ]`), and transparent category headers matching `mint onboard` and `resume_picker`.
+- **Three-Step Stepper Flow**: Structured configuration across 3 distinct steps (`1. Agent Tools`, `2. Native Plugins`, `3. Launch Target`), giving users full control over tool policy, host plugin access, and subsequent launch targets (CLI, Web, Desktop, or Save & Exit).
+- **MCP CLI Ergonomics**: Added short flags `-a` for `--args` and `-e` for `--env` in `mint mcp add` for convenient and quick server registration.
+
+## Onboard Setup Wizard UI/UX High-Contrast Grey Redesign (`mint onboard`)
+- **High-Contrast Monochrome Theme**: Unified the Setup Wizard styling with Mint CLI's `resume_picker` design system using `SELECTION_BACKGROUND` and `SELECTION_TEXT` to ensure clear visibility across transparent terminals and custom wallpaper backgrounds.
+- **Solid Gray Bar Row Highlights**: In active model choice lists (Step 1 & Step 3) and the services checklist (Step 2), the focused row now receives a full-width solid grey highlight bar (`bg: Gray, fg: Black`) that instantly stands out without color ambiguity.
+- **Active Text Cursor (`█`)**: Input boxes (Gemini API Key, custom model identifiers, and service config inputs) now render a block cursor (`█`) at the insertion point when focused, and hide the cursor when unfocused.
+- **Explicit Focus Badges**: Box titles now feature distinct pill badges: `[ EDITING ]` for active input fields and `[ SELECTING ]` for active choice lists, with dimmed titles and markers (`› (selected)`) when unfocused.
+- **Context-Aware Action Buttons & Footer**: Replaced static green action buttons with context-aware buttons (e.g. `[ Enter / Tab: Next Field ➔ ]` vs `[ Enter: Continue to Services ➔ ]`) and dynamic footer shortcuts that reflect the currently focused control.
+
 ## Headless Browser Automation & Anti-Loop Engine (CLI, Desktop, and Web)
 - **Headless Chromium via Shell Playbook**: Replaced agent-facing `browser_*` tools and the headed Mint Browser UI (`mint auto`, `BrowserShell.tsx`, `BrowserSuggestionsPopup.tsx`) with high-reliability headless Chromium shell commands (`google-chrome --headless=new --dump-dom`, `--screenshot`) managed through `run_shell`.
 - **System Default Browser Previews**: HTML artifact previews open directly in the user's default system browser across CLI (Full-Screen TUI / Classic), Desktop, and Web, eliminating custom embedded browser windows.

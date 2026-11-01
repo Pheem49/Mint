@@ -13,10 +13,10 @@ pub enum McpCommand {
     Add {
         name: String,
         command: String,
-        /// Repeatable: one value per `--args` occurrence (e.g. `--args -y --args --header`).
-        #[arg(long, num_args = 1, allow_hyphen_values = true)]
+        /// Repeatable: one value per `--args` occurrence (e.g. `--args -y` or `-a -y`).
+        #[arg(long, short = 'a', num_args = 1, allow_hyphen_values = true)]
         args: Vec<String>,
-        #[arg(long, num_args = 1, allow_hyphen_values = true)]
+        #[arg(long, short = 'e', num_args = 1, allow_hyphen_values = true)]
         env: Vec<String>,
         /// Immediately allow the agent to call every tool on the new server
         /// (`allow <name> *`). Off by default — tools are opt-in per server.
