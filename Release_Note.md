@@ -1,5 +1,10 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Interactive Saved Plans Picker & Viewer (`/plan list`) (CLI, Desktop, and Web)
+- **Interactive TUI Choice Dialog for `/plan list`**: Running `/plan list` in Full-Screen TUI now opens an interactive modal selector (`prompt_choice`) displaying all saved plans under `.agents/plans/` sorted newest-first, featuring human-readable timestamps (`YYYY-MM-DD HH:MM:SS · slug`) and clean Markdown title previews.
+- **Instant Borderless Plan Card Render**: Selecting a plan from the list and pressing `Enter` directly renders the plan into the chat transcript as a full borderless Plan Card with solid gray fill (`#404040`), headers, and task checkboxes (`[ ]` / `[✓]`), unifying `/plan list` and `/plan show <n>` into one seamless command.
+- **Direct Shortcuts & Platform Parity**: Supports instant viewing via `/plan list <n>` (e.g. `/plan list 1`), `/plan show <n>`, or name search across CLI, Desktop, and Web (`mint-core` slash dispatcher), with `slash-commands.json` metadata kept fully in sync.
+
 ## Framed Release Notes & Plan Review Inline Card UI (CLI, Desktop, and Web)
 - **Full-Screen TUI Framed Card with Background**: Replaced the raw transcript dump of `/release-notes` with a self-contained inline continuous borderless card rendered via Ratatui with a solid unified gray surface fill (`USER_MESSAGE_BACKGROUND: Color::Rgb(64, 64, 64)`), category bullet badges (`●`), and indented bullet points (`•`) without border lines or the redundant `Command ›` header.
 - **Plan Review Card & Compact Modal Dialog**: Transformed the plan review experience upon exiting plan mode (`AgentApproval::ExitPlanMode`). Instead of stuffing the entire multi-section plan into a massive modal dialog at the bottom of the screen, the complete plan is now rendered as a large, beautiful borderless card directly in the chat transcript with structured headers, status checkboxes (`[ ]` / `[✓]`), numbered steps, and solid gray fill (`#404040`). The bottom interactive approval dialog is reduced to a concise 4-row prompt (`"Do you want to proceed with this plan?"` with `Approve` / `Deny`).

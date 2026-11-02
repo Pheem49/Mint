@@ -449,6 +449,7 @@ pub struct MockCommandUi {
     pub notices: Vec<String>,
     pub command_outputs: Vec<String>,
     pub release_notes: Vec<String>,
+    pub plans: Vec<String>,
     pub status: Vec<String>,
     pub choice_answers: Vec<Option<usize>>,
     pub text_answers: Vec<Option<String>>,
@@ -476,6 +477,7 @@ impl CommandUi for MockCommandUi {
     }
 
     fn push_plan(&mut self, plan: &str) {
+        self.plans.push(plan.to_string());
         self.command_outputs.push(plan.to_string());
     }
 

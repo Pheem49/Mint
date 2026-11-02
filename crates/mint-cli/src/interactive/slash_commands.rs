@@ -159,12 +159,44 @@ fn first_line_preview(path: &Path) -> String {
         .map(str::trim)
         .find(|l| !l.is_empty())
         .unwrap_or("");
-    if first.chars().count() > 80 {
-        let short: String = first.chars().take(80).collect();
+    let clean = first.trim_start_matches('#').trim();
+    if clean.chars().count() > 80 {
+        let short: String = clean.chars().take(80).collect();
         format!("{short}…")
     } else {
-        first.to_string()
+        clean.to_string()
     }
+}
+
+fn format_plan_meta(path: &Path) -> String {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    if stem.len() >= 15 && stem.as_bytes().get(8) == Some(&b'-') {
+        let y = &stem[0..4];
+        let m = &stem[4..6];
+        let d = &stem[6..8];
+        let hh = &stem[9..11];
+        let mm = &stem[11..13];
+        let ss = &stem[13..15];
+        if y.chars().all(|c| c.is_ascii_digit())
+            && m.chars().all(|c| c.is_ascii_digit())
+            && d.chars().all(|c| c.is_ascii_digit())
+            && hh.chars().all(|c| c.is_ascii_digit())
+            && mm.chars().all(|c| c.is_ascii_digit())
+            && ss.chars().all(|c| c.is_ascii_digit())
+        {
+            let date_str = format!("{y}-{m}-{d} {hh}:{mm}:{ss}");
+            if stem.len() > 16 {
+                let slug = &stem[16..];
+                return format!("{date_str} · {slug}");
+            } else {
+                return date_str;
+            }
+        }
+    }
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 async fn execute_core_slash(
@@ -714,20 +746,69 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
-        "/plan" if rest == "list" => {
+        "/plan" if rest == "list" || rest.starts_with("list ") => {
+            let arg = rest.trim_start_matches("list").trim();
             let files = list_plan_files(&session.current_dir);
             if files.is_empty() {
-                ui.push_notice("No saved plans yet.");
-            } else {
-                let mut lines = vec![format!("{BLUE}Saved plans:{RESET}")];
-                for (idx, path) in files.iter().enumerate() {
-                    lines.push(format!(
-                        "  {DIM}[{}]{RESET} {BLUE}{}{RESET}",
-                        idx + 1,
-                        first_line_preview(path)
-                    ));
+                ui.push_notice("No saved plans yet under .agents/plans/");
+            } else if !arg.is_empty() {
+                let found = if let Ok(idx) = arg.parse::<usize>() {
+                    idx.checked_sub(1).and_then(|i| files.get(i))
+                } else {
+                    files.iter().find(|p| {
+                        p.file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| n.contains(arg))
+                    })
+                };
+                match found {
+                    Some(path) => match std::fs::read_to_string(path) {
+                        Ok(content) => ui.push_plan(&content),
+                        Err(e) => ui.push_notice(format!("Could not read plan file: {e}")),
+                    },
+                    None => ui.push_notice(format!(
+                        "No saved plan matching \"{arg}\" — run /plan list to see saved plans."
+                    )),
                 }
-                ui.push_command_output(lines.join("\n"));
+            } else {
+                let options = files
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, path)| {
+                        let preview = first_line_preview(path);
+                        let display_title = if preview.is_empty() {
+                            path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("Untitled Plan")
+                        } else {
+                            &preview
+                        };
+                        let meta = format_plan_meta(path);
+                        ChoiceItem::with_description(
+                            format!("[{}] {}", idx + 1, display_title),
+                            meta,
+                            path.to_string_lossy().to_string(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                match ui.prompt_choice(
+                    "Select Saved Plan",
+                    "Choose a plan to view its content (Press Enter to view, Esc to cancel)",
+                    &options,
+                ) {
+                    Ok(Some(idx)) => {
+                        if let Some(path) = files.get(idx) {
+                            match std::fs::read_to_string(path) {
+                                Ok(content) => {
+                                    ui.push_plan(&content);
+                                }
+                                Err(e) => ui.push_notice(format!("Could not read plan file: {e}")),
+                            }
+                        }
+                    }
+                    _ => {}
+                }
             }
             Some(SlashResult::Handled)
         }
@@ -746,7 +827,7 @@ pub async fn handle_slash_command(
             };
             match found {
                 Some(path) => match std::fs::read_to_string(path) {
-                    Ok(content) => ui.push_command_output(content),
+                    Ok(content) => ui.push_plan(&content),
                     Err(e) => ui.push_notice(format!("Could not read plan file: {e}")),
                 },
                 None => ui.push_notice(format!(
@@ -4281,5 +4362,64 @@ mod tests {
             );
             assert!(ui.release_notes[0].contains("Release Notes"));
         }
+    }
+
+    #[test]
+    fn format_plan_meta_parses_timestamp() {
+        let p1 = Path::new("/tmp/plans/20261102-182231-my-plan.md");
+        assert_eq!(format_plan_meta(p1), "2026-11-02 18:22:31 · my-plan");
+
+        let p2 = Path::new("/tmp/plans/20261102-180001.md");
+        assert_eq!(format_plan_meta(p2), "2026-11-02 18:00:01");
+
+        let p3 = Path::new("/tmp/plans/custom-plan.md");
+        assert_eq!(format_plan_meta(p3), "custom-plan.md");
+    }
+
+    #[tokio::test]
+    async fn slash_plan_list_interactive_selection_and_show() {
+        let temp = std::env::temp_dir().join(format!("mint-plan-test-{}", std::process::id()));
+        let plans_dir = temp.join(".agents").join("plans");
+        std::fs::create_dir_all(&plans_dir).unwrap();
+
+        let plan1_content = "# First Plan\n- [ ] Task 1";
+        let plan2_content = "# Second Plan\n- [x] Done";
+        std::fs::write(plans_dir.join("20261102-180000-plan-one.md"), plan1_content).unwrap();
+        std::fs::write(plans_dir.join("20261102-183000-plan-two.md"), plan2_content).unwrap();
+
+        let mut session = InteractiveSession {
+            chat_id: mint_core::CHAT_CLI_ID.to_string(),
+            config: MintConfig::default(),
+            current_dir: temp.clone(),
+            fast_mode: false,
+            plan_mode: false,
+            pending_image: None,
+            history: Vec::new(),
+            jobs: BackgroundJobs::new(),
+        };
+
+        // 1. /plan list with interactive selection (pick index 0, which is the newest plan2)
+        let mut ui = MockCommandUi::new();
+        ui.choice_answers.push(Some(0));
+        let res = handle_slash_command(&mut session, &mut ui, "/plan list").await;
+        assert!(matches!(res, Some(SlashResult::Handled)));
+        assert_eq!(ui.plans.len(), 1);
+        assert_eq!(ui.plans[0], plan2_content);
+
+        // 2. /plan list 1 directly views the first plan
+        let mut ui = MockCommandUi::new();
+        let res = handle_slash_command(&mut session, &mut ui, "/plan list 1").await;
+        assert!(matches!(res, Some(SlashResult::Handled)));
+        assert_eq!(ui.plans.len(), 1);
+        assert_eq!(ui.plans[0], plan2_content);
+
+        // 3. /plan show 2 views the second plan
+        let mut ui = MockCommandUi::new();
+        let res = handle_slash_command(&mut session, &mut ui, "/plan show 2").await;
+        assert!(matches!(res, Some(SlashResult::Handled)));
+        assert_eq!(ui.plans.len(), 1);
+        assert_eq!(ui.plans[0], plan1_content);
+
+        let _ = std::fs::remove_dir_all(temp);
     }
 }

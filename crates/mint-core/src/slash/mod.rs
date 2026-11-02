@@ -520,14 +520,64 @@ fn cmd_plan(req: &SlashRequest, rest: &str) -> SlashResponse {
             markdown: "📋 Plan Mode **OFF**.".into(),
             effects: vec![SlashEffect::PlanModeChanged { enabled: false }],
         }
-    } else if trimmed == "list" {
+    } else if trimmed == "list" || trimmed.starts_with("list ") {
+        let list_arg = trimmed.trim_start_matches("list").trim();
         let ws = req.workspace();
         let plan_dir = ws.join(".agents").join("plans");
-        let mut entries = Vec::new();
-        if let Ok(rd) = std::fs::read_dir(&plan_dir) {
-            for entry in rd.flatten() {
-                let path = entry.path();
-                if path.is_file() {
+        if !list_arg.is_empty() {
+            let arg = list_arg;
+            let mut found_content = None;
+            if let Ok(rd) = std::fs::read_dir(&plan_dir) {
+                let mut files: Vec<_> = rd
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_file())
+                    .collect();
+                files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+                if let Ok(idx) = arg.parse::<usize>() {
+                    if let Some(path) = idx.checked_sub(1).and_then(|i| files.get(i)) {
+                        if let Ok(content) = std::fs::read_to_string(path) {
+                            let name = path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or_default()
+                                .to_string();
+                            found_content = Some((name, content));
+                        }
+                    }
+                } else {
+                    for path in &files {
+                        let name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        if name.contains(arg) {
+                            if let Ok(content) = std::fs::read_to_string(path) {
+                                found_content = Some((name, content));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            match found_content {
+                Some((name, content)) => message(format!("### Plan: {}\n\n{}", name, content)),
+                None => error(format!(
+                    "No saved plan matching \"{}\" under `.agents/plans/`",
+                    arg
+                )),
+            }
+        } else {
+            let mut entries = Vec::new();
+            if let Ok(rd) = std::fs::read_dir(&plan_dir) {
+                let mut files: Vec<_> = rd
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_file())
+                    .collect();
+                files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+                for (idx, path) in files.iter().enumerate() {
                     let name = path
                         .file_name()
                         .and_then(|n| n.to_str())
@@ -535,16 +585,23 @@ fn cmd_plan(req: &SlashRequest, rest: &str) -> SlashResponse {
                         .to_string();
                     let first_line = std::fs::read_to_string(&path)
                         .ok()
-                        .and_then(|s| s.lines().next().map(|l| l.trim().to_string()))
+                        .and_then(|s| {
+                            s.lines()
+                                .find(|l| !l.trim().is_empty())
+                                .map(|l| l.trim().trim_start_matches('#').trim().to_string())
+                        })
                         .unwrap_or_default();
-                    entries.push(format!("- **{}**: {}", name, first_line));
+                    entries.push(format!("- **[{}] `{}`**: {}", idx + 1, name, first_line));
                 }
             }
-        }
-        if entries.is_empty() {
-            message("No saved plans found under `.agents/plans/`.")
-        } else {
-            message(format!("### Saved Plans\n\n{}", entries.join("\n")))
+            if entries.is_empty() {
+                message("No saved plans found under `.agents/plans/`.")
+            } else {
+                message(format!(
+                    "### Saved Plans\n\n{}\n\n*Type `/plan list <number>` or `/plan show <name>` to view.*",
+                    entries.join("\n")
+                ))
+            }
         }
     } else if let Some(show_arg) = trimmed.strip_prefix("show") {
         let arg = show_arg.trim();
@@ -552,17 +609,35 @@ fn cmd_plan(req: &SlashRequest, rest: &str) -> SlashResponse {
         let plan_dir = ws.join(".agents").join("plans");
         let mut found_content = None;
         if let Ok(rd) = std::fs::read_dir(&plan_dir) {
-            for entry in rd.flatten() {
-                let path = entry.path();
-                let name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or_default()
-                    .to_string();
-                if name.contains(arg) {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
+            let mut files: Vec<_> = rd
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file())
+                .collect();
+            files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+            if let Ok(idx) = arg.parse::<usize>() {
+                if let Some(path) = idx.checked_sub(1).and_then(|i| files.get(i)) {
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        let name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or_default()
+                            .to_string();
                         found_content = Some((name, content));
-                        break;
+                    }
+                }
+            } else {
+                for path in &files {
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    if name.contains(arg) {
+                        if let Ok(content) = std::fs::read_to_string(path) {
+                            found_content = Some((name, content));
+                            break;
+                        }
                     }
                 }
             }
@@ -3127,6 +3202,46 @@ mod tests {
                 serde_json::to_value(other)
             ),
         }
+
+        let temp = std::env::temp_dir().join(format!("mint-core-plan-test-{}", std::process::id()));
+        let plans_dir = temp.join(".agents").join("plans");
+        std::fs::create_dir_all(&plans_dir).unwrap();
+        std::fs::write(
+            plans_dir.join("20261102-190000-arch.md"),
+            "# Architecture Plan\n1. Module seam",
+        )
+        .unwrap();
+
+        let req_ws = |input: &str| SlashRequest {
+            input: input.to_string(),
+            surface: Some("cli".to_string()),
+            cwd: Some(temp.to_string_lossy().to_string()),
+            chat_id: None,
+        };
+
+        match execute(&req_ws("/plan list"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("Architecture Plan"));
+                assert!(markdown.contains("20261102-190000-arch.md"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        match execute(&req_ws("/plan list 1"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("# Architecture Plan"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        match execute(&req_ws("/plan show 1"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("# Architecture Plan"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        let _ = std::fs::remove_dir_all(temp);
     }
 
     #[test]
