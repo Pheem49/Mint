@@ -82,6 +82,52 @@ mod dialog_tests {
     }
 
     #[test]
+    fn resume_restores_plan_card_in_transcript() {
+        let plan_text = "# Implementation Plan\n\n## Steps\n1. Do step one\n2. Do step two";
+        let activity = serde_json::json!([
+            {
+                "type": "ToolStart",
+                "data": {
+                    "callId": "plan-call",
+                    "action": "exit_plan_mode",
+                    "input": {
+                        "plan": plan_text
+                    }
+                }
+            },
+            {
+                "type": "ToolEnd",
+                "data": {
+                    "callId": "plan-call",
+                    "action": "exit_plan_mode",
+                    "input": {
+                        "plan": plan_text
+                    },
+                    "result": "Plan approved by the user."
+                }
+            }
+        ]);
+        let (root, memory) = saved_activity_fixture(activity, "completed");
+        let mut state = ChatViewState::default();
+        state.reload_transcript_with(&memory, "resume-details", &root);
+
+        let plan_entry = state
+            .transcript
+            .iter()
+            .find(|entry| entry.role == TranscriptRole::Plan);
+        assert!(
+            plan_entry.is_some(),
+            "Plan card must be restored in transcript upon resume"
+        );
+        assert_eq!(plan_entry.unwrap().text, plan_text);
+
+        // exit_plan_mode should not create an extra generic tool activity card
+        assert!(state.tools.iter().all(|t| t.action != "exit_plan_mode"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn resume_switching_sessions_closes_previous_tool_details() {
         let (root, memory) = saved_activity_fixture(
             serde_json::json!([
@@ -687,14 +733,14 @@ mod dialog_tests {
                 "{width}x{height}: last diff line hidden"
             );
             assert!(rendered.contains("2. Deny"));
-            route_mouse_wheel(&mut state, event::MouseEventKind::ScrollDown);
+            route_mouse_wheel(&mut state, event::MouseEventKind::ScrollDown, None, None);
             terminal
                 .draw(|frame| {
                     state.render(frame);
                 })
                 .unwrap();
             assert!(visible(terminal.backend().buffer()).contains("Skill instruction 100"));
-            route_mouse_wheel(&mut state, event::MouseEventKind::ScrollUp);
+            route_mouse_wheel(&mut state, event::MouseEventKind::ScrollUp, None, None);
             assert_eq!(
                 state.scroll_from_bottom, 0,
                 "wheel must review the dialog, not chat"
@@ -1192,7 +1238,7 @@ mod dialog_tests {
     #[test]
     fn mouse_wheel_routes_to_transcript_or_open_thought_panel() {
         let mut state = ChatViewState::default();
-        route_mouse_wheel(&mut state, event::MouseEventKind::ScrollUp);
+        route_mouse_wheel(&mut state, event::MouseEventKind::ScrollUp, None, None);
         assert_eq!(state.scroll_from_bottom, 3);
 
         state.thought_modal = Some(ThoughtModalState {
@@ -1200,10 +1246,67 @@ mod dialog_tests {
             lines: vec!["thought".to_owned()],
             scroll: 4,
         });
-        route_mouse_wheel(&mut state, event::MouseEventKind::ScrollUp);
+        route_mouse_wheel(&mut state, event::MouseEventKind::ScrollUp, None, None);
         assert_eq!(state.thought_modal.as_ref().unwrap().scroll, 1);
-        route_mouse_wheel(&mut state, event::MouseEventKind::ScrollDown);
+        route_mouse_wheel(&mut state, event::MouseEventKind::ScrollDown, None, None);
         assert_eq!(state.thought_modal.as_ref().unwrap().scroll, 4);
+    }
+
+    #[test]
+    fn mouse_wheel_scrolls_transcript_during_unscrollable_dialog_or_when_hovering_transcript() {
+        use std::sync::mpsc;
+        let mut state = ChatViewState::default();
+        let (tx, _rx) = mpsc::channel();
+        state.dialog = Some(DialogState::new_choice(
+            "Review plan",
+            "Do you want to proceed with this plan?",
+            vec!["Approve".into(), "Deny".into()],
+            None,
+            tx,
+        ));
+        assert_eq!(state.dialog.as_ref().unwrap().body_max_scroll.get(), 0);
+
+        // When dialog body cannot scroll, mouse wheel anywhere scrolls transcript
+        route_mouse_wheel(&mut state, event::MouseEventKind::ScrollUp, None, None);
+        assert_eq!(state.scroll_from_bottom, 3);
+        route_mouse_wheel(&mut state, event::MouseEventKind::ScrollDown, None, None);
+        assert_eq!(state.scroll_from_bottom, 0);
+
+        // Even with a scrollable dialog, cursor hovering inside transcript scrolls transcript
+        let (tx2, _rx2) = mpsc::channel();
+        let scrollable_dialog = DialogState::new_choice(
+            "Long command",
+            "Lots of output...",
+            vec!["Approve".into(), "Deny".into()],
+            None,
+            tx2,
+        );
+        scrollable_dialog.body_max_scroll.set(50);
+        state.dialog = Some(scrollable_dialog);
+
+        let transcript_area = Rect::new(0, 0, 80, 20);
+        let cursor_in_transcript = Position::new(10, 10);
+        let cursor_in_dialog = Position::new(10, 22);
+
+        // Hover in transcript -> scrolls transcript
+        route_mouse_wheel(
+            &mut state,
+            event::MouseEventKind::ScrollUp,
+            Some(cursor_in_transcript),
+            Some(transcript_area),
+        );
+        assert_eq!(state.scroll_from_bottom, 3);
+        assert_eq!(state.dialog.as_ref().unwrap().body_scroll, 0);
+
+        // Hover in dialog -> scrolls dialog body
+        route_mouse_wheel(
+            &mut state,
+            event::MouseEventKind::ScrollDown,
+            Some(cursor_in_dialog),
+            Some(transcript_area),
+        );
+        assert_eq!(state.scroll_from_bottom, 3);
+        assert_eq!(state.dialog.as_ref().unwrap().body_scroll, 3);
     }
 
     #[test]
@@ -2950,5 +3053,161 @@ mod swarm_panel_tests {
         assert_eq!(state.transcript[2].text, "Line 1\nLine 2");
         assert_eq!(state.transcript[3].role, TranscriptRole::Notice);
         assert_eq!(state.transcript[3].text, "─ Worked for 1s");
+    }
+
+    #[test]
+    fn release_notes_renders_as_framed_inline_card_with_background() {
+        let sample = "# Release Notes - Mint Agent v1.18.0\n\n## Smart Thinking\n- Item 1\n\n## Section 2\n- Item 2";
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let tui = ChatTui::handle(state.clone());
+        tui.push_release_notes(sample);
+
+        let locked = state.lock().unwrap();
+        assert_eq!(locked.transcript.len(), 1);
+        assert_eq!(locked.transcript[0].role, TranscriptRole::ReleaseNotes);
+
+        let lines = locked.plain_transcript_lines();
+        let plain_joined = lines.join("\n");
+        assert!(
+            !plain_joined.contains("Command ›"),
+            "must not display Command › header"
+        );
+        assert!(
+            plain_joined.contains("Release Notes"),
+            "must mention Release Notes"
+        );
+        assert!(plain_joined.contains("v1.18.0"), "must mention version");
+        assert!(
+            plain_joined.contains("Smart Thinking"),
+            "must show section heading"
+        );
+
+        let formatted = locked.transcript_text(80);
+        let formatted_text = formatted
+            .lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !formatted_text.contains('╭') && !formatted_text.contains('┌'),
+            "must not render top border characters"
+        );
+        assert!(
+            !formatted_text.contains('╰') && !formatted_text.contains('└'),
+            "must not render bottom border characters"
+        );
+        assert!(
+            !formatted_text.contains('│'),
+            "must not render side border characters"
+        );
+
+        use ratatui::widgets::Widget;
+        let layout = TranscriptLayout::new(formatted.clone(), 80);
+        let p = layout.paragraph_at(0);
+        let mut final_buf = Buffer::empty(Rect::new(0, 0, 80, 11));
+        p.render(Rect::new(0, 0, 80, 11), &mut final_buf);
+        for y in 0..11 {
+            assert_eq!(
+                final_buf[(5, y)].style().bg,
+                Some(ratatui::style::Color::Rgb(64, 64, 64)),
+                "row {y} must have continuous solid gray background"
+            );
+        }
+
+        let has_card_bg = formatted.lines.iter().any(|l| {
+            l.spans
+                .iter()
+                .any(|s| s.style.bg == Some(crate::terminal_theme::CARD_BACKGROUND))
+        });
+        assert!(has_card_bg, "must use gray CARD_BACKGROUND fill");
+    }
+
+    #[test]
+    fn plan_renders_as_borderless_inline_card_with_background() {
+        let sample = "# Implementation Plan: Borderless Plan Card\n\n## Objectives\n- [ ] Task 1: Create TranscriptRole::Plan\n- [x] Task 2: Completed step\n\n## Steps\n1. First step\n2. Second step\n\nFinal note paragraph.";
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let tui = ChatTui::handle(state.clone());
+        tui.push_plan(sample);
+
+        let locked = state.lock().unwrap();
+        assert_eq!(locked.transcript.len(), 1);
+        assert_eq!(locked.transcript[0].role, TranscriptRole::Plan);
+
+        let lines = locked.plain_transcript_lines();
+        let plain_joined = lines.join("\n");
+        assert!(
+            !plain_joined.contains("Command ›"),
+            "must not display Command › header"
+        );
+        assert!(
+            !plain_joined.contains("Mint ›"),
+            "must not display Mint › header"
+        );
+        assert!(
+            plain_joined.contains("Proposed Plan"),
+            "must mention Proposed Plan"
+        );
+        assert!(
+            plain_joined.contains("Borderless Plan Card"),
+            "must mention title"
+        );
+        assert!(
+            plain_joined.contains("Objectives"),
+            "must show section heading"
+        );
+        assert!(
+            plain_joined.contains("[ ]"),
+            "must show unchecked checklist icon"
+        );
+        assert!(
+            plain_joined.contains("[✓]"),
+            "must show checked checklist icon"
+        );
+        assert!(
+            plain_joined.contains("1. First step"),
+            "must show numbered list"
+        );
+
+        let formatted = locked.transcript_text(80);
+        let formatted_text = formatted
+            .lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !formatted_text.contains('╭') && !formatted_text.contains('┌'),
+            "must not render top border characters"
+        );
+        assert!(
+            !formatted_text.contains('╰') && !formatted_text.contains('└'),
+            "must not render bottom border characters"
+        );
+        assert!(
+            !formatted_text.contains('│'),
+            "must not render side border characters"
+        );
+
+        use ratatui::widgets::Widget;
+        let layout = TranscriptLayout::new(formatted.clone(), 80);
+        let p = layout.paragraph_at(0);
+        let card_height = locked.transcript[0].rendered_lines.len() as u16;
+        let mut final_buf = Buffer::empty(Rect::new(0, 0, 80, card_height));
+        p.render(Rect::new(0, 0, 80, card_height), &mut final_buf);
+        for y in 0..card_height {
+            assert_eq!(
+                final_buf[(5, y)].style().bg,
+                Some(ratatui::style::Color::Rgb(64, 64, 64)),
+                "row {y} must have continuous solid gray background"
+            );
+        }
+
+        let has_card_bg = formatted.lines.iter().any(|l| {
+            l.spans
+                .iter()
+                .any(|s| s.style.bg == Some(crate::terminal_theme::CARD_BACKGROUND))
+        });
+        assert!(has_card_bg, "must use gray CARD_BACKGROUND fill");
     }
 }

@@ -61,6 +61,7 @@ describe('web search image links', () => {
       calcData: { result: 42 },
       imageSearchData: null,
       imageGenData: null,
+      planData: null,
     })
     expect(extractToolCardPayloads(progress, '```weather_json\n{"city":"Bangkok"}\n```').weatherData).toBeNull()
   })

@@ -21,4 +21,15 @@ describe('skill approval', () => {
     expect(html).toContain('Reject')
     expect(html).not.toContain('Always allow for this session')
   })
+
+  it('renders plan review card with markdown body and approve/deny actions', () => {
+    const html = renderToStaticMarkup(<ApprovalCard
+      pendingApproval={{ approval: { ExitPlanMode: { plan: '## Implementation Steps\n- [ ] Step 1\n- [x] Step 2' } } }}
+      onApproval={() => {}}
+    />)
+    expect(html).toContain('Plan Review')
+    expect(html).toContain('Approve and proceed')
+    expect(html).toContain('Deny (keep planning)')
+    expect(html).not.toContain('Always allow for this session')
+  })
 })

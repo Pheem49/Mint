@@ -227,7 +227,12 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             agent_mode: true,
             plan_mode: false,
         },
-        "/release-notes" => message(crate::release_notes::text()),
+        "/release-notes"
+        | "/release_notes"
+        | "/release-note"
+        | "/release_note"
+        | "/releasenotes"
+        | "/releasenote" => message(crate::release_notes::text()),
         "/clear" => SlashResponse::Applied {
             markdown: "🧹 Conversation history cleared.".into(),
             effects: vec![SlashEffect::HistoryCleared],
@@ -2719,17 +2724,24 @@ mod tests {
     #[test]
     fn release_notes_are_available_on_every_surface() {
         for surface in ["cli", "desktop", "web"] {
-            match execute(
-                &req_surface("/release-notes", surface),
-                &mut MintConfig::default(),
-            ) {
-                SlashResponse::Message { markdown } => {
-                    assert!(markdown.starts_with("# Release Notes - Mint Agent"));
+            for cmd in [
+                "/release-notes",
+                "/release_notes",
+                "/release-note",
+                "/release_note",
+            ] {
+                match execute(&req_surface(cmd, surface), &mut MintConfig::default()) {
+                    SlashResponse::Message { markdown } => {
+                        assert!(
+                            markdown.starts_with("# Release Notes - Mint Agent"),
+                            "failed for command {cmd} on {surface}"
+                        );
+                    }
+                    other => panic!(
+                        "expected release notes for {cmd} on {surface}, got {}",
+                        serde_json::to_value(other).unwrap()
+                    ),
                 }
-                other => panic!(
-                    "expected release notes on {surface}, got {}",
-                    serde_json::to_value(other).unwrap()
-                ),
             }
         }
     }

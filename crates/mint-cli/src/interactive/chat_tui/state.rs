@@ -186,6 +186,19 @@ impl TuiHandle {
             state.scroll_from_bottom = 0;
         }
     }
+    pub fn push_release_notes(&self, text: impl Into<String>) {
+        if let Ok(mut state) = self.state.lock() {
+            state
+                .transcript
+                .push(TranscriptEntry::new(TranscriptRole::ReleaseNotes, text));
+            state.scroll_from_bottom = 0;
+        }
+    }
+    pub fn push_plan(&self, text: impl Into<String>) {
+        if let Ok(mut state) = self.state.lock() {
+            state.push_plan(text);
+        }
+    }
     #[allow(dead_code)]
     pub fn push_system(&self, text: impl Into<String>) {
         if let Ok(mut state) = self.state.lock() {
@@ -385,6 +398,9 @@ impl ChatViewState {
             ),
             _ => return None,
         };
+        if action == "exit_plan_mode" {
+            return None;
+        }
         let existing = self.tools.iter().position(|tool| {
             (end.is_some() || call_id.is_some())
                 && tool.running()
@@ -864,22 +880,41 @@ impl ChatViewState {
             // In-flight external turns use the shared-sync placeholder until a terminal snapshot arrives.
             if !matches!(turn_status, "running" | "queued") {
                 match &event {
-                    mint_core::AgentProgress::ToolStart { .. } => {
-                        self.record_tool_progress(&event);
-                    }
-                    mint_core::AgentProgress::ToolEnd { action, result, .. } => {
-                        if let Some(index) = self.record_tool_progress(&event) {
-                            self.tools[index].elapsed = value["data"]["elapsed_ms"]
-                                .as_u64()
-                                .or_else(|| value["data"]["elapsedMs"].as_u64())
-                                .map(std::time::Duration::from_millis);
-                            self.refresh_tool_card(index);
+                    mint_core::AgentProgress::ToolStart { action, .. } => {
+                        if action != "exit_plan_mode" {
+                            self.record_tool_progress(&event);
                         }
-                        if action == "web_search"
-                            && !result.starts_with("Web search error:")
-                            && result != "No web search results found."
-                        {
-                            sources.extend(crate::agent::parse_web_search_sources(result));
+                    }
+                    mint_core::AgentProgress::ToolEnd {
+                        action,
+                        input,
+                        result,
+                        ..
+                    } => {
+                        if action == "exit_plan_mode" {
+                            let plan_str = input
+                                .get("plan")
+                                .and_then(|p| p.as_str())
+                                .or_else(|| value["data"]["input"]["plan"].as_str());
+                            if let Some(plan) = plan_str {
+                                if !plan.trim().is_empty() {
+                                    self.push_plan(plan);
+                                }
+                            }
+                        } else {
+                            if let Some(index) = self.record_tool_progress(&event) {
+                                self.tools[index].elapsed = value["data"]["elapsed_ms"]
+                                    .as_u64()
+                                    .or_else(|| value["data"]["elapsedMs"].as_u64())
+                                    .map(std::time::Duration::from_millis);
+                                self.refresh_tool_card(index);
+                            }
+                            if action == "web_search"
+                                && !result.starts_with("Web search error:")
+                                && result != "No web search results found."
+                            {
+                                sources.extend(crate::agent::parse_web_search_sources(result));
+                            }
                         }
                     }
                     mint_core::AgentProgress::SubagentStarted { .. }
@@ -1178,6 +1213,11 @@ impl ChatViewState {
         }
         self.scroll_from_bottom = 0;
     }
+    pub fn push_plan(&mut self, text: impl Into<String>) {
+        self.transcript
+            .push(TranscriptEntry::new(TranscriptRole::Plan, text));
+        self.scroll_from_bottom = 0;
+    }
     #[cfg(test)]
     pub fn push_assistant(&mut self, text: impl Into<String>) {
         self.flush_assistant_reveal();
@@ -1438,6 +1478,7 @@ impl ChatViewState {
                 TranscriptRole::Assistant => Some(("Mint", crate::terminal_theme::ACCENT)),
                 TranscriptRole::Notice => None,
                 TranscriptRole::Command => Some(("Command", crate::terminal_theme::ACCENT)),
+                TranscriptRole::ReleaseNotes | TranscriptRole::Plan => None,
                 TranscriptRole::System => Some(("System", crate::terminal_theme::WARNING)),
             };
             if let Some((label, color)) = role_header {
@@ -1544,6 +1585,7 @@ impl ChatViewState {
                 TranscriptRole::Assistant => Some("Mint ›"),
                 TranscriptRole::Notice => None,
                 TranscriptRole::Command => Some("Command ›"),
+                TranscriptRole::ReleaseNotes | TranscriptRole::Plan => None,
                 TranscriptRole::System => Some("System ›"),
             } {
                 lines.push(header.to_owned());

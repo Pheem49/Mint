@@ -97,24 +97,38 @@ pub(crate) struct ChatTui {
     clipboard: TextClipboard,
 }
 
-fn route_mouse_wheel(state: &mut ChatViewState, kind: event::MouseEventKind) {
-    if let Some(dialog) = state.dialog.as_mut() {
-        match kind {
-            event::MouseEventKind::ScrollUp => {
-                dialog.body_scroll = dialog
-                    .body_scroll
-                    .min(dialog.body_max_scroll.get())
-                    .saturating_sub(3);
+fn route_mouse_wheel(
+    state: &mut ChatViewState,
+    kind: event::MouseEventKind,
+    point: Option<Position>,
+    transcript_area: Option<Rect>,
+) {
+    let in_transcript = match (point, transcript_area) {
+        (Some(pt), Some(area)) => area.contains(pt),
+        _ => false,
+    };
+
+    if !in_transcript {
+        if let Some(dialog) = state.dialog.as_mut() {
+            if dialog.body_max_scroll.get() > 0 {
+                match kind {
+                    event::MouseEventKind::ScrollUp => {
+                        dialog.body_scroll = dialog
+                            .body_scroll
+                            .min(dialog.body_max_scroll.get())
+                            .saturating_sub(3);
+                    }
+                    event::MouseEventKind::ScrollDown => {
+                        dialog.body_scroll = dialog
+                            .body_scroll
+                            .saturating_add(3)
+                            .min(dialog.body_max_scroll.get());
+                    }
+                    _ => {}
+                }
+                return;
             }
-            event::MouseEventKind::ScrollDown => {
-                dialog.body_scroll = dialog
-                    .body_scroll
-                    .saturating_add(3)
-                    .min(dialog.body_max_scroll.get());
-            }
-            _ => {}
         }
-        return;
     }
     match kind {
         event::MouseEventKind::ScrollUp => {
@@ -660,7 +674,12 @@ impl ChatTui {
                     if self.handle_selection_mouse(m, &mut state)? {
                         continue;
                     }
-                    route_mouse_wheel(&mut state, m.kind);
+                    route_mouse_wheel(
+                        &mut state,
+                        m.kind,
+                        Some(Position::new(m.column, m.row)),
+                        self.transcript_area,
+                    );
                 }
                 event::Event::Paste(text) => {
                     self.clear_mouse_selection();
@@ -937,17 +956,39 @@ impl ChatTui {
         match input_event {
             event::Event::Mouse(mouse) => {
                 if !self.handle_selection_mouse(mouse, state)? {
-                    route_mouse_wheel(state, mouse.kind);
+                    route_mouse_wheel(
+                        state,
+                        mouse.kind,
+                        Some(Position::new(mouse.column, mouse.row)),
+                        self.transcript_area,
+                    );
                 }
             }
             event::Event::Resize(_, _) => self.clear_mouse_selection(),
             event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
                 self.clear_mouse_selection();
-                if let Some(dialog) = state.dialog.as_mut()
-                    && let Some(answer) = dialog.handle_key(key)
-                    && let Some(dialog) = state.dialog.take()
-                {
-                    let _ = dialog.reply.send(answer);
+                let is_unscrollable_dialog = state
+                    .dialog
+                    .as_ref()
+                    .map_or(false, |d| d.body_max_scroll.get() == 0);
+                if let Some(dialog) = state.dialog.as_mut() {
+                    if let Some(answer) = dialog.handle_key(key) {
+                        if let Some(dialog) = state.dialog.take() {
+                            let _ = dialog.reply.send(answer);
+                        }
+                        return Ok(());
+                    }
+                }
+                if is_unscrollable_dialog {
+                    match key.code {
+                        event::KeyCode::PageUp => {
+                            state.scroll_from_bottom = state.scroll_from_bottom.saturating_add(10);
+                        }
+                        event::KeyCode::PageDown => {
+                            state.scroll_from_bottom = state.scroll_from_bottom.saturating_sub(10);
+                        }
+                        _ => {}
+                    }
                 }
             }
             _ => {}
@@ -1145,7 +1186,12 @@ impl ChatTui {
                             if self.handle_selection_mouse(mouse, &mut state)? {
                                 continue;
                             }
-                            route_mouse_wheel(&mut state, mouse.kind);
+                            route_mouse_wheel(
+                                &mut state,
+                                mouse.kind,
+                                Some(Position::new(mouse.column, mouse.row)),
+                                self.transcript_area,
+                            );
                         }
                     }
                     event::Event::Paste(text) => {

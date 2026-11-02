@@ -578,7 +578,7 @@ export default function ModelSelectorPopover({
   }, [currentInspected])
 
   const inspectedThinking = useMemo(() => {
-    if (!currentInspected) return { supported: false, enabled: false, effort: 'medium' }
+    if (!currentInspected) return { supported: false, hasNative: false, enabled: false, effort: 'medium' }
     return getThinkingConfig(currentInspected.model, currentInspected.providerId)
   }, [currentInspected, getThinkingConfig])
 

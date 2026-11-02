@@ -483,7 +483,11 @@ fn tui_approval(
         AgentApproval::UserApproval { title, prompt } => yes_no(title, prompt.to_owned()),
         AgentApproval::EnterPlanMode { reason } => yes_no("Enter plan mode?", reason.to_owned()),
         AgentApproval::ExitPlanMode { plan } => {
-            let outcome = yes_no("Review plan", plan.to_owned());
+            tui.push_plan(plan);
+            let outcome = yes_no(
+                "Review plan",
+                "Do you want to proceed with this plan?".to_string(),
+            );
             if outcome == ApprovalOutcome::Approved {
                 match save_plan_file(root, plan) {
                     Ok(path) => tui.push_notice(format!("Plan saved to {}", path.display())),

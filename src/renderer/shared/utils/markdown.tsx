@@ -19,6 +19,7 @@ const MermaidCard = lazy(() => import('../components/cards/MermaidCard'))
 const UiGridCard = lazy(() => import('../components/cards/UiGridCard'))
 const UiFeatureCard = lazy(() => import('../components/cards/UiFeatureCard'))
 const UiMockupWidget = lazy(() => import('../components/cards/UiMockupWidget'))
+import { ReleaseNotesCard } from '../components/cards/ReleaseNotesCard'
 import {
   Info,
   Lightbulb,
@@ -826,6 +827,14 @@ function splitVideoSegments(text: string): Segment[] {
 export function renderFormattedMessage(text: string, webSources: WebSearchSource[] = []): ReactNode {
   const displayText = readableAssistantText(text.replace(/\r\n?/g, '\n'))
   if (!displayText) return null
+
+  if (displayText.trimStart().startsWith('# Release Notes')) {
+    return (
+      <div className="chat-formatted-body">
+        <ReleaseNotesCard markdown={displayText} />
+      </div>
+    )
+  }
 
   const segments = splitVideoSegments(displayText)
   const sourceByImage = new Map(

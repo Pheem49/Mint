@@ -213,6 +213,7 @@ pub fn apply_tui_theme(buffer: &mut Buffer, theme: TuiTheme) {
                     Color::Gray => tokens.subtle,
                     ACCENT | WATERMARK_MARK => tokens.accent,
                     BLUE => tokens.blue,
+                    CARD_BORDER => Color::Rgb(175, 180, 188),
                     WATERMARK_RIM => tokens.watermark_rim,
                     WATERMARK_BAND => tokens.watermark_band,
                     WATERMARK_ORBIT => tokens.watermark_orbit,
@@ -245,6 +246,9 @@ pub const SELECTION_TEXT: Color = Color::Black;
 pub const SELECTION_BACKGROUND: Color = Color::Gray;
 pub const PANEL_BACKGROUND: Color = Color::Rgb(38, 48, 45); // #26302D
 pub const USER_MESSAGE_BACKGROUND: Color = Color::Rgb(64, 64, 64); // #404040
+/// Gray card surface and border tokens for framed transcript cards (e.g. Release Notes).
+pub const CARD_BACKGROUND: Color = USER_MESSAGE_BACKGROUND; // Color::Rgb(64, 64, 64) - matches user message bubble
+pub const CARD_BORDER: Color = Color::Rgb(115, 120, 130); // #737882 - clear neutral gray border
 /// Endpoints for the animated white glow used by the TUI thinking status.
 pub const THINKING_GLOW_DIM: (u8, u8, u8) = (100, 100, 110);
 pub const THINKING_GLOW_BRIGHT: (u8, u8, u8) = (255, 255, 255);
@@ -264,6 +268,27 @@ mod tests {
             assert_eq!(preview.added_background, tokens.added_background);
             assert_eq!(preview.removed_background, tokens.removed_background);
         }
+    }
+
+    #[test]
+    fn card_tokens_preserve_gray_background_in_auto_and_adapt_in_light() {
+        use ratatui::layout::Rect;
+
+        // In Auto theme, card background must not get cleared to Reset
+        let mut buf_auto = Buffer::empty(Rect::new(0, 0, 2, 2));
+        buf_auto[(0, 0)].set_bg(CARD_BACKGROUND).set_fg(CARD_BORDER);
+        apply_tui_theme(&mut buf_auto, TuiTheme::Auto);
+        assert_eq!(buf_auto[(0, 0)].bg, CARD_BACKGROUND);
+        assert_eq!(buf_auto[(0, 0)].fg, CARD_BORDER);
+
+        // In Light theme, card background and border adapt to light surface
+        let mut buf_light = Buffer::empty(Rect::new(0, 0, 2, 2));
+        buf_light[(0, 0)]
+            .set_bg(CARD_BACKGROUND)
+            .set_fg(CARD_BORDER);
+        apply_tui_theme(&mut buf_light, TuiTheme::Light);
+        assert_eq!(buf_light[(0, 0)].bg, Color::Rgb(225, 225, 225));
+        assert_eq!(buf_light[(0, 0)].fg, Color::Rgb(175, 180, 188));
     }
 }
 

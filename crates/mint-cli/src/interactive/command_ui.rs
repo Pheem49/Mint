@@ -38,6 +38,13 @@ impl ChoiceItem {
 pub trait CommandUi {
     fn push_notice_str(&mut self, text: &str);
     fn push_command_output_str(&mut self, text: &str);
+    fn push_release_notes(&mut self, notes: &str) {
+        self.push_command_output(notes);
+    }
+    #[allow(dead_code)]
+    fn push_plan(&mut self, plan: &str) {
+        self.push_command_output(plan);
+    }
     fn set_status(&mut self, lines: Vec<String>);
     fn clear_status(&mut self);
     fn open_thought_viewer(&mut self) -> Result<()> {
@@ -150,6 +157,14 @@ impl CommandUi for FullScreenCommandUi<'_> {
 
     fn push_command_output_str(&mut self, text: &str) {
         self.handle.push_command(text);
+    }
+
+    fn push_release_notes(&mut self, notes: &str) {
+        self.handle.push_release_notes(notes);
+    }
+
+    fn push_plan(&mut self, plan: &str) {
+        self.handle.push_plan(plan);
     }
 
     fn set_status(&mut self, lines: Vec<String>) {
@@ -433,6 +448,7 @@ impl CommandUi for ClassicCommandUi {
 pub struct MockCommandUi {
     pub notices: Vec<String>,
     pub command_outputs: Vec<String>,
+    pub release_notes: Vec<String>,
     pub status: Vec<String>,
     pub choice_answers: Vec<Option<usize>>,
     pub text_answers: Vec<Option<String>>,
@@ -453,6 +469,14 @@ impl CommandUi for MockCommandUi {
 
     fn push_command_output_str(&mut self, text: &str) {
         self.command_outputs.push(text.to_string());
+    }
+
+    fn push_release_notes(&mut self, notes: &str) {
+        self.release_notes.push(notes.to_string());
+    }
+
+    fn push_plan(&mut self, plan: &str) {
+        self.command_outputs.push(plan.to_string());
     }
 
     fn set_status(&mut self, lines: Vec<String>) {

@@ -819,6 +819,12 @@
   border-color: var(--border-subtle);
 }
 
+.approval-badge-chip.plan {
+  background: var(--accent-subtle, rgba(105, 230, 166, 0.12));
+  color: var(--accent, #69e6a6);
+  border: 1px solid var(--accent-border, rgba(105, 230, 166, 0.3));
+}
+
 .approval-content-box {
   width: 100%;
   box-sizing: border-box;
@@ -846,6 +852,17 @@
   padding: 2px 0;
   color: var(--text-main, #f4f4f5);
   text-align: left;
+}
+
+.approval-content-box.plan-review-content {
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  background: var(--bg-surface-soft, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 9px;
+  padding: 12px 16px;
+  white-space: normal;
 }
 
 .approval-reason-text {

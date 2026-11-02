@@ -205,7 +205,19 @@ async fn execute_core_slash(
     match response {
         SlashResponse::Message { markdown } => {
             if !markdown.is_empty() {
-                ui.push_command_output(markdown);
+                if matches!(
+                    cmd,
+                    "/release-notes"
+                        | "/release_notes"
+                        | "/release-note"
+                        | "/release_note"
+                        | "/releasenotes"
+                        | "/releasenote"
+                ) {
+                    ui.push_release_notes(&markdown);
+                } else {
+                    ui.push_command_output(markdown);
+                }
             }
             Some(SlashResult::Handled)
         }
@@ -2639,11 +2651,9 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
-        "/release-notes" => {
-            ui.push_command_output(format!(
-                "\n{BLUE}────────────────────────────────────────────{RESET}\n{}\n{BLUE}────────────────────────────────────────────{RESET}",
-                mint_core::release_notes::text()
-            ));
+        "/release-notes" | "/release_notes" | "/release-note" | "/release_note"
+        | "/releasenotes" | "/releasenote" => {
+            ui.push_release_notes(&mint_core::release_notes::text());
             Some(SlashResult::Handled)
         }
 
@@ -4236,5 +4246,40 @@ mod tests {
         let res = handle_slash_command(&mut session, &mut ui, "/fast on").await;
         assert!(matches!(res, Some(SlashResult::Handled)));
         assert!(session.fast_mode);
+    }
+
+    #[tokio::test]
+    async fn slash_release_notes_routes_to_push_release_notes() {
+        let mut session = InteractiveSession {
+            chat_id: mint_core::CHAT_CLI_ID.to_string(),
+            config: MintConfig::default(),
+            current_dir: std::env::current_dir().unwrap(),
+            fast_mode: false,
+            plan_mode: false,
+            pending_image: None,
+            history: Vec::new(),
+            jobs: BackgroundJobs::new(),
+        };
+
+        for cmd in [
+            "/release-notes",
+            "/release_notes",
+            "/release-note",
+            "/release_note",
+        ] {
+            let mut ui = MockCommandUi::new();
+            let res = handle_slash_command(&mut session, &mut ui, cmd).await;
+            assert!(matches!(res, Some(SlashResult::Handled)));
+            assert!(
+                ui.command_outputs.is_empty(),
+                "must not route {cmd} to push_command_output"
+            );
+            assert_eq!(
+                ui.release_notes.len(),
+                1,
+                "must route {cmd} to push_release_notes"
+            );
+            assert!(ui.release_notes[0].contains("Release Notes"));
+        }
     }
 }

@@ -360,3 +360,135 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* --- Release Notes Card Widget --- */
+.release-notes-card {
+  border-radius: var(--radius-lg, 10px);
+  border: none;
+  background: color-mix(in srgb, #404040 95%, transparent);
+  backdrop-filter: var(--glass-blur, blur(12px));
+  -webkit-backdrop-filter: var(--glass-blur, blur(12px));
+  padding: 16px 18px;
+  margin: 10px 0;
+  color: var(--text-main, #e8e8ea);
+}
+
+.release-notes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.release-notes-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: var(--text-main, #e8e8ea);
+}
+
+.release-notes-icon {
+  color: var(--accent, #10b981);
+}
+
+.release-notes-version-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: var(--radius-full, 999px);
+  background: color-mix(in srgb, var(--accent, #10b981) 15%, transparent);
+  color: var(--accent, #10b981);
+  border: 1px solid color-mix(in srgb, var(--accent, #10b981) 30%, transparent);
+}
+
+.release-notes-count-badge {
+  font-size: 0.72rem;
+  color: var(--text-muted, #8f8f94);
+  font-weight: 500;
+}
+
+.release-notes-track {
+  display: none;
+}
+
+.release-notes-bar {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, var(--accent, #10b981), var(--status-listening, #7dd3fc));
+}
+
+.release-notes-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.release-notes-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-main, #e8e8ea);
+  margin-bottom: 6px;
+}
+
+.release-notes-bullet {
+  color: var(--text-muted, #9ca3af);
+  font-size: 0.75rem;
+}
+
+.release-notes-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 6px;
+}
+
+.release-notes-item {
+  font-size: 0.76rem;
+  line-height: 1.55;
+  color: var(--text-main, #e8e8ea);
+}
+
+.release-notes-item-header {
+  display: inline;
+}
+
+.release-notes-item-bullet {
+  color: var(--accent, #10b981);
+  margin-right: 6px;
+  font-weight: bold;
+}
+
+.release-notes-item-title {
+  font-weight: 650;
+  color: var(--text-main, #fff);
+  margin-right: 5px;
+}
+
+.release-notes-item-desc {
+  color: var(--text-main, #d1d5db);
+}
+
+.release-notes-subitems {
+  margin-top: 4px;
+  margin-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.release-notes-subitem {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.73rem;
+  color: var(--text-muted, #9ca3af);
+}
+
+.release-notes-subitem-bullet {
+  color: var(--text-muted, #9ca3af);
+}

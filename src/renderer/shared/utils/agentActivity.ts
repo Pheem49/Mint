@@ -188,6 +188,9 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     case 'note_write':
       rawTarget = name || path || '(note)'
       break
+    case 'exit_plan_mode':
+      rawTarget = 'plan approval'
+      break
     default:
       rawTarget = path || query || command || expression || symbol || city || url || selector || filter || name || tool || action.replaceAll('_', ' ')
       break
