@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useProviderModels } from '@/hooks/useProviderModels'
 import { catalogPlatform } from '../../platform'
-import { HF_MODELS, getModelMetadata, isFreeModel, OPENROUTER_POPULAR_MODELS } from '../../constants/models'
+import { HF_MODELS, getModelMetadata, hasNativeThinkingSupport, isFreeModel, OPENROUTER_POPULAR_MODELS } from '../../constants/models'
 import type { CustomProviderConfig } from '../../types'
 import anthropicLogo from '@lobehub/icons-static-svg/icons/anthropic.svg?url'
 import deepseekLogo from '@lobehub/icons-static-svg/icons/deepseek-color.svg?url'
@@ -427,17 +427,28 @@ export default function ModelSelectorPopover({
   // Helper to resolve a model's thinking status
   const getThinkingConfig = useCallback((model: string, provider: string) => {
     const meta = getModelMetadata(model, provider)
+    const hasNative = hasNativeThinkingSupport(model, provider)
+    if (!meta.supportsThinking) {
+      return {
+        supported: false,
+        hasNative: false,
+        enabled: false,
+        effort: 'medium',
+      }
+    }
     const override = modelThinkingOverrides[model]
     if (override) {
       return {
-        supported: meta.supportsThinking,
+        supported: true,
+        hasNative,
         enabled: override.enabled ?? true,
         effort: (override.effort || 'medium').toLowerCase(),
       }
     }
     return {
-      supported: meta.supportsThinking,
-      enabled: meta.supportsThinking ? (settingsConfig?.thinkingEnabled ?? true) : false,
+      supported: true,
+      hasNative,
+      enabled: hasNative ? (settingsConfig?.thinkingEnabled ?? true) : false,
       effort: (settingsConfig?.thinkingEffort || 'medium').toLowerCase(),
     }
   }, [modelThinkingOverrides, settingsConfig?.thinkingEnabled, settingsConfig?.thinkingEffort])
@@ -857,9 +868,12 @@ export default function ModelSelectorPopover({
                   <button
                     type="button"
                     role="switch"
+                    disabled={!inspectedThinking.supported}
                     aria-checked={inspectedThinking.enabled}
                     className={`model-detail-switch ${inspectedThinking.enabled ? 'checked' : ''}`}
+                    style={!inspectedThinking.supported ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
                     onClick={() => {
+                      if (!inspectedThinking.supported) return
                       persistThinking(
                         currentInspected.model,
                         !inspectedThinking.enabled,
@@ -867,7 +881,9 @@ export default function ModelSelectorPopover({
                       )
                     }}
                     title={
-                      inspectedThinking.enabled
+                      !inspectedThinking.supported
+                        ? 'Thinking is not available for non-text models'
+                        : inspectedThinking.enabled
                         ? 'Disable thinking'
                         : 'Enable thinking'
                     }
@@ -876,16 +892,28 @@ export default function ModelSelectorPopover({
                   </button>
                 </div>
 
-                {!inspectedThinking.supported && (
-                  <div className="model-unsupported-note" style={{ color: inspectedThinking.enabled ? 'var(--interactive-fg)' : undefined }}>
-                    {inspectedThinking.enabled
-                      ? 'Thinking enabled (force toggle)'
-                      : 'Not flagged as reasoning model by default (toggle to force enable)'}
-                  </div>
-                )}
+                <div
+                  className="model-unsupported-note"
+                  style={{
+                    color:
+                      inspectedThinking.supported && inspectedThinking.enabled
+                        ? 'var(--interactive-fg)'
+                        : undefined,
+                  }}
+                >
+                  {!inspectedThinking.supported
+                    ? 'Non-text model (image/audio/embedding) — Thinking is not applicable'
+                    : inspectedThinking.enabled
+                    ? inspectedThinking.hasNative
+                      ? 'Native Reasoning API active'
+                      : 'Prompted Chain-of-Thought (<think>) active'
+                    : inspectedThinking.hasNative
+                    ? 'Supports Native Reasoning API'
+                    : 'Supports Prompted Chain-of-Thought (<think>)'}
+                </div>
 
                 {/* Effort Section (visible when Thinking is ON) */}
-                {inspectedThinking.enabled && (
+                {inspectedThinking.supported && inspectedThinking.enabled && (
                   <div className="model-effort-section">
                     <div className="model-detail-section-title">Effort</div>
                     <div className="model-effort-list">

@@ -1,5 +1,14 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Smart Generic Thinking & Multi-Provider Reasoning Architecture (CLI, Desktop, and Web)
+- **Safe Non-Text Filter**: Automatically excludes only non-text media and embedding models (`banana`, `imagen`, `image`, `dall-e`, `flux`, `sdxl`, `sd3`, `ideogram`, `veo-`, `tts`, `whisper`, `embed`, `aqa`, `moderation`, `native-audio`, `-live-`) from Chain-of-Thought reasoning, disabling the Thinking toggle in the UI and `/thinking` CLI command so non-text endpoints never receive invalid reasoning payloads.
+- **Unrestricted Thinking Control on All Chat Models**: Unlocked the Thinking toggle (`ON` / `OFF`) and `Effort` selector (`Low`, `Medium`, `High`, `Extra High`) for all text and chat models across Gemini, DeepSeek, OpenAI, Anthropic, OpenRouter, Ollama, HuggingFace, and Local providers.
+- **Provider-Accurate Native Reasoning Payloads**:
+  - **DeepSeek (`deepseek-flash`, `deepseek-v4-pro`, `deepseek-reasoner`)**: Sends `reasoning_effort` (`"none"`, `"low"`, `"medium"`, `"high"`, `"max"`) and `thinking: { "type": "enabled" | "disabled" }` per the DeepSeek V4 specification, with `1M` context window metadata.
+  - **Google Gemini (`gemini-2.5-*`, `gemini-3.*`)**: Explicitly passes `"includeThoughts": true` alongside `thinkingBudget` inside `generationConfig.thinkingConfig` across both single-turn and multi-turn streaming requests, with automatic HTTP 400 retry fallback if a specific endpoint rejects `thinkingConfig`.
+  - **OpenAI, OpenRouter & Anthropic**: Maps effort levels to `reasoning_effort` (`o1`/`o3`/`o4`/`gpt-5`), OpenRouter `reasoning: { "effort" }` / `reasoning: { "exclude": true }`, and Anthropic `thinking: { "type": "enabled", "budget_tokens": N }`.
+- **Prompt-Based Chain-of-Thought Fallback (`<think>...</think>`)**: When Thinking is enabled on a chat model without a dedicated native reasoning API parameter (e.g. `gpt-4o`, `claude-haiku-4.5`, `deepseek-chat`, `gemini-1.5-flash`), Mint automatically injects an effort-scaled `<think>...</think>` system directive and streams parsed `<think>` / `<thought>` blocks into the collapsible Thinking UI across CLI TUI, Desktop, and Web.
+
 ## Code Block UI & Copy Ergonomics (CLI, Desktop, and Web)
 - **Frictionless CLI Code Copying**: Removed the vertical gutter bar (`│ `) from CLI code blocks, replacing it with 2-space clean indentation. Terminal mouse selection or double-clicking commands now copies pure, runnable code without grabbing border characters or breaking shell commands (`bash: │: command not found`).
 - **Smart Line Numbers on Desktop & Web**: Automatically hides line numbers for short commands and snippets ($\le 5$ lines), eliminating unnecessary 44px gutter clutter. Added an optional `#` toggle button for longer code blocks.

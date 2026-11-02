@@ -927,16 +927,33 @@ fn capitalize_effort(s: &str) -> String {
 fn cmd_thinking(rest: &str, config: &mut MintConfig) -> SlashResponse {
     let model = config.active_model().to_string();
     let supported = config.is_thinking_supported();
+    let has_native = MintConfig::has_native_thinking_api(&config.ai_provider, &model);
+    let mode_desc = if !supported {
+        "Non-text model (image/audio/embedding)"
+    } else if has_native {
+        "Native Reasoning API"
+    } else {
+        "Prompted CoT (<think>)"
+    };
     let (current_enabled, current_effort) = config.resolved_thinking();
     let raw = rest.trim().to_ascii_lowercase();
 
+    if !supported && raw != "off" && raw != "disable" && raw != "false" {
+        return message(format!(
+            "⚠️ **Thinking is not available for `{model}`**\n\n\
+             `{model}` is classified as a non-text model (image/audio/embedding), which does not support Chain-of-Thought reasoning."
+        ));
+    }
+
     if raw.is_empty() {
-        let status_label = if !supported {
-            "Not supported by active model".to_string()
-        } else if current_enabled {
-            format!("ON (Effort: {})", capitalize_effort(current_effort))
+        let status_label = if current_enabled {
+            format!(
+                "ON ({}, Effort: {})",
+                mode_desc,
+                capitalize_effort(current_effort)
+            )
         } else {
-            "OFF".to_string()
+            format!("OFF ({mode_desc})")
         };
 
         let mut choices = Vec::new();
@@ -976,14 +993,15 @@ fn cmd_thinking(rest: &str, config: &mut MintConfig) -> SlashResponse {
             "⚠️ Thinking is **not supported** by the current active model.".to_string()
         } else if current_enabled {
             format!(
-                "✅ Thinking is **ON** (Effort: **{}**)",
-                capitalize_effort(current_effort)
+                "✅ Thinking is **ON** (Effort: **{}**, Mode: `{}`)",
+                capitalize_effort(current_effort),
+                mode_desc
             )
         } else {
-            "⏸️ Thinking is **OFF**".to_string()
+            format!("⏸️ Thinking is **OFF** (Mode: `{mode_desc}`)")
         };
         return message(format!(
-            "🧠 **Thinking Status**\n\n- Active Model: `{model}`\n- Supported: **{supported}**\n- State: {status_label}\n\nUsage: `/thinking [on|off|low|medium|high|extra_high]`"
+            "🧠 **Thinking Status**\n\n- Active Model: `{model}`\n- Supported: **{supported}** (`{mode_desc}`)\n- State: {status_label}\n\nUsage: `/thinking [on|off|low|medium|high|extra_high]`"
         ));
     }
 
@@ -1019,16 +1037,11 @@ fn cmd_thinking(rest: &str, config: &mut MintConfig) -> SlashResponse {
     config.thinking_enabled = new_enabled;
     config.thinking_effort = new_effort.clone();
 
-    let text = if !supported {
+    let text = if new_enabled {
         format!(
-            "🧠 Updated thinking preference for `{model}` to **{}** (Effort: **{}**).\n*Note: `{model}` may not natively emit reasoning tokens.*",
-            if new_enabled { "ON" } else { "OFF" },
-            capitalize_effort(&new_effort)
-        )
-    } else if new_enabled {
-        format!(
-            "🧠 Thinking **ON** for `{model}` (Effort: **{}**).",
-            capitalize_effort(&new_effort)
+            "🧠 Thinking **ON** for `{model}` (Effort: **{}**, Mode: `{}`).",
+            capitalize_effort(&new_effort),
+            mode_desc
         )
     } else {
         format!("🧠 Thinking **OFF** for `{model}`.")
@@ -3282,14 +3295,24 @@ mod tests {
             other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
         }
 
-        // 5. Non-reasoning model accepts preference with advisory note
+        // 5. Non-native chat model accepts preference with Prompted CoT mode
         cfg.ai_provider = "openai".into();
         cfg.openai_model = "gpt-4o".into();
         match execute(&req("/thinking on"), &mut cfg) {
             SlashResponse::Applied { markdown, .. } => {
-                assert!(markdown.contains("may not natively emit reasoning tokens"));
+                assert!(markdown.contains("Prompted CoT (<think>)"));
             }
             other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 6. Non-text media model rejects enabling thinking
+        cfg.ai_provider = "gemini".into();
+        cfg.gemini_model = "nano-banana-pro-preview".into();
+        match execute(&req("/thinking on"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("Thinking is not available"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
         }
     }
 

@@ -773,51 +773,129 @@ impl MintConfig {
         }
     }
 
-    /// Returns whether thinking/reasoning is supported by a given provider & model.
-    pub fn is_thinking_supported_for_model(provider: &str, model: &str) -> bool {
-        let p = provider.to_ascii_lowercase();
-        let m = model.to_ascii_lowercase();
+    /// Returns true if the model ID refers to a non-text media or embedding model
+    /// (e.g. image generation/editing, TTS, STT, embeddings, moderation, or live-only audio).
+    pub fn is_non_text_model(model: &str) -> bool {
+        let m = model.trim().to_ascii_lowercase();
+        if m.is_empty() {
+            return true;
+        }
+        m.contains("banana")
+            || m.contains("imagen")
+            || m.contains("image")
+            || m.contains("dall-e")
+            || m.contains("flux")
+            || m.contains("sdxl")
+            || m.contains("sd3")
+            || m.contains("ideogram")
+            || m.contains("veo-")
+            || m.contains("whisper")
+            || m.contains("tts")
+            || m.contains("embed")
+            || m.contains("aqa")
+            || m.contains("moderation")
+            || m.contains("native-audio")
+            || m.contains("-live-")
+            || m.ends_with("-live")
+    }
+
+    /// Returns whether the provider's HTTP endpoint natively accepts a dedicated thinking/reasoning
+    /// payload parameter for this model (as opposed to using the prompt-based `<think>` CoT fallback).
+    pub fn has_native_thinking_api(provider: &str, model: &str) -> bool {
+        if Self::is_non_text_model(model) {
+            return false;
+        }
+        let p = provider.trim().to_ascii_lowercase();
+        let m = model.trim().to_ascii_lowercase();
         if p == "gemini" {
             return m.contains("2.5")
-                || m.contains("2.0")
+                || m.contains("2.0-flash-thinking")
                 || m.contains("3.")
+                || m.contains("gemini-3-")
+                || m.ends_with("gemini-3")
+                || m.contains("4.")
+                || m.contains("gemini-4-")
+                || m.contains("argon")
                 || m.contains("thinking");
         }
         if p == "anthropic" {
             return m.contains("3-7")
                 || m.contains("3.7")
-                || m.contains("sonnet-5")
-                || m.contains("opus-5")
                 || m.contains("sonnet-4")
-                || m.contains("opus-4");
+                || m.contains("opus-4")
+                || m.contains("haiku-4")
+                || m.contains("claude-4")
+                || m.contains("sonnet-5")
+                || m.contains("opus-5");
         }
         if p == "openai" || p == "local_openai" {
-            return m.starts_with("o1")
-                || m.starts_with("o3")
+            let slug = m.rsplit('/').next().unwrap_or(&m);
+            return slug.starts_with("o1")
+                || slug.starts_with("o3")
+                || slug.starts_with("o4")
                 || m.contains("thinking")
                 || m.contains("reason")
-                || m.contains("gpt-5");
+                || m.contains("gpt-5")
+                || m.contains("r1")
+                || m.contains("qwq");
         }
         if p == "deepseek" {
-            return m.contains("reasoner") || m.contains("r1") || m.contains("deepseek");
+            return m.contains("flash")
+                || m.contains("v4")
+                || m.contains("reasoner")
+                || m.contains("r1")
+                || m.contains("thinking");
         }
         if p == "openrouter" {
             return m.contains("o1")
                 || m.contains("o3")
+                || m.contains("o4")
+                || m.contains("gpt-5")
                 || m.contains("thinking")
                 || m.contains("reason")
                 || m.contains("r1")
                 || m.contains("qwq")
-                || m.contains("glm")
-                || m.contains("deepseek");
+                || m.contains("deepseek-flash")
+                || m.contains("deepseek-v4")
+                || m.contains("gemini-2.5")
+                || m.contains("gemini-3")
+                || m.contains("claude-3-7")
+                || m.contains("claude-3.7")
+                || m.contains("claude-4")
+                || m.contains("sonnet-4")
+                || m.contains("opus-4")
+                || m.contains("sonnet-5")
+                || m.contains("opus-5");
         }
         if p == "ollama" {
             return m.contains("r1")
                 || m.contains("qwq")
+                || m.contains("qwen3")
                 || m.contains("thinking")
                 || m.contains("deepseek");
         }
         false
+    }
+
+    /// Returns whether thinking/reasoning is supported by a given provider & model
+    /// (either via native provider API parameters or prompt-based `<think>` CoT fallback).
+    /// Only non-text models (image generation, TTS/STT, embeddings) return `false`.
+    pub fn is_thinking_supported_for_model(provider: &str, model: &str) -> bool {
+        if Self::is_non_text_model(model) {
+            return false;
+        }
+        let p = provider.trim().to_ascii_lowercase();
+        matches!(
+            p.as_str(),
+            "gemini"
+                | "anthropic"
+                | "openai"
+                | "local_openai"
+                | "deepseek"
+                | "openrouter"
+                | "ollama"
+                | "huggingface"
+        ) || p.starts_with("custom:")
     }
 
     /// Returns whether the active model supports thinking/reasoning.
@@ -828,6 +906,9 @@ impl MintConfig {
     /// Resolves thinking enabled state for a model.
     pub fn resolved_thinking_enabled_for_model(&self, provider: &str, model: &str) -> bool {
         let model_clean = model.trim();
+        if !Self::is_thinking_supported_for_model(provider, model_clean) {
+            return false;
+        }
         if let Some(cfg) = self.model_thinking_configs.get(model_clean) {
             return cfg.enabled;
         }
@@ -837,8 +918,8 @@ impl MintConfig {
                 return v.enabled;
             }
         }
-        // If not explicitly configured, enable by default only if model supports it
-        if Self::is_thinking_supported_for_model(provider, model) {
+        // If not explicitly overridden per-model, enable by default for models with native thinking API
+        if Self::has_native_thinking_api(provider, model_clean) {
             self.thinking_enabled
         } else {
             false
@@ -1815,7 +1896,7 @@ mod tests {
     fn test_thinking_configuration_and_resolution() {
         let mut config = MintConfig::default();
 
-        // Support checks
+        // All text/chat models support thinking (via native API or prompt fallback)
         assert!(MintConfig::is_thinking_supported_for_model(
             "anthropic",
             "claude-3-7-sonnet"
@@ -1825,21 +1906,70 @@ mod tests {
             "gemini-2.5-pro"
         ));
         assert!(MintConfig::is_thinking_supported_for_model(
+            "gemini",
+            "gemini-3-flash-preview"
+        ));
+        assert!(MintConfig::is_thinking_supported_for_model(
             "openai", "o3-mini"
         ));
         assert!(MintConfig::is_thinking_supported_for_model(
             "deepseek",
             "deepseek-reasoner"
         ));
-        assert!(!MintConfig::is_thinking_supported_for_model(
+        assert!(MintConfig::is_thinking_supported_for_model(
+            "deepseek",
+            "deepseek-flash"
+        ));
+        assert!(MintConfig::is_thinking_supported_for_model(
+            "deepseek",
+            "deepseek-v4-pro"
+        ));
+        assert!(MintConfig::is_thinking_supported_for_model(
             "openai", "gpt-4o"
         ));
-        assert!(!MintConfig::is_thinking_supported_for_model(
+        assert!(MintConfig::is_thinking_supported_for_model(
             "anthropic",
             "claude-3-5-haiku"
         ));
 
-        // Global default resolution
+        // Non-text models (image / audio / embedding) do NOT support thinking
+        assert!(!MintConfig::is_thinking_supported_for_model(
+            "gemini",
+            "nano-banana-pro-preview"
+        ));
+        assert!(!MintConfig::is_thinking_supported_for_model(
+            "gemini",
+            "gemini-nano-banana-2.1"
+        ));
+        assert!(!MintConfig::is_thinking_supported_for_model(
+            "gemini",
+            "imagen-3.0-generate-002"
+        ));
+        assert!(!MintConfig::is_thinking_supported_for_model(
+            "openai",
+            "text-embedding-3-small"
+        ));
+
+        // Native thinking API detection
+        assert!(MintConfig::has_native_thinking_api(
+            "deepseek",
+            "deepseek-flash"
+        ));
+        assert!(MintConfig::has_native_thinking_api(
+            "deepseek",
+            "deepseek-v4-pro"
+        ));
+        assert!(!MintConfig::has_native_thinking_api(
+            "deepseek",
+            "deepseek-chat"
+        ));
+        assert!(MintConfig::has_native_thinking_api(
+            "gemini",
+            "gemini-3-flash-preview"
+        ));
+        assert!(!MintConfig::has_native_thinking_api("openai", "gpt-4o"));
+
+        // Global default resolution for native thinking model
         config.ai_provider = "anthropic".into();
         config.anthropic_model = "claude-3-7-sonnet".into();
         let (enabled, effort) = config.resolved_thinking();
@@ -1857,9 +1987,21 @@ mod tests {
         let (enabled, _) = config.resolved_thinking();
         assert!(!enabled);
 
-        // Unsupported model always resolves enabled to false
+        // Standard chat model without native thinking API defaults to false until toggled on
         config.ai_provider = "openai".into();
         config.openai_model = "gpt-4o".into();
+        let (enabled, _) = config.resolved_thinking();
+        assert!(!enabled);
+        // Once user toggles it on, it enables thinking (via prompt fallback)
+        config.set_model_thinking("gpt-4o", true, "high");
+        let (enabled, effort) = config.resolved_thinking();
+        assert!(enabled);
+        assert_eq!(effort, "high");
+
+        // Non-text model always resolves enabled to false even if overridden
+        config.ai_provider = "gemini".into();
+        config.gemini_model = "nano-banana-pro-preview".into();
+        config.set_model_thinking("nano-banana-pro-preview", true, "high");
         let (enabled, _) = config.resolved_thinking();
         assert!(!enabled);
     }

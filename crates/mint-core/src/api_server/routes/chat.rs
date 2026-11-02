@@ -53,6 +53,26 @@ impl ApiChatRequest {
     }
 }
 
+fn apply_request_overrides_to_config(config: &mut MintConfig, chat_req: &ChatRequest) {
+    let active_model = config.active_model().to_string();
+    if let Some(temp) = chat_req.temperature {
+        config.temperature = Some(temp);
+        config.set_model_temperature(&active_model, Some(temp));
+    }
+    if chat_req.thinking_enabled.is_some() || chat_req.thinking_effort.is_some() {
+        let (cur_enabled, cur_effort) = config.resolved_thinking();
+        let enabled = chat_req.thinking_enabled.unwrap_or(cur_enabled);
+        let effort = chat_req
+            .thinking_effort
+            .as_deref()
+            .unwrap_or(cur_effort)
+            .to_string();
+        config.thinking_enabled = enabled;
+        config.thinking_effort = effort.clone();
+        config.set_model_thinking(&active_model, enabled, &effort);
+    }
+}
+
 pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpStream) {
     let owner = match background_request_owner(ctx.request_str) {
         Ok(owner) => owner,
@@ -98,9 +118,10 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
     match (method, route) {
         ("POST", "/api/chat") => {
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
-                let config = load_config().unwrap_or_default();
+                let mut config = load_config().unwrap_or_default();
                 let metadata = req.attachment_metadata.clone();
                 let chat_req = req.into_chat_request(&config);
+                apply_request_overrides_to_config(&mut config, &chat_req);
                 let (mut chat_req, receipt) =
                     match crate::library::prepare_chat(&chat_req, metadata.as_ref(), &config).await
                     {
@@ -229,9 +250,10 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
 
         ("POST", "/api/chat-stream") => {
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
-                let config = load_config().unwrap_or_default();
+                let mut config = load_config().unwrap_or_default();
                 let metadata = req.attachment_metadata.clone();
                 let chat_req = req.into_chat_request(&config);
+                apply_request_overrides_to_config(&mut config, &chat_req);
                 let (mut chat_req, receipt) =
                     match crate::library::prepare_chat(&chat_req, metadata.as_ref(), &config).await
                     {

@@ -27,6 +27,26 @@ pub(crate) enum DesktopStreamEvent {
     },
 }
 
+fn apply_request_overrides_to_config(config: &mut mint_core::MintConfig, chat_req: &ChatRequest) {
+    let active_model = config.active_model().to_string();
+    if let Some(temp) = chat_req.temperature {
+        config.temperature = Some(temp);
+        config.set_model_temperature(&active_model, Some(temp));
+    }
+    if chat_req.thinking_enabled.is_some() || chat_req.thinking_effort.is_some() {
+        let (cur_enabled, cur_effort) = config.resolved_thinking();
+        let enabled = chat_req.thinking_enabled.unwrap_or(cur_enabled);
+        let effort = chat_req
+            .thinking_effort
+            .as_deref()
+            .unwrap_or(cur_effort)
+            .to_string();
+        config.thinking_enabled = enabled;
+        config.thinking_effort = effort.clone();
+        config.set_model_thinking(&active_model, enabled, &effort);
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn send_chat_message(
     app: AppHandle,
@@ -52,6 +72,7 @@ pub(crate) async fn send_chat_message(
     }
     let (request, receipt) =
         mint_core::library::prepare_chat(&request, attachment_metadata.as_ref(), &config).await?;
+    apply_request_overrides_to_config(&mut config, &request);
 
     if request.message.starts_with("/chat ") {
         let mut clean_request = request.clone();
@@ -225,6 +246,7 @@ pub(crate) async fn stream_chat_message(
     }
     let (request, receipt) =
         mint_core::library::prepare_chat(&request, attachment_metadata.as_ref(), &config).await?;
+    apply_request_overrides_to_config(&mut config, &request);
 
     if request.message.starts_with("/chat ") {
         let mut clean_request = request.clone();

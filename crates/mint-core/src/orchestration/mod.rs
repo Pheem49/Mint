@@ -2562,7 +2562,19 @@ where
                     }
 
                     if decision.action == "finish" {
-                        let mut summary = decision.input.summary.trim().to_owned();
+                        let (inline_summary_thought, cleaned_summary) =
+                            crate::chat::extract_think_tag(decision.input.summary.trim());
+                        if let Some(th) = inline_summary_thought
+                            && !fast_mode
+                            && !extended_emitted
+                        {
+                            progress(AgentProgress::ExtendedThinking {
+                                id: Some(thought_id.clone()),
+                                thought: th,
+                                elapsed_ms: Some(thought_started.elapsed().as_millis() as u64),
+                            });
+                        }
+                        let mut summary = cleaned_summary.trim().to_owned();
                         if summary.is_empty() {
                             let err_msg = "Error: Your finish action summary was empty. \
                                        You MUST provide a final answer, explanation, or response to the user's query \
@@ -3978,11 +3990,9 @@ async fn execute_tool_outcome_reviewed_inner(
     run_control::check()?;
     if decision.action == "view_image" {
         use crate::media::tool_images::{self, ViewTarget};
-        let target = tool_images::resolve_view_target(
-            &decision.input.path,
-            &decision.input.artifact_id,
-        )
-        .map_err(OrchestrationError::Agent)?;
+        let target =
+            tool_images::resolve_view_target(&decision.input.path, &decision.input.artifact_id)
+                .map_err(OrchestrationError::Agent)?;
         let root = root.to_path_buf();
         let config = config.clone();
         let chat = chat_id.to_owned();
@@ -3995,46 +4005,44 @@ async fn execute_tool_outcome_reviewed_inner(
         // repeat request can be refused before it creates another chat artifact.
         let loaded = {
             let (chat, artifact_id) = (chat.clone(), artifact_id.clone());
-            tokio::task::spawn_blocking(
-                move || -> Result<LoadedImage, String> {
-                    if !artifact_id.is_empty() {
-                        let (entry, bytes) = crate::mcp_result::read_artifact(&artifact_id)?;
-                        if entry.chat_id != chat || entry.kind != "image" {
-                            return Err("Image artifact is not available in this conversation.".into());
-                        }
-                        return Ok((tool_images::content_key(&bytes), None));
+            tokio::task::spawn_blocking(move || -> Result<LoadedImage, String> {
+                if !artifact_id.is_empty() {
+                    let (entry, bytes) = crate::mcp_result::read_artifact(&artifact_id)?;
+                    if entry.chat_id != chat || entry.kind != "image" {
+                        return Err("Image artifact is not available in this conversation.".into());
                     }
-                    let path = agent_read_path(&root, &path, &config).map_err(|e| e.to_string())?;
-                    let path = assert_path_capability(&path, Capability::Read, &config)
-                        .map_err(|e| e.to_string())?;
-                    if std::fs::metadata(&path).map_err(|e| e.to_string())?.len()
-                        > tool_images::ORIGINAL_LIMIT as u64
-                    {
-                        return Err("Image exceeds 20 MiB".into());
-                    }
-                    let mime = match path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("")
-                        .to_ascii_lowercase()
-                        .as_str()
-                    {
-                        "png" => "image/png",
-                        "jpg" | "jpeg" => "image/jpeg",
-                        "gif" => "image/gif",
-                        "webp" => "image/webp",
-                        "svg" => "image/svg+xml",
-                        _ => return Err("Unsupported image type".into()),
-                    };
-                    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-                    let name = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("Image")
-                        .to_owned();
-                    Ok((tool_images::content_key(&bytes), Some((bytes, mime, name))))
-                },
-            )
+                    return Ok((tool_images::content_key(&bytes), None));
+                }
+                let path = agent_read_path(&root, &path, &config).map_err(|e| e.to_string())?;
+                let path = assert_path_capability(&path, Capability::Read, &config)
+                    .map_err(|e| e.to_string())?;
+                if std::fs::metadata(&path).map_err(|e| e.to_string())?.len()
+                    > tool_images::ORIGINAL_LIMIT as u64
+                {
+                    return Err("Image exceeds 20 MiB".into());
+                }
+                let mime = match path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase()
+                    .as_str()
+                {
+                    "png" => "image/png",
+                    "jpg" | "jpeg" => "image/jpeg",
+                    "gif" => "image/gif",
+                    "webp" => "image/webp",
+                    "svg" => "image/svg+xml",
+                    _ => return Err("Unsupported image type".into()),
+                };
+                let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Image")
+                    .to_owned();
+                Ok((tool_images::content_key(&bytes), Some((bytes, mime, name))))
+            })
             .await
             .map_err(|e| OrchestrationError::Agent(e.to_string()))?
             .map_err(OrchestrationError::Agent)?

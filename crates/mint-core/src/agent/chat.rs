@@ -642,8 +642,10 @@ async fn call_gemini(
     let url =
         format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent");
 
-    let payload = if request.messages.is_some() {
+    let mut payload = if request.messages.is_some() {
         let mut p = gemini_native_payload(request)?;
+        let sys = effective_system_instruction(config, request, "gemini", &model);
+        p["systemInstruction"] = json!({ "parts": [{ "text": sys }] });
         let temp = effective_temperature(config, request);
         let mut gen_cfg = json!({ "temperature": temp });
         gemini_apply_thinking_config(&mut gen_cfg, config, request, &model);
@@ -653,15 +655,30 @@ async fn call_gemini(
         gemini_chat_payload(config, request)?
     };
 
-    let response: Value = client
-        .post(url)
-        .header("x-goog-api-key", api_key)
+    let raw_resp = client
+        .post(&url)
+        .header("x-goog-api-key", &api_key)
         .json(&payload)
         .send()
-        .await?
-        .error_for_status()?
-        .json()
         .await?;
+    let response: Value = if raw_resp.status() == reqwest::StatusCode::BAD_REQUEST
+        && payload["generationConfig"].get("thinkingConfig").is_some()
+    {
+        if let Some(gen_obj) = payload["generationConfig"].as_object_mut() {
+            gen_obj.remove("thinkingConfig");
+        }
+        client
+            .post(&url)
+            .header("x-goog-api-key", &api_key)
+            .json(&payload)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?
+    } else {
+        raw_resp.error_for_status()?.json().await?
+    };
     parse_gemini_reply(model, &response)
 }
 
@@ -789,39 +806,44 @@ fn gemini_native_part(
     })
 }
 
-/// Extracts `<think>...</think>` chain-of-thought blocks emitted by reasoning models
-/// (e.g. DeepSeek-R1, QwQ) when embedded directly into plain text content.
+/// Extracts `<think>...</think>` or `<thought>...</thought>` chain-of-thought blocks emitted by
+/// reasoning models or the prompt-based CoT fallback when embedded directly into plain text content.
 /// Returns `(Option<thought>, remaining_text)`.
-fn extract_think_tag(text: &str) -> (Option<String>, String) {
-    if let Some(start) = text.find("<think>") {
-        if let Some(end) = text[start + 7..].find("</think>") {
-            let thought = text[start + 7..start + 7 + end].trim().to_string();
-            let mut remaining = text[..start].to_string();
-            remaining.push_str(&text[start + 7 + end + 8..]);
-            let cleaned = remaining.trim().to_string();
-            (
-                if thought.is_empty() {
-                    None
-                } else {
-                    Some(thought)
-                },
-                cleaned,
-            )
-        } else {
-            let thought = text[start + 7..].trim().to_string();
-            let cleaned = text[..start].trim().to_string();
-            (
-                if thought.is_empty() {
-                    None
-                } else {
-                    Some(thought)
-                },
-                cleaned,
-            )
+pub(crate) fn extract_think_tag(text: &str) -> (Option<String>, String) {
+    for (open_tag, close_tag) in [("<think>", "</think>"), ("<thought>", "</thought>")] {
+        if let Some(start) = text.find(open_tag) {
+            let open_len = open_tag.len();
+            let close_len = close_tag.len();
+            if let Some(end) = text[start + open_len..].find(close_tag) {
+                let thought = text[start + open_len..start + open_len + end]
+                    .trim()
+                    .to_string();
+                let mut remaining = text[..start].to_string();
+                remaining.push_str(&text[start + open_len + end + close_len..]);
+                let cleaned = remaining.trim().to_string();
+                return (
+                    if thought.is_empty() {
+                        None
+                    } else {
+                        Some(thought)
+                    },
+                    cleaned,
+                );
+            } else {
+                let thought = text[start + open_len..].trim().to_string();
+                let cleaned = text[..start].trim().to_string();
+                return (
+                    if thought.is_empty() {
+                        None
+                    } else {
+                        Some(thought)
+                    },
+                    cleaned,
+                );
+            }
         }
-    } else {
-        (None, text.to_string())
     }
+    (None, text.to_string())
 }
 
 /// Parses a Gemini `generateContent` response, collecting text parts and any
@@ -1183,13 +1205,14 @@ async fn call_ollama(
         config.ollama_host.trim_end_matches('/')
     };
     let model = config.ollama_model.clone();
+    let system_instruction = effective_system_instruction(config, request, "ollama", &model);
     let native = request.messages.is_some()
         && config.tool_calling_mode() == crate::config::ToolCallingMode::Native;
     let mut body = if native {
         let mut payload = json!({
             "model": model,
             "stream": false,
-            "messages": ollama_request_messages(request),
+            "messages": ollama_request_messages(request, &system_instruction),
         });
         if let Some(tools) = &request.tools {
             payload["tools"] = json!(
@@ -1216,7 +1239,7 @@ async fn call_ollama(
             "model": model,
             "stream": false,
             "messages": [
-                { "role": "system", "content": request.system_instruction },
+                { "role": "system", "content": system_instruction },
                 user_message
             ]
         })
@@ -1230,7 +1253,7 @@ async fn call_ollama(
         "temperature": temp,
     });
     let (thinking_enabled, _) = effective_thinking(config, request, &model);
-    if MintConfig::is_thinking_supported_for_model("ollama", &model) {
+    if MintConfig::has_native_thinking_api("ollama", &model) {
         body["think"] = json!(thinking_enabled);
     }
     let response: Value = client
@@ -1248,15 +1271,11 @@ async fn call_ollama(
 /// Unlike OpenAI, Ollama expects tool-call `arguments` as a JSON object (not a
 /// stringified JSON blob) and doesn't require a `tool_call_id` on tool-result
 /// messages.
-fn ollama_request_messages(request: &ChatRequest) -> Vec<Value> {
+fn ollama_request_messages(request: &ChatRequest, system_instruction: &str) -> Vec<Value> {
     let history = request.messages.as_deref().unwrap_or(&[]);
     let mut result = ollama_native_messages(history);
-    if !request.system_instruction.is_empty() && !history.iter().any(|m| m.role == ChatRole::System)
-    {
-        result.insert(
-            0,
-            json!({"role":"system","content":request.system_instruction}),
-        );
+    if !system_instruction.is_empty() && !history.iter().any(|m| m.role == ChatRole::System) {
+        result.insert(0, json!({"role":"system","content":system_instruction}));
     }
     result
 }
@@ -1435,9 +1454,10 @@ fn anthropic_chat_payload(
     request: &ChatRequest,
     stream: bool,
 ) -> Result<Value, ChatError> {
-    let system = anthropic_system_blocks(&request.system_instruction);
+    let system_instruction = effective_system_instruction(config, request, "anthropic", model);
+    let system = anthropic_system_blocks(&system_instruction);
     let (thinking_enabled, thinking_effort) = effective_thinking(config, request, model);
-    let is_thinking_supported = MintConfig::is_thinking_supported_for_model("anthropic", model);
+    let is_thinking_supported = MintConfig::has_native_thinking_api("anthropic", model);
     let use_thinking = thinking_enabled && is_thinking_supported;
 
     let (budget, max_tokens, temp) = if use_thinking {
@@ -1749,20 +1769,43 @@ where
     let api_key = provider_key(&config.api_key, "GEMINI_API_KEY");
     required_key("gemini", &api_key)?;
     let model = config.gemini_model.clone();
-    let payload = if request.messages.is_some() {
-        gemini_native_payload(request)?
+    let mut payload = if request.messages.is_some() {
+        let mut p = gemini_native_payload(request)?;
+        let sys = effective_system_instruction(config, request, "gemini", &model);
+        p["systemInstruction"] = json!({ "parts": [{ "text": sys }] });
+        let temp = effective_temperature(config, request);
+        let mut gen_cfg = json!({ "temperature": temp });
+        gemini_apply_thinking_config(&mut gen_cfg, config, request, &model);
+        p["generationConfig"] = gen_cfg;
+        p
     } else {
         gemini_chat_payload(config, request)?
     };
-    let response = client
-        .post(format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
-        ))
-        .header("x-goog-api-key", api_key)
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
+    );
+    let raw_resp = client
+        .post(&url)
+        .header("x-goog-api-key", &api_key)
         .json(&payload)
         .send()
-        .await?
-        .error_for_status()?;
+        .await?;
+    let response = if raw_resp.status() == reqwest::StatusCode::BAD_REQUEST
+        && payload["generationConfig"].get("thinkingConfig").is_some()
+    {
+        if let Some(gen_obj) = payload["generationConfig"].as_object_mut() {
+            gen_obj.remove("thinkingConfig");
+        }
+        client
+            .post(&url)
+            .header("x-goog-api-key", &api_key)
+            .json(&payload)
+            .send()
+            .await?
+            .error_for_status()?
+    } else {
+        raw_resp.error_for_status()?
+    };
     collect_stream_reply(response, StreamFormat::Gemini, model, on_event).await
 }
 
@@ -1829,13 +1872,14 @@ fn ollama_stream_payload(
     request: &ChatRequest,
     model: &str,
 ) -> Result<Value, ChatError> {
+    let system_instruction = effective_system_instruction(config, request, "ollama", model);
     let native = request.messages.is_some()
         && config.tool_calling_mode() == crate::config::ToolCallingMode::Native;
     let mut payload = if native {
         let mut value = json!({
             "model": model,
             "stream": true,
-            "messages": ollama_request_messages(request),
+            "messages": ollama_request_messages(request, &system_instruction),
         });
         if let Some(tools) = &request.tools {
             value["tools"] = json!(
@@ -1862,7 +1906,7 @@ fn ollama_stream_payload(
             "model": model,
             "stream": true,
             "messages": [
-                { "role": "system", "content": request.system_instruction },
+                { "role": "system", "content": system_instruction },
                 user
             ]
         })
@@ -1872,7 +1916,7 @@ fn ollama_stream_payload(
         "temperature": effective_temperature(config, request),
     });
     let (thinking_enabled, _) = effective_thinking(config, request, model);
-    if MintConfig::is_thinking_supported_for_model("ollama", model) {
+    if MintConfig::has_native_thinking_api("ollama", model) {
         payload["think"] = json!(thinking_enabled);
     }
     Ok(payload)
@@ -2001,7 +2045,7 @@ struct StreamReplyAccumulator {
     text: String,
     thought: String,
     tag_buffer: String,
-    inside_think_tag: bool,
+    active_think_close_tag: Option<&'static str>,
     tool_calls: Vec<StreamToolCall>,
     stop_reason: Option<String>,
     input_tokens: Option<u32>,
@@ -2028,7 +2072,7 @@ impl StreamReplyAccumulator {
         }
     }
 
-    /// Route inline `<think>` content without assuming tag boundaries line up
+    /// Route inline `<think>` or `<thought>` content without assuming tag boundaries line up
     /// with provider chunks. A possible partial tag is retained until the next
     /// chunk; ordinary text is emitted immediately.
     fn push_text<F>(&mut self, delta: &str, on_event: &mut F)
@@ -2041,38 +2085,53 @@ impl StreamReplyAccumulator {
         self.text.push_str(delta);
         self.tag_buffer.push_str(delta);
         loop {
-            let tag = if self.inside_think_tag {
-                "</think>"
-            } else {
-                "<think>"
-            };
-            if let Some(index) = self.tag_buffer.find(tag) {
-                let before = self.tag_buffer[..index].to_owned();
-                self.tag_buffer.drain(..index + tag.len());
-                if self.inside_think_tag {
+            if let Some(close_tag) = self.active_think_close_tag {
+                if let Some(index) = self.tag_buffer.find(close_tag) {
+                    let before = self.tag_buffer[..index].to_owned();
+                    self.tag_buffer.drain(..index + close_tag.len());
                     self.push_reasoning(&before, on_event);
-                } else {
-                    self.emit_text(&before, on_event);
+                    self.active_think_close_tag = None;
+                    continue;
                 }
-                self.inside_think_tag = !self.inside_think_tag;
-                continue;
-            }
-
-            let retain_from = self
-                .tag_buffer
-                .rfind('<')
-                .and_then(|index| tag.starts_with(&self.tag_buffer[index..]).then_some(index));
-            let emit_end = retain_from.unwrap_or(self.tag_buffer.len());
-            if emit_end > 0 {
-                let ready = self.tag_buffer[..emit_end].to_owned();
-                self.tag_buffer.drain(..emit_end);
-                if self.inside_think_tag {
+                let retain_from = self.tag_buffer.rfind('<').and_then(|index| {
+                    close_tag
+                        .starts_with(&self.tag_buffer[index..])
+                        .then_some(index)
+                });
+                let emit_end = retain_from.unwrap_or(self.tag_buffer.len());
+                if emit_end > 0 {
+                    let ready = self.tag_buffer[..emit_end].to_owned();
+                    self.tag_buffer.drain(..emit_end);
                     self.push_reasoning(&ready, on_event);
-                } else {
+                }
+                break;
+            } else {
+                let candidates = [("<think>", "</think>"), ("<thought>", "</thought>")];
+                let earliest = candidates
+                    .into_iter()
+                    .filter_map(|(open, close)| {
+                        self.tag_buffer.find(open).map(|idx| (idx, open, close))
+                    })
+                    .min_by_key(|(idx, _, _)| *idx);
+                if let Some((index, open_tag, close_tag)) = earliest {
+                    let before = self.tag_buffer[..index].to_owned();
+                    self.tag_buffer.drain(..index + open_tag.len());
+                    self.emit_text(&before, on_event);
+                    self.active_think_close_tag = Some(close_tag);
+                    continue;
+                }
+                let retain_from = self.tag_buffer.rfind('<').and_then(|index| {
+                    let tail = &self.tag_buffer[index..];
+                    ("<think>".starts_with(tail) || "<thought>".starts_with(tail)).then_some(index)
+                });
+                let emit_end = retain_from.unwrap_or(self.tag_buffer.len());
+                if emit_end > 0 {
+                    let ready = self.tag_buffer[..emit_end].to_owned();
+                    self.tag_buffer.drain(..emit_end);
                     self.emit_text(&ready, on_event);
                 }
+                break;
             }
-            break;
         }
     }
 
@@ -2084,7 +2143,7 @@ impl StreamReplyAccumulator {
             return;
         }
         let remaining = std::mem::take(&mut self.tag_buffer);
-        if self.inside_think_tag {
+        if self.active_think_close_tag.is_some() {
             self.push_reasoning(&remaining, on_event);
         } else {
             self.emit_text(&remaining, on_event);
@@ -2581,8 +2640,10 @@ fn wants_agent_json(request: &ChatRequest) -> bool {
 
 fn gemini_chat_payload(config: &MintConfig, request: &ChatRequest) -> Result<Value, ChatError> {
     let temp = effective_temperature(config, request);
+    let sys_instruction =
+        effective_system_instruction(config, request, "gemini", &config.gemini_model);
     let mut payload = json!({
-        "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
+        "systemInstruction": { "parts": [{ "text": sys_instruction }] },
         "contents": [{ "role": "user", "parts": gemini_parts(request)? }]
     });
     let mut gen_cfg = if wants_agent_json(request) {
@@ -2721,6 +2782,9 @@ pub(crate) fn effective_thinking(
     request: &ChatRequest,
     model: &str,
 ) -> (bool, String) {
+    if !MintConfig::is_thinking_supported_for_model(&config.ai_provider, model) {
+        return (false, "medium".to_string());
+    }
     let enabled = request
         .thinking_enabled
         .unwrap_or_else(|| config.resolved_thinking_enabled_for_model(&config.ai_provider, model));
@@ -2732,18 +2796,59 @@ pub(crate) fn effective_thinking(
     (enabled, effort)
 }
 
+pub(crate) fn thinking_prompt_directive(effort: &str) -> &'static str {
+    match effort {
+        "low" => {
+            "\n\n[Thinking Mode: Enabled (Low Effort)]\nBefore providing your response or calling any tool, you MUST write a brief and concise (2-4 sentences) internal reasoning process enclosed strictly within <think>...</think> tags at the very beginning of your message content (never inside tool arguments), followed by your tool call or final answer outside the tags."
+        }
+        "high" => {
+            "\n\n[Thinking Mode: Enabled (High Effort)]\nBefore providing your response or calling any tool, you MUST write a thorough and detailed internal reasoning process, carefully analyzing edge cases and trade-offs, enclosed strictly within <think>...</think> tags at the very beginning of your message content (never inside tool arguments), followed by your tool call or final answer outside the tags."
+        }
+        "extra_high" => {
+            "\n\n[Thinking Mode: Enabled (Extra High Effort)]\nBefore providing your response or calling any tool, you MUST write an exhaustive, step-by-step internal reasoning process, verifying assumptions and alternative approaches in depth, enclosed strictly within <think>...</think> tags at the very beginning of your message content (never inside tool arguments), followed by your tool call or final answer outside the tags."
+        }
+        _ => {
+            "\n\n[Thinking Mode: Enabled (Medium Effort)]\nBefore providing your response or calling any tool, you MUST write a clear and structured internal reasoning process enclosed strictly within <think>...</think> tags at the very beginning of your message content (never inside tool arguments), followed by your tool call or final answer outside the tags."
+        }
+    }
+}
+
+/// Returns the effective system instruction for a request, appending a `<think>...</think>`
+/// Chain-of-Thought directive when Thinking is enabled on a chat model that does not use
+/// a native visible reasoning API parameter.
+pub(crate) fn effective_system_instruction(
+    config: &MintConfig,
+    request: &ChatRequest,
+    provider: &str,
+    model: &str,
+) -> String {
+    let base = request.system_instruction.as_str();
+    if wants_agent_json(request) {
+        return base.to_string();
+    }
+    let (enabled, effort) = effective_thinking(config, request, model);
+    if enabled && !MintConfig::has_native_thinking_api(provider, model) {
+        format!("{base}{}", thinking_prompt_directive(&effort))
+    } else {
+        base.to_string()
+    }
+}
+
 pub(crate) fn gemini_apply_thinking_config(
     gen_cfg: &mut Value,
     config: &MintConfig,
     request: &ChatRequest,
     model: &str,
 ) {
-    if !MintConfig::is_thinking_supported_for_model("gemini", model) {
+    if !MintConfig::has_native_thinking_api("gemini", model) {
         return;
     }
     let (enabled, effort) = effective_thinking(config, request, model);
     if !enabled {
-        gen_cfg["thinkingConfig"] = json!({ "thinkingBudget": 0 });
+        gen_cfg["thinkingConfig"] = json!({
+            "includeThoughts": false,
+            "thinkingBudget": 0
+        });
     } else {
         let budget = match effort.as_str() {
             "low" => 1024,
@@ -2752,7 +2857,10 @@ pub(crate) fn gemini_apply_thinking_config(
             "extra_high" => 32768,
             _ => 4096,
         };
-        gen_cfg["thinkingConfig"] = json!({ "thinkingBudget": budget });
+        gen_cfg["thinkingConfig"] = json!({
+            "includeThoughts": true,
+            "thinkingBudget": budget
+        });
     }
 }
 
@@ -2762,18 +2870,18 @@ fn openai_chat_payload(
     request: &ChatRequest,
     stream: bool,
 ) -> Result<Value, ChatError> {
+    let provider = config.ai_provider.trim().to_ascii_lowercase();
+    let effective_sys = effective_system_instruction(config, request, &provider, model);
     let messages = if let Some(messages) = &request.messages {
         let mut built = Vec::new();
-        if !request.system_instruction.is_empty()
-            && !messages.iter().any(|m| m.role == ChatRole::System)
-        {
-            built.push(json!({ "role": "system", "content": request.system_instruction }));
+        if !effective_sys.is_empty() && !messages.iter().any(|m| m.role == ChatRole::System) {
+            built.push(json!({ "role": "system", "content": effective_sys }));
         }
         built.extend(openai_native_messages(messages)?);
         built
     } else {
         vec![
-            json!({ "role": "system", "content": request.system_instruction }),
+            json!({ "role": "system", "content": effective_sys }),
             json!({
                 "role": "user",
                 "content": openai_message_content(
@@ -2812,10 +2920,56 @@ fn openai_chat_payload(
     if stream {
         payload["stream_options"] = json!({ "include_usage": true });
     }
-    // OpenAI reasoning models (o1, o3, etc.) reject explicit temperature parameter.
-    let is_reasoning_model = model.starts_with("o1") || model.starts_with("o3");
+    let clean_model = model
+        .trim()
+        .to_ascii_lowercase()
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    let is_openai_reasoning = clean_model.starts_with("o1")
+        || clean_model.starts_with("o3")
+        || clean_model.starts_with("o4")
+        || clean_model.starts_with("gpt-5");
+    let is_deepseek_native =
+        provider == "deepseek" && MintConfig::has_native_thinking_api("deepseek", model);
+    let is_openrouter_native =
+        provider == "openrouter" && MintConfig::has_native_thinking_api("openrouter", model);
+
     let (thinking_enabled, thinking_effort) = effective_thinking(config, request, model);
-    if is_reasoning_model {
+    if is_deepseek_native {
+        if thinking_enabled {
+            let effort_str = match thinking_effort.as_str() {
+                "low" => "low",
+                "medium" => "medium",
+                "high" => "high",
+                "extra_high" => "max",
+                _ => "high",
+            };
+            payload["reasoning_effort"] = json!(effort_str);
+            payload["thinking"] = json!({ "type": "enabled" });
+        } else {
+            payload["reasoning_effort"] = json!("none");
+            payload["thinking"] = json!({ "type": "disabled" });
+            payload["temperature"] = json!(effective_temperature(config, request));
+        }
+    } else if is_openrouter_native {
+        if thinking_enabled {
+            let effort_str = match thinking_effort.as_str() {
+                "low" => "low",
+                "medium" => "medium",
+                "high" => "high",
+                "extra_high" => "xhigh",
+                _ => "medium",
+            };
+            payload["reasoning"] = json!({ "effort": effort_str });
+        } else {
+            payload["reasoning"] = json!({ "exclude": true });
+        }
+        if !is_openai_reasoning {
+            payload["temperature"] = json!(effective_temperature(config, request));
+        }
+    } else if is_openai_reasoning {
         if thinking_enabled {
             let effort_str = match thinking_effort.as_str() {
                 "low" => "low",
@@ -4389,5 +4543,109 @@ mod tests {
         let decoded_trailing = decode_tool_arguments(&trailing);
         assert_eq!(decoded_trailing["command"], "echo ok");
         assert_eq!(decoded_trailing["flag"], true);
+    }
+
+    #[test]
+    fn gemini_thinking_config_includes_thoughts_flag_and_skips_non_native_models() {
+        let mut config = MintConfig::default();
+        config.ai_provider = "gemini".into();
+        config.gemini_model = "gemini-2.5-flash".into();
+
+        let request_on = ChatRequest {
+            message: "Solve 12 * 13".into(),
+            thinking_enabled: Some(true),
+            thinking_effort: Some("high".into()),
+            ..Default::default()
+        };
+        let payload_on = gemini_chat_payload(&config, &request_on).unwrap();
+        assert_eq!(
+            payload_on["generationConfig"]["thinkingConfig"]["includeThoughts"],
+            true
+        );
+        assert_eq!(
+            payload_on["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            16384
+        );
+
+        let request_off = ChatRequest {
+            message: "Hello".into(),
+            thinking_enabled: Some(false),
+            ..Default::default()
+        };
+        let payload_off = gemini_chat_payload(&config, &request_off).unwrap();
+        assert_eq!(
+            payload_off["generationConfig"]["thinkingConfig"]["includeThoughts"],
+            false
+        );
+        assert_eq!(
+            payload_off["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            0
+        );
+
+        // Non-text image generation model does not attach thinkingConfig or prompt directive
+        config.gemini_model = "nano-banana-pro-preview".into();
+        let payload_banana = gemini_chat_payload(&config, &request_on).unwrap();
+        assert!(
+            payload_banana["generationConfig"]
+                .get("thinkingConfig")
+                .is_none()
+        );
+        let banana_sys = payload_banana["systemInstruction"]["parts"][0]["text"]
+            .as_str()
+            .unwrap_or("");
+        assert!(!banana_sys.contains("<think>"));
+    }
+
+    #[test]
+    fn deepseek_v4_and_prompt_fallback_thinking_payloads() {
+        let mut config = MintConfig::default();
+        config.ai_provider = "deepseek".into();
+        config.deepseek_model = "deepseek-flash".into();
+
+        let req_on = ChatRequest {
+            message: "Explain quantum entanglement".into(),
+            system_instruction: "You are helpful.".into(),
+            thinking_enabled: Some(true),
+            thinking_effort: Some("extra_high".into()),
+            ..Default::default()
+        };
+        let payload_on = openai_chat_payload(&config, "deepseek-flash", &req_on, false).unwrap();
+        assert_eq!(payload_on["reasoning_effort"], "max");
+        assert_eq!(payload_on["thinking"]["type"], "enabled");
+        assert!(payload_on.get("temperature").is_none());
+        // Native thinking model should not get prompt-fallback directive
+        let sys_on = payload_on["messages"][0]["content"].as_str().unwrap();
+        assert_eq!(sys_on, "You are helpful.");
+
+        let req_off = ChatRequest {
+            message: "Hi".into(),
+            system_instruction: "You are helpful.".into(),
+            thinking_enabled: Some(false),
+            ..Default::default()
+        };
+        let payload_off = openai_chat_payload(&config, "deepseek-flash", &req_off, false).unwrap();
+        assert_eq!(payload_off["reasoning_effort"], "none");
+        assert_eq!(payload_off["thinking"]["type"], "disabled");
+        assert!(payload_off.get("temperature").is_some());
+
+        // Non-native chat model (`gpt-4o`) with thinking_enabled = true gets prompt-based CoT directive
+        config.ai_provider = "openai".into();
+        config.openai_model = "gpt-4o".into();
+        let payload_fallback = openai_chat_payload(&config, "gpt-4o", &req_on, false).unwrap();
+        let sys_fallback = payload_fallback["messages"][0]["content"].as_str().unwrap();
+        assert!(sys_fallback.contains("[Thinking Mode: Enabled (Extra High Effort)]"));
+        assert!(sys_fallback.contains("<think>...</think>"));
+    }
+
+    #[test]
+    fn extract_think_tag_supports_both_think_and_thought_tags() {
+        let (thought1, cleaned1) = extract_think_tag("<think>\nStep 1\n</think>\nFinal answer 1");
+        assert_eq!(cleaned1, "Final answer 1");
+        assert_eq!(thought1.as_deref(), Some("Step 1"));
+
+        let (thought2, cleaned2) =
+            extract_think_tag("<thought>\nStep 2\n</thought>\nFinal answer 2");
+        assert_eq!(cleaned2, "Final answer 2");
+        assert_eq!(thought2.as_deref(), Some("Step 2"));
     }
 }

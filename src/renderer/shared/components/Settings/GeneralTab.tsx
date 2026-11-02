@@ -13,6 +13,7 @@ import {
   IMAGE_GEN_PROVIDER_MODELS,
   VEO_STUDIO_MODELS,
   getModelMetadata,
+  hasNativeThinkingSupport,
 } from '../../constants/models'
 import type {
   CustomProviderConfig,
@@ -534,14 +535,17 @@ export default function GeneralTab({
               })()
 
               const meta = getModelMetadata(activeModelRaw, config.aiProvider)
+              const hasNativeThinking = hasNativeThinkingSupport(activeModelRaw, config.aiProvider)
               const modelConfigs = (config.modelThinkingConfigs ?? {}) as Record<string, { enabled?: boolean; effort?: string }>
               const customModelThinking = activeModelRaw ? modelConfigs[activeModelRaw] : undefined
               const hasCustomModel = customModelThinking !== undefined
 
               const isThinkingSupported = meta.supportsThinking
-              const currentEnabled = customModelThinking?.enabled !== undefined
+              const currentEnabled = !isThinkingSupported
+                ? false
+                : customModelThinking?.enabled !== undefined
                 ? customModelThinking.enabled
-                : (config.thinkingEnabled ?? true)
+                : (hasNativeThinking ? (config.thinkingEnabled ?? true) : false)
 
               const currentEffort = (customModelThinking?.effort || config.thinkingEffort || 'medium').toLowerCase()
 
@@ -599,8 +603,10 @@ export default function GeneralTab({
                     </label>
                     <div className="thinking-card-status" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <span className="section-current-badge" style={{ fontSize: '0.75rem' }}>
-                        {currentEnabled
-                          ? `Thinking ON (${effortLabelMap[currentEffort] || 'Medium'})${!isThinkingSupported ? ' · Force' : ''}`
+                        {!isThinkingSupported
+                          ? 'Unavailable (Non-Text Model)'
+                          : currentEnabled
+                          ? `Thinking ON (${effortLabelMap[currentEffort] || 'Medium'})${hasNativeThinking ? '' : ' · Prompted CoT'}`
                           : 'Thinking OFF'}
                       </span>
                       {hasCustomModel && (
@@ -622,25 +628,32 @@ export default function GeneralTab({
                     <div>
                       <span style={{ fontSize: '0.82rem', fontWeight: 500 }}>Enable thinking</span>
                       <p style={{ margin: '2px 0 0 0', fontSize: '0.73rem', color: 'var(--text-muted)' }}>
-                        {isThinkingSupported
-                          ? 'Allow model to output chain-of-thought tokens.'
-                          : currentEnabled
-                          ? 'Chain-of-thought token generation enabled (force toggle).'
-                          : 'Model not flagged as reasoning by default — toggle on to force enable.'}
+                        {!isThinkingSupported
+                          ? 'Image, audio, and embedding models do not support Chain-of-Thought reasoning.'
+                          : hasNativeThinking
+                          ? 'Uses the provider’s native Reasoning API (thinkingBudget / reasoning_effort / thinking).'
+                          : 'Uses Prompted Chain-of-Thought (<think>...</think>) so the model reasons step-by-step before answering.'}
                       </p>
                     </div>
-                    <label className="settings-toggle-switch">
+                    <label
+                      className="settings-toggle-switch"
+                      style={!isThinkingSupported ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+                    >
                       <input
                         type="checkbox"
+                        disabled={!isThinkingSupported}
                         checked={currentEnabled}
-                        onChange={(e) => handleToggleThinking(e.target.checked)}
+                        onChange={(e) => {
+                          if (!isThinkingSupported) return
+                          handleToggleThinking(e.target.checked)
+                        }}
                       />
                       <span className="settings-toggle-slider"></span>
                     </label>
                   </div>
 
                   {/* Effort Level Row */}
-                  {currentEnabled && (
+                  {isThinkingSupported && currentEnabled && (
                     <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border)' }}>
                       <div className="thinking-card-effort-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'none', letterSpacing: '0.04em' }}>
