@@ -84,23 +84,32 @@ pub(crate) fn match_composer_suggestions(
 ) -> Vec<(String, String)> {
     let cursor = cursor.min(chars.len());
     let before: String = chars[..cursor].iter().collect();
-    if before.starts_with('/') && !before.contains(char::is_whitespace) {
+    if before.starts_with('/') {
         let prefix = before.to_lowercase();
+        let has_space = before.contains(char::is_whitespace);
         let query = &prefix[1..];
         let mut matches: Vec<_> = super::SLASH_COMMANDS
             .iter()
             .filter(|command| {
-                command.on_cli()
-                    && command.token.starts_with('/')
-                    && (command.token.to_lowercase().starts_with(&prefix)
-                        || command.description.to_lowercase().contains(query))
+                if !command.on_cli() || !command.token.starts_with('/') {
+                    return false;
+                }
+                let token_lower = command.token.to_lowercase();
+                if has_space {
+                    token_lower.starts_with(&prefix)
+                } else {
+                    token_lower.starts_with(&prefix)
+                        || command.description.to_lowercase().contains(query)
+                }
             })
             .collect();
-        matches.sort_by_key(|command| !command.token.to_lowercase().starts_with(&prefix));
-        return matches
-            .into_iter()
-            .map(|command| (command.token.clone(), command.description.clone()))
-            .collect();
+        if !matches.is_empty() {
+            matches.sort_by_key(|command| !command.token.to_lowercase().starts_with(&prefix));
+            return matches
+                .into_iter()
+                .map(|command| (command.token.clone(), command.description.clone()))
+                .collect();
+        }
     }
     if before.starts_with('$') && !before.contains(char::is_whitespace) {
         let prefix = before[1..].to_lowercase();
@@ -147,5 +156,24 @@ mod tests {
         let chars: Vec<char> = "/res".chars().collect();
         let results = match_composer_suggestions(&chars, chars.len(), Path::new("."));
         assert!(results.iter().any(|(token, _)| token == "/resume"));
+    }
+
+    #[test]
+    fn match_composer_suggestions_matches_plan_list_order_and_subcommand() {
+        let chars_p: Vec<char> = "/p".chars().collect();
+        let results_p = match_composer_suggestions(&chars_p, chars_p.len(), Path::new("."));
+        let plan_idx = results_p.iter().position(|(t, _)| t == "/plan");
+        let plan_list_idx = results_p.iter().position(|(t, _)| t == "/plan list");
+        assert!(plan_idx.is_some());
+        assert!(plan_list_idx.is_some());
+        assert_eq!(plan_list_idx.unwrap(), plan_idx.unwrap() + 1);
+
+        let chars_plan_space: Vec<char> = "/plan ".chars().collect();
+        let results_plan =
+            match_composer_suggestions(&chars_plan_space, chars_plan_space.len(), Path::new("."));
+        assert_eq!(
+            results_plan.first().map(|(t, _)| t.as_str()),
+            Some("/plan list")
+        );
     }
 }
