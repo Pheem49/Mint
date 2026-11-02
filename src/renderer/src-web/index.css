@@ -143,6 +143,10 @@ button {
   padding: 4px 6px;
 }
 
+.chat-code-toggle-lines-btn.is-active {
+  color: var(--interactive-fg, #38bdf8);
+}
+
 .chat-code-copy-btn.is-copied {
   color: var(--interactive-fg);
 }
@@ -164,9 +168,9 @@ button {
 }
 
 .chat-code-block-body code {
-  font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.6;
+  font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Noto Sans Thai', monospace;
+  font-size: 14.5px;
+  line-height: 1.65;
   white-space: pre;
   color: var(--text-chat, var(--text-main, #e2e8f0));
   display: block;
@@ -197,7 +201,7 @@ button {
   padding-right: 14px;
   text-align: right;
   color: var(--text-soft, #475569);
-  font-size: 0.76rem;
+  font-size: 0.82rem;
   user-select: none;
   opacity: 0.65;
 }

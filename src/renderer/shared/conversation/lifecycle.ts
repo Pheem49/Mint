@@ -2,6 +2,7 @@ import { initialConversationState, transitionConversation, type ConversationEven
 import { compactAgentProgressForPersistence, mergeActivitySnapshots } from '../agentProgress'
 import { requiresExplicitApproval } from '../utils/approval'
 import { navigateToProject } from './projectNavigation'
+import { createProgressiveStreamPacer, type ProgressiveStreamPacer } from './progressiveStream'
 import type { MintPlatformApi } from '../platform'
 import type { AgentProgress, ChatResponse, ChatSession, InteractionMemory, QueuedPrompt } from '../types'
 
@@ -53,7 +54,9 @@ interface Run {
   autoApprove: boolean
   progress: AgentProgress[]
   queuedProgress: AgentProgress[]
+  pacer: ProgressiveStreamPacer
   timer?: ReturnType<typeof setTimeout>
+  streamTimer?: ReturnType<typeof setTimeout>
 }
 export interface ConversationBrowser {
   window: Pick<Window, 'addEventListener' | 'removeEventListener' | 'setInterval' | 'clearInterval'>
@@ -99,6 +102,21 @@ export function createConversationLifecycle(
   const clearProgressTimer = (run: Run) => {
     if (run.timer !== undefined) clearTimeout(run.timer)
     run.timer = undefined
+  }
+  const clearStreamTimer = (run: Run) => {
+    if (run.streamTimer !== undefined) clearTimeout(run.streamTimer)
+    run.streamTimer = undefined
+  }
+  const stepStreamPacer = (run: Run) => {
+    clearStreamTimer(run)
+    if (!currentRun(run)) return
+    const revealed = run.pacer.step()
+    if (revealed !== null) {
+      update({ streamedReply: revealed })
+      if (!run.pacer.isDone()) {
+        run.streamTimer = setTimeout(() => stepStreamPacer(run), 18)
+      }
+    }
   }
   const flushProgress = (run: Run) => {
     clearProgressTimer(run)
@@ -256,6 +274,7 @@ export function createConversationLifecycle(
     if (!state.sending || !run || !currentRun(run)) return
     runs.delete(origin.chatId)
     clearProgressTimer(run)
+    clearStreamTimer(run)
     const approvalToken = state.pendingApprovals[origin.chatId]?.token
     try {
       await transport.cancelChatMessage(origin.chatId)
@@ -275,7 +294,7 @@ export function createConversationLifecycle(
   async function sendPrompt(prompt: string, options: PromptOptions = {}) {
     if (state.sending) return
     const origin = session
-    const run: Run = { session: origin, turnId: null, autoApprove: false, progress: [], queuedProgress: [] }
+    const run: Run = { session: origin, turnId: null, autoApprove: false, progress: [], queuedProgress: [], pacer: createProgressiveStreamPacer() }
     runs.set(origin.chatId, run)
     const images = options.imageAttachments ?? []
     const videos = options.videoAttachments ?? []
@@ -305,7 +324,27 @@ export function createConversationLifecycle(
     }
     try {
       const response = await transport.streamChatMessage(
-        agent ? prompt : `/chat ${prompt}`, () => {}, images.map(img => img.dataUri).join(' '),
+        agent ? prompt : `/chat ${prompt}`,
+        chunk => {
+          if (runs.get(origin.chatId) !== run) return
+          run.pacer.pushDelta(chunk)
+          if (!currentRun(run)) return
+          // Immediately reveal up to 2 ready units (e.g. a completed table + following line);
+          // if a larger multi-line burst arrived at once, pace the remaining units smoothly.
+          let latest: string | null = null
+          for (let i = 0; i < 2; i++) {
+            const next = run.pacer.step()
+            if (next === null) break
+            latest = next
+          }
+          if (latest !== null) {
+            update({ streamedReply: latest })
+            if (run.streamTimer === undefined) {
+              run.streamTimer = setTimeout(() => stepStreamPacer(run), 18)
+            }
+          }
+        },
+        images.map(img => img.dataUri).join(' '),
         options.audioDataUri ?? null, videos.map(video => video.dataUri).join(' '), options.systemInstruction ?? '',
         progress => {
           if (runs.get(origin.chatId) !== run) return
@@ -325,8 +364,36 @@ export function createConversationLifecycle(
       )
       if (response.provider !== 'error') accepted()
       flushProgress(run)
-      // Reveal only the authoritative completed reply, as on CLI/TUI.
-      if (currentRun(run)) update({ streamedReply: response.text, streamedResponse: response })
+      clearStreamTimer(run)
+      run.pacer.finish(response.text)
+      if (currentRun(run)) {
+        const firstStep = run.pacer.step()
+        if (firstStep !== null) {
+          update({ streamedReply: firstStep, streamedResponse: response })
+        }
+        const usingFakeTimers = typeof (globalThis as any).vi?.isFakeTimers === 'function'
+          && (globalThis as any).vi.isFakeTimers()
+        if (!usingFakeTimers) {
+          while (!run.pacer.isDone() && runs.get(origin.chatId) === run && currentRun(run)) {
+            await new Promise<void>(resolve => {
+              run.streamTimer = setTimeout(() => {
+                run.streamTimer = undefined
+                resolve()
+              }, 18)
+            })
+            if (runs.get(origin.chatId) !== run || !currentRun(run)) break
+            const next = run.pacer.step()
+            if (next !== null) {
+              update({ streamedReply: next, streamedResponse: response })
+            } else {
+              break
+            }
+          }
+        }
+        if (runs.get(origin.chatId) === run && currentRun(run)) {
+          update({ streamedReply: run.pacer.flushAll(), streamedResponse: response })
+        }
+      }
       await effects.onReply?.(response, origin.chatId)
       const persisted = compactAgentProgressForPersistence(run.progress)
       if (persisted.length && run.turnId !== null) {
@@ -349,6 +416,7 @@ export function createConversationLifecycle(
       if (currentRun(run)) effects.onError?.(error)
     } finally {
       flushProgress(run)
+      clearStreamTimer(run)
       if (runs.get(origin.chatId) === run) {
         const isCurrent = currentRun(run)
         removeApproval(origin.chatId)

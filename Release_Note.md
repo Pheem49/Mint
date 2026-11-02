@@ -1,5 +1,16 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Code Block UI & Copy Ergonomics (CLI, Desktop, and Web)
+- **Frictionless CLI Code Copying**: Removed the vertical gutter bar (`│ `) from CLI code blocks, replacing it with 2-space clean indentation. Terminal mouse selection or double-clicking commands now copies pure, runnable code without grabbing border characters or breaking shell commands (`bash: │: command not found`).
+- **Smart Line Numbers on Desktop & Web**: Automatically hides line numbers for short commands and snippets ($\le 5$ lines), eliminating unnecessary 44px gutter clutter. Added an optional `#` toggle button for longer code blocks.
+- **Enhanced Code Typography**: Increased code font size from `13px` to `14.5px` with a generous `1.65` line height and Thai font fallbacks across Desktop and Web, making code comments with Thai tone marks legible and comfortable to read.
+
+## Structure-Aware Progressive AI Response Rendering (CLI, Desktop, and Web)
+- **Line-by-Line + Block-Aware Streaming Engine**: Replaced all-at-once response dumps with a deep, structure-aware progressive reveal engine across Full-Screen TUI, Classic CLI, Desktop UI, and Web UI.
+- **Smooth Line-by-Line Reveal**: Regular paragraphs, headings, lists, blockquotes/callouts (`> [!NOTE]` etc.), and standard syntax-highlighted code blocks stream and reveal smoothly line by line with adaptive catch-up pacing.
+- **Atomic Block Reveal for Tables & Custom UI Cards**: Markdown tables (`| ... |`) and structured UI/JSON/Mermaid fenced blocks (`ui-grid`, `ui-card`, `ui-feature`, `ui-mockup`, `weather-json`, `stock-json`, `calculation-json`, `image-search-json`, `image-gen-json`, `mermaid`) are held in buffer while incomplete and released as a single atomic unit once complete, preventing broken table borders or raw JSON flashes mid-stream.
+- **Full-Screen TUI & Viewport Ergonomics**: Preserves user scroll position (`scroll_from_bottom`) during live streaming, keeps mid-turn notices (`Thought · ...`) ordered above the active assistant message, defers post-turn notices (`Sources`, `Worked for ...`) until the reveal completes, and allows instant reveal completion via `Esc` / `Ctrl+C`.
+
 ## MCP Tool Execution UI Consolidation (Desktop and Web)
 - **Eliminated Raw Execution Dumps from Chat Messages**: Suppressed raw unstyled MCP call logs (`Failed`, `Completed`, and internal `Tool definition ready` discovery lines) from leaking into the main chat message bubble.
 - **Consolidated into Agent Activity Accordion**: Integrated detailed MCP tool invocations, statuses, outputs, and artifacts strictly inside the `Executed X mcp_tool` group accordion in `AgentActivityTable`, keeping the chat conversation surface completely clean and focused on user queries and synthesized AI responses.

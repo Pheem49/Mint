@@ -1509,9 +1509,12 @@ pub async fn run_code_agent_with_options(
         }
     };
 
-    // Providers may still stream internally, but the CLI deliberately waits
-    // for AgentResult.summary so it can render one complete Markdown document.
-    let on_chunk = |_summary: String| {};
+    let chunk_tui = options.tui.clone();
+    let on_chunk = move |delta: String| {
+        if let Some(tui) = &chunk_tui {
+            tui.append_assistant_delta(&delta);
+        }
+    };
 
     let user_name = MemoryStore::open_default()
         .ok()
@@ -1628,17 +1631,18 @@ pub async fn run_code_agent_with_options(
     let worked_line = format!("{DIM}{label} {}{RESET}", "─".repeat(fill_len));
 
     if let Some(tui) = &options.tui {
-        tui.push_assistant(res.summary.clone());
+        let mut post_notices = Vec::new();
         if let Ok(mut status) = live_status.lock()
             && !status.web_sources.is_empty()
         {
             let sources = status.web_sources.drain(..).collect::<Vec<_>>();
             let text = format_tui_web_sources(&sources, MAX_TUI_WEB_SOURCES);
             if !text.is_empty() {
-                tui.push_notice(text);
+                post_notices.push(text);
             }
         }
-        tui.push_notice(worked_line);
+        post_notices.push(worked_line);
+        tui.begin_assistant_reveal(res.summary.clone(), post_notices);
         avatar_bridge.on_talking(false);
         return Ok(res);
     }
@@ -1783,7 +1787,14 @@ mod format_markdown_bold_tests {
             strip_ansi(&out).contains("print(1)"),
             "code content dropped: {out}"
         );
-        assert!(out.contains('│'), "missing gutter bar: {out}");
+        assert!(
+            !out.contains('│'),
+            "code block should not have vertical pipe gutter: {out}"
+        );
+        assert!(
+            strip_ansi(&out).contains("  print(1)"),
+            "code block should be indented with 2 spaces: {out}"
+        );
     }
 
     #[test]

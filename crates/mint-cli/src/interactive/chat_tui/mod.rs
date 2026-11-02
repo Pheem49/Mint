@@ -1106,24 +1106,38 @@ impl ChatTui {
     ) -> Result<T> {
         use event::{KeyCode, KeyModifiers};
         loop {
+            let mut revealing = false;
             if let Ok(mut state) = handle.state.lock() {
                 if let Ok(queued) = handle.queued.lock() {
                     state.queued_count = queued.len();
                     state.queued_preview = queued.last().cloned();
                 }
+                state.tick_assistant_reveal_if_due(std::time::Duration::from_millis(18));
+                revealing = state.has_pending_assistant_reveal();
                 self.scroll_mouse_selection(&mut state);
                 self.draw_state(&state)?;
             }
             if task.is_finished() {
+                let mut still_revealing = false;
                 if let Ok(mut state) = handle.state.lock() {
                     state.finish_live_thought();
                     state.finish_running_tools();
-                    state.queued_count = 0;
-                    state.queued_preview = None;
+                    if state.has_unfinished_assistant_stream() {
+                        state.flush_assistant_reveal();
+                    }
+                    still_revealing = state.has_pending_assistant_reveal();
+                    if !still_revealing {
+                        state.queued_count = 0;
+                        state.queued_preview = None;
+                        self.draw_state(&state)?;
+                    }
                 }
-                return Ok(task.await?);
+                if !still_revealing {
+                    return Ok(task.await?);
+                }
             }
-            if event::poll(std::time::Duration::from_millis(30))? {
+            let poll_ms = if revealing { 18 } else { 30 };
+            if event::poll(std::time::Duration::from_millis(poll_ms))? {
                 match event::read()? {
                     event::Event::Resize(_, _) => self.clear_mouse_selection(),
                     event::Event::Mouse(mouse) => {
@@ -1177,7 +1191,13 @@ impl ChatTui {
                             || (key.code == KeyCode::Char('c')
                                 && key.modifiers.contains(KeyModifiers::CONTROL))
                         {
-                            handle.interrupted.store(true, Ordering::Relaxed);
+                            if task.is_finished() {
+                                if let Ok(mut state) = handle.state.lock() {
+                                    state.flush_assistant_reveal();
+                                }
+                            } else {
+                                handle.interrupted.store(true, Ordering::Relaxed);
+                            }
                             continue;
                         }
                         if let Ok(mut state) = handle.state.lock() {

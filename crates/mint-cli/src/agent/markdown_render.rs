@@ -271,6 +271,214 @@ fn try_render_single_line_custom_block(raw: &str, term_width: usize) -> Option<V
     None
 }
 
+pub(crate) fn is_atomic_fenced_lang(lang: &str) -> bool {
+    matches!(
+        lang.to_ascii_lowercase().as_str(),
+        "ui-grid"
+            | "ui_grid"
+            | "ui-grid-json"
+            | "ui_grid_json"
+            | "ui-card"
+            | "ui_card"
+            | "ui-card-json"
+            | "ui_card_json"
+            | "ui-feature"
+            | "ui_feature"
+            | "ui-mockup"
+            | "ui_mockup"
+            | "ui-mockup-json"
+            | "ui_mockup_json"
+            | "weather_json"
+            | "weather-json"
+            | "stock_json"
+            | "stock-json"
+            | "calculation_json"
+            | "calculation-json"
+            | "image_search_json"
+            | "image-search-json"
+            | "image_gen_json"
+            | "image-gen-json"
+            | "mermaid"
+    )
+}
+
+/// Splits Markdown into progressive reveal units:
+/// - Regular text, headings, lists, callouts, and standard code blocks split line-by-line.
+/// - Markdown tables (`| ... |`) group all consecutive rows into a single atomic unit.
+/// - Custom UI/JSON/Mermaid fenced blocks (`ui-card`, `ui-grid`, `ui-mockup`, etc.) group the
+///   entire fenced block into a single atomic unit so raw JSON never flashes mid-stream.
+///
+/// When `is_complete` is `false`, trailing incomplete lines, open tables, and unclosed atomic
+/// fenced blocks are held back until completed.
+pub(crate) fn split_progressive_units(raw: &str, is_complete: bool) -> Vec<String> {
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    let slice = if is_complete || raw.ends_with('\n') {
+        raw
+    } else if let Some(last_nl) = raw.rfind('\n') {
+        &raw[..=last_nl]
+    } else {
+        return Vec::new();
+    };
+
+    let mut units = Vec::new();
+    let mut in_code_block = false;
+    let mut pending_code_fence: Option<(String, bool)> = None;
+    let mut in_atomic_fence = false;
+    let mut atomic_fence_buffer: Vec<String> = Vec::new();
+    let mut table_buffer: Vec<String> = Vec::new();
+
+    for raw_line in slice.lines() {
+        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        let trimmed = line.trim_start();
+
+        if !in_code_block && !in_atomic_fence && markdown::is_table_line(trimmed) {
+            table_buffer.push(line.to_owned());
+            continue;
+        }
+
+        if !table_buffer.is_empty() {
+            units.push(table_buffer.join("\n"));
+            table_buffer.clear();
+        }
+
+        if trimmed.starts_with("```") {
+            if !in_code_block && !in_atomic_fence {
+                let after_open = trimmed.trim_start_matches('`').trim();
+                if after_open.ends_with("```") && after_open.len() > 3 {
+                    units.push(line.to_owned());
+                    continue;
+                }
+                let lang = if let Some(idx) =
+                    after_open.find(|c: char| c.is_whitespace() || c == '[' || c == '{')
+                {
+                    &after_open[..idx]
+                } else {
+                    after_open
+                };
+                if is_atomic_fenced_lang(lang) {
+                    in_atomic_fence = true;
+                    atomic_fence_buffer.clear();
+                    atomic_fence_buffer.push(line.to_owned());
+                } else {
+                    in_code_block = true;
+                    let can_promote = lang.is_empty() || lang.eq_ignore_ascii_case("plaintext");
+                    pending_code_fence = Some((line.to_owned(), can_promote));
+                }
+            } else if in_atomic_fence {
+                atomic_fence_buffer.push(line.to_owned());
+                units.push(atomic_fence_buffer.join("\n"));
+                atomic_fence_buffer.clear();
+                in_atomic_fence = false;
+            } else {
+                in_code_block = false;
+                if let Some((fence, _)) = pending_code_fence.take() {
+                    units.push(format!("{fence}\n{line}"));
+                } else {
+                    units.push(line.to_owned());
+                }
+            }
+            continue;
+        }
+
+        if in_atomic_fence {
+            atomic_fence_buffer.push(line.to_owned());
+            continue;
+        }
+
+        if let Some((fence, can_promote)) = pending_code_fence.take() {
+            let first_token = trimmed
+                .find(|c: char| c.is_whitespace() || c == '[' || c == '{')
+                .map_or(trimmed, |idx| &trimmed[..idx]);
+            if can_promote && is_atomic_fenced_lang(first_token) {
+                in_code_block = false;
+                in_atomic_fence = true;
+                atomic_fence_buffer.clear();
+                atomic_fence_buffer.push(fence);
+                atomic_fence_buffer.push(line.to_owned());
+            } else {
+                units.push(format!("{fence}\n{line}"));
+            }
+            continue;
+        }
+
+        units.push(line.to_owned());
+    }
+
+    if is_complete {
+        if !table_buffer.is_empty() {
+            units.push(table_buffer.join("\n"));
+        }
+        if let Some((fence, _)) = pending_code_fence.take() {
+            units.push(fence);
+        }
+        if !atomic_fence_buffer.is_empty() {
+            units.push(atomic_fence_buffer.join("\n"));
+        }
+    }
+
+    units
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct ProgressiveMarkdownPacer {
+    raw_buffer: String,
+    completed: bool,
+    revealed_units: usize,
+}
+
+impl ProgressiveMarkdownPacer {
+    pub fn push_delta(&mut self, delta: &str) {
+        if !delta.is_empty() {
+            self.raw_buffer.push_str(delta);
+        }
+    }
+
+    pub fn finish_with_authoritative(&mut self, full_text: &str) {
+        self.raw_buffer.clear();
+        self.raw_buffer.push_str(full_text);
+        self.completed = true;
+    }
+
+    pub fn is_completed(&self) -> bool {
+        self.completed
+    }
+
+    pub fn is_done(&self) -> bool {
+        if !self.completed {
+            return false;
+        }
+        let units = split_progressive_units(&self.raw_buffer, true);
+        self.revealed_units >= units.len()
+    }
+
+    pub fn step(&mut self) -> Option<String> {
+        let units = split_progressive_units(&self.raw_buffer, self.completed);
+        if self.revealed_units >= units.len() {
+            return None;
+        }
+        let remaining = units.len() - self.revealed_units;
+        let advance = if remaining <= 12 {
+            1
+        } else {
+            (remaining / 10).clamp(1, 4)
+        };
+        self.revealed_units = (self.revealed_units + advance).min(units.len());
+        Some(units[..self.revealed_units].join("\n"))
+    }
+
+    pub fn flush_all(&mut self) -> Option<String> {
+        self.completed = true;
+        let units = split_progressive_units(&self.raw_buffer, true);
+        if units.is_empty() {
+            return None;
+        }
+        self.revealed_units = units.len();
+        Some(units.join("\n"))
+    }
+}
+
 pub(crate) fn format_markdown_bold(text: &str) -> String {
     let (term_width, _) = markdown::terminal_size_or_default();
     format_markdown_bold_with_width(text, term_width as usize)
@@ -384,7 +592,7 @@ pub(crate) fn format_markdown_bold_with_width(text: &str, term_width: usize) -> 
                     } else {
                         formatted_lines.push(code_block_top_border(&custom_lang, term_width));
                         for l in buffered.lines() {
-                            formatted_line = format!("{CODE_BORDER}│{RESET} {l}");
+                            formatted_line = format!("  {l}");
                             formatted_lines.push(formatted_line);
                         }
                         formatted_lines.push(code_block_bottom_border(term_width));
@@ -432,7 +640,7 @@ pub(crate) fn format_markdown_bold_with_width(text: &str, term_width: usize) -> 
                 Some(h) => highlight_code_line(h, line),
                 None => line.to_string(),
             };
-            formatted_line = format!("{CODE_BORDER}│{RESET} {content}{RESET}");
+            formatted_line = format!("  {content}{RESET}");
             formatted_lines.push(formatted_line);
             continue;
         }
@@ -803,5 +1011,97 @@ mod tests {
         let output_grid = format_markdown_bold(fenced_single_line);
         assert!(output_grid.contains("OptionA"));
         assert!(output_grid.contains("Best choice"));
+    }
+
+    #[test]
+    fn test_progressive_units_splits_text_and_code_line_by_line_but_groups_tables_and_ui_cards() {
+        let doc = "\
+# Heading
+Paragraph line 1
+| Col A | Col B |
+| --- | --- |
+| 1 | 2 |
+After table
+```rust
+fn main() {}
+```
+```ui-card
+[{\"title\": \"CardTitle\", \"subtitle\": \"Sub\"}]
+```
+Final line";
+
+        let units = split_progressive_units(doc, true);
+        assert_eq!(
+            units,
+            vec![
+                "# Heading",
+                "Paragraph line 1",
+                "| Col A | Col B |\n| --- | --- |\n| 1 | 2 |",
+                "After table",
+                "```rust\nfn main() {}",
+                "```",
+                "```ui-card\n[{\"title\": \"CardTitle\", \"subtitle\": \"Sub\"}]\n```",
+                "Final line",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_progressive_units_holds_incomplete_table_and_unclosed_ui_card_while_streaming() {
+        let streaming_table = "Intro line\n| Header 1 | Header 2 |\n| --- | --- |\n";
+        let units = split_progressive_units(streaming_table, false);
+        assert_eq!(units, vec!["Intro line"]);
+
+        let streaming_card = "Intro line\n```ui-grid\n[{\"title\": \"A\"}]\n";
+        let units_card = split_progressive_units(streaming_card, false);
+        assert_eq!(units_card, vec!["Intro line"]);
+
+        // Bare opening fence without its first code line is held so an empty code box never flashes
+        let bare_fence = "Intro line\n```rust\n";
+        assert_eq!(
+            split_progressive_units(bare_fence, false),
+            vec!["Intro line"]
+        );
+
+        let streaming_code = "Intro line\n```rust\nlet x = 1;\nlet y = 2;\n";
+        let units_code = split_progressive_units(streaming_code, false);
+        assert_eq!(
+            units_code,
+            vec!["Intro line", "```rust\nlet x = 1;", "let y = 2;"]
+        );
+
+        // Unlabeled fence whose first line is a ui-card keyword is promoted to atomic block
+        let unlabeled_card = "Intro line\n```\nui-card [\n  {\"title\": \"A\"}\n]\n";
+        assert_eq!(
+            split_progressive_units(unlabeled_card, false),
+            vec!["Intro line"]
+        );
+        let closed_unlabeled_card = "Intro line\n```\nui-card [\n  {\"title\": \"A\"}\n]\n```\n";
+        assert_eq!(
+            split_progressive_units(closed_unlabeled_card, false),
+            vec!["Intro line", "```\nui-card [\n  {\"title\": \"A\"}\n]\n```"]
+        );
+    }
+
+    #[test]
+    fn test_progressive_markdown_pacer_reveals_units_progressively_and_flushes() {
+        let mut pacer = ProgressiveMarkdownPacer::default();
+        pacer.push_delta("Line 1\nLine 2\n| A | B |\n| - | - |\n");
+        assert_eq!(pacer.step().as_deref(), Some("Line 1"));
+        assert_eq!(pacer.step().as_deref(), Some("Line 1\nLine 2"));
+        // Table is still open because no non-table line or finish has arrived
+        assert_eq!(pacer.step(), None);
+        assert!(!pacer.is_done());
+
+        pacer.finish_with_authoritative("Line 1\nLine 2\n| A | B |\n| - | - |\nDone");
+        assert_eq!(
+            pacer.step().as_deref(),
+            Some("Line 1\nLine 2\n| A | B |\n| - | - |")
+        );
+        assert_eq!(
+            pacer.step().as_deref(),
+            Some("Line 1\nLine 2\n| A | B |\n| - | - |\nDone")
+        );
+        assert!(pacer.is_done());
     }
 }

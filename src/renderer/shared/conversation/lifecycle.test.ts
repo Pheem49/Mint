@@ -18,7 +18,7 @@ const reply: ChatResponse = { provider: 'system', model: 'test', text: 'complete
 const activity: AgentProgress = { type: 'ToolStart', data: { action: 'read_file', input: { path: 'file.txt' } } }
 
 function setup(overrides: Partial<ConversationTransport> = {}, callbacks: ConversationEffects = {}, drafts?: { read(id: string): string; write(id: string, text: string): void }) {
-  const streams: Array<{ chatId: string; onProgress: (p: AgentProgress) => void; onApproval: (p: PendingApproval) => void; onStarted: (id: number) => void; result: ReturnType<typeof deferred<ChatResponse>> }> = []
+  const streams: Array<{ chatId: string; onChunk: (chunk: string) => void; onProgress: (p: AgentProgress) => void; onApproval: (p: PendingApproval) => void; onStarted: (id: number) => void; result: ReturnType<typeof deferred<ChatResponse>> }> = []
   const saved: Array<{ id: number; progress: AgentProgress[] }> = []
   const submitted: Array<{ token: string; approved: boolean; answer?: string }> = []
   const transport: ConversationTransport = {
@@ -29,9 +29,9 @@ function setup(overrides: Partial<ConversationTransport> = {}, callbacks: Conver
     cancelChatMessage: async () => {},
     clearChatHistory: async () => 1,
     submitToolApproval: async (token: string, approved: boolean, answer?: string) => { submitted.push({ token, approved, answer }) },
-    streamChatMessage: (_message: string, _chunk: unknown, _image: unknown, _audio: unknown, _video: unknown, _instruction: unknown, onProgress: (progress: AgentProgress) => void, _document: unknown, _workspace: unknown, chatId: string, _agent: unknown, _plan: unknown, _mcp: unknown, onApproval: (approval: PendingApproval) => void, onStarted: (id: number) => void) => {
+    streamChatMessage: (_message: string, onChunk: (chunk: string) => void, _image: unknown, _audio: unknown, _video: unknown, _instruction: unknown, onProgress: (progress: AgentProgress) => void, _document: unknown, _workspace: unknown, chatId: string, _agent: unknown, _plan: unknown, _mcp: unknown, onApproval: (approval: PendingApproval) => void, onStarted: (id: number) => void) => {
       const result = deferred<ChatResponse>()
-      streams.push({ chatId, onProgress, onApproval, onStarted, result })
+      streams.push({ chatId, onChunk, onProgress, onApproval, onStarted, result })
       return result.promise
     },
     ...overrides,
@@ -520,5 +520,64 @@ describe('Queued messages lifecycle and steering', () => {
     expect(lifecycle.getSnapshot().sending).toBe(true)
     expect(lifecycle.getSnapshot().sendingMessage).toBe('Important Urgent Turn')
     expect(streams).toHaveLength(2)
+  })
+
+  it('progressively reveals streamed lines while holding incomplete tables and unclosed UI cards until completed', async () => {
+    const { lifecycle, streams } = setup()
+    const run = lifecycle.sendPrompt('Show card and table')
+
+    streams[0].onChunk('Line 1\n```ui-card\n[{"title":"Box"}]\n')
+    expect(lifecycle.getSnapshot().streamedReply).toBe('Line 1')
+
+    streams[0].onChunk('```\n| A | B |\n| - | - |\n')
+    expect(lifecycle.getSnapshot().streamedReply).toBe('Line 1\n```ui-card\n[{"title":"Box"}]\n```')
+
+    streams[0].onChunk('| 1 | 2 |\nAfter table\n')
+    expect(lifecycle.getSnapshot().streamedReply).toBe(
+      'Line 1\n```ui-card\n[{"title":"Box"}]\n```\n| A | B |\n| - | - |\n| 1 | 2 |\nAfter table',
+    )
+
+    streams[0].result.resolve({
+      provider: 'system',
+      model: 'test',
+      text: 'Line 1\n```ui-card\n[{"title":"Box"}]\n```\n| A | B |\n| - | - |\n| 1 | 2 |\nAfter table',
+    })
+    await run
+  })
+
+  it('drains a single-burst DirectText response progressively across multiple frames instead of dumping all at once', async () => {
+    const { lifecycle, streams } = setup()
+    const observedReplies: string[] = []
+    const unsubscribe = lifecycle.subscribe(() => {
+      const current = lifecycle.getSnapshot().streamedReply
+      if (current && observedReplies[observedReplies.length - 1] !== current) {
+        observedReplies.push(current)
+      }
+    })
+
+    const fullText = [
+      'Line 1',
+      'Line 2',
+      '| H1 | H2 |',
+      '| - | - |',
+      '| V1 | V2 |',
+      '```ui-card',
+      '[{"title":"Card"}]',
+      '```',
+      'Final line',
+    ].join('\n')
+
+    const run = lifecycle.sendPrompt('Direct text burst')
+    streams[0].onChunk(fullText)
+    streams[0].result.resolve({ provider: 'system', model: 'test', text: fullText })
+    await run
+    unsubscribe()
+
+    expect(observedReplies).toEqual([
+      'Line 1\nLine 2',
+      'Line 1\nLine 2\n| H1 | H2 |\n| - | - |\n| V1 | V2 |',
+      'Line 1\nLine 2\n| H1 | H2 |\n| - | - |\n| V1 | V2 |\n```ui-card\n[{"title":"Card"}]\n```',
+      fullText,
+    ])
   })
 })

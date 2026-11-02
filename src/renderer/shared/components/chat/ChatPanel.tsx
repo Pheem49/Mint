@@ -78,7 +78,7 @@ export function ThinkingElapsedMeta() {
   )
 }
 
-const STREAM_MARKDOWN_UPDATE_MS = 120
+const STREAM_MARKDOWN_UPDATE_MS = 32
 
 function useThrottledValue<T>(value: T, intervalMs: number): T {
   const [throttledValue, setThrottledValue] = useState(value)

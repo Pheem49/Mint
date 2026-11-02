@@ -69,6 +69,10 @@ pub(crate) struct ChatViewState {
     pub(crate) queued_count: usize,
     pub(crate) queued_preview: Option<String>,
     pub(crate) theme: crate::terminal_theme::TuiTheme,
+    pub(super) assistant_pacer: Option<crate::agent::ProgressiveMarkdownPacer>,
+    pub(super) active_assistant_entry: Option<usize>,
+    pub(super) pending_post_assistant_notices: Vec<String>,
+    pub(super) last_assistant_tick: Option<std::time::Instant>,
 }
 
 #[derive(Clone, Debug)]
@@ -161,9 +165,17 @@ impl TuiHandle {
             state.push_notice(text);
         }
     }
-    pub fn push_assistant(&self, text: impl Into<String>) {
+    pub fn append_assistant_delta(&self, delta: &str) {
+        if delta.is_empty() {
+            return;
+        }
         if let Ok(mut state) = self.state.lock() {
-            state.push_assistant(text);
+            state.append_assistant_delta(delta);
+        }
+    }
+    pub fn begin_assistant_reveal(&self, summary: String, post_notices: Vec<String>) {
+        if let Ok(mut state) = self.state.lock() {
+            state.begin_assistant_reveal(summary, post_notices);
         }
     }
     pub fn push_command(&self, text: impl Into<String>) {
@@ -826,6 +838,9 @@ impl ChatViewState {
             self.thoughts.clear();
             self.thought_modal = None;
             self.tool_viewer = None;
+            self.assistant_pacer = None;
+            self.active_assistant_entry = None;
+            self.pending_post_assistant_notices.clear();
             self.last_interaction_id = 0;
             self.sync_cursor = 0;
         }
@@ -990,6 +1005,9 @@ impl ChatViewState {
         self.thoughts.clear();
         self.thought_modal = None;
         self.tool_viewer = None;
+        self.assistant_pacer = None;
+        self.active_assistant_entry = None;
+        self.pending_post_assistant_notices.clear();
         let scoped = mint_core::scoped_chat_id(chat_id, Some(&workspace.to_string_lossy()));
         self.sync_cursor = memory.latest_conversation_sequence(&scoped).unwrap_or(0);
         if let Ok(rows) = memory.interactions_for_chat(&scoped) {
@@ -1137,25 +1155,139 @@ impl ChatViewState {
         changed
     }
     pub fn push_user(&mut self, text: String) {
+        self.flush_assistant_reveal();
         self.transcript
             .push(TranscriptEntry::new(TranscriptRole::User, text));
         self.scroll_from_bottom = 0;
         self.swarm_agents.clear();
     }
     pub fn push_notice(&mut self, text: impl Into<String>) {
-        self.transcript
-            .push(TranscriptEntry::new(TranscriptRole::Notice, text));
+        let entry = TranscriptEntry::new(TranscriptRole::Notice, text);
+        if let Some(idx) = self.active_assistant_entry
+            && idx <= self.transcript.len()
+        {
+            self.transcript.insert(idx, entry);
+            self.active_assistant_entry = Some(idx + 1);
+            for tool in &mut self.tools {
+                if tool.entry >= idx {
+                    tool.entry += 1;
+                }
+            }
+        } else {
+            self.transcript.push(entry);
+        }
         self.scroll_from_bottom = 0;
     }
+    #[cfg(test)]
     pub fn push_assistant(&mut self, text: impl Into<String>) {
+        self.flush_assistant_reveal();
         self.transcript
             .push(TranscriptEntry::new(TranscriptRole::Assistant, text));
         self.scroll_from_bottom = 0;
+    }
+    fn upsert_active_assistant_entry(&mut self, text: String) {
+        if let Some(idx) = self.active_assistant_entry
+            && idx < self.transcript.len()
+            && self.transcript[idx].role == TranscriptRole::Assistant
+        {
+            self.transcript[idx] = TranscriptEntry::new(TranscriptRole::Assistant, text);
+        } else {
+            let idx = self.transcript.len();
+            self.transcript
+                .push(TranscriptEntry::new(TranscriptRole::Assistant, text));
+            self.active_assistant_entry = Some(idx);
+        }
+    }
+    pub fn append_assistant_delta(&mut self, delta: &str) {
+        if delta.is_empty() {
+            return;
+        }
+        let pacer = self
+            .assistant_pacer
+            .get_or_insert_with(crate::agent::ProgressiveMarkdownPacer::default);
+        pacer.push_delta(delta);
+        if self.active_assistant_entry.is_none() {
+            self.tick_assistant_reveal();
+        }
+    }
+    pub fn begin_assistant_reveal(&mut self, summary: String, post_notices: Vec<String>) {
+        let pacer = self
+            .assistant_pacer
+            .get_or_insert_with(crate::agent::ProgressiveMarkdownPacer::default);
+        pacer.finish_with_authoritative(&summary);
+        self.pending_post_assistant_notices = post_notices;
+        self.tick_assistant_reveal();
+    }
+    pub fn tick_assistant_reveal(&mut self) -> bool {
+        let Some(mut pacer) = self.assistant_pacer.take() else {
+            return false;
+        };
+        let revealed = pacer.step();
+        let done = pacer.is_done();
+        let mut changed = false;
+        if let Some(text) = revealed {
+            self.upsert_active_assistant_entry(text);
+            self.last_assistant_tick = Some(std::time::Instant::now());
+            changed = true;
+        }
+        if done {
+            self.active_assistant_entry = None;
+            self.last_assistant_tick = None;
+            let notices = std::mem::take(&mut self.pending_post_assistant_notices);
+            for notice in notices {
+                self.transcript
+                    .push(TranscriptEntry::new(TranscriptRole::Notice, notice));
+                changed = true;
+            }
+        } else {
+            self.assistant_pacer = Some(pacer);
+        }
+        changed
+    }
+    pub(super) fn tick_assistant_reveal_if_due(
+        &mut self,
+        min_interval: std::time::Duration,
+    ) -> bool {
+        if self.assistant_pacer.is_none() {
+            return false;
+        }
+        if self
+            .last_assistant_tick
+            .is_some_and(|last| last.elapsed() < min_interval)
+        {
+            return false;
+        }
+        self.tick_assistant_reveal()
+    }
+    pub fn flush_assistant_reveal(&mut self) {
+        if let Some(mut pacer) = self.assistant_pacer.take()
+            && let Some(text) = pacer.flush_all()
+        {
+            self.upsert_active_assistant_entry(text);
+        }
+        self.active_assistant_entry = None;
+        self.last_assistant_tick = None;
+        let notices = std::mem::take(&mut self.pending_post_assistant_notices);
+        for notice in notices {
+            self.transcript
+                .push(TranscriptEntry::new(TranscriptRole::Notice, notice));
+        }
+    }
+    pub fn has_pending_assistant_reveal(&self) -> bool {
+        self.assistant_pacer.is_some()
+    }
+    pub(super) fn has_unfinished_assistant_stream(&self) -> bool {
+        self.assistant_pacer
+            .as_ref()
+            .is_some_and(|pacer| !pacer.is_completed())
     }
     pub fn clear_transcript(&mut self) {
         self.transcript.clear();
         self.tools.clear();
         self.swarm_agents.clear();
+        self.assistant_pacer = None;
+        self.active_assistant_entry = None;
+        self.pending_post_assistant_notices.clear();
         if self
             .dialog
             .as_ref()

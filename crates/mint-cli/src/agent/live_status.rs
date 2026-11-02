@@ -204,8 +204,16 @@ fn ramp_estimate(estimated: u64, elapsed_secs: f64) -> u64 {
 }
 
 pub(super) fn render_live_summary(summary: &str) {
+    use std::io::IsTerminal;
     let (tw, _) = markdown::terminal_size_or_default();
     let width = tw as usize;
+    let total_lines = summary.lines().count().max(1);
+    let pace_delay = if io::stdout().is_terminal() {
+        let per_line_ms = (500 / total_lines as u64).clamp(4, 16);
+        Duration::from_millis(per_line_ms)
+    } else {
+        Duration::ZERO
+    };
 
     let mut is_first = true;
     let mut table_buffer: Vec<String> = Vec::new();
@@ -219,6 +227,10 @@ pub(super) fn render_live_summary(summary: &str) {
         if !table_buffer.is_empty() {
             print_table_block(&table_buffer, &mut is_first);
             table_buffer.clear();
+            if !pace_delay.is_zero() {
+                let _ = io::stdout().flush();
+                std::thread::sleep(pace_delay);
+            }
         }
 
         let indent = if is_first { "" } else { "  " };
@@ -233,6 +245,10 @@ pub(super) fn render_live_summary(summary: &str) {
             is_first = false;
         } else {
             print!("\n{wrapped}");
+        }
+        if !pace_delay.is_zero() {
+            let _ = io::stdout().flush();
+            std::thread::sleep(pace_delay);
         }
     }
 

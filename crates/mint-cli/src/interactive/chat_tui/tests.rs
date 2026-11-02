@@ -2883,4 +2883,72 @@ mod swarm_panel_tests {
         assert_eq!(dialog.handle_key(esc), None);
         assert!(!dialog.resume_picker.as_ref().unwrap().renaming);
     }
+
+    #[test]
+    fn progressive_assistant_reveal_streams_lines_and_appends_notices_on_completion() {
+        let mut state = ChatViewState::default();
+        state.push_user("Explain and show table".into());
+
+        // Stream an intro line plus an incomplete table
+        state.append_assistant_delta("First line\n| A | B |\n| - | - |\n");
+        assert_eq!(state.transcript.len(), 2);
+        assert_eq!(state.transcript[1].role, TranscriptRole::Assistant);
+        assert_eq!(state.transcript[1].text, "First line");
+
+        // User scrolls up while streaming; scroll_from_bottom should be respected
+        state.scroll_from_bottom = 5;
+
+        // Finish turn with authoritative summary + post-turn notices (Sources + Worked line)
+        state.begin_assistant_reveal(
+            "First line\n| A | B |\n| - | - |\n| 1 | 2 |\nFinal line".into(),
+            vec![
+                "Sources:\n1. Example\n   https://example.com".into(),
+                "─ Worked for 2s • test".into(),
+            ],
+        );
+
+        // First tick inside begin_assistant_reveal reveals the completed table block
+        assert_eq!(
+            state.transcript[1].text,
+            "First line\n| A | B |\n| - | - |\n| 1 | 2 |"
+        );
+        assert_eq!(state.scroll_from_bottom, 5);
+        assert!(state.has_pending_assistant_reveal());
+
+        // Next tick reveals Final line and flushes the notices
+        assert!(state.tick_assistant_reveal());
+        assert!(!state.has_pending_assistant_reveal());
+        assert_eq!(
+            state.transcript[1].text,
+            "First line\n| A | B |\n| - | - |\n| 1 | 2 |\nFinal line"
+        );
+        assert_eq!(state.transcript.len(), 4);
+        assert_eq!(state.transcript[2].role, TranscriptRole::Notice);
+        assert!(state.transcript[2].text.starts_with("Sources:"));
+        assert_eq!(state.transcript[3].role, TranscriptRole::Notice);
+        assert!(state.transcript[3].text.contains("Worked for 2s"));
+    }
+
+    #[test]
+    fn progressive_assistant_reveal_inserts_mid_turn_notices_before_active_assistant_entry() {
+        let mut state = ChatViewState::default();
+        state.push_user("Question".into());
+        state.append_assistant_delta("Line 1\n");
+        assert_eq!(state.transcript.len(), 2);
+        assert_eq!(state.transcript[1].role, TranscriptRole::Assistant);
+
+        // When ExtendedThinking finishes right after streaming chunks, its notice should sit above Assistant
+        state.push_notice("Thought · 1.2s (Ctrl+T to view)");
+        assert_eq!(state.transcript.len(), 3);
+        assert_eq!(state.transcript[1].role, TranscriptRole::Notice);
+        assert_eq!(state.transcript[1].text, "Thought · 1.2s (Ctrl+T to view)");
+        assert_eq!(state.transcript[2].role, TranscriptRole::Assistant);
+        assert_eq!(state.transcript[2].text, "Line 1");
+
+        state.begin_assistant_reveal("Line 1\nLine 2".into(), vec!["─ Worked for 1s".into()]);
+        assert!(!state.has_pending_assistant_reveal());
+        assert_eq!(state.transcript[2].text, "Line 1\nLine 2");
+        assert_eq!(state.transcript[3].role, TranscriptRole::Notice);
+        assert_eq!(state.transcript[3].text, "─ Worked for 1s");
+    }
 }
