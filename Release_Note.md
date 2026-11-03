@@ -1,5 +1,13 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Drag & Drop Support for Side Panel Tools & Artifacts (Desktop and Web)
+- **Automatic Image Attachment on Drag**: Dragging image files or image preview tabs from Tools / Side Panel now automatically resolves the image binary/dataUri and attaches it as an interactive Image Attachment chip (complete with trimmed thumbnail preview and removal button) directly above the composer, feeding vision data straight into multimodal LLMs without requiring extra read turns.
+- **Side Panel Tools Tab Dragging**: Enabled HTML5 dragging on preview tabs within `ToolSurfacePage` (and the tabs switcher dropdown menu). Users can now directly drag tabs (such as generated slides, documents, images) from the Tools panel on the right and drop them into the chat input composer to mention `@relative/path`.
+- **Artifact Preview Header Dragging**: Made the file icon and title container in `ArtifactPreviewPanel` draggable with grab cursors and informative tooltips (`title="<path> (Drag to chat)"`), allowing quick reference dragging directly from the artifact viewer header.
+- **Chat Artifact Cards Dragging**: Enabled dragging on `.chat-artifact-card` items directly in the message stream, allowing users to drag inline presentation/PDF/document cards into the input field.
+- **Deep Seam & Unified Drag Utility (`workspaceDrag.ts`)**: Built deep helpers `setWorkspaceDragData` and `formatWorkspaceReference` under `src/renderer/shared/utils/workspaceDrag.ts` unifying drag data transfer across `WorkspacePanel`, `ToolSurfacePage`, `ArtifactPreviewPanel`, and `ArtifactCards`, setting both `application/x-mint-workspace-path`, `application/x-mint-workspace-file`, and fallback `text/plain`.
+- **Robust Drop & Dragover Ergonomics in Chat**: Upgraded `ChatPanel` and `CollapsiblePasteInput` to handle dragover seamlessly with copy cursors and drop handlers across the input textarea, chat form, and the main conversation area.
+
 ## Context Compaction & Observation Compression Harness (CLI, Desktop, and Web)
 - **File-Backed Output Scratchpad (Cursor / Claude Code Pattern)**: Automatically offloads bulky tool execution logs (> 3,000 characters) to `.mint/scratch/tool_outputs/<timestamp>_<action>_<hash>.log`, presenting the model with clean head/tail previews and an actionable pointer path to prevent token bloat while keeping full raw outputs on-demand.
 - **Progressive Observation Ghosting (Three-Tier Aging)**: Implemented deterministic turn-level aging for historic `ToolResult` messages without LLM invocation cost — retaining recent 3 turns in full (Hot Zone), truncating turns 4–10 to concise summaries (Warm Zone), and collapsing older turns (> 10 turns back) into 1-line tombstones (Cold Zone).

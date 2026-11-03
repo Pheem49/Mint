@@ -25,6 +25,7 @@ import {
   detectArtifactType,
   getFileLanguage,
 } from '../../utils/artifacts'
+import { setWorkspaceDragData } from '../../utils/workspaceDrag'
 
 export type { ArtifactFile, ArtifactType, ViewportMode }
 export { detectArtifactType, getFileLanguage }
@@ -265,7 +266,25 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
           flexShrink: 0,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+        <div
+          className="artifact-preview-header-drag"
+          draggable={Boolean(filePath)}
+          onDragStart={filePath ? (event) => {
+            setWorkspaceDragData(event.dataTransfer, {
+              path: filePath,
+              root: sourceWorkspace,
+              url: imageUrl || artifact?.url,
+            })
+          } : undefined}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            minWidth: 0,
+            cursor: filePath ? 'grab' : undefined,
+          }}
+          title={filePath ? `${filePath} (Drag to chat)` : undefined}
+        >
           <span
             style={{
               display: 'inline-flex',
@@ -728,9 +747,17 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
                   })
                 }
               }}
+              draggable
+              onDragStart={(event) => {
+                setWorkspaceDragData(event.dataTransfer, {
+                  path: filePath,
+                  root: sourceWorkspace,
+                  url: imageUrl || artifact?.url,
+                })
+              }}
               src={imageUrl || artifact.url}
               alt={fileName}
-              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', cursor: 'grab' }}
               onLoad={(e) => {
                 const img = e.currentTarget
                 if (img.naturalWidth && img.naturalHeight) {

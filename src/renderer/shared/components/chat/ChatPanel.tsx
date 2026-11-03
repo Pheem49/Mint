@@ -36,7 +36,7 @@ import { SubagentStatusStrip } from '../activity/SubagentStatusStrip'
 import { VirtualChatHistory, type VirtualChatHistoryHandle } from './VirtualChatHistory'
 import type { ArtifactFile } from '../../utils/artifacts'
 import type { AgentProgress, ChatResponse, DiffHunk, FileChange, GitCheckpoint, QueuedPrompt, RuntimeStatus } from '../../types'
-import { shouldShowSessionDivider, formatSessionDividerLabel } from '../../utils/ui'
+import { shouldShowSessionDivider, formatSessionDividerLabel, createTrimmedImagePreview } from '../../utils/ui'
 import { useVoiceInput } from '@/voiceInput'
 import VoicePill from './VoicePill'
 import { useGeminiLiveVoice } from '../../utils/useGeminiLiveVoice'
@@ -48,6 +48,7 @@ import WorkspaceSelector from '../workspace/WorkspaceSelector'
 import ToolsPanelToggle from '../workspace/ToolsPanelToggle'
 import { ModsPanel } from '../extensions/ModsPanel'
 import type { ToolSurface } from '../workspace/ToolSurfacePage'
+import { WORKSPACE_PATH_MIME, WORKSPACE_FILE_MIME, WORKSPACE_IMAGE_MIME, isImageFileName, resolveImageToDataUri } from '../../utils/workspaceDrag'
 import QueuedMessagesBanner from './QueuedMessagesBanner'
 import '../../css/thinking-status.css'
 import '../../css/slash-choice.css'
@@ -150,6 +151,7 @@ interface ChatPanelContract {
   onSelectVideo: (event: ChangeEvent<HTMLInputElement>) => void
   onSelectDocument: (event: ChangeEvent<HTMLInputElement>) => void
   onPasteImage: (clipboardData: DataTransfer) => boolean
+  onAttachImage?: (image: { dataUri: string; previewDataUri?: string; objectUrl?: string; name: string }) => void
   onSetMessage: (message: string) => void
   onSendVoiceMessage: (message: string, audioDataUri?: string | null) => Promise<void>
   onRemoveImage: (idx: number) => void
@@ -269,6 +271,7 @@ export default function ChatPanel({
   onSelectVideo,
   onSelectDocument,
   onPasteImage,
+  onAttachImage,
   onSetMessage,
   onSendVoiceMessage,
   onRemoveImage,
@@ -711,6 +714,14 @@ export default function ChatPanel({
 
   const handleDragOver = (e: DragEvent<HTMLElement>) => {
     e.preventDefault()
+    if (
+      e.dataTransfer?.types?.includes(WORKSPACE_PATH_MIME) ||
+      e.dataTransfer?.types?.includes(WORKSPACE_FILE_MIME) ||
+      e.dataTransfer?.types?.includes(WORKSPACE_IMAGE_MIME) ||
+      e.dataTransfer?.types?.includes('application/x-mint-workspace-path')
+    ) {
+      e.dataTransfer.dropEffect = 'copy'
+    }
   }
 
   const handleDrop = (e: DragEvent<HTMLElement>) => {
@@ -718,6 +729,26 @@ export default function ChatPanel({
     e.stopPropagation()
     dragCounter.current = 0
     setIsDragging(false)
+
+    const wsPath =
+      e.dataTransfer?.getData(WORKSPACE_IMAGE_MIME) ||
+      e.dataTransfer?.getData(WORKSPACE_PATH_MIME) ||
+      e.dataTransfer?.getData('application/x-mint-workspace-path')
+    if (wsPath) {
+      void tryAttachDroppedImage(e.dataTransfer).then((attached) => {
+        if (!attached) {
+          const raw =
+            e.dataTransfer?.getData(WORKSPACE_PATH_MIME) ||
+            e.dataTransfer?.getData('application/x-mint-workspace-path') ||
+            ''
+          if (raw) {
+            appendWorkspaceReference(raw.startsWith('@') ? raw : `@${raw}`)
+            textareaRef.current?.focus()
+          }
+        }
+      })
+      return
+    }
 
     const now = Date.now()
     if (now - lastDropTimeRef.current < 250) {
@@ -1113,13 +1144,78 @@ export default function ChatPanel({
     if (!trimmed) return
     onSetMessage(message.trim() ? `${message.trimEnd()} ${trimmed} ` : `${trimmed} `)
   }
+
+  const tryAttachDroppedImage = async (dataTransfer: DataTransfer): Promise<boolean> => {
+    if (!onAttachImage) return false
+
+    const rawImage = dataTransfer.getData(WORKSPACE_IMAGE_MIME)
+    let imagePayload: { path?: string; root?: string; url?: string; name?: string } | null = null
+    if (rawImage) {
+      try {
+        imagePayload = JSON.parse(rawImage)
+      } catch {
+        // ignore
+      }
+    }
+
+    const wsPath =
+      imagePayload?.path ||
+      dataTransfer.getData(WORKSPACE_PATH_MIME) ||
+      dataTransfer.getData('application/x-mint-workspace-path')
+    const plainText = dataTransfer.getData('text/plain')
+    const uriList = dataTransfer.getData('text/uri-list')
+    const candidatePath = (wsPath || plainText || uriList || '').replace(/^@/, '').trim()
+
+    const isImg =
+      Boolean(imagePayload) ||
+      isImageFileName(candidatePath) ||
+      candidatePath.startsWith('blob:') ||
+      candidatePath.startsWith('data:image/') ||
+      Boolean(imagePayload?.url)
+    if (!isImg) return false
+
+    const name = imagePayload?.name || candidatePath.split(/[\\/]/).pop()?.split('?')[0] || 'image.png'
+    const root = imagePayload?.root || workspacePath || ''
+    const url =
+      imagePayload?.url ||
+      (candidatePath.startsWith('http') || candidatePath.startsWith('blob:') || candidatePath.startsWith('data:image/')
+        ? candidatePath
+        : '')
+
+    let dataUri = ''
+    if (url) {
+      dataUri = await resolveImageToDataUri(url, root, (p, r) => runtimePlatform.readWorkspaceImage(p, r))
+    }
+    if (!dataUri && candidatePath) {
+      dataUri = await resolveImageToDataUri(candidatePath, root, (p, r) => runtimePlatform.readWorkspaceImage(p, r))
+    }
+
+    if (dataUri) {
+      const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
+      onAttachImage({ dataUri, previewDataUri, name })
+      textareaRef.current?.focus()
+      return true
+    }
+    return false
+  }
+
   const handleWorkspaceDrop = (event: DragEvent<HTMLElement>) => {
-    const reference =
-      event.dataTransfer.getData('application/x-mint-workspace-path') ||
-      event.dataTransfer.getData('text/plain')
-    if (!reference.trim().startsWith('@')) return
     event.preventDefault()
-    appendWorkspaceReference(reference)
+    void tryAttachDroppedImage(event.dataTransfer).then((attached) => {
+      if (attached) return
+      const wsPath =
+        event.dataTransfer.getData(WORKSPACE_PATH_MIME) ||
+        event.dataTransfer.getData('application/x-mint-workspace-path')
+      const plainText = event.dataTransfer.getData('text/plain')
+      const reference = wsPath || plainText
+      if (!reference) return
+      const trimmed = reference.trim()
+      if (wsPath || trimmed.startsWith('@')) {
+        const formatted = trimmed.startsWith('@') ? trimmed : `@${trimmed}`
+        appendWorkspaceReference(formatted)
+        textareaRef.current?.focus()
+      }
+    })
   }
   const isEmptyChat = interactions.length === 0 && !sending && !pendingApproval
 
@@ -1559,7 +1655,12 @@ export default function ChatPanel({
             onSubmit(event)
           }}
           onDragOver={(event) => {
-            if (event.dataTransfer.types.includes('application/x-mint-workspace-path')) {
+            if (
+              event.dataTransfer.types.includes(WORKSPACE_PATH_MIME) ||
+              event.dataTransfer.types.includes(WORKSPACE_FILE_MIME) ||
+              event.dataTransfer.types.includes(WORKSPACE_IMAGE_MIME) ||
+              event.dataTransfer.types.includes('application/x-mint-workspace-path')
+            ) {
               event.preventDefault()
               event.dataTransfer.dropEffect = 'copy'
             }
@@ -1664,6 +1765,18 @@ export default function ChatPanel({
               if (historyIndex !== null) setHistoryIndex(null)
             }}
             onKeyDown={handleInputKeyDown}
+            onDragOver={(event) => {
+              if (
+                event.dataTransfer.types.includes(WORKSPACE_PATH_MIME) ||
+                event.dataTransfer.types.includes(WORKSPACE_FILE_MIME) ||
+                event.dataTransfer.types.includes(WORKSPACE_IMAGE_MIME) ||
+                event.dataTransfer.types.includes('application/x-mint-workspace-path') ||
+                event.dataTransfer.types.includes('text/plain')
+              ) {
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'copy'
+              }
+            }}
             onDrop={handleWorkspaceDrop}
             placeholder="Ask anything, @ to mention, / for actions"
             rows={1}

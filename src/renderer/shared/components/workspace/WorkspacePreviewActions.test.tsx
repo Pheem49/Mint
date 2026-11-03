@@ -87,3 +87,15 @@ it('renders dual-mode toggles for markdown, svg, and html without showing browse
   expect(webHtml).toMatch(/>Code<\/button>/)
   expect(webHtml).toContain('aria-label="Open preview"')
 })
+
+it('makes the artifact header draggable for dragging into chat', () => {
+  const html = renderToStaticMarkup(
+    <ArtifactPreviewPanel
+      artifact={{ path: 'Harness_Presentation.pdf', content: '' }}
+      onClose={() => {}}
+    />,
+  )
+  expect(html).toContain('draggable="true"')
+  expect(html).toContain('artifact-preview-header-drag')
+})
+

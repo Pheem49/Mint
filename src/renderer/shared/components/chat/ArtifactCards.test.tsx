@@ -53,4 +53,16 @@ describe('ArtifactCards', () => {
     expect(html).toContain('PDF')
     expect(html).toContain('Open in Side Panel')
   })
+
+  it('renders cards with draggable attribute so users can drag into chat', () => {
+    const aiText = 'ไฟล์สไลด์: `presentation.pdf`'
+    const html = renderToStaticMarkup(
+      <ArtifactCards
+        aiText={aiText}
+        workspacePath="/home/user/workspace"
+        onOpenArtifact={() => {}}
+      />
+    )
+    expect(html).toMatch(/class="chat-artifact-card[^"]*"[^>]*draggable="true"/)
+  })
 })

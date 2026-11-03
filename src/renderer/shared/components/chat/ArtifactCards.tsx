@@ -1,6 +1,7 @@
 import React, { memo, useMemo } from 'react'
 import type { AgentProgress } from '../../types'
 import { detectArtifactType, type ArtifactFile } from '../../utils/artifacts'
+import { setWorkspaceDragData } from '../../utils/workspaceDrag'
 
 export interface ArtifactCardsProps {
   progress?: AgentProgress[]
@@ -114,6 +115,14 @@ export const ArtifactCards = memo(function ArtifactCards({
           <div
             key={art.path}
             className="chat-artifact-card"
+            draggable
+            onDragStart={(event) => {
+              setWorkspaceDragData(event.dataTransfer, {
+                path: art.path,
+                root: workspacePath,
+              })
+            }}
+            title={`${art.path} (Drag to chat)`}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -124,6 +133,7 @@ export const ArtifactCards = memo(function ArtifactCards({
               border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
               boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
               gap: '12px',
+              cursor: 'grab',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>

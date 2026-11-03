@@ -7,7 +7,7 @@ import { detectArtifactType } from '@shared/utils/artifacts'
 import { workspacePlatform } from '@shared/platform'
 import { announceWorkspaceChange, useWorkspaceUndo } from '@shared/workspaceUndo'
 import { normalizeWorkspacePath } from '@shared/utils/workspaces'
-import { WORKSPACE_FILE_MIME } from '@shared/utils/workspaceDrag'
+import { WORKSPACE_FILE_MIME, setWorkspaceDragData } from '@shared/utils/workspaceDrag'
 import type { WorkspaceSnapshot, WorkspaceTreeEntry } from '@shared/types'
 import {
   materialFolderIcon,
@@ -79,10 +79,11 @@ function TreeNode({ workspacePath, entry, level, expanded, onToggle, onContextMe
         title={entry.path}
         draggable
         onDragStart={(event) => {
-          event.dataTransfer.setData('application/x-mint-workspace-path', dragText)
-          event.dataTransfer.setData('text/plain', dragText)
-          if (!isDirectory) event.dataTransfer.setData(WORKSPACE_FILE_MIME, JSON.stringify({ root: workspacePath, path: entry.path, kind: 'file' }))
-          event.dataTransfer.effectAllowed = 'copy'
+          setWorkspaceDragData(event.dataTransfer, {
+            path: entry.path,
+            root: workspacePath,
+            kind: isDirectory ? 'directory' : 'file',
+          })
         }}
       >
         <span

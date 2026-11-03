@@ -1739,6 +1739,7 @@ export default function MintDashboard() {
     onSelectVideo: selectVideo,
     onSelectDocument: selectDocument,
     onPasteImage: pasteImage,
+    onAttachImage: (image) => conversationActions.attachImage(image),
     onSetMessage: conversationActions.compose,
     subscribeMessage: conversationActions.subscribe,
     getMessage: () => conversationActions.getSnapshot().message,

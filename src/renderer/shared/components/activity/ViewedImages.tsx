@@ -3,6 +3,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import type { AgentProgress } from '../../types'
 import { viewedImagesFrom, type ViewedImageItem } from '../../utils/viewedImages'
+import { setWorkspaceDragData } from '../../utils/workspaceDrag'
 import { mediaPlatform } from '../../platform'
 import '../../css/viewed-images.css'
 
@@ -76,8 +77,27 @@ export function ViewedImage({
             aria-label={`Expand ${image.name}`}
             title={onOpenArtifact ? 'Open full image in Tools Surface' : `Expand ${image.name}`}
             onClick={handleOpen}
+            draggable
+            onDragStart={(event) => {
+              setWorkspaceDragData(event.dataTransfer, {
+                path: image.path || image.name,
+                url: src,
+              })
+            }}
           >
-            <img src={src} alt={`Viewed image: ${image.name}`} loading="lazy" onError={() => setBroken(true)} />
+            <img
+              src={src}
+              alt={`Viewed image: ${image.name}`}
+              loading="lazy"
+              onError={() => setBroken(true)}
+              draggable
+              onDragStart={(event) => {
+                setWorkspaceDragData(event.dataTransfer, {
+                  path: image.path || image.name,
+                  url: src,
+                })
+              }}
+            />
             <span className="viewed-image-inline-overlay">
               <span className="viewed-image-inline-badge">{onOpenArtifact ? 'Open in Tools' : 'Click to zoom'}</span>
             </span>
@@ -110,8 +130,27 @@ export function ViewedImage({
         aria-label={`Expand ${image.name}`}
         title={onOpenArtifact ? 'Open full image in Tools Surface' : `Expand ${image.name}`}
         onClick={handleOpen}
+        draggable
+        onDragStart={(event) => {
+          setWorkspaceDragData(event.dataTransfer, {
+            path: image.path || image.name,
+            url: src,
+          })
+        }}
       >
-        <img src={src} alt={`Viewed image: ${image.name}`} loading="lazy" onError={() => setBroken(true)} />
+        <img
+          src={src}
+          alt={`Viewed image: ${image.name}`}
+          loading="lazy"
+          onError={() => setBroken(true)}
+          draggable
+          onDragStart={(event) => {
+            setWorkspaceDragData(event.dataTransfer, {
+              path: image.path || image.name,
+              url: src,
+            })
+          }}
+        />
       </button>}
     <figcaption title={image.path}>{image.name}</figcaption>
     <dialog ref={dialog} className="viewed-image-dialog" aria-label={`Image preview: ${image.name}`}

@@ -5,7 +5,7 @@ import { detectArtifactType, type ArtifactFile } from '../../utils/artifacts'
 import TerminalDock from './TerminalDock'
 import type { FileChange } from '../../types'
 import { ListTodo, Paperclip, Puzzle, Image as ImageIcon, Layers, ChevronLeft, ChevronRight } from 'lucide-react'
-import { WORKSPACE_FILE_MIME, parseWorkspaceFileDrag, type WorkspaceFileDrag } from '../../utils/workspaceDrag'
+import { WORKSPACE_FILE_MIME, parseWorkspaceFileDrag, setWorkspaceDragData, type WorkspaceFileDrag } from '../../utils/workspaceDrag'
 
 const ArtifactPreviewPanel = lazy(() => import('./ArtifactPreviewPanel').then(m => ({ default: m.ArtifactPreviewPanel })))
 const CodeReviewPage = lazy(() => import('./CodeReviewPage'))
@@ -531,34 +531,45 @@ export default function ToolSurfacePage({
               role="tablist"
               aria-label="Open tool pages"
             >
-              {surfaces.map((surface) => (
-                <div
-                  className={`tool-surface-tab ${surface.id === active.id ? 'is-active' : ''}`}
-                  key={surface.id}
-                  onContextMenu={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    setTabMenuState({
-                      id: surface.id,
-                      x: Math.min(event.clientX, window.innerWidth - 180),
-                      y: Math.min(event.clientY, window.innerHeight - 150),
-                    })
-                  }}
-                >
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={surface.id === active.id}
-                    title={surface.title}
-                    aria-label={surface.title}
-                    onClick={() => { setTabMenuState(null); onSelect(surface.id) }}
+              {surfaces.map((surface) => {
+                const isPreview = surface.kind === 'preview' && Boolean(surface.artifact?.path)
+                return (
+                  <div
+                    className={`tool-surface-tab ${surface.id === active.id ? 'is-active' : ''}`}
+                    key={surface.id}
+                    draggable={isPreview}
+                    onDragStart={isPreview ? (event) => {
+                      setWorkspaceDragData(event.dataTransfer, {
+                        path: surface.artifact.path,
+                        root: surface.artifact.workspacePath || workspacePath,
+                        url: surface.artifact.url,
+                      })
+                    } : undefined}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setTabMenuState({
+                        id: surface.id,
+                        x: Math.min(event.clientX, window.innerWidth - 180),
+                        y: Math.min(event.clientY, window.innerHeight - 150),
+                      })
+                    }}
                   >
-                    <span className={`tool-surface-tab-icon is-${surface.kind}`} aria-hidden="true">{surfaceIcon(surface)}</span>
-                    <span className="tool-surface-tab-title">{surface.title}</span>
-                  </button>
-                  <button type="button" className="tool-surface-tab-close" onClick={() => onClose(surface.id)} aria-label={`Close ${surface.title}`} title="Close">×</button>
-                </div>
-              ))}
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={surface.id === active.id}
+                      title={surface.title}
+                      aria-label={surface.title}
+                      onClick={() => { setTabMenuState(null); onSelect(surface.id) }}
+                    >
+                      <span className={`tool-surface-tab-icon is-${surface.kind}`} aria-hidden="true">{surfaceIcon(surface)}</span>
+                      <span className="tool-surface-tab-title">{surface.title}</span>
+                    </button>
+                    <button type="button" className="tool-surface-tab-close" onClick={() => onClose(surface.id)} aria-label={`Close ${surface.title}`} title="Close">×</button>
+                  </div>
+                )
+              })}
             </div>
             {hasOverflow && (
               <button
@@ -636,10 +647,19 @@ export default function ToolSurfacePage({
                   <div className="tool-surface-tabs-dropdown-list">
                     {surfaces.map((s) => {
                       const isActive = s.id === active.id
+                      const isPreview = s.kind === 'preview' && Boolean(s.artifact?.path)
                       return (
                         <div
                           key={s.id}
                           className={`tool-surface-tabs-dropdown-item ${isActive ? 'is-active' : ''}`}
+                          draggable={isPreview}
+                          onDragStart={isPreview ? (event) => {
+                            setWorkspaceDragData(event.dataTransfer, {
+                              path: s.artifact.path,
+                              root: s.artifact.workspacePath || workspacePath,
+                              url: s.artifact.url,
+                            })
+                          } : undefined}
                           onClick={() => {
                             onSelect(s.id)
                             setTabsSwitcherOpen(false)
