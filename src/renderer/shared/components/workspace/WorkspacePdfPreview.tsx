@@ -104,7 +104,7 @@ function PdfPageItem({
           fontWeight: 500,
         }}
       >
-        สไลด์ {pageNumber} จาก {pdf.numPages}
+        Slide {pageNumber} of {pdf.numPages}
       </span>
     </div>
   )
@@ -250,7 +250,7 @@ export default function WorkspacePdfPreview({
     <section className="workspace-pdf-preview" aria-label="PDF preview">
       <div className="workspace-pdf-controls" role="toolbar" aria-label="PDF controls">
         <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--text-main)' }} aria-live="polite">
-          สไลด์ {pageNumber} / {pdf?.numPages ?? '–'}
+          Slide {pageNumber} / {pdf?.numPages ?? '–'}
         </span>
         <div style={{ height: '14px', width: '1px', background: 'var(--border)', margin: '0 4px' }} />
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>

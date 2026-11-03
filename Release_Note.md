@@ -7,6 +7,7 @@
 - **Chat Artifact Cards Dragging**: Enabled dragging on `.chat-artifact-card` items directly in the message stream, allowing users to drag inline presentation/PDF/document cards into the input field.
 - **Deep Seam & Unified Drag Utility (`workspaceDrag.ts`)**: Built deep helpers `setWorkspaceDragData` and `formatWorkspaceReference` under `src/renderer/shared/utils/workspaceDrag.ts` unifying drag data transfer across `WorkspacePanel`, `ToolSurfacePage`, `ArtifactPreviewPanel`, and `ArtifactCards`, setting both `application/x-mint-workspace-path`, `application/x-mint-workspace-file`, and fallback `text/plain`.
 - **Robust Drop & Dragover Ergonomics in Chat**: Upgraded `ChatPanel` and `CollapsiblePasteInput` to handle dragover seamlessly with copy cursors and drop handlers across the input textarea, chat form, and the main conversation area.
+- **English Slide Pagination in Workspace Preview**: Updated slide indicator and page labels in `WorkspacePdfPreview` from Thai to standard English (`Slide {pageNumber} / {pdf.numPages}` and `Slide {pageNumber} of {pdf.numPages}`).
 
 ## Context Compaction & Observation Compression Harness (CLI, Desktop, and Web)
 - **File-Backed Output Scratchpad (Cursor / Claude Code Pattern)**: Automatically offloads bulky tool execution logs (> 3,000 characters) to `.mint/scratch/tool_outputs/<timestamp>_<action>_<hash>.log`, presenting the model with clean head/tail previews and an actionable pointer path to prevent token bloat while keeping full raw outputs on-demand.
