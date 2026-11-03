@@ -4306,3 +4306,8 @@ input:checked + .slider:before {
   color: #e1e1e1;
 }
 
+.chat-artifact-open-btn:hover {
+  background: color-mix(in srgb, var(--text-main, #ffffff) 14%, transparent) !important;
+  border-color: var(--border-light, var(--border)) !important;
+}
+

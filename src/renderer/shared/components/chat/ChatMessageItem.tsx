@@ -11,6 +11,7 @@ import { AgentActivityDrawer } from '../activity/AgentActivityDrawer'
 import SourcesBlock from './SourcesBlock'
 import { TurnFileChanges, type RewindRequestPayload } from './TurnFileChanges'
 import { ToolResultCards } from '../cards/ToolResultCards'
+import { ArtifactCards } from './ArtifactCards'
 import ProviderBrandIcon from '../ui/ProviderBrandIcon'
 
 export interface ChatMessageItemProps {
@@ -148,6 +149,7 @@ const ChatMessageItem = React.memo(
               <McpToolResults progress={progress} running={interaction.status === 'running'} interrupted={interaction.status === 'interrupted'} chatId={props.chatId || interaction.chatId} mode="artifacts-only" />
               <ViewedImages progress={progress} chatId={props.chatId || interaction.chatId} onOpenArtifact={onOpenArtifact} />
               <ToolResultCards progress={progress} aiText={interaction.aiText} />
+              <ArtifactCards progress={progress} aiText={interaction.aiText} workspacePath={interaction.workspace || undefined} onOpenArtifact={onOpenArtifact} />
               {memoizedAiContent}
             </div>
             {webSources.length > 0 && <SourcesBlock sources={webSources} />}
