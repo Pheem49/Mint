@@ -487,6 +487,7 @@ pub fn start_web_frontend(
     }
     let mut program = Command::new(if cfg!(windows) { "npm.cmd" } else { "npm" });
     program.args(["run", script]);
+    program.env("VITE_CONFIG_NATIVE_IGNORE_WARNING", "true");
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

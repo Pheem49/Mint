@@ -303,6 +303,10 @@ pub(crate) async fn launch_mint_target(target: String, dev: bool) -> Result<()> 
 
             println!("{DIM}Press Ctrl+C to stop{RESET}\n");
             tokio::select! {
+                _ = wait_for_shutdown_signal() => {
+                    let _ = mint_core::bg_shell::kill_job(&frontend.id);
+                    println!("\n{MINT}✔ Mint Web stopped.{RESET}");
+                }
                 result = mint_core::start_api_server(3000) => result?,
                 result = async {
                     loop {
