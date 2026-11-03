@@ -1,16 +1,32 @@
 /* Shared Web/Desktop file browser. Existing Mint surfaces, typography and tokens. */
 .library-page {
   position: absolute;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  left: 0;
   z-index: 5;
   overflow: auto;
   min-width: 0;
   padding: 48px clamp(20px,5vw,76px) 40px;
   background: var(--bg-gradient);
   color: var(--text-main);
+  transition: left 0.22s ease;
+}
+.app-body .library-page {
+  left: var(--sidebar-expanded-width, 264px);
+}
+.app-body.sidebar-collapsed .library-page {
+  left: calc(var(--sidebar-collapsed-width, 56px) + var(--sidebar-content-gap, 10px));
+}
+@media (max-width: 760px) {
+  .app-body .library-page,
+  .app-body.sidebar-collapsed .library-page {
+    left: 0 !important;
+  }
 }
 .library-content {
-  max-width: 1200px;
+  max-width: 1380px;
   margin: 0 auto;
 }
 .library-header {
@@ -78,6 +94,44 @@
   gap: 12px;
   border-bottom: 1px solid var(--border);
   padding-bottom: 12px;
+}
+.library-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.library-grid-sizes {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md,8px);
+}
+.library-grid-sizes button.library-size-toggle {
+  min-height: 28px;
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: calc(var(--radius-md,8px) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  gap: 6px;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.library-grid-sizes button.library-size-toggle:hover:not(:disabled) {
+  background: var(--bg-surface-hover);
+  color: var(--text-main);
+}
+.library-grid-sizes button.library-size-toggle[aria-pressed=true] {
+  background: var(--bg-surface-hover);
+  color: var(--text-main);
+  box-shadow: 0 1px 2px rgba(0,0,0,.2);
 }
 .library-filters {
   display: flex;
@@ -247,15 +301,19 @@
 }
 .library-items.is-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill,minmax(190px,1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill,minmax(260px,1fr));
+  gap: 22px;
+}
+.library-items.is-grid.is-grid-large {
+  grid-template-columns: repeat(auto-fill,minmax(360px,1fr));
+  gap: 26px;
 }
 .is-grid .library-item {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-content: start;
-  padding: 0 0 10px;
+  padding: 0 0 12px;
 }
 .is-grid .library-item-preview {
   flex-direction: column;
@@ -266,13 +324,34 @@
 .is-grid .library-thumbnail {
   width: 100%;
   height: auto;
-  aspect-ratio: 8/5;
+  aspect-ratio: 4/3;
+  border-radius: var(--radius-md,8px);
+  border: 1px solid rgba(255,255,255,.05);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.is-grid .library-thumbnail img {
+  object-position: center 20%;
+}
+.is-grid .library-item-preview:hover .library-thumbnail {
+  border-color: rgba(255,255,255,.15);
+  box-shadow: 0 4px 14px rgba(0,0,0,.35);
 }
 .is-grid .library-item-date {
   flex: 1;
+  font-size: 11.5px;
+}
+.is-grid .library-item-copy strong {
+  font-size: 13.5px;
+}
+.is-grid.is-grid-large .library-item-copy strong {
+  font-size: 14.5px;
 }
 .is-grid .library-item-copy small {
-  margin-top: 2px;
+  font-size: 11.5px;
+  margin-top: 3px;
+}
+.is-grid.is-grid-large .library-item-copy small {
+  font-size: 12px;
 }
 .library-preview-backdrop {
   position: fixed;
@@ -399,6 +478,18 @@
   .library-toolbar {
     align-items: flex-start;
     gap: 8px;
+    flex-wrap: wrap;
+  }
+  .library-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .library-grid-sizes button.library-size-toggle {
+    padding: 0 7px;
+  }
+  .library-grid-sizes button.library-size-toggle span {
+    display: none;
   }
   .library-filters {
     gap: 0;
@@ -446,6 +537,10 @@
   .library-items.is-grid {
     grid-template-columns: repeat(2,minmax(0,1fr));
     gap: 12px;
+  }
+  .library-items.is-grid.is-grid-large {
+    grid-template-columns: repeat(1,minmax(0,1fr));
+    gap: 14px;
   }
   .library-preview-backdrop {
     padding: 12px;

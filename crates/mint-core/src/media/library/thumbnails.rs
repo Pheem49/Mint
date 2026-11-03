@@ -4,6 +4,7 @@ fn inflight() -> &'static Mutex<std::collections::HashSet<(PathBuf, String)>> {
     static JOBS: OnceLock<Mutex<std::collections::HashSet<(PathBuf, String)>>> = OnceLock::new();
     JOBS.get_or_init(Default::default)
 }
+
 impl LibraryStore {
     pub(super) fn enqueue_thumbnail(&self, id: String) {
         let key = (self.root.clone(), id.clone());
@@ -37,15 +38,20 @@ impl LibraryStore {
         if item.thumbnail_status != "pending" {
             return Ok(());
         }
+        let dir = if item.origin == "legacy" {
+            &self.legacy
+        } else {
+            &self.root
+        };
         let thumbnail = self
             .managed_path(&item.path)
             .ok()
             .and_then(|path| fs::read(path).ok())
             .and_then(|bytes| {
                 if item.kind == "video" {
-                    crate::pictures::extract_video_thumbnail_from_bytes(&self.root, id, &bytes)
+                    crate::pictures::extract_video_thumbnail_from_bytes(dir, id, &bytes)
                 } else {
-                    crate::pictures::create_thumbnail_from_bytes(&self.root, id, &bytes)
+                    crate::pictures::create_thumbnail_from_bytes(dir, id, &bytes)
                 }
             });
         let updated = self.memory.connection()?.execute(

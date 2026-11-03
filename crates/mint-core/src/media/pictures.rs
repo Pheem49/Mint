@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::ConfigError;
 
-const THUMBNAIL_MAX_SIZE: u32 = 360;
+const THUMBNAIL_MAX_SIZE: u32 = 800;
 
 #[derive(Debug, Error)]
 pub enum PictureError {
