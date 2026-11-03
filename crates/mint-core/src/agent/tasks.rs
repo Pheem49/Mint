@@ -260,8 +260,8 @@ impl TaskStore {
 }
 
 pub fn tasks_path() -> Result<PathBuf, TaskError> {
-    dirs::config_dir()
-        .map(|directory| directory.join("mint").join("tasks.json"))
+    crate::mint_config_dir()
+        .map(|directory| directory.join("tasks.json"))
         .ok_or(TaskError::ConfigDirectoryUnavailable)
 }
 

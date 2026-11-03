@@ -1296,8 +1296,8 @@ fn restrict_to_owner(path: &Path) {
 fn restrict_to_owner(_path: &Path) {}
 
 pub fn memory_path() -> Result<PathBuf, MemoryError> {
-    dirs::config_dir()
-        .map(|directory| directory.join("mint").join("mint-knowledge.sqlite"))
+    crate::mint_config_dir()
+        .map(|directory| directory.join("mint-knowledge.sqlite"))
         .ok_or(MemoryError::ConfigDirectoryUnavailable)
 }
 

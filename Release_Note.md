@@ -1,5 +1,11 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Test Database Isolation & Centralized Config Directory Routing (`mint_config_dir`)
+- **Isolated Test Data Environment**: Upgraded `mint_config_dir()` in `mint-core` to automatically detect test execution (`is_test_environment()`, `cfg!(test)`, Cargo target runner, and `MINT_CONFIG_DIR`/`MINT_CONFIG_PATH` overrides) and route runtime storage to a dedicated temporary directory (`/tmp/mint-test/`).
+- **Unified Store Routing**: Refactored `memory_path()` (`mint-knowledge.sqlite`), `cron_jobs_path()` (`cron-jobs.json`), and `tasks_path()` (`tasks.json`) to resolve directly through `mint_config_dir()` instead of hardcoding platform user paths (`dirs::config_dir()`).
+- **Eliminated Production Database Contamination**: Running unit or regression tests (such as MCP cancellation, swarm execution, or mod recovery tests) will no longer create or leave orphaned workspace sessions (`mint-cancel-workspace-*`, `review-live-dispatch`, etc.) in the real user SQLite database (`~/.config/mint/mint-knowledge.sqlite`) or pollute the Desktop and Web sidebar chat lists.
+- **Regression Test Cleanup**: Added explicit session and subagent cleanup to `parallel_dispatch_shows_parent_calls_before_provider_finishes` in `review_regressions.rs`.
+
 ## Interactive Saved Plans Picker & Viewer (`/plan list`) (CLI, Desktop, and Web)
 - **Interactive TUI Choice Dialog for `/plan list`**: Running `/plan list` in Full-Screen TUI now opens an interactive modal selector (`prompt_choice`) displaying all saved plans under `.agents/plans/` sorted newest-first, featuring human-readable timestamps (`YYYY-MM-DD HH:MM:SS · slug`) and clean Markdown title previews.
 - **Instant Borderless Plan Card Render**: Selecting a plan from the list and pressing `Enter` directly renders the plan into the chat transcript as a full borderless Plan Card with solid gray fill (`#404040`), headers, and task checkboxes (`[ ]` / `[✓]`), unifying `/plan list` and `/plan show <n>` into one seamless command.
