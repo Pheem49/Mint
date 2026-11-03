@@ -988,7 +988,11 @@ mod browser_startup_tests {
         let default_tools = tool_catalog(&config, false, Path::new("."), false);
         // Agent browser_* tools are removed; web browsing is done via run_shell
         assert!(!default_tools.iter().any(|tool| tool.name == "browser_open"));
-        assert!(!default_tools.iter().any(|tool| tool.name == "browser_screenshot"));
+        assert!(
+            !default_tools
+                .iter()
+                .any(|tool| tool.name == "browser_screenshot")
+        );
         assert!(default_tools.iter().any(|tool| tool.name == "run_shell"));
     }
 }

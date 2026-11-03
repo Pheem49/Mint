@@ -1,5 +1,29 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Context Compaction & Observation Compression Harness (CLI, Desktop, and Web)
+- **File-Backed Output Scratchpad (Cursor / Claude Code Pattern)**: Automatically offloads bulky tool execution logs (> 3,000 characters) to `.mint/scratch/tool_outputs/<timestamp>_<action>_<hash>.log`, presenting the model with clean head/tail previews and an actionable pointer path to prevent token bloat while keeping full raw outputs on-demand.
+- **Progressive Observation Ghosting (Three-Tier Aging)**: Implemented deterministic turn-level aging for historic `ToolResult` messages without LLM invocation cost — retaining recent 3 turns in full (Hot Zone), truncating turns 4–10 to concise summaries (Warm Zone), and collapsing older turns (> 10 turns back) into 1-line tombstones (Cold Zone).
+- **Semantic Tool Superseding**: Automatically detects file modifications (`apply_code_edits`, `write_file`, `patch_file`, `delete_file`) and replaces earlier `read_file` results targeting those modified paths with compact superseding notices, eliminating stale code hallucinations and saving thousands of prompt tokens.
+- **Trajectory Buffer Compaction**: Compacts observation previews for older trajectory items in `rebuild_observation`, keeping the task history bounded and responsive across 50–100+ step autonomous runs.
+- **Structured Milestone Compaction**: Upgraded `compact_native_messages` with structured markdown sections (Core Intent, Files Modified & Validated, Key Decisions & Findings, Pending Actions) ensuring critical state and verified paths are never lost during macro compaction.
+
+## Deep Module Architecture & God Files Refactoring (`mint-core`)
+- **Chat Provider Seam Decomposition (`agent/chat/`)**: Decomposed the 4,651-line `chat.rs` monolith into a deep, modular structure under `crates/mint-core/src/agent/chat/`. Each provider now owns an isolated seam with its own payload construction, thought signature handling, and response decoding:
+  - `gemini.rs` (518 lines): Google Gemini 1.5/2.0 native function calling, thinkingConfig, schema sanitization, and multimodal parts.
+  - `anthropic.rs` (318 lines): Anthropic Messages API client, prompt caching breakpoints, and tool response parsers.
+  - `openai.rs` (582 lines): OpenAI, OpenRouter, and DeepSeek client with reasoning tokens and audio attachments.
+  - `ollama.rs` (321 lines): Ollama native messages and streaming parsers.
+  - `custom.rs` (149 lines): Custom HTTP endpoints and Hugging Face adapters.
+  - `streaming.rs` (466 lines): Server-Sent Events (SSE) accumulator and progressive thought/chunk streams.
+  - `tests.rs` (1,403 lines): Isolated 58-test unit verification suite.
+  - `mod.rs` (856 lines): High-level provider-agnostic coordinator, fallback dispatchers (`send_chat`, `stream_chat`), and public types.
+- **Orchestration Seam Deconstruction (`orchestration/`)**: Reduced the 6,653-line orchestration god file down to 2,587 lines (a 61% reduction) by isolating discrete responsibilities into cohesive modules:
+  - `types.rs` (646 lines): Centralized execution types including `TurnLease`, `TurnStartListener`, `OrchestrationError`, `AskUserOption`, `AgentApproval`, `AgentProgress`, `ToolExecutionRecord`, and `AgentResult`.
+  - `decision_parsing.rs` (736 lines): Deep parsing for LLM output, tool call preparation, schema sanitization, and retry tracking.
+  - `tools/dispatch.rs` (899 lines): Tool execution router, parallel read-only batch execution, code review gatekeeper, and result appending.
+  - `tests.rs`, `mcp_outcome_tests.rs`, `full_skill_result_tests.rs` (2,011 lines): Dedicated unit and regression suites.
+- **100% Backward Compatibility**: Maintained exact API and struct compatibility across all public and crate interfaces for CLI (`crates/mint-cli`), Desktop (`src/renderer/src`), and Web (`src/renderer/src-web`). Fully verified with all 58 chat tests, 180 orchestration tests, and 241 CLI tests passing.
+
 ## Library Grid & High-Resolution Thumbnails (Desktop and Web)
 - **Comfortable Card Layout**: Increased default grid card width to 260px (`minmax(260px, 1fr)`) with an expanded 1380px max-width container, delivering a spacious 3–4 column layout with clear preview details.
 - **Grid Density Switcher**: Added a toolbar toggle (`Normal` / `Large`) with localStorage persistence, enabling a 2–3 column mode for closer visual inspection without opening preview modals.

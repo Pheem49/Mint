@@ -52,9 +52,7 @@ pub async fn navigate(config: &MintConfig, url: &str) -> Result<String, String> 
                 Err(err)
             }
         }
-        Err(e) => {
-            Err(e)
-        }
+        Err(e) => Err(e),
     }
 }
 
@@ -216,8 +214,6 @@ pub(super) async fn capture_page(
                 Err(err)
             }
         }
-        Err(e) => {
-            Err(e)
-        }
+        Err(e) => Err(e),
     }
 }

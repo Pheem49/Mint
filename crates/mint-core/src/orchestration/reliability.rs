@@ -313,7 +313,11 @@ mod tests {
         .await;
         scope(async { assert_eq!(recorded_capture("dom|default|https://a.io"), None) }).await;
         record_capture("k", None);
-        assert_eq!(recorded_capture("k"), None, "no turn scope, nothing recorded");
+        assert_eq!(
+            recorded_capture("k"),
+            None,
+            "no turn scope, nothing recorded"
+        );
     }
     #[tokio::test]
     async fn an_image_is_only_new_the_first_time_within_a_turn() {

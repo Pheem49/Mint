@@ -595,7 +595,10 @@ mod headless_playbook_tests {
         ] {
             assert!(prompt.contains(needle), "playbook is missing {needle:?}");
         }
-        assert!(!prompt.contains("browser_open"), "no browser_* tools in shell mode");
+        assert!(
+            !prompt.contains("browser_open"),
+            "no browser_* tools in shell mode"
+        );
     }
 
     #[test]
@@ -606,7 +609,10 @@ mod headless_playbook_tests {
             "call `ask_user` with clear options",
             "Never recursively crawl",
         ] {
-            assert!(prompt.contains(needle), "web search playbook is missing {needle:?}");
+            assert!(
+                prompt.contains(needle),
+                "web search playbook is missing {needle:?}"
+            );
         }
     }
 }

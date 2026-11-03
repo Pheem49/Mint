@@ -73,7 +73,8 @@ pub struct HostEnv {
 impl HostEnv {
     pub fn detect() -> Self {
         Self {
-            no_sandbox: cfg!(target_os = "linux") && (is_root() || Path::new("/.dockerenv").exists()),
+            no_sandbox: cfg!(target_os = "linux")
+                && (is_root() || Path::new("/.dockerenv").exists()),
             linux_timeout: cfg!(target_os = "linux"),
             profile_root: std::env::temp_dir().join("mint-headless"),
         }
@@ -209,7 +210,12 @@ pub fn prepare_with(command: &str, config: &MintConfig, host: &HostEnv) -> Optio
         ))
     });
 
-    Some(ChromeRun { command: out, key, output, profile })
+    Some(ChromeRun {
+        command: out,
+        key,
+        output,
+        profile,
+    })
 }
 
 fn configured_program(config: &MintConfig) -> Option<String> {
@@ -263,7 +269,11 @@ fn tokenize(command: &str) -> Vec<Token<'_>> {
             }
             (Some(s), None) => {
                 if ch.is_whitespace() {
-                    tokens.push(Token { text: &command[s..index], start: s, end: index });
+                    tokens.push(Token {
+                        text: &command[s..index],
+                        start: s,
+                        end: index,
+                    });
                     start = None;
                 } else if ch == '"' || ch == '\'' {
                     quote = Some(ch);
@@ -272,14 +282,20 @@ fn tokenize(command: &str) -> Vec<Token<'_>> {
         }
     }
     if let Some(s) = start {
-        tokens.push(Token { text: &command[s..], start: s, end: command.len() });
+        tokens.push(Token {
+            text: &command[s..],
+            start: s,
+            end: command.len(),
+        });
     }
     tokens
 }
 
 fn is_operator(token: &str) -> bool {
-    matches!(token, "|" | "||" | "&&" | ";" | "&" | ">" | ">>" | "<" | "2>" | "2>&1")
-        || token.ends_with(';')
+    matches!(
+        token,
+        "|" | "||" | "&&" | ";" | "&" | ">" | ">>" | "<" | "2>" | "2>&1"
+    ) || token.ends_with(';')
 }
 
 /// A Chrome *invocation*, not a mention: the program sits in command position.
@@ -297,7 +313,11 @@ fn in_command_position(tokens: &[Token<'_>], index: usize) -> bool {
     let mut i = index;
     while i > 0 {
         let previous = tokens[i - 1].text;
-        if previous == "timeout" || previous.chars().all(|c| c.is_ascii_digit() || c == '.') && i >= 2 && tokens[i - 2].text == "timeout" {
+        if previous == "timeout"
+            || previous.chars().all(|c| c.is_ascii_digit() || c == '.')
+                && i >= 2
+                && tokens[i - 2].text == "timeout"
+        {
             i -= 1;
             continue;
         }
@@ -306,8 +326,10 @@ fn in_command_position(tokens: &[Token<'_>], index: usize) -> bool {
             i -= 1;
             continue;
         }
-        return matches!(previous, "&&" | "||" | "|" | ";" | "&" | "(" | "then" | "do")
-            || previous.ends_with(';');
+        return matches!(
+            previous,
+            "&&" | "||" | "|" | ";" | "&" | "(" | "then" | "do"
+        ) || previous.ends_with(';');
     }
     true
 }
@@ -317,8 +339,7 @@ fn base_name(path: &str) -> &str {
 }
 
 fn unquote(token: &str) -> &str {
-    token
-        .trim_matches(|c| c == '"' || c == '\'')
+    token.trim_matches(|c| c == '"' || c == '\'')
 }
 
 fn quote(value: &str) -> String {
@@ -338,7 +359,11 @@ fn normalize_url(url: &str) -> String {
         Some(i) => rest.split_at(i),
         None => (rest, ""),
     };
-    let path = if path == "/" { "" } else { path.trim_end_matches('/') };
+    let path = if path == "/" {
+        ""
+    } else {
+        path.trim_end_matches('/')
+    };
     format!(
         "{}://{}{}",
         scheme.to_ascii_lowercase(),
@@ -402,7 +427,10 @@ mod tests {
         ] {
             assert!(out.contains(flag), "missing {flag} in {out}");
         }
-        assert!(out.ends_with("--screenshot=/tmp/a.png https://example.com"), "{out}");
+        assert!(
+            out.ends_with("--screenshot=/tmp/a.png https://example.com"),
+            "{out}"
+        );
     }
 
     #[test]
@@ -423,16 +451,28 @@ mod tests {
     fn mentions_of_chrome_are_not_chrome_invocations() {
         let config = MintConfig::default();
         let env = host();
-        for command in ["ls -la", "echo google-chrome", "grep chrome notes.txt", "cargo test chromium"] {
+        for command in [
+            "ls -la",
+            "echo google-chrome",
+            "grep chrome notes.txt",
+            "cargo test chromium",
+        ] {
             assert!(prepare_with(command, &config, &env).is_none(), "{command}");
         }
     }
 
     #[test]
     fn chrome_after_cd_or_env_assignment_is_recognised_and_redirects_survive() {
-        let out = run("cd /tmp && LANG=C google-chrome --dump-dom https://example.com > out.html").command;
-        assert!(out.starts_with("cd /tmp && LANG=C timeout 45 google-chrome "), "{out}");
-        assert!(out.ends_with("--dump-dom https://example.com > out.html"), "{out}");
+        let out = run("cd /tmp && LANG=C google-chrome --dump-dom https://example.com > out.html")
+            .command;
+        assert!(
+            out.starts_with("cd /tmp && LANG=C timeout 45 google-chrome "),
+            "{out}"
+        );
+        assert!(
+            out.ends_with("--dump-dom https://example.com > out.html"),
+            "{out}"
+        );
     }
 
     #[test]
@@ -470,18 +510,31 @@ mod tests {
     #[test]
     fn different_mode_viewport_or_page_gets_a_different_key() {
         let base = run("google-chrome --screenshot=/tmp/a.png https://example.com/a").key;
-        assert_ne!(base, run("google-chrome --dump-dom https://example.com/a").key);
         assert_ne!(
             base,
-            run("google-chrome --window-size=800,600 --screenshot=/tmp/a.png https://example.com/a").key
+            run("google-chrome --dump-dom https://example.com/a").key
         );
-        assert_ne!(base, run("google-chrome --screenshot=/tmp/a.png https://example.com/b").key);
+        assert_ne!(
+            base,
+            run(
+                "google-chrome --window-size=800,600 --screenshot=/tmp/a.png https://example.com/a"
+            )
+            .key
+        );
+        assert_ne!(
+            base,
+            run("google-chrome --screenshot=/tmp/a.png https://example.com/b").key
+        );
     }
 
     #[test]
     fn commands_without_exactly_one_url_have_no_key() {
         assert!(run("google-chrome --dump-dom").key.is_none());
-        assert!(run("google-chrome --dump-dom https://a.io https://b.io").key.is_none());
+        assert!(
+            run("google-chrome --dump-dom https://a.io https://b.io")
+                .key
+                .is_none()
+        );
     }
 
     #[test]
@@ -517,7 +570,12 @@ mod tests {
         second.discard_profile();
         assert_eq!(std::fs::read_dir(&env.profile_root).unwrap().count(), 0);
         // A profile the model chose itself is never touched.
-        let own = prepare_with("chromium --dump-dom --user-data-dir=/tmp/keep https://c.io", &config, &env).unwrap();
+        let own = prepare_with(
+            "chromium --dump-dom --user-data-dir=/tmp/keep https://c.io",
+            &config,
+            &env,
+        )
+        .unwrap();
         assert!(own.profile.is_none());
         let _ = std::fs::remove_dir_all(&env.profile_root);
     }

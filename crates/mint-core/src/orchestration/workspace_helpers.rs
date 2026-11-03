@@ -271,7 +271,13 @@ pub(super) async fn run_shell(
 
     Ok(format!(
         "exit: {}\nmode: {}\nsandboxed: {}{}{}\nstdout:\n{}\nstderr:\n{}",
-        status_str, output.mode, output.sandboxed, warning_line, notice, output.stdout, output.stderr
+        status_str,
+        output.mode,
+        output.sandboxed,
+        warning_line,
+        notice,
+        output.stdout,
+        output.stderr
     ))
 }
 

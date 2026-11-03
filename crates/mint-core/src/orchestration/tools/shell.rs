@@ -119,7 +119,8 @@ pub(in crate::orchestration) async fn execute(
                     ))
                 }
                 ApprovalOutcome::Approved => {
-                    let out = run_shell(root, config, chat_id, command, &input.retry_reason).await?;
+                    let out =
+                        run_shell(root, config, chat_id, command, &input.retry_reason).await?;
                     if let Some(run) = &chrome {
                         record_capture_result(run, &out);
                     }
@@ -300,13 +301,19 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         reliability::scope(async {
             let first = chrome("google-chrome --screenshot=a.png https://example.com/shop");
-            assert!(repeat_capture_notice(&first, &dir, "").is_none(), "first capture runs");
+            assert!(
+                repeat_capture_notice(&first, &dir, "").is_none(),
+                "first capture runs"
+            );
             std::fs::write(dir.join("a.png"), b"png").unwrap();
             record_capture_result(&first, "");
 
             let again = chrome("google-chrome --screenshot=b.png https://example.com/shop/");
             let notice = repeat_capture_notice(&again, &dir, "").expect("repeat refused");
-            assert!(notice.contains("a.png") && notice.contains("view_image"), "{notice}");
+            assert!(
+                notice.contains("a.png") && notice.contains("view_image"),
+                "{notice}"
+            );
             assert!(
                 repeat_capture_notice(&again, &dir, "page changed after login").is_none(),
                 "a retryReason allows a deliberate recapture"
@@ -327,7 +334,10 @@ mod tests {
         reliability::scope(async {
             let dom = chrome("google-chrome --dump-dom https://example.com");
             record_capture_result(&dom, "Error: Chrome failed\nexit: 1\n");
-            assert!(repeat_capture_notice(&dom, &dir, "").is_none(), "failures can be retried");
+            assert!(
+                repeat_capture_notice(&dom, &dir, "").is_none(),
+                "failures can be retried"
+            );
             record_capture_result(&dom, "<html></html>");
             let notice = repeat_capture_notice(&dom, &dir, "").expect("repeat refused");
             assert!(notice.starts_with("Already read"), "{notice}");

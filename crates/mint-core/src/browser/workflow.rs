@@ -257,14 +257,7 @@ impl ShellBridge {
             if let Some(action) = step["action"].as_str() {
                 if matches!(
                     normalize_action(action),
-                    "open"
-                        | "click"
-                        | "type"
-                        | "fill"
-                        | "key_press"
-                        | "select"
-                        | "tabs"
-                        | "wait"
+                    "open" | "click" | "type" | "fill" | "key_press" | "select" | "tabs" | "wait"
                 ) {
                     verified = step["result"]["verification"] == "verified";
                 }
@@ -468,11 +461,20 @@ mod tests {
                     input,
                 }],
             };
-            assert!(validate(&wf, &config, false).is_ok(), "Action '{action}' should be valid in normal mode");
+            assert!(
+                validate(&wf, &config, false).is_ok(),
+                "Action '{action}' should be valid in normal mode"
+            );
             if plan_allowed {
-                assert!(validate(&wf, &config, true).is_ok(), "Action '{action}' should be allowed in plan mode");
+                assert!(
+                    validate(&wf, &config, true).is_ok(),
+                    "Action '{action}' should be allowed in plan mode"
+                );
             } else {
-                assert!(validate(&wf, &config, true).is_err(), "Action '{action}' should be rejected in plan mode");
+                assert!(
+                    validate(&wf, &config, true).is_err(),
+                    "Action '{action}' should be rejected in plan mode"
+                );
             }
         }
 

@@ -378,9 +378,15 @@ mod tests {
         // observed result (same image) never changes.
         let mut guard = RepetitionGuard::default();
         let calls = [
-            ("run_shell", json!({"command": "chrome --screenshot=/tmp/a.png u"})),
+            (
+                "run_shell",
+                json!({"command": "chrome --screenshot=/tmp/a.png u"}),
+            ),
             ("view_image", json!({"path": "/tmp/a.png"})),
-            ("run_shell", json!({"command": "chrome --screenshot=/tmp/b.png u"})),
+            (
+                "run_shell",
+                json!({"command": "chrome --screenshot=/tmp/b.png u"}),
+            ),
         ];
         let mut notices = Vec::new();
         for (action, input) in &calls {
@@ -388,7 +394,11 @@ mod tests {
             notices.push(guard.observe_result(action, "same-page-bytes"));
         }
         assert!(notices[0].is_none());
-        assert!(notices[1].as_deref().is_some_and(|n| n.contains("Loop Notice")));
+        assert!(
+            notices[1]
+                .as_deref()
+                .is_some_and(|n| n.contains("Loop Notice"))
+        );
         assert!(notices[2].is_some());
 
         // The next non-finish call is intercepted even though its input is new.
@@ -397,10 +407,7 @@ mod tests {
             LoopGuardDecision::InterceptStuckLoop { .. }
         ));
         // `finish` is never blocked.
-        assert_eq!(
-            guard.check("finish", &json!({})),
-            LoopGuardDecision::Allow
-        );
+        assert_eq!(guard.check("finish", &json!({})), LoopGuardDecision::Allow);
     }
 
     #[test]
@@ -409,7 +416,11 @@ mod tests {
         for i in 0..10 {
             let input = json!({"path": format!("f{i}")});
             assert_eq!(guard.check("read_file", &input), LoopGuardDecision::Allow);
-            assert!(guard.observe_result("read_file", &format!("body {i}")).is_none());
+            assert!(
+                guard
+                    .observe_result("read_file", &format!("body {i}"))
+                    .is_none()
+            );
         }
     }
 

@@ -93,17 +93,22 @@ pub enum ViewTarget<'a> {
 /// Single place that interprets `view_image` arguments. An artifact wins when
 /// both are given (it is already in the conversation); blank values count as
 /// missing; supplying neither explains how to recover instead of just failing.
-pub fn resolve_view_target<'a>(path: &'a str, artifact_id: &'a str) -> Result<ViewTarget<'a>, String> {
+pub fn resolve_view_target<'a>(
+    path: &'a str,
+    artifact_id: &'a str,
+) -> Result<ViewTarget<'a>, String> {
     let (path, artifact_id) = (path.trim(), artifact_id.trim());
     if !artifact_id.is_empty() {
         Ok(ViewTarget::Artifact(artifact_id))
     } else if !path.is_empty() {
         Ok(ViewTarget::Path(path))
     } else {
-        Err("view_image needs a `path` (an image file, e.g. the --screenshot file you just wrote) \
+        Err(
+            "view_image needs a `path` (an image file, e.g. the --screenshot file you just wrote) \
              or an `artifactId` (from an earlier tool result). Images you already viewed in this \
              turn are already in your context; do not request them again."
-            .into())
+                .into(),
+        )
     }
 }
 

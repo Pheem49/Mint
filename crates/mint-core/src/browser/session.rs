@@ -7,12 +7,7 @@ use super::{
 use crate::MintConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{
-    collections::BTreeSet,
-    future::Future,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::BTreeSet, future::Future, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 tokio::task_local! {
@@ -578,9 +573,7 @@ async fn perform(
     let action = super::workflow::normalize_action(action);
     let text = args["text"].as_str().unwrap_or("");
     match action {
-        "open" => {
-            super::navigate(config, args["url"].as_str().ok_or("url required")?.trim()).await
-        }
+        "open" => super::navigate(config, args["url"].as_str().ok_or("url required")?.trim()).await,
         "click" => super::click(config, selector.ok_or("target required")?).await,
         "type" => super::type_text(config, selector.ok_or("target required")?, text).await,
         "fill" => {
@@ -627,9 +620,7 @@ async fn perform(
                 super::mouse_click(config, x, y, args["button"].as_str().unwrap_or("left")).await
             }
         }
-        "key_press" => {
-            super::key_press(config, args["key"].as_str().ok_or("key required")?).await
-        }
+        "key_press" => super::key_press(config, args["key"].as_str().ok_or("key required")?).await,
         _ => Err(format!("Unsupported browser action: {action}")),
     }
 }

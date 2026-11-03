@@ -47,9 +47,7 @@ pub async fn mouse_move(config: &MintConfig, x: f64, y: f64) -> Result<String, S
             .await;
             Ok(format!("mouse moved to ({x:.0},{y:.0})"))
         }
-        Err(e) => {
-            Err(e)
-        }
+        Err(e) => Err(e),
     }
 }
 
@@ -131,12 +129,8 @@ pub async fn mouse_click(
 /// Type text using CDP Input.insertText (native, supports any Unicode text).
 pub async fn type_text_native(config: &MintConfig, text: &str) -> Result<String, String> {
     match cdp_call_raw(config, "Input.insertText", json!({ "text": text })).await {
-        Ok(_) => {
-            Ok(format!("typed {} characters", text.len()))
-        }
-        Err(e) => {
-            Err(e)
-        }
+        Ok(_) => Ok(format!("typed {} characters", text.len())),
+        Err(e) => Err(e),
     }
 }
 
@@ -169,8 +163,7 @@ pub async fn key_press(config: &MintConfig, key: &str) -> Result<String, String>
         key_down["text"] = json!("\r");
         key_down["unmodifiedText"] = json!("\r");
     }
-    cdp_call_raw(config, "Input.dispatchKeyEvent", key_down)
-        .await?;
+    cdp_call_raw(config, "Input.dispatchKeyEvent", key_down).await?;
 
     // char event for printable single characters
     if key.chars().count() == 1 && !key.chars().next().map(|c| c.is_control()).unwrap_or(true) {
