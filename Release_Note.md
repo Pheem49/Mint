@@ -1,85 +1,68 @@
 # Release Notes - Mint Agent v1.18.0
 
-## Test Database Isolation & Centralized Config Directory Routing (`mint_config_dir`)
-- **Isolated Test Data Environment**: Upgraded `mint_config_dir()` in `mint-core` to automatically detect test execution (`is_test_environment()`, `cfg!(test)`, Cargo target runner, and `MINT_CONFIG_DIR`/`MINT_CONFIG_PATH` overrides) and route runtime storage to a dedicated temporary directory (`/tmp/mint-test/`).
-- **Unified Store Routing**: Refactored `memory_path()` (`mint-knowledge.sqlite`), `cron_jobs_path()` (`cron-jobs.json`), and `tasks_path()` (`tasks.json`) to resolve directly through `mint_config_dir()` instead of hardcoding platform user paths (`dirs::config_dir()`).
-- **Eliminated Production Database Contamination**: Running unit or regression tests (such as MCP cancellation, swarm execution, or mod recovery tests) will no longer create or leave orphaned workspace sessions (`mint-cancel-workspace-*`, `review-live-dispatch`, etc.) in the real user SQLite database (`~/.config/mint/mint-knowledge.sqlite`) or pollute the Desktop and Web sidebar chat lists.
-- **Regression Test Cleanup**: Added explicit session and subagent cleanup to `parallel_dispatch_shows_parent_calls_before_provider_finishes` in `review_regressions.rs`.
+## Library Grid & High-Resolution Thumbnails (Desktop and Web)
+- **Comfortable Card Layout**: Increased default grid card width to 260px (`minmax(260px, 1fr)`) with an expanded 1380px max-width container, delivering a spacious 3–4 column layout with clear preview details.
+- **Grid Density Switcher**: Added a toolbar toggle (`Normal` / `Large`) with localStorage persistence, enabling a 2–3 column mode for closer visual inspection without opening preview modals.
+- **Enhanced 4:3 Aspect Ratio**: Upgraded thumbnail cards from 16:10 to 4:3 with face-aware framing (`object-position: center 20%`) to keep character art, cosplay shots, and portraits centered.
+- **Crisp 800px Previews**: Upgraded backend thumbnail resolution from 360px to 800px with automatic background migration for razor-sharp rendering on HiDPI displays.
+- **Responsive Sidebar Alignment**: Connected `.library-page` offsets to the shell's sidebar expanded/collapsed state with smooth 0.22s sliding transitions.
+
+## Graceful Web Shutdown & CLI Cleanup (`mint web`)
+- **Clean Ctrl+C Termination**: Added shutdown signal handling to `mint web` in `mint-cli`, terminating frontend processes cleanly without false error messages.
+- **Warning Suppression**: Injected `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to silence upstream Vite CommonJS deprecation notices during web launch.
+
+## Test Database Isolation & Centralized Config Routing
+- **Isolated Test Data**: Configured `mint_config_dir()` to route automated test storage to dedicated temporary paths (`/tmp/mint-test/`), preventing test runs from contaminating user databases or sidebar histories.
+- **Unified Path Resolution**: Centralized store routing for `mint-knowledge.sqlite`, `cron-jobs.json`, and `tasks.json` through `mint_config_dir()`.
+- **Regression Cleanup**: Added explicit session and subagent teardown hooks in test runners.
 
 ## Interactive Saved Plans Picker & Viewer (`/plan list`) (CLI, Desktop, and Web)
-- **Interactive TUI Choice Dialog for `/plan list`**: Running `/plan list` in Full-Screen TUI now opens an interactive modal selector (`prompt_choice`) displaying all saved plans under `.agents/plans/` sorted newest-first, featuring human-readable timestamps (`YYYY-MM-DD HH:MM:SS · slug`) and clean Markdown title previews.
-- **Instant Borderless Plan Card Render**: Selecting a plan from the list and pressing `Enter` directly renders the plan into the chat transcript as a full borderless Plan Card with solid gray fill (`#404040`), headers, and task checkboxes (`[ ]` / `[✓]`), unifying `/plan list` and `/plan show <n>` into one seamless command.
-- **Direct Shortcuts & Platform Parity**: Supports instant viewing via `/plan list <n>` (e.g. `/plan list 1`), `/plan show <n>`, or name search across CLI, Desktop, and Web (`mint-core` slash dispatcher), with `slash-commands.json` metadata kept fully in sync.
-- **Multi-Word Slash Command Suggestions**: Added `/plan list` to `slash-commands.json` positioned directly after `/plan`. Upgraded composer suggestions matching in Full-Screen TUI to support multi-word subcommand prefix autocompletion when typing with whitespace (e.g. `/plan ` or `/plugin `), enabling instant Tab-completion and keyboard navigation across subcommands.
+- **Interactive TUI Plan Picker**: Running `/plan list` in Full-Screen TUI opens an interactive selector showing saved plans sorted by timestamp with instant title previews.
+- **Inline Plan Card Render**: Selecting a plan renders a borderless `#404040` card into the transcript complete with task checkboxes (`[ ]` / `[✓]`) and step statuses.
+- **Shortcuts & Autocompletion**: Added direct viewing via `/plan list <n>` and `/plan show <n>`, plus multi-word subcommand autocompletion (e.g. `/plan `, `/plugin `) in the TUI composer.
 
-## Framed Release Notes & Plan Review Inline Card UI (CLI, Desktop, and Web)
-- **Full-Screen TUI Framed Card with Background**: Replaced the raw transcript dump of `/release-notes` with a self-contained inline continuous borderless card rendered via Ratatui with a solid unified gray surface fill (`USER_MESSAGE_BACKGROUND: Color::Rgb(64, 64, 64)`), category bullet badges (`●`), and indented bullet points (`•`) without border lines or the redundant `Command ›` header.
-- **Plan Review Card & Compact Modal Dialog**: Transformed the plan review experience upon exiting plan mode (`AgentApproval::ExitPlanMode`). Instead of stuffing the entire multi-section plan into a massive modal dialog at the bottom of the screen, the complete plan is now rendered as a large, beautiful borderless card directly in the chat transcript with structured headers, status checkboxes (`[ ]` / `[✓]`), numbered steps, and solid gray fill (`#404040`). The bottom interactive approval dialog is reduced to a concise 4-row prompt (`"Do you want to proceed with this plan?"` with `Approve` / `Deny`).
-- **Plan Card Persistence Across Session Resumes (CLI, Desktop, and Web)**: Fixed an issue where reloading or resuming a session (`/resume`, `mint --resume`, or selecting past sessions in Desktop/Web) omitted the formatted plan card from the transcript. CLI's `push_saved_activity` reconstructs `TranscriptRole::Plan` directly from saved `exit_plan_mode` activity entries in conversation memory, and Desktop/Web's `ToolResultCards` extracts `planData` to render an inline `PlanCard` across past sessions.
-- **Transcript Scrolling During Approval Dialogs**: Fixed an issue where active modal dialogs unconditionally intercepted mouse wheel events even when the dialog body had zero scrollable overflow. Mouse wheel scrolling now dynamically inspects cursor position (`transcript_area`) and body scroll limits, allowing users to freely scroll through chat transcripts and large plan cards while approval dialogs are active. Additionally enabled `PageUp` and `PageDown` keyboard navigation during unscrollable choice dialogs.
-- **Desktop & Web Parity Card (`ReleaseNotesCard` & `ApprovalCard`)**: Added dedicated borderless `.release-notes-card` styling and upgraded `ApprovalCard` for plan reviews with Markdown rendering (`FormattedMessage`), `Plan Review` chip badges, and streamlined `Approve and proceed` / `Deny (keep planning)` actions.
-- **Slash Command Aliases**: Extended command matching across CLI, Desktop, and Web to support `/release-notes`, `/release_notes`, `/release-note`, `/release_note`, `/releasenotes`, and `/releasenote`.
+## Unified Plan Review & Inline Card UI (CLI, Desktop, and Web)
+- **Framed Transcript Cards**: Replaced raw text dumps for `/release-notes` and plan reviews with continuous borderless cards matching the dark theme.
+- **Compact Approval Modal**: Condensed the plan review modal to a concise approval prompt while presenting the full plan in the transcript with unblocked scrolling.
+- **Session Resume Persistence**: Reconstructed formatted plan cards when resuming past conversations across CLI, Desktop, and Web.
+- **Command Aliases**: Added flexible slash command matching for `/release-notes`, `/release_notes`, `/release-note`, and `/releasenotes`.
 
-## Smart Generic Thinking & Multi-Provider Reasoning Architecture (CLI, Desktop, and Web)
-- **Safe Non-Text Filter**: Automatically excludes only non-text media and embedding models (`banana`, `imagen`, `image`, `dall-e`, `flux`, `sdxl`, `sd3`, `ideogram`, `veo-`, `tts`, `whisper`, `embed`, `aqa`, `moderation`, `native-audio`, `-live-`) from Chain-of-Thought reasoning, disabling the Thinking toggle in the UI and `/thinking` CLI command so non-text endpoints never receive invalid reasoning payloads.
-- **Unrestricted Thinking Control on All Chat Models**: Unlocked the Thinking toggle (`ON` / `OFF`) and `Effort` selector (`Low`, `Medium`, `High`, `Extra High`) for all text and chat models across Gemini, DeepSeek, OpenAI, Anthropic, OpenRouter, Ollama, HuggingFace, and Local providers.
-- **Provider-Accurate Native Reasoning Payloads**:
-  - **DeepSeek (`deepseek-flash`, `deepseek-v4-pro`, `deepseek-reasoner`)**: Sends `reasoning_effort` (`"none"`, `"low"`, `"medium"`, `"high"`, `"max"`) and `thinking: { "type": "enabled" | "disabled" }` per the DeepSeek V4 specification, with `1M` context window metadata.
-  - **Google Gemini (`gemini-2.5-*`, `gemini-3.*`)**: Explicitly passes `"includeThoughts": true` alongside `thinkingBudget` inside `generationConfig.thinkingConfig` across both single-turn and multi-turn streaming requests, with automatic HTTP 400 retry fallback if a specific endpoint rejects `thinkingConfig`.
-  - **OpenAI, OpenRouter & Anthropic**: Maps effort levels to `reasoning_effort` (`o1`/`o3`/`o4`/`gpt-5`), OpenRouter `reasoning: { "effort" }` / `reasoning: { "exclude": true }`, and Anthropic `thinking: { "type": "enabled", "budget_tokens": N }`.
-- **Prompt-Based Chain-of-Thought Fallback (`<think>...</think>`)**: When Thinking is enabled on a chat model without a dedicated native reasoning API parameter (e.g. `gpt-4o`, `claude-haiku-4.5`, `deepseek-chat`, `gemini-1.5-flash`), Mint automatically injects an effort-scaled `<think>...</think>` system directive and streams parsed `<think>` / `<thought>` blocks into the collapsible Thinking UI across CLI TUI, Desktop, and Web.
+## Universal Thinking & Multi-Provider Reasoning (CLI, Desktop, and Web)
+- **Universal Thinking Toggle**: Enabled Thinking controls and effort levels (`Low` to `Extra High`) across all chat models (Gemini, DeepSeek, OpenAI, Anthropic, OpenRouter, Ollama, and Local).
+- **Native Parameter Dispatch**: Sends provider-accurate payloads including Gemini `thinkingConfig`, OpenAI/OpenRouter `reasoning_effort`, Anthropic `budget_tokens`, and DeepSeek V4 reasoning specifications.
+- **Prompt-Based Fallback**: Automatically injects effort-scaled `<think>...</think>` directives for standard chat models without native reasoning APIs.
+- **Non-Text Filter**: Automatically disables reasoning options for image, video, audio, and embedding models.
 
-## Code Block UI & Copy Ergonomics (CLI, Desktop, and Web)
-- **Frictionless CLI Code Copying**: Removed the vertical gutter bar (`│ `) from CLI code blocks, replacing it with 2-space clean indentation. Terminal mouse selection or double-clicking commands now copies pure, runnable code without grabbing border characters or breaking shell commands (`bash: │: command not found`).
-- **Smart Line Numbers on Desktop & Web**: Automatically hides line numbers for short commands and snippets ($\le 5$ lines), eliminating unnecessary 44px gutter clutter. Added an optional `#` toggle button for longer code blocks.
-- **Enhanced Code Typography**: Increased code font size from `13px` to `14.5px` with a generous `1.65` line height and Thai font fallbacks across Desktop and Web, making code comments with Thai tone marks legible and comfortable to read.
+## Code Block UI & Terminal Copy Ergonomics (CLI, Desktop, and Web)
+- **Frictionless CLI Code Copying**: Replaced vertical border gutters (`│ `) with clean 2-space indentation so terminal mouse selection copies pure, runnable commands.
+- **Smart Line Numbers**: Automatically hides line numbers on short snippets ($\le 5$ lines) with an optional `#` toggle on Desktop and Web.
+- **Typography Enhancements**: Increased code size to 14.5px with 1.65 line height and proper Thai font fallbacks.
 
-## Structure-Aware Progressive AI Response Rendering (CLI, Desktop, and Web)
-- **Line-by-Line + Block-Aware Streaming Engine**: Replaced all-at-once response dumps with a deep, structure-aware progressive reveal engine across Full-Screen TUI, Classic CLI, Desktop UI, and Web UI.
-- **Smooth Line-by-Line Reveal**: Regular paragraphs, headings, lists, blockquotes/callouts (`> [!NOTE]` etc.), and standard syntax-highlighted code blocks stream and reveal smoothly line by line with adaptive catch-up pacing.
-- **Atomic Block Reveal for Tables & Custom UI Cards**: Markdown tables (`| ... |`) and structured UI/JSON/Mermaid fenced blocks (`ui-grid`, `ui-card`, `ui-feature`, `ui-mockup`, `weather-json`, `stock-json`, `calculation-json`, `image-search-json`, `image-gen-json`, `mermaid`) are held in buffer while incomplete and released as a single atomic unit once complete, preventing broken table borders or raw JSON flashes mid-stream.
-- **Full-Screen TUI & Viewport Ergonomics**: Preserves user scroll position (`scroll_from_bottom`) during live streaming, keeps mid-turn notices (`Thought · ...`) ordered above the active assistant message, defers post-turn notices (`Sources`, `Worked for ...`) until the reveal completes, and allows instant reveal completion via `Esc` / `Ctrl+C`.
+## Structure-Aware Progressive AI Streaming (CLI, Desktop, and Web)
+- **Smooth Line-by-Line Reveal**: Streams markdown text, lists, and syntax-highlighted code blocks smoothly with adaptive pacing.
+- **Atomic Block Buffering**: Holds markdown tables and custom UI/Mermaid cards in buffer until complete to eliminate broken syntax flashes mid-stream.
+- **Viewport Ergonomics**: Preserves terminal scroll positions during generation and defers post-turn metadata until streaming finishes.
 
-## MCP Tool Execution UI Consolidation (Desktop and Web)
-- **Eliminated Raw Execution Dumps from Chat Messages**: Suppressed raw unstyled MCP call logs (`Failed`, `Completed`, and internal `Tool definition ready` discovery lines) from leaking into the main chat message bubble.
-- **Consolidated into Agent Activity Accordion**: Integrated detailed MCP tool invocations, statuses, outputs, and artifacts strictly inside the `Executed X mcp_tool` group accordion in `AgentActivityTable`, keeping the chat conversation surface completely clean and focused on user queries and synthesized AI responses.
-- **Artifacts-Only Bubble Passthrough**: Allowed downloadable artifacts (images, files) and critical warning banners to pass through safely without polluting the interface with intermediate debug text.
+## Streamlined MCP Tool Activity UI (Desktop and Web)
+- **Accordion Grouping**: Moved raw MCP execution logs out of chat bubbles into collapsible `Executed X mcp_tool` activity accordions.
+- **Clean Conversation Surface**: Reserved chat bubbles strictly for downloadable artifacts, critical notices, and final AI responses.
 
-## Tool & Environment Setup Wizard Redesign (`mint setup`)
-- **Full-Screen Ratatui TUI Modernization**: Replaced the legacy raw ANSI script and aggressive clear-screen flickering in `setup.rs` with a smooth, double-buffered Ratatui Full-Screen TUI wizard adhering to the workspace rule.
-- **Categorized 49 Agent Tools**: Grouped all 49 agent tools into 7 clear categories (Files & Workspace, Code & Repository, Search & Knowledge, Productivity & Utilities, Planning & Safety, Execution & MCP, and Media & Audio/Video) with auto-scrolling viewports and real-time enabled counts.
-- **High-Contrast Monochrome Theme Parity**: Integrated the Solid Gray Bar highlight (`bg: Gray, fg: Black`), pill badges (`[ SELECTING ]`), and transparent category headers matching `mint onboard` and `resume_picker`.
-- **Three-Step Stepper Flow**: Structured configuration across 3 distinct steps (`1. Agent Tools`, `2. Native Plugins`, `3. Launch Target`), giving users full control over tool policy, host plugin access, and subsequent launch targets (CLI, Web, Desktop, or Save & Exit).
-- **MCP CLI Ergonomics**: Added short flags `-a` for `--args` and `-e` for `--env` in `mint mcp add` for convenient and quick server registration.
+## Modern Setup & Onboarding TUI Wizards (`mint setup` & `mint onboard`)
+- **Full-Screen Setup Wizard**: Modernized `mint setup` with a 3-step Ratatui TUI categorized across 49 agent tools, native plugins, and launch targets.
+- **High-Contrast Monochrome Styling**: Unified `mint onboard` with solid gray row highlights, active cursor indicators (`█`), and dynamic footer shortcuts.
+- **MCP Shorthand Flags**: Added `-a` (`--args`) and `-e` (`--env`) shorthand options to `mint mcp add`.
 
-## Onboard Setup Wizard UI/UX High-Contrast Grey Redesign (`mint onboard`)
-- **High-Contrast Monochrome Theme**: Unified the Setup Wizard styling with Mint CLI's `resume_picker` design system using `SELECTION_BACKGROUND` and `SELECTION_TEXT` to ensure clear visibility across transparent terminals and custom wallpaper backgrounds.
-- **Solid Gray Bar Row Highlights**: In active model choice lists (Step 1 & Step 3) and the services checklist (Step 2), the focused row now receives a full-width solid grey highlight bar (`bg: Gray, fg: Black`) that instantly stands out without color ambiguity.
-- **Active Text Cursor (`█`)**: Input boxes (Gemini API Key, custom model identifiers, and service config inputs) now render a block cursor (`█`) at the insertion point when focused, and hide the cursor when unfocused.
-- **Explicit Focus Badges**: Box titles now feature distinct pill badges: `[ EDITING ]` for active input fields and `[ SELECTING ]` for active choice lists, with dimmed titles and markers (`› (selected)`) when unfocused.
-- **Context-Aware Action Buttons & Footer**: Replaced static green action buttons with context-aware buttons (e.g. `[ Enter / Tab: Next Field ➔ ]` vs `[ Enter: Continue to Services ➔ ]`) and dynamic footer shortcuts that reflect the currently focused control.
+## Headless Browser Automation & Anti-Loop Safeguards (CLI, Desktop, and Web)
+- **Headless Chromium Automation**: Replaced legacy headed browser windows with headless Chromium commands (`--headless=new`) and deterministic `mint browser run` workflows.
+- **System Default Browser Previews**: HTML artifacts and previews open directly in your system's default browser across all platforms.
+- **Anti-Loop Protections**: Automatically intercepts stuck tool loops ($\ge 3$ repeated outputs) and deduplicates screenshot analyses using SHA-256 hashes.
+- **Diagnostic Slash Command**: Updated `/browser` and `/browser status` to report detected Chromium binaries and sandbox readiness.
 
-## Headless Browser Automation & Anti-Loop Engine (CLI, Desktop, and Web)
-- **Headless Chromium via Shell Playbook**: Replaced agent-facing `browser_*` tools and the headed Mint Browser UI (`mint auto`, `BrowserShell.tsx`, `BrowserSuggestionsPopup.tsx`) with high-reliability headless Chromium shell commands (`google-chrome --headless=new --dump-dom`, `--screenshot`) managed through `run_shell`.
-- **System Default Browser Previews**: HTML artifact previews open directly in the user's default system browser across CLI (Full-Screen TUI / Classic), Desktop, and Web, eliminating custom embedded browser windows.
-- **Anti-Loop Repetition Guard & SHA-256 Image Dedup**:
-  - Multi-layered repetition guard in `mint-core` tracks execution outputs over a rolling 8-execution window, intercepting stuck loops ($\ge 3$ identical results) with actionable `InterceptStuckLoop` guidance.
-  - Image artifact viewer computes SHA-256 hashes on `view_image` calls, suppressing repeated analysis of identical screenshots and steering the agent toward forward progress.
-- **Deterministic Headless Workflow Runner (`mint browser run`)**: Streamlined workflow action names to concise verbs (`open`, `click`, `type`, `fill`, `screenshot`, `wait`, `tabs`, etc.) with full backward compatibility for legacy `browser_*` aliases. Retained the 14-action deterministic browser workflow engine for scripted multi-step automation and testing, strictly headless with per-run temporary user profiles and artifacts stored under `.mint/browser-runs/`.
-- **Diagnostic Slash Command (`/browser` & `/browser status`)**: Streamlined `/browser` across CLI TUI, Desktop, and Web to report detected Chromium binary paths, version info, and sandbox readiness.
-- **Information Sufficiency & Follow-Up Search Gate**: Prevented over-agentic crawling and runaway token consumption by enforcing an Information Sufficiency rule on web searches (stopping and synthesizing immediately once target links/answers are found), requiring interactive user confirmation via `ask_user` before conducting follow-up searches on incomplete topics, and restricting headless Chrome strictly to explicit user requests or unblocked direct page reading.
-- **Clean Architecture Sweep**: Fully removed `mint auto` CLI command, headed Tauri browser capabilities, port 9222 takeover logic, and legacy browser-mode toggles across Desktop and Web settings.
-- **Browser Subsystem Decoupling & Dead Code Pruning**: Removed zombie `run_session` wrappers from the agent loop and Gemini Live, pruned 12 dead public exports from `mint_core::lib`, removed obsolete multi-process tab lease lockfiles (`TabLease`, `.mint-browser-leases`), decoupled Tauri's background task queue from legacy CDP actions, and updated Desktop titlebar navigation to 'Open in default browser'.
-- **Search Sources Popover Ergonomics**: Improved domain source popover positioning with dynamic viewport detection, scroll/resize tracking, and containment within message bubbles across Desktop and Web.
-- **Error Recovery Preview Route (`#/error-preview`)**: Added a dedicated preview route across Desktop and Web to inspect the live error recovery interface anytime with seamless full-viewport centering and uniform background styling without triggering an actual runtime crash.
-
-## Shell Execution & Background Job Promotion Safeguards
-- **Background Shell Status Reporting**: When synchronous `run_shell` commands exceed 180s and are promoted to background jobs, the output status is now explicitly formatted as `exit: running_in_background (job_id: <job_id>)` instead of ambiguous `exit: unknown`.
-- **System Guard & Anti-Retry Notice**: Injected an explicit `[SYSTEM NOTICE]` into the tool output alerting the agent that the process is actively running in the background and strictly prohibiting redundant re-runs or alternative scripts.
-- **Agent System Prompt Rules**: Added rule 12b and updated execution evidence guidelines in `agent.rs` to prevent retry loops on long-running tasks and enforce `shell_output` monitoring.
-- **TUI Tool Activity Status Parity**: Updated Full-Screen TUI's `ToolActivity` in `mint-cli` to recognize `running_in_background` as active rather than misclassifying it as a failure.
+## Shell Execution & Background Job Safeguards
+- **Explicit Background Status**: Clearly marks promoted background commands (>180s) as `exit: running_in_background (job_id: <id>)`.
+- **System Anti-Retry Notice**: Injects background execution notices to prevent agents from triggering redundant retry loops.
+- **TUI Activity Parity**: Ensured the Full-Screen TUI recognizes background processes as actively running.
 
 ## 🚀 Architecture Evolution & Future Roadmap
-- **Retirement of Legacy Mint Browser**: We have officially decommissioned the legacy headed Mint Browser subsystem (including the `mint auto` CLI command, CDP port 9222 takeover, and custom embedded browser window frames in Desktop and Web).
-- **Modern Headless Browser Foundation**: In its place, Mint v1.18.0 establishes a clean, decoupled **Headless Browser** architecture powered by deterministic shell automation and the headless workflow runner (`mint browser run`). Web previews and generated HTML artifacts now open cleanly in your system default browser.
-- **Future Vision**: This headless transformation eliminates UI bloat and execution instability while establishing a rock-solid, production-grade foundation. In future releases, we plan to extend and build upon this headless foundation to develop a reimagined, vastly superior Mint Browser.
+- **Decommissioned Legacy Browser**: Fully retired the headed Mint Browser subsystem (`mint auto`, port 9222 takeover, and embedded browser frames).
+- **Headless Foundation**: Replaced with a fast, decoupled headless automation engine, establishing a reliable foundation for future web capabilities.
