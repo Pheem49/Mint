@@ -185,7 +185,7 @@
 .chat-ui-grid-wrapper {
   margin: 14px 0;
   padding: 18px;
-  border-radius: 20px;
+  border-radius: var(--radius-xl, 12px);
   border: 1px solid var(--border-default);
   background: var(--bg-surface);
   backdrop-filter: var(--glass-blur);
@@ -273,7 +273,7 @@
    -------------------------------------------------------------------------- */
 .chat-ui-mockup-container {
   margin: 18px 0;
-  border-radius: 22px;
+  border-radius: var(--radius-xl, 12px);
   border: 1px solid var(--border-default);
   background: var(--bg-surface-raised);
   box-shadow: var(--shadow-md);

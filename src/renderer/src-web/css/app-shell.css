@@ -1224,7 +1224,7 @@ h1 {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  border-radius: 12px;
+  border-radius: var(--radius-xl, 12px);
   padding: 10px 16px;
   display: flex;
   align-items: center;
@@ -1275,7 +1275,7 @@ h1 {
   color: var(--interactive-fg);
   border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   padding: 5px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm, 6px);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -1300,7 +1300,7 @@ h1 {
   cursor: pointer;
   padding: 4px;
   font-size: 12px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs, 4px);
   display: flex;
   align-items: center;
   justify-content: center;
