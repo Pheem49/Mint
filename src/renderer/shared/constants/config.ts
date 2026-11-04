@@ -9,6 +9,7 @@ export const DEFAULT_CONFIG = {
   theme: 'dark',
   tuiTheme: 'dark' as 'system' | 'dark' | 'light',
   accentColor: '#10b981',
+  textColor: '#f8fafc',
   systemTextColor: '#f8fafc',
   chatTextColor: '#f8fafc',
   customBgStart: '#0f172a',

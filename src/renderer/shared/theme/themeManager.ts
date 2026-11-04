@@ -100,6 +100,26 @@ export const applyTheme = (cfg: any): void => {
   document.documentElement.style.setProperty('--text-on-accent', contrastText)
   document.documentElement.style.setProperty('--accent-contrast', contrastText)
 
+  // Centralized Text Color Tokens
+  const textColor = cfg.textColor || cfg.systemTextColor || cfg.chatTextColor
+  if (textColor) {
+    document.documentElement.style.setProperty('--text-main', textColor)
+    document.documentElement.style.setProperty('--text-chat', textColor)
+    document.documentElement.style.setProperty('--text-primary', textColor)
+    document.documentElement.style.setProperty('--text-soft', `color-mix(in srgb, ${textColor} 82%, transparent)`)
+    document.documentElement.style.setProperty('--text-secondary', `color-mix(in srgb, ${textColor} 82%, transparent)`)
+    document.documentElement.style.setProperty('--text-muted', `color-mix(in srgb, ${textColor} 58%, transparent)`)
+  } else {
+    ;[
+      '--text-main',
+      '--text-chat',
+      '--text-primary',
+      '--text-soft',
+      '--text-secondary',
+      '--text-muted',
+    ].forEach((prop) => document.documentElement.style.removeProperty(prop))
+  }
+
   // Surface and Blur
   if (surfaceStyle === 'opaque') {
     document.documentElement.style.setProperty('--glass-blur', 'none')
@@ -140,7 +160,7 @@ export const applyTheme = (cfg: any): void => {
     return
   }
 
-  // Clean up inline background and text overrides for standard themes
+  // Clean up inline background overrides for standard themes
   ;[
     '--bg-canvas',
     '--bg-color',
@@ -152,8 +172,5 @@ export const applyTheme = (cfg: any): void => {
     '--surface-bg',
     '--surface-strong',
     '--input-bg',
-    '--text-main',
-    '--text-chat',
-    '--text-soft',
   ].forEach((prop) => document.documentElement.style.removeProperty(prop))
 }

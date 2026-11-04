@@ -59,12 +59,66 @@ export const ACCENT_FLAVORS: AccentFlavor[] = [
   },
 ]
 
+export interface TextColorFlavor {
+  id: string
+  name: string
+  color: string
+  contrastText: string
+  description: string
+}
+
+export const TEXT_COLOR_FLAVORS: TextColorFlavor[] = [
+  {
+    id: 'white',
+    name: 'Pure White',
+    color: '#ffffff',
+    contrastText: '#09090b',
+    description: 'Crisp classic bright white',
+  },
+  {
+    id: 'green',
+    name: 'Cyber Green',
+    color: '#86efac',
+    contrastText: '#09090b',
+    description: 'Phosphor terminal matrix green',
+  },
+  {
+    id: 'cyan',
+    name: 'Electric Cyan',
+    color: '#67e8f9',
+    contrastText: '#09090b',
+    description: 'Sci-fi holographic ice cyan',
+  },
+  {
+    id: 'amber',
+    name: 'Retro Amber',
+    color: '#fde047',
+    contrastText: '#09090b',
+    description: 'Warm CRT phosphor amber gold',
+  },
+  {
+    id: 'lavender',
+    name: 'Pastel Lilac',
+    color: '#d8b4fe',
+    contrastText: '#09090b',
+    description: 'Soft dreamy violet lavender',
+  },
+  {
+    id: 'coral',
+    name: 'Soft Coral',
+    color: '#fda4af',
+    contrastText: '#09090b',
+    description: 'Warm energetic pastel rose coral',
+  },
+]
+
 export interface ThemePreset {
   id: string
   name: string
   description: string
   theme: 'dark' | 'light' | 'midnight' | 'studio'
   accentColor: string
+  textColor?: string
   systemTextColor: string
   chatTextColor: string
   bgPreview: string

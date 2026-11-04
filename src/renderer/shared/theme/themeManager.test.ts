@@ -60,4 +60,21 @@ describe('theme surface settings', () => {
     applyTheme({ theme: 'studio' })
     expect(attributes.get('data-theme')).toBe('studio')
   })
+
+  it('sets centralized text color and derived tokens when textColor is provided', () => {
+    applyTheme({ theme: 'dark', textColor: '#f8fafc' })
+    expect(properties.get('--text-main')).toBe('#f8fafc')
+    expect(properties.get('--text-chat')).toBe('#f8fafc')
+    expect(properties.get('--text-primary')).toBe('#f8fafc')
+    expect(properties.get('--text-soft')).toBe('color-mix(in srgb, #f8fafc 82%, transparent)')
+    expect(properties.get('--text-secondary')).toBe('color-mix(in srgb, #f8fafc 82%, transparent)')
+    expect(properties.get('--text-muted')).toBe('color-mix(in srgb, #f8fafc 58%, transparent)')
+  })
+
+  it('sets custom text color when another color is chosen', () => {
+    applyTheme({ theme: 'dark', textColor: '#f5f5f4' })
+    expect(properties.get('--text-main')).toBe('#f5f5f4')
+    expect(properties.get('--text-chat')).toBe('#f5f5f4')
+    expect(properties.get('--text-primary')).toBe('#f5f5f4')
+  })
 })
