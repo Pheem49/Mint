@@ -196,7 +196,7 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
                     gap: 6,
                     padding: '4px 10px',
                     fontSize: '0.75rem',
-                    borderRadius: '8px',
+                    borderRadius: 'var(--radius-sm, 8px)',
                     background: 'var(--accent-subtle)',
                     border: '1px solid var(--accent-border)',
                     color: 'var(--interactive-fg)',
@@ -292,7 +292,7 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
                     <button
                       type="button"
                       className="approval-btn approval-btn-approve"
-                      style={{ whiteSpace: 'nowrap', padding: '9px 16px', borderRadius: '8px' }}
+                      style={{ whiteSpace: 'nowrap', padding: '9px 16px', borderRadius: 'var(--radius-sm, 8px)' }}
                       disabled={isMultiSelect ? selectedOptions.size === 0 && !askAnswer.trim() : !askAnswer.trim()}
                       onClick={() =>
                         onApproval(true, false, isMultiSelect ? buildMultiSelectAnswer() : askAnswer.trim())

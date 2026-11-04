@@ -77,7 +77,7 @@ export default class ModalErrorBoundary extends React.Component<Props, State> {
                 color: 'var(--status-error, #ef4444)',
                 background: 'color-mix(in srgb, var(--status-error, #ef4444) 12%, transparent)',
                 padding: '6px 12px',
-                borderRadius: 6,
+                borderRadius: 'var(--radius-xs, 6px)',
                 maxWidth: 460,
                 wordBreak: 'break-word',
               }}
@@ -91,7 +91,7 @@ export default class ModalErrorBoundary extends React.Component<Props, State> {
               onClick={this.handleRetry}
               style={{
                 padding: '8px 20px',
-                borderRadius: 8,
+                borderRadius: 'var(--radius-sm, 8px)',
                 border: 'none',
                 background: 'var(--accent, #10b981)',
                 color: 'var(--text-on-accent, #ffffff)',
@@ -107,7 +107,7 @@ export default class ModalErrorBoundary extends React.Component<Props, State> {
               onClick={() => this.props.onClose?.()}
               style={{
                 padding: '8px 20px',
-                borderRadius: 8,
+                borderRadius: 'var(--radius-sm, 8px)',
                 border: '1px solid var(--border-default, rgba(255, 255, 255, 0.15))',
                 background: 'transparent',
                 color: 'var(--text-main, #e4e4e7)',

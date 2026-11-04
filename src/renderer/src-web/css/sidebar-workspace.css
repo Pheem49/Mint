@@ -419,7 +419,7 @@
   gap: 9px;
   padding: 0 10px;
   color: var(--text-secondary);
-  border-radius: 7px;
+  border-radius: var(--radius-sm, 8px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -100,7 +100,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
               style={{
                 width: '32px',
                 height: '32px',
-                borderRadius: '8px',
+                borderRadius: 'var(--radius-sm, 8px)',
                 background: 'color-mix(in srgb, var(--status-error, #ef4444) 15%, transparent)',
                 color: 'var(--status-error, #ef4444)',
                 display: 'inline-flex',
@@ -133,7 +133,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
               color: 'var(--text-muted)',
               cursor: isLoading ? 'not-allowed' : 'pointer',
               padding: '6px',
-              borderRadius: '6px',
+              borderRadius: 'var(--radius-xs, 6px)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -152,7 +152,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
           <div
             style={{
               padding: '12px 14px',
-              borderRadius: '10px',
+              borderRadius: 'var(--radius-md, 10px)',
               background: 'color-mix(in srgb, var(--status-error, #ef4444) 10%, transparent)',
               border: '1px solid color-mix(in srgb, var(--status-error, #ef4444) 25%, transparent)',
               fontSize: '13px',
@@ -181,7 +181,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
             style={{
               background: 'var(--surface-bg)',
               border: '1px solid var(--border)',
-              borderRadius: '10px',
+              borderRadius: 'var(--radius-md, 10px)',
               padding: '14px',
               display: 'flex',
               flexDirection: 'column',
@@ -213,7 +213,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
                 <span
                   style={{
                     padding: '3px 8px',
-                    borderRadius: '6px',
+                    borderRadius: 'var(--radius-xs, 6px)',
                     background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
                     color: 'var(--interactive-fg)',
                     fontWeight: 600,
@@ -225,7 +225,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
                 <code
                   style={{
                     padding: '3px 7px',
-                    borderRadius: '6px',
+                    borderRadius: 'var(--radius-xs, 6px)',
                     background: 'var(--bg-input, var(--bg-surface-soft))',
                     color: 'var(--text-main)',
                     fontSize: '12px',
@@ -263,7 +263,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
                   maxHeight: '160px',
                   overflowY: 'auto',
                   border: '1px solid var(--border)',
-                  borderRadius: '8px',
+                  borderRadius: 'var(--radius-sm, 8px)',
                   background: 'var(--surface-bg)',
                   display: 'flex',
                   flexDirection: 'column',
@@ -307,7 +307,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
                             fontSize: '10.5px',
                             fontWeight: 600,
                             padding: '1px 6px',
-                            borderRadius: '4px',
+                            borderRadius: 'var(--radius-xs, 6px)',
                             background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
                             color: 'var(--interactive-fg)',
                           }}
@@ -354,7 +354,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
             disabled={isLoading}
             style={{
               padding: '8px 16px',
-              borderRadius: '8px',
+              borderRadius: 'var(--radius-sm, 8px)',
               border: '1px solid var(--border)',
               background: 'transparent',
               color: 'var(--text-main)',
@@ -373,7 +373,7 @@ export const RewindModal: React.FC<RewindModalProps> = ({
             disabled={isLoading}
             style={{
               padding: '8px 18px',
-              borderRadius: '8px',
+              borderRadius: 'var(--radius-sm, 8px)',
               border: 'none',
               background: 'var(--status-error, #ef4444)',
               color: '#ffffff',

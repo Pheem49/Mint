@@ -42,7 +42,7 @@
 .file-changes-summary-icon {
   align-items: center;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border-radius: 7px;
+  border-radius: var(--radius-sm, 8px);
   color: var(--interactive-fg);
   display: inline-flex;
   flex: 0 0 30px;

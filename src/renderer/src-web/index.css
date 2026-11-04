@@ -52,7 +52,7 @@ button {
   border: 1px solid color-mix(in srgb, var(--accent, #10b981) 25%, transparent);
   color: var(--interactive-fg);
   padding: 2px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs, 6px);
   font-weight: 500;
   font-size: 0.9em;
   display: inline-block;
@@ -75,7 +75,7 @@ button {
   flex-direction: column;
   background: var(--panel-soft, #121214);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  border-radius: 16px;
+  border-radius: var(--radius-xl, 18px);
   margin: 12px 0;
   overflow: hidden;
   box-shadow: var(--shadow-sm, 0 4px 16px rgba(0, 0, 0, 0.18));
@@ -110,7 +110,7 @@ button {
   color: var(--text-soft, #64748b);
   background: var(--bg-surface-soft);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-2xs, 4px);
 }
 
 .chat-code-block-actions {
@@ -125,7 +125,7 @@ button {
   color: var(--text-soft, #94a3b8);
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs, 6px);
   display: inline-flex;
   align-items: center;
   gap: 5px;

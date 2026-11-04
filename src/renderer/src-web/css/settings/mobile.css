@@ -178,7 +178,7 @@
   .settings-content .setting-feature-card {
     min-width: 0;
     padding: 14px;
-    border-radius: 18px;
+    border-radius: var(--radius-xl, 18px);
   }
 
   .settings-content .provider-card-header {
@@ -315,6 +315,6 @@
 
   .settings-nav-search,
   .tab-btn {
-    border-radius: 14px;
+    border-radius: var(--radius-lg, 14px);
   }
 }

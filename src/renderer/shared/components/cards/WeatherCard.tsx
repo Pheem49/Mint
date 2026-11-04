@@ -94,7 +94,7 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
       style={{
         background: weatherInfo.gradient,
         color: '#ffffff',
-        borderRadius: '12px',
+        borderRadius: 'var(--radius-xl, 18px)',
         padding: '16px 20px',
         margin: '12px 0',
         boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)',
@@ -161,7 +161,7 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
                 alignItems: 'center',
                 background: 'rgba(255, 255, 255, 0.12)',
                 backdropFilter: 'blur(4px)',
-                borderRadius: '8px',
+                borderRadius: 'var(--radius-sm, 8px)',
                 padding: '8px 4px',
               }}
             >
@@ -187,7 +187,7 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
           style={{
             background: 'rgba(255, 255, 255, 0.12)',
             backdropFilter: 'blur(4px)',
-            borderRadius: '8px',
+            borderRadius: 'var(--radius-sm, 8px)',
             padding: '8px 10px',
           }}
         >
@@ -199,7 +199,7 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
           style={{
             background: 'rgba(255, 255, 255, 0.12)',
             backdropFilter: 'blur(4px)',
-            borderRadius: '8px',
+            borderRadius: 'var(--radius-sm, 8px)',
             padding: '8px 10px',
           }}
         >
@@ -211,7 +211,7 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
           style={{
             background: 'rgba(255, 255, 255, 0.12)',
             backdropFilter: 'blur(4px)',
-            borderRadius: '8px',
+            borderRadius: 'var(--radius-sm, 8px)',
             padding: '8px 10px',
           }}
         >

@@ -1377,7 +1377,7 @@ export default function ChatPanel({
               background: 'var(--bg-backdrop)',
               backdropFilter: 'blur(8px)',
               border: '2px dashed var(--accent)',
-              borderRadius: '16px',
+              borderRadius: 'var(--radius-xl, 18px)',
               margin: '12px',
               display: 'flex',
               flexDirection: 'column',
@@ -1500,7 +1500,7 @@ export default function ChatPanel({
       <div className="chat-container" ref={chatContainerRef} onScroll={handleChatScroll} style={{ overflowAnchor: 'none' }}>
         {hasOlder && onLoadOlder && (
           <button type="button" className="load-older-messages" disabled={loadingOlder}
-            style={{ display: 'block', margin: '0 auto 20px', padding: '7px 14px', borderRadius: 8,
+            style={{ display: 'block', margin: '0 auto 20px', padding: '7px 14px', borderRadius: 'var(--radius-md, 10px)',
               border: '1px solid var(--border-color, #3a3a3a)', background: 'var(--surface, #252525)',
               color: 'var(--text-secondary, #c0c0c0)', cursor: loadingOlder ? 'default' : 'pointer' }}
             onClick={async () => {

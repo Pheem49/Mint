@@ -1,6 +1,6 @@
 .queued-messages-tray {
   margin: 0 0 10px 0;
-  border-radius: 12px;
+  border-radius: var(--radius-xl, 18px);
   background: var(--bg-surface-soft, rgba(255, 255, 255, 0.04));
   border: 1px solid var(--border-default, rgba(255, 255, 255, 0.1));
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
@@ -54,7 +54,7 @@
   padding: 1px 7px;
   font-size: 0.72rem;
   font-weight: 700;
-  border-radius: 999px;
+  border-radius: var(--radius-full, 9999px);
   background: var(--accent-color, #10b981);
   color: #ffffff;
 }
@@ -85,7 +85,7 @@
   gap: 4px;
   padding: 4px 8px;
   font-size: 0.72rem;
-  border-radius: 6px;
+  border-radius: var(--radius-xs, 6px);
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted, #94a3b8);
@@ -175,7 +175,7 @@
   gap: 4px;
   padding: 2px 6px;
   font-size: 0.68rem;
-  border-radius: 4px;
+  border-radius: var(--radius-2xs, 4px);
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-soft, #94a3b8);
 }
@@ -193,7 +193,7 @@
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs, 6px);
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted, #94a3b8);

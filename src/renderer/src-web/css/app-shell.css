@@ -789,7 +789,7 @@ h1 {
 .preview-split-resizer-grip {
   width: 4px;
   height: 28px;
-  border-radius: 2px;
+  border-radius: var(--radius-2xs, 4px);
   background: var(--border);
   position: relative;
   z-index: 1;

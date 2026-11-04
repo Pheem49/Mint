@@ -113,7 +113,7 @@ export const AgentActivityDrawer = memo(function AgentActivityDrawer({
               display: 'inline-flex',
               padding: '2px',
               background: 'var(--surface-strong)',
-              borderRadius: '6px',
+              borderRadius: 'var(--radius-xs, 6px)',
               border: '1px solid var(--border)',
             }}
           >
@@ -127,7 +127,7 @@ export const AgentActivityDrawer = memo(function AgentActivityDrawer({
                 background: viewMode === 'list' ? 'var(--accent)' : 'transparent',
                 color: viewMode === 'list' ? 'var(--text-on-accent)' : 'var(--text-muted)',
                 border: 'none',
-                borderRadius: '4px',
+                borderRadius: 'var(--radius-2xs, 4px)',
                 padding: '3px 8px',
                 fontSize: '0.74rem',
                 fontWeight: 500,
@@ -146,7 +146,7 @@ export const AgentActivityDrawer = memo(function AgentActivityDrawer({
                 background: viewMode === 'dag' ? 'var(--accent)' : 'transparent',
                 color: viewMode === 'dag' ? 'var(--text-on-accent)' : 'var(--text-muted)',
                 border: 'none',
-                borderRadius: '4px',
+                borderRadius: 'var(--radius-2xs, 4px)',
                 padding: '3px 8px',
                 fontSize: '0.74rem',
                 fontWeight: 500,

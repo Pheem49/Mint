@@ -30,7 +30,7 @@ function ImageTile({ image }: { image: ImageSearchHit }) {
         display: 'flex',
         flex: '0 0 116px',
         flexDirection: 'column',
-        borderRadius: '10px',
+        borderRadius: 'var(--radius-md, 10px)',
         overflow: 'hidden',
         background: 'var(--surface-strong)',
         border: '1px solid var(--border)',
@@ -93,7 +93,7 @@ export default function ImageSearchCard({ data }: { data: ImageSearchData }) {
       style={{
         background: cardBg,
         color: cardText,
-        borderRadius: '12px',
+        borderRadius: 'var(--radius-xl, 18px)',
         padding: '16px 20px',
         margin: '12px 0',
         boxShadow: 'var(--shadow-md)',

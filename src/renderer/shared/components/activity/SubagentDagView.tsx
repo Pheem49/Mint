@@ -202,7 +202,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
             alignItems: 'center',
             gap: '10px',
             padding: '10px 18px',
-            borderRadius: '12px',
+            borderRadius: 'var(--radius-xl, 18px)',
             background: 'linear-gradient(135deg, var(--accent-subtle), color-mix(in srgb, var(--status-info, #3b82f6) 15%, transparent))',
             border: '1px solid var(--accent-border)',
             boxShadow: 'var(--shadow-md)',
@@ -213,7 +213,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
             style={{
               width: '32px',
               height: '32px',
-              borderRadius: '8px',
+              borderRadius: 'var(--radius-sm, 8px)',
               background: 'var(--accent)',
               color: 'var(--text-on-accent)',
               display: 'flex',
@@ -272,7 +272,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
                   flexDirection: 'column',
                   width: '260px',
                   padding: '12px',
-                  borderRadius: '10px',
+                  borderRadius: 'var(--radius-lg, 14px)',
                   background: isSelected ? 'var(--bg-surface-raised)' : 'var(--bg-surface)',
                   border: `1px solid ${isSelected ? statusColor : 'var(--border-default)'}`,
                   cursor: 'pointer',
@@ -298,7 +298,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
                       fontSize: '0.68rem',
                       fontWeight: 600,
                       padding: '2px 6px',
-                      borderRadius: '4px',
+                      borderRadius: 'var(--radius-2xs, 4px)',
                       textTransform: 'none',
                       background: `color-mix(in srgb, ${statusColor} 15%, transparent)`,
                       color: statusColor,
@@ -345,7 +345,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
           style={{
             background: 'var(--bg-surface-raised)',
             border: '1px solid var(--border-default)',
-            borderRadius: '10px',
+            borderRadius: 'var(--radius-lg, 14px)',
             padding: '14px',
             marginTop: '8px',
           }}
@@ -379,7 +379,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
                 style={{
                   background: 'var(--bg-surface-soft)',
                   border: '1px solid var(--border-subtle)',
-                  borderRadius: '6px',
+                  borderRadius: 'var(--radius-xs, 6px)',
                   padding: '8px 10px',
                   fontSize: '0.76rem',
                 }}
@@ -395,7 +395,7 @@ export function SubagentDagView({ progress, isLive = false }: Props) {
                       padding: '4px 6px',
                       background: 'var(--bg-canvas)',
                       border: '1px solid var(--border-subtle)',
-                      borderRadius: '4px',
+                      borderRadius: 'var(--radius-2xs, 4px)',
                       color: 'var(--text-secondary)',
                       fontSize: '0.72rem',
                       overflowX: 'auto',

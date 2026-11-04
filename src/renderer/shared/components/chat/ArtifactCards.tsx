@@ -141,7 +141,7 @@ export const ArtifactCards = memo(function ArtifactCards({
                 style={{
                   width: '36px',
                   height: '32px',
-                  borderRadius: '6px',
+                  borderRadius: 'var(--radius-xs, 6px)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',

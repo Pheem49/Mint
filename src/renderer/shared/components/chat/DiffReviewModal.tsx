@@ -206,7 +206,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
             <div
               className="management-card-icon"
-              style={{ width: 34, height: 34, fontSize: '0.72rem', fontWeight: 700, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--interactive-fg)', borderRadius: '6px' }}
+              style={{ width: 34, height: 34, fontSize: '0.72rem', fontWeight: 700, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--interactive-fg)', borderRadius: 'var(--radius-sm, 8px)' }}
             >
               DIFF
             </div>
@@ -237,7 +237,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                     color: 'var(--interactive-fg)',
                     background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
                     padding: '1px 6px',
-                    borderRadius: '4px',
+                    borderRadius: 'var(--radius-xs, 6px)',
                   }}
                 >
                   +{additions}
@@ -249,7 +249,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                     color: 'var(--status-error-fg)',
                     background: 'var(--status-error-bg)',
                     padding: '1px 6px',
-                    borderRadius: '4px',
+                    borderRadius: 'var(--radius-xs, 6px)',
                   }}
                 >
                   -{deletions}
@@ -262,7 +262,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                       color: 'var(--status-warning-fg)',
                       background: 'var(--status-warning-bg)',
                       padding: '1px 6px',
-                      borderRadius: '4px',
+                      borderRadius: 'var(--radius-xs, 6px)',
                       textTransform: 'none',
                     }}
                   >
@@ -533,9 +533,9 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
         >
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             <span>Shortcut: </span>
-            <kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '2px 5px', borderRadius: 4, fontSize: '0.72rem' }}>Esc</kbd> Cancel
+            <kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '2px 5px', borderRadius: 'var(--radius-xs, 6px)', fontSize: '0.72rem' }}>Esc</kbd> Cancel
             <span style={{ margin: '0 8px' }}>•</span>
-            <kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '2px 5px', borderRadius: 4, fontSize: '0.72rem' }}>Cmd/Ctrl+Enter</kbd> Approve
+            <kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '2px 5px', borderRadius: 'var(--radius-xs, 6px)', fontSize: '0.72rem' }}>Cmd/Ctrl+Enter</kbd> Approve
           </div>
 
           <div style={{ display: 'flex', gap: 10 }}>

@@ -31,7 +31,7 @@ export default function CalculationCard({ data }: { data: CalculationData }) {
       style={{
         background: t.cardBg,
         color: t.cardText,
-        borderRadius: '12px',
+        borderRadius: 'var(--radius-xl, 18px)',
         padding: '16px 20px',
         margin: '12px 0',
         boxShadow: t.cardShadow,
@@ -52,7 +52,7 @@ export default function CalculationCard({ data }: { data: CalculationData }) {
         style={{
           background: t.exprBg,
           border: `1px solid ${t.exprBorder}`,
-          borderRadius: '8px',
+          borderRadius: 'var(--radius-sm, 8px)',
           padding: '10px 14px',
           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
           fontSize: '14px',
@@ -73,7 +73,7 @@ export default function CalculationCard({ data }: { data: CalculationData }) {
         style={{
           background: t.resultBg,
           border: `1px solid ${t.resultBorder}`,
-          borderRadius: '10px',
+          borderRadius: 'var(--radius-md, 10px)',
           padding: '12px 18px',
         }}
       >

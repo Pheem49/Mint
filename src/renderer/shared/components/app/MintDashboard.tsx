@@ -1869,7 +1869,7 @@ export default function MintDashboard() {
             }}
           />
         )}
-        {toastMessage && <div role="status" style={{ position: 'fixed', bottom: 22, right: 22, zIndex: 10000, padding: '12px 18px', borderRadius: 10, background: 'var(--bg-surface)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}>{toastMessage}</div>}
+        {toastMessage && <div role="status" style={{ position: 'fixed', bottom: 22, right: 22, zIndex: 10000, padding: '12px 18px', borderRadius: 'var(--radius-lg, 14px)', background: 'var(--bg-surface)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}>{toastMessage}</div>}
         <DashboardSidebar
           view={view}
           sidebarCollapsed={sidebarCollapsed}

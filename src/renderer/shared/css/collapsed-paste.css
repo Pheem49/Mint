@@ -9,7 +9,7 @@
   min-width: 0;
   padding: 10px 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs, 6px);
   background: transparent;
   color: var(--accent, #22d3ee);
   font: inherit;

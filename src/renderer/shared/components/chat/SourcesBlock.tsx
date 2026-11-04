@@ -237,7 +237,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                 className="source-card"
                 style={{
                   justifyContent: 'space-between',
-                  borderRadius: '16px',
+                  borderRadius: 'var(--radius-xl, 18px)',
                   background: 'var(--bg-surface-soft)',
                   border: '1px solid var(--border-subtle)',
                   transition: 'all 0.15s ease',
@@ -323,7 +323,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                         alt=""
                         width={14}
                         height={14}
-                        style={{ borderRadius: '3px', flexShrink: 0 }}
+                        style={{ borderRadius: 'var(--radius-xs, 6px)', flexShrink: 0 }}
                         onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
                       />
                       <span
@@ -351,7 +351,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                           background: 'var(--accent-subtle)',
                           border: '1px solid var(--accent-border)',
                           padding: '1px 6px',
-                          borderRadius: '4px',
+                          borderRadius: 'var(--radius-xs, 6px)',
                           flexShrink: 0,
                           cursor: 'pointer',
                           display: 'flex',
@@ -389,7 +389,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: '10px 14px',
-              borderRadius: '16px',
+              borderRadius: 'var(--radius-xl, 18px)',
               background: 'var(--bg-surface-soft)',
               border: '1px solid var(--border-subtle)',
               cursor: 'pointer',
@@ -449,7 +449,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
             style={{
               background: 'var(--bg-surface-soft)',
               border: '1px solid var(--border-subtle)',
-              borderRadius: '8px',
+              borderRadius: 'var(--radius-sm, 8px)',
               padding: '4px 10px',
               color: 'var(--text-secondary)',
               fontSize: '0.73rem',
@@ -478,7 +478,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
             maxHeight: popoverPos.maxHeight,
             background: 'var(--bg-overlay)',
             border: '1px solid var(--border-default)',
-            borderRadius: '14px',
+            borderRadius: 'var(--radius-lg, 14px)',
             boxShadow: '0 16px 36px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.4)',
             zIndex: 10000,
             padding: '6px',
@@ -513,7 +513,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                 fontSize: '0.85rem',
                 padding: '0 4px',
                 lineHeight: 1,
-                borderRadius: '4px',
+                borderRadius: 'var(--radius-xs, 6px)',
               }}
               onClick={() => setOpenDropdownDomain(null)}
               aria-label="Close"
@@ -544,7 +544,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                   flexDirection: 'column',
                   gap: '2px',
                   padding: '6px 8px',
-                  borderRadius: '8px',
+                  borderRadius: 'var(--radius-sm, 8px)',
                   color: 'var(--text-primary)',
                   textDecoration: 'none',
                   fontSize: '0.75rem',

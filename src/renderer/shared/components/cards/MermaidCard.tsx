@@ -210,7 +210,7 @@ export default function MermaidCard({ code }: { code: string }) {
       style={{
         background: 'var(--bg-surface-soft)',
         color: 'var(--text-primary)',
-        borderRadius: '12px',
+        borderRadius: 'var(--radius-xl, 18px)',
         padding: '16px 20px',
         margin: '12px 0',
         boxShadow: 'var(--shadow-md)',

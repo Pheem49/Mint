@@ -410,7 +410,7 @@ function renderAlertBox(type: string, children: ReactNode): ReactNode {
       style={{
         margin: '14px 0',
         padding: '12px 16px',
-        borderRadius: '10px',
+        borderRadius: 'var(--radius-lg, 14px)',
         borderLeft: `4px solid ${config.border}`,
         borderTop: `1px solid ${config.borderSubtle}`,
         borderRight: `1px solid ${config.borderSubtle}`,
@@ -474,7 +474,7 @@ export function ChatMediaImage({
         className="chat-media-card chat-media-card--failed"
         style={{
           margin: '6px 0 10px',
-          borderRadius: '10px',
+          borderRadius: 'var(--radius-lg, 14px)',
           padding: '10px 14px',
           border: '1px solid var(--border, rgba(255,255,255,0.12))',
           background: 'var(--panel-bg, #141416)',
@@ -496,7 +496,7 @@ export function ChatMediaImage({
               flexShrink: 0,
               fontSize: '0.78rem',
               padding: '3px 8px',
-              borderRadius: '6px',
+              borderRadius: 'var(--radius-xs, 6px)',
               background: 'var(--bg-surface-soft, rgba(255,255,255,0.06))',
               border: '1px solid var(--border, rgba(255,255,255,0.12))',
               color: 'var(--interactive-fg-hover, #38bdf8)',
@@ -529,7 +529,7 @@ export function ChatMediaImage({
       <div
         className="chat-media-card chat-media-card--thumbnail"
         data-load-stage={stage}
-        style={{ margin: '6px 0 10px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px' }}
+        style={{ margin: '6px 0 10px', borderRadius: 'var(--radius-lg, 14px)', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px' }}
       >
         <a href={pageUrl} target="_blank" rel="noopener noreferrer" title={sourceUrl ? `Open source page: ${label}` : label} style={{ display: 'flex', justifyContent: 'center', textDecoration: 'none' }}>
           <img
@@ -556,12 +556,12 @@ export function ChatMediaImage({
     )
   }
   return (
-    <div className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
+    <div className="chat-media-card" style={{ margin: '10px 0', borderRadius: 'var(--radius-xl, 18px)', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
       <img
         src={directUrl}
         alt={label}
         referrerPolicy="no-referrer"
-        style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }}
+        style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: 'var(--radius-md, 10px)' }}
         onError={handleImageError}
       />
     </div>
@@ -706,7 +706,7 @@ const mdComponents = {
     return renderCodeCard(lang, codeText)
   },
   table: ({ children }) => (
-    <div className="chat-table-container" style={{ overflowX: 'auto', margin: '14px 0', width: '100%', borderRadius: '8px', border: '1px solid var(--border-light, rgba(255, 255, 255, 0.12))', background: 'var(--panel-bg)', boxShadow: 'var(--shadow-sm, 0 4px 12px rgba(0, 0, 0, 0.15))' }}>
+    <div className="chat-table-container" style={{ overflowX: 'auto', margin: '14px 0', width: '100%', borderRadius: 'var(--radius-md, 10px)', border: '1px solid var(--border-light, rgba(255, 255, 255, 0.12))', background: 'var(--panel-bg)', boxShadow: 'var(--shadow-sm, 0 4px 12px rgba(0, 0, 0, 0.15))' }}>
       <table className="chat-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem', textAlign: 'left', lineHeight: '1.5' }}>
         {children}
       </table>
@@ -853,8 +853,8 @@ export function renderFormattedMessage(text: string, webSources: WebSearchSource
       {segments.map((segment, i) => {
         if (segment.type === 'video') {
           return (
-            <div key={`video-${i}`} className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: '#000' }}>
-              <video controls src={resolveMediaUrl(segment.src)} style={{ width: '100%', maxHeight: '400px', borderRadius: '8px', display: 'block' }} />
+            <div key={`video-${i}`} className="chat-media-card" style={{ margin: '10px 0', borderRadius: 'var(--radius-xl, 18px)', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: '#000' }}>
+              <video controls src={resolveMediaUrl(segment.src)} style={{ width: '100%', maxHeight: '400px', borderRadius: 'var(--radius-md, 10px)', display: 'block' }} />
             </div>
           )
         }

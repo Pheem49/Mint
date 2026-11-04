@@ -89,7 +89,7 @@ function PdfPageItem({
         ref={canvasRef}
         style={{
           boxShadow: '0 6px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.08)',
-          borderRadius: '6px',
+          borderRadius: 'var(--radius-xs, 6px)',
           display: 'block',
           background: '#ffffff',
           maxWidth: '100%',

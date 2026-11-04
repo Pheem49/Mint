@@ -16,4 +16,12 @@
   --color-secondary-foreground: var(--btn-gray-fg, var(--text-main));
   --color-muted-foreground: var(--text-muted);
   --color-ring: var(--accent);
+  --radius-2xs: var(--radius-2xs);
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-3xl: var(--radius-3xl);
 }

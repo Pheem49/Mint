@@ -60,7 +60,7 @@ export default function StockCard({ data }: { data: StockData }) {
       style={{
         background: t.cardBg,
         color: t.cardText,
-        borderRadius: '12px',
+        borderRadius: 'var(--radius-xl, 18px)',
         padding: '16px 20px',
         margin: '12px 0',
         boxShadow: t.cardShadow,
@@ -80,7 +80,7 @@ export default function StockCard({ data }: { data: StockData }) {
                 fontSize: '11px',
                 fontWeight: 700,
                 padding: '2px 6px',
-                borderRadius: '4px',
+                borderRadius: 'var(--radius-2xs, 4px)',
                 background: t.tagBg,
                 color: t.tagColor,
                 textTransform: 'none',
@@ -98,7 +98,7 @@ export default function StockCard({ data }: { data: StockData }) {
             background: isPositive ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
             border: `1px solid ${isPositive ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
             padding: '4px 10px',
-            borderRadius: '20px',
+            borderRadius: 'var(--radius-full, 9999px)',
             display: 'flex',
             alignItems: 'center',
             gap: '4px',
@@ -123,26 +123,26 @@ export default function StockCard({ data }: { data: StockData }) {
 
       {/* Stats Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
-        <div style={{ background: t.statBg, borderRadius: '8px', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
+        <div style={{ background: t.statBg, borderRadius: 'var(--radius-sm, 8px)', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
           <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'none' }}>Day high</p>
           <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700, color: t.statValue }}>
             {data.dayHigh ? `${currencySymbol}${data.dayHigh.toFixed(2)}` : 'N/A'}
           </p>
         </div>
 
-        <div style={{ background: t.statBg, borderRadius: '8px', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
+        <div style={{ background: t.statBg, borderRadius: 'var(--radius-sm, 8px)', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
           <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'none' }}>Day low</p>
           <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700, color: t.statValue }}>
             {data.dayLow ? `${currencySymbol}${data.dayLow.toFixed(2)}` : 'N/A'}
           </p>
         </div>
 
-        <div style={{ background: t.statBg, borderRadius: '8px', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
+        <div style={{ background: t.statBg, borderRadius: 'var(--radius-sm, 8px)', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
           <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'none' }}>Market cap</p>
           <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700, color: t.statValue }}>{formatLargeNum(data.marketCap)}</p>
         </div>
 
-        <div style={{ background: t.statBg, borderRadius: '8px', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
+        <div style={{ background: t.statBg, borderRadius: 'var(--radius-sm, 8px)', padding: '8px 10px', border: `1px solid ${t.statBorder}` }}>
           <p style={{ margin: 0, fontSize: '10px', color: t.statLabel, textTransform: 'none' }}>Volume</p>
           <p style={{ margin: '2px 0 0', fontSize: '12px', fontWeight: 700, color: t.statValue }}>{formatLargeNum(data.volume)}</p>
         </div>

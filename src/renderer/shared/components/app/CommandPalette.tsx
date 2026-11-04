@@ -381,7 +381,7 @@ export function CommandPalette({
           maxWidth: '620px',
           background: 'var(--bg-overlay)',
           border: '1px solid var(--border-default)',
-          borderRadius: '14px',
+          borderRadius: 'var(--radius-2xl, 22px)',
           boxShadow: 'var(--shadow-lg)',
           overflow: 'hidden',
           display: 'flex',
@@ -435,7 +435,7 @@ export function CommandPalette({
           <kbd
             style={{
               padding: '2px 7px',
-              borderRadius: '4px',
+              borderRadius: 'var(--radius-2xs, 4px)',
               background: 'var(--bg-surface-soft)',
               color: 'var(--text-muted)',
               fontSize: '0.7rem',
@@ -493,7 +493,7 @@ export function CommandPalette({
                         alignItems: 'center',
                         justifyContent: 'space-between',
                         padding: '9px 12px',
-                        borderRadius: '8px',
+                        borderRadius: 'var(--radius-sm, 8px)',
                         cursor: 'pointer',
                         background: isSelected ? 'var(--accent-subtle)' : 'transparent',
                         border: `1px solid ${isSelected ? 'var(--accent-border)' : 'transparent'}`,
@@ -506,7 +506,7 @@ export function CommandPalette({
                             fontSize: '0.68rem',
                             fontWeight: 700,
                             padding: '2px 5px',
-                            borderRadius: '4px',
+                            borderRadius: 'var(--radius-2xs, 4px)',
                             background: 'var(--bg-surface-soft)',
                             color: isSelected ? 'var(--interactive-fg)' : 'var(--text-muted)',
                             fontFamily: 'monospace',
@@ -553,7 +553,7 @@ export function CommandPalette({
                             color: 'var(--interactive-fg)',
                             fontWeight: 600,
                             padding: '2px 6px',
-                            borderRadius: '4px',
+                            borderRadius: 'var(--radius-2xs, 4px)',
                             background: 'var(--accent-subtle)',
                           }}
                         >
@@ -582,8 +582,8 @@ export function CommandPalette({
           }}
         >
           <div style={{ display: 'flex', gap: '12px' }}>
-            <span><kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '1px 4px', borderRadius: '3px' }}>↑</kbd> <kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '1px 4px', borderRadius: '3px' }}>↓</kbd> to navigate</span>
-            <span><kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '1px 4px', borderRadius: '3px' }}>↵</kbd> to select</span>
+            <span><kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '1px 4px', borderRadius: 'var(--radius-2xs, 4px)' }}>↑</kbd> <kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '1px 4px', borderRadius: 'var(--radius-2xs, 4px)' }}>↓</kbd> to navigate</span>
+            <span><kbd style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', padding: '1px 4px', borderRadius: 'var(--radius-2xs, 4px)' }}>↵</kbd> to select</span>
           </div>
           <span>Universal command palette</span>
         </div>
