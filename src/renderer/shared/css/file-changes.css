@@ -37,6 +37,13 @@
   min-height: 38px;
   padding: 6px 14px;
   box-sizing: border-box;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.file-changes-summary-row:hover {
+  background: color-mix(in srgb, var(--text-main) 3%, transparent);
 }
 
 .file-changes-summary-row.is-open {
@@ -47,17 +54,8 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
-  user-select: none;
   min-width: 0;
-  padding: 2px 4px;
-  margin: -2px -4px;
-  border-radius: var(--radius-xs, 4px);
-  transition: opacity 0.15s ease;
-}
-
-.file-changes-summary-toggle:hover {
-  opacity: 0.9;
+  flex: 1;
 }
 
 .file-changes-summary-label {

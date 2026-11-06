@@ -371,19 +371,19 @@ export const TurnFileChanges = memo(function TurnFileChanges({
   return (
     <div className={`file-changes-summary-container ${isLive ? 'is-live' : ''}`}>
       <div className="agent-activity-card file-changes-card">
-        <div className={`file-changes-summary-row ${isOpen ? 'is-open' : ''}`}>
-          <div
-            className="file-changes-summary-toggle"
-            onClick={() => setIsOpen((prev) => !prev)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                setIsOpen((prev) => !prev)
-              }
-            }}
-          >
+        <div
+          className={`file-changes-summary-row ${isOpen ? 'is-open' : ''}`}
+          onClick={() => setIsOpen((prev) => !prev)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              setIsOpen((prev) => !prev)
+            }
+          }}
+        >
+          <div className="file-changes-summary-toggle">
             <span className="file-changes-summary-label">{summaryLabel}</span>
             <span className="file-changes-summary-counts">
               {totalAdditions > 0 && <span className="file-changes-count-add">+{totalAdditions}</span>}
@@ -395,7 +395,10 @@ export const TurnFileChanges = memo(function TurnFileChanges({
               aria-hidden="true"
             />
           </div>
-          <div className="file-changes-summary-actions">
+          <div
+            className="file-changes-summary-actions"
+            onClick={(e) => e.stopPropagation()}
+          >
             {onRewindRequest && (
               <button
                 type="button"
@@ -412,7 +415,10 @@ export const TurnFileChanges = memo(function TurnFileChanges({
                 type="button"
                 className="file-changes-review-btn"
                 title="Review changed code"
-                onClick={onOpenReview}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onOpenReview()
+                }}
               >
                 <Files size={13} aria-hidden="true" />
                 <span>Review</span>
