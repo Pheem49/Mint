@@ -770,13 +770,15 @@ export default function ChatPanel({
       e.dataTransfer?.getData(WORKSPACE_IMAGE_MIME) ||
       e.dataTransfer?.getData(WORKSPACE_PATH_MIME) ||
       e.dataTransfer?.getData('application/x-mint-workspace-path')
-    if (wsPath) {
+    const fileRef =
+      e.dataTransfer?.getData(WORKSPACE_PATH_MIME) ||
+      e.dataTransfer?.getData('application/x-mint-workspace-path') ||
+      e.dataTransfer?.getData('text/plain') ||
+      ''
+    if (wsPath || fileRef) {
       void tryAttachDroppedImage(e.dataTransfer).then((attached) => {
         if (!attached) {
-          const raw =
-            e.dataTransfer?.getData(WORKSPACE_PATH_MIME) ||
-            e.dataTransfer?.getData('application/x-mint-workspace-path') ||
-            ''
+          const raw = fileRef || wsPath
           if (raw) {
             handleReferenceFile(raw)
           }
@@ -1232,13 +1234,14 @@ export default function ChatPanel({
 
   const handleWorkspaceDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault()
+    const wsPath =
+      event.dataTransfer.getData(WORKSPACE_PATH_MIME) ||
+      event.dataTransfer.getData('application/x-mint-workspace-path')
+    const plainText = event.dataTransfer.getData('text/plain')
+    const reference = wsPath || plainText
+
     void tryAttachDroppedImage(event.dataTransfer).then((attached) => {
       if (attached) return
-      const wsPath =
-        event.dataTransfer.getData(WORKSPACE_PATH_MIME) ||
-        event.dataTransfer.getData('application/x-mint-workspace-path')
-      const plainText = event.dataTransfer.getData('text/plain')
-      const reference = wsPath || plainText
       if (!reference) return
       const trimmed = reference.trim()
       if (wsPath || trimmed.startsWith('@')) {

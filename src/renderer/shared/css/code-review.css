@@ -388,6 +388,20 @@
   white-space: nowrap;
 }
 
+.code-review-file-bar-path[draggable="true"] {
+  cursor: grab;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.code-review-file-bar-path[draggable="true"]:hover {
+  color: var(--accent, #38bdf8);
+}
+
+.code-review-file-bar-path[draggable="true"]:active {
+  cursor: grabbing;
+}
+
 .code-review-file-bar-stat-add {
   color: var(--status-success, #22c55e);
   font-weight: 600;
@@ -603,6 +617,17 @@
 .code-review-tree-folder-btn:hover {
   background: var(--bg-surface-hover);
   color: var(--text-primary);
+}
+
+.code-review-tree-folder-btn[draggable="true"],
+.code-review-tree-file[draggable="true"] {
+  cursor: grab;
+  user-select: none;
+}
+
+.code-review-tree-folder-btn[draggable="true"]:active,
+.code-review-tree-file[draggable="true"]:active {
+  cursor: grabbing;
 }
 
 .code-review-chevron {
