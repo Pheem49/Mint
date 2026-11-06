@@ -155,6 +155,9 @@ impl ToolActivity {
         };
 
         if self.shell() {
+            if let Some(summary) = extract_field(&["toolSummary", "summary"]) {
+                return summary;
+            }
             if let Some(cmd) =
                 extract_field(&["command", "cmd", "script", "exec", "code", "bash", "sh"])
             {
@@ -224,6 +227,12 @@ impl ToolActivity {
     }
 
     pub fn subagent_action_summary(action: &str, input: &Value) -> String {
+        if let Some(tool_summary) = input.get("toolSummary").and_then(Value::as_str) {
+            let trimmed = tool_summary.trim();
+            if !trimmed.is_empty() && !mint_core::is_dummy_value(trimmed) {
+                return format!("Ran {}", trimmed);
+            }
+        }
         for key in [
             "description",
             "command",
@@ -240,9 +249,15 @@ impl ToolActivity {
                         continue;
                     }
                     return match key {
-                        "command" | "cmd" => format!("Running `{trimmed}`"),
-                        "pattern" | "query" => format!("Searching for {trimmed}"),
-                        "path" => format!("Reading {trimmed}"),
+                        "command" | "cmd" => format!("Ran `{trimmed}`"),
+                        "pattern" | "query" => format!("Searched for {trimmed}"),
+                        "path" => {
+                            if action == "write_file" || action == "edit_file" {
+                                format!("Edited {trimmed}")
+                            } else {
+                                format!("Analyzed {trimmed}")
+                            }
+                        }
                         _ => trimmed.to_string(),
                     };
                 }

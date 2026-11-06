@@ -4225,5 +4225,235 @@ input:checked + .slider:before {
   transform: none;
 }
 
+/* Modern Developer-Centric Activity Timeline (Claude Code / Cursor Style) */
+.modern-activity-history {
+  margin-bottom: 6px;
+}
+
+.modern-activity-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: var(--radius-xs, 4px);
+  text-align: left;
+  width: 100%;
+  transition: background 0.15s ease;
+}
+
+.modern-activity-toggle:hover {
+  background: color-mix(in srgb, var(--panel-soft) 40%, transparent);
+}
+
+.modern-activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.modern-activity-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.modern-activity-duration {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-soft);
+  letter-spacing: -0.01em;
+}
+
+.modern-activity-subheader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  user-select: none;
+  padding: 1px 2px;
+  border-radius: var(--radius-xs, 4px);
+  transition: color 0.15s ease;
+}
+
+.modern-activity-subheader:hover {
+  color: var(--text-soft);
+}
+
+.modern-activity-natural-summary {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.modern-activity-subchevron {
+  color: var(--text-muted);
+  transition: transform 0.18s ease;
+}
+
+.modern-activity-subchevron.is-open {
+  transform: rotate(180deg);
+}
+
+.modern-activity-card {
+  padding: 2px 0 6px 0;
+}
+
+.modern-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+}
+
+.modern-timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs, 4px);
+  font-size: 0.78rem;
+  color: var(--text-soft);
+  transition: background 0.12s ease, color 0.12s ease;
+  user-select: none;
+  border: none;
+  background: transparent;
+}
+
+.modern-timeline-row:hover {
+  background: color-mix(in srgb, var(--panel-soft) 50%, transparent);
+  color: var(--text-main);
+}
+
+.modern-timeline-verb {
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  min-width: 58px;
+}
+
+.modern-timeline-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.modern-timeline-target {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 450;
+  color: var(--text-main);
+}
+
+.modern-timeline-line-range {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+.modern-timeline-diff-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  font-weight: 500;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+
+.diff-stat-add {
+  color: #4ade80;
+}
+
+.diff-stat-del {
+  color: #f87171;
+}
+
+.modern-timeline-status-col {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.modern-timeline-chevron {
+  color: var(--text-muted);
+  transition: transform 0.18s ease;
+  flex-shrink: 0;
+}
+
+.modern-timeline-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.modern-timeline-thought-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.modern-thought-row {
+  cursor: pointer;
+}
+
+.modern-timeline-thought-label {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.modern-thought-body {
+  margin-left: 18px;
+  margin-top: 2px;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.modern-timeline-output {
+  margin: 3px 0 6px 18px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--bg-surface-raised, #000) 80%, transparent);
+  border-radius: var(--radius-xs, 4px);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.74rem;
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.modern-group-subitems {
+  padding-left: 18px;
+  border-left: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  margin-left: 8px;
+  margin-top: 2px;
+  margin-bottom: 4px;
+}
+
 
 

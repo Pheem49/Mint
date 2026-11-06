@@ -190,28 +190,60 @@ export const AgentActivityDrawer = memo(function AgentActivityDrawer({
     </>
   )
 
-  const displaySummary =
+  const naturalActionSummary =
     latestPlan?.objective ||
+    activityView.naturalSummary ||
     activityView.summary ||
-    (latestRunSummary ? `Run telemetry (${latestRunSummary.outcome})` : 'Agent Activity')
+    (latestRunSummary ? `Run telemetry (${latestRunSummary.outcome})` : 'Working through task')
+
+  const durationText =
+    activityView.durationText ||
+    (latestRunSummary?.durationSecs ? `${Math.round(latestRunSummary.durationSecs)}s` : '')
+
+  const workedHeadline = durationText
+    ? `Worked for ${durationText}`
+    : (isHistorical || latestRunSummary) ? 'Worked' : 'Working'
 
   if (isHistorical) {
     return (
-      <div className="agent-activity-history">
-        <button type="button" className="agent-activity-toggle" aria-expanded={isOpen} onClick={handleToggle}>
-          <span>{displaySummary}</span>
-          <ChevronDown size={13} className={`agent-activity-toggle-chevron${isOpen ? ' is-open' : ''}`} aria-hidden="true" />
+      <div className="agent-activity-history modern-activity-history">
+        <button
+          type="button"
+          className="agent-activity-toggle modern-activity-toggle"
+          aria-expanded={isOpen}
+          onClick={handleToggle}
+        >
+          <div className="modern-activity-header-left">
+            <span className="modern-activity-duration">{workedHeadline}</span>
+            <ChevronDown
+              size={13}
+              className={`agent-activity-toggle-chevron${isOpen ? ' is-open' : ''}`}
+              aria-hidden="true"
+            />
+          </div>
+          <span className="modern-activity-natural-summary">{naturalActionSummary}</span>
         </button>
-        {isOpen && <div className="agent-activity-card agent-activity-card-history">{renderContent()}</div>}
+        {isOpen && (
+          <div className="agent-activity-card modern-activity-card agent-activity-card-history">
+            {renderContent()}
+          </div>
+        )}
       </div>
     )
   }
 
   return (
-    <div className="message ai-message agent-activity-message">
-      <div className="agent-activity-card">
-        <div className="agent-activity-header" style={{ cursor: 'pointer' }} onClick={handleToggle}>
-          <span>{displaySummary}</span>
+    <div className="message ai-message agent-activity-message modern-activity-message">
+      <div className="agent-activity-card modern-activity-card">
+        <div className="agent-activity-header modern-activity-header" style={{ cursor: 'pointer' }} onClick={handleToggle}>
+          <div className="modern-activity-header-left">
+            <span className="modern-activity-duration">{workedHeadline}</span>
+            <ChevronDown
+              size={13}
+              className={`agent-activity-toggle-chevron${isOpen ? ' is-open' : ''}`}
+              aria-hidden="true"
+            />
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span
               className="agent-activity-status"
@@ -219,10 +251,17 @@ export const AgentActivityDrawer = memo(function AgentActivityDrawer({
             >
               {pendingApproval ? 'Waiting for approval' : latestRunSummary ? 'Completed' : 'Working'}
             </span>
-            <ChevronDown size={13} className={`agent-activity-toggle-chevron${isOpen ? ' is-open' : ''}`} aria-hidden="true" />
           </div>
         </div>
-        {isOpen && <div style={{ marginTop: '8px' }}>{renderContent()}</div>}
+        <div className="modern-activity-subheader" style={{ cursor: 'pointer' }} onClick={handleToggle}>
+          <span>{naturalActionSummary}</span>
+          <ChevronDown
+            size={12}
+            className={`modern-activity-subchevron${isOpen ? ' is-open' : ''}`}
+            aria-hidden="true"
+          />
+        </div>
+        {isOpen && <div className="modern-activity-content">{renderContent()}</div>}
       </div>
     </div>
   )

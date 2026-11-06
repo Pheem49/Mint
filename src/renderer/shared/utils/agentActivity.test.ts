@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeTool, activitiesFrom } from './agentActivity'
+import { describeTool, activitiesFrom, generateNaturalActivitySummary, formatDurationText } from './agentActivity'
 import { viewedImagesFrom } from './viewedImages'
 import { reduceLiveAgentProgress } from '../agentProgress'
 import type { AgentProgress } from '../types'
@@ -228,6 +228,51 @@ describe('live progress retention across multi-step turns', () => {
     expect(view.items[14].target).toBe('echo step 14')
     // Timeline must not drop the early groups
     expect(view.timeline?.length).toBeGreaterThan(15)
+  })
+})
+
+describe('modern semantic activity timeline metadata', () => {
+  it('extracts Analyzed verb and line range for read_file', () => {
+    const tool = describeTool('read_file', { path: 'src/App.tsx', startLine: 25, endLine: 50 })
+    expect(tool.semanticVerb).toBe('Analyzed')
+    expect(tool.lineRange).toBe('#L25-50')
+  })
+
+  it('extracts Edited verb and diff stats for edit_file', () => {
+    const tool = describeTool('edit_file', {
+      Path: 'src/App.tsx',
+      Target: 'line1\nline2',
+      Replacement: 'line1\nline2\nline3\nline4',
+    })
+    expect(tool.semanticVerb).toBe('Edited')
+    expect(tool.diffStats).toEqual({ additions: 4, deletions: 2 })
+  })
+
+  it('extracts Ran verb and toolSummary intent for run_command', () => {
+    const tool = describeTool('run_command', {
+      CommandLine: 'npm run build:ui',
+      toolSummary: 'Build UI for Desktop and Web',
+    })
+    expect(tool.semanticVerb).toBe('Ran')
+    expect(tool.intentTitle).toBe('Build UI for Desktop and Web')
+  })
+
+  it('generates natural composite activity summary', () => {
+    const view = activitiesFrom([
+      { type: 'ToolStart', data: { action: 'read_file', input: { path: 'a.ts' } } },
+      { type: 'ToolEnd', data: { action: 'read_file', input: { path: 'a.ts' }, result: 'ok' } },
+      { type: 'ToolStart', data: { action: 'run_shell', input: { command: 'cargo check' } } },
+      { type: 'ToolEnd', data: { action: 'run_shell', input: { command: 'cargo check' }, result: 'ok' } },
+      { type: 'ToolStart', data: { action: 'write_file', input: { path: 'b.ts', content: 'hello' } } },
+      { type: 'ToolEnd', data: { action: 'write_file', input: { path: 'b.ts' }, result: 'ok' } },
+    ])
+    expect(view.naturalSummary).toBe('Explored files, ran commands, edited files')
+  })
+
+  it('formats duration cleanly', () => {
+    expect(formatDurationText(14)).toBe('14s')
+    expect(formatDurationText(120)).toBe('2m')
+    expect(formatDurationText(75)).toBe('1m 15s')
   })
 })
 

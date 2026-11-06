@@ -280,11 +280,11 @@ function deriveFileChangesFromProgress(progress: AgentProgress[]): FileChange[] 
         }
       } else if (event.data.action === 'write_file' || event.data.action === 'note_write') {
         const input = (event.data.input as any) || {}
-        let path = input.path || input.name || input.title || input.filePath || ''
+        let path = input.path || input.Path || input.name || input.title || input.filePath || ''
         if (event.data.action === 'note_write' && path && !path.includes('/') && !path.startsWith('.config/')) {
           path = `.config/mint/notes/${path}`
         }
-        const fileContent = input.fileContent ?? input.file_content ?? input.content ?? input.body ?? input.text ?? ''
+        const fileContent = input.fileContent ?? input.file_content ?? input.Content ?? input.content ?? input.body ?? input.text ?? ''
         if (typeof path === 'string' && path.trim()) {
           const additions = fileContent ? fileContent.split('\n').length : 0
           activeEdit = {
@@ -296,13 +296,39 @@ function deriveFileChangesFromProgress(progress: AgentProgress[]): FileChange[] 
             hunks: [{ oldText: '', newText: fileContent }]
           }
         }
+      } else if (event.data.action === 'edit_file') {
+        const input = (event.data.input as any) || {}
+        const path = input.Path || input.path || input.filePath || ''
+        const target = input.Target ?? input.target ?? ''
+        const replacement = input.Replacement ?? input.replacement ?? ''
+        if (typeof path === 'string' && path.trim()) {
+          const deletions = target ? target.split('\n').length : 0
+          const additions = replacement ? replacement.split('\n').length : 0
+          activeEdit = {
+            action: 'edit_file',
+            path: path.trim(),
+            created: false,
+            additions,
+            deletions,
+            hunks: [{ oldText: target, newText: replacement }]
+          }
+        }
       } else {
         activeEdit = null
       }
     } else if (event.type === 'ToolEnd') {
-      if (activeEdit && (event.data.action === 'apply_patch' || event.data.action === 'write_file' || event.data.action === 'note_write')) {
+      if (activeEdit && (event.data.action === 'apply_patch' || event.data.action === 'write_file' || event.data.action === 'note_write' || event.data.action === 'edit_file')) {
         const isError = typeof event.data.result === 'string' && (event.data.result.startsWith('Error:') || event.data.result.startsWith('Failed:'))
         if (!isError) {
+          const lineMatch = typeof event.data.result === 'string' && event.data.result.match(/\+(\d+)\/-(\d+) lines/)
+          if (lineMatch) {
+            const add = parseInt(lineMatch[1], 10)
+            const del = parseInt(lineMatch[2], 10)
+            if (!isNaN(add) && !isNaN(del)) {
+              activeEdit.additions = add
+              activeEdit.deletions = del
+            }
+          }
           try {
             const applied = JSON.parse(event.data.result)
             if (Array.isArray(applied) && applied.length > 0) {

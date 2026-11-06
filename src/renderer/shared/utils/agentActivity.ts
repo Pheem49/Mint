@@ -17,6 +17,16 @@ export interface AgentActivity {
   /** Raw ToolEnd output text, shown when the row is expanded in the UI. */
   result?: string
   viewedImage?: ViewedImageItem
+  /** Semantic verb (e.g. 'Analyzed', 'Edited', 'Created', 'Ran', 'Searched') */
+  semanticVerb?: string
+  /** Human-readable intent or title (e.g. toolSummary for commands, or skill title) */
+  intentTitle?: string
+  /** Line range suffix if available, e.g. '#L25-50' */
+  lineRange?: string
+  /** Git diff additions/deletions if available */
+  diffStats?: { additions: number; deletions: number }
+  /** Elapsed duration in ms or s */
+  elapsedMs?: number
 }
 
 export interface AgentActivityGroup {
@@ -38,6 +48,10 @@ export type TimelineItem =
 
 export interface AgentActivityView {
   summary: string
+  /** Natural composite summary phrase, e.g. "Explored files, ran commands, edited files" */
+  naturalSummary?: string
+  /** Total elapsed time string if available, e.g. "2m", "14s" */
+  durationText?: string
   items: AgentActivity[]
   groups?: AgentActivityGroup[]
   /** Unified chronological list of thoughts, extended thinking, and tool activities. */
@@ -198,24 +212,68 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
 
   // Append line range for read_file when startLine / endLine are available
   let target = rawTarget
+  let lineRange: string | undefined
   if (action === 'read_file' && path) {
     const startLine =
       typeof input.startLine === 'number'
         ? input.startLine
         : typeof input.start_line === 'number'
           ? input.start_line
-          : undefined
+          : typeof input.StartLine === 'number'
+            ? input.StartLine
+            : undefined
     const endLine =
       typeof input.endLine === 'number'
         ? input.endLine
         : typeof input.end_line === 'number'
           ? input.end_line
-          : undefined
+          : typeof input.EndLine === 'number'
+            ? input.EndLine
+            : undefined
     if (startLine !== undefined && endLine !== undefined) {
-      target = `${rawTarget} #L${startLine}-${endLine}`
+      lineRange = `#L${startLine}-${endLine}`
+      target = `${rawTarget} ${lineRange}`
     } else if (startLine !== undefined) {
-      target = `${rawTarget} #L${startLine}`
+      lineRange = `#L${startLine}`
+      target = `${rawTarget} ${lineRange}`
     }
+  }
+
+  // Diff stats extraction for edit_file / write_file
+  let diffStats: { additions: number; deletions: number } | undefined
+  if (action === 'edit_file') {
+    const targetText = input.Target ?? input.target ?? ''
+    const replacementText = input.Replacement ?? input.replacement ?? ''
+    const deletions = targetText ? targetText.split('\n').length : 0
+    const additions = replacementText ? replacementText.split('\n').length : 0
+    diffStats = { additions, deletions }
+  } else if (action === 'write_file' || action === 'note_write') {
+    const content = input.fileContent ?? input.file_content ?? input.Content ?? input.content ?? input.text ?? input.body ?? ''
+    const additions = content ? content.split('\n').length : 0
+    diffStats = { additions, deletions: 0 }
+  }
+
+  // Intent / summary extraction for commands
+  let intentTitle: string | undefined
+  if (action === 'run_shell' || action === 'run_command' || action === 'bash') {
+    intentTitle = activityDetail(input, 'toolSummary') || activityDetail(input, 'summary') || activityDetail(input, 'description')
+  }
+
+  let semanticVerb = 'Executed'
+  if (action === 'read_file') {
+    semanticVerb = 'Analyzed'
+  } else if (action === 'edit_file' || action === 'apply_patch' || action === 'apply_code_edits') {
+    semanticVerb = 'Edited'
+  } else if (action === 'write_file' || action === 'note_write') {
+    semanticVerb = 'Edited'
+  } else if (action === 'run_shell' || action === 'run_command' || action === 'bash') {
+    semanticVerb = 'Ran'
+  } else if (action?.includes('search')) {
+    semanticVerb = 'Searched'
+  } else if (action === 'calculation' || action === 'calculator') {
+    semanticVerb = 'Calculated'
+  } else if (action === 'view_image') {
+    semanticVerb = 'Viewed'
   }
 
   return {
@@ -226,7 +284,55 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     kind: activityKind(action, target),
     state: 'active',
     action,
+    semanticVerb,
+    intentTitle,
+    lineRange,
+    diffStats,
   }
+}
+
+export function formatDurationText(durationSecs?: number): string {
+  if (durationSecs === undefined || durationSecs === null || durationSecs <= 0) return ''
+  const secs = Math.round(durationSecs)
+  if (secs < 60) return `${secs}s`
+  const mins = Math.floor(secs / 60)
+  const remSecs = secs % 60
+  if (remSecs === 0) return `${mins}m`
+  return `${mins}m ${remSecs}s`
+}
+
+export function generateNaturalActivitySummary(items: AgentActivity[], timeline?: TimelineItem[]): string {
+  if (!items || items.length === 0) {
+    if (timeline && timeline.some(t => t.kind === 'extendedThinking' || t.kind === 'thought')) {
+      return 'Thinking'
+    }
+    return 'Working'
+  }
+
+  let hasRead = false
+  let hasWrite = false
+  let hasCommand = false
+  let hasSearch = false
+  let hasThought = Boolean(timeline && timeline.some(t => t.kind === 'extendedThinking'))
+
+  for (const item of items) {
+    if (item.action === 'read_file') hasRead = true
+    else if (item.action === 'write_file' || item.action === 'edit_file' || item.action === 'apply_patch') hasWrite = true
+    else if (item.action === 'run_shell' || item.action === 'run_command' || item.action === 'bash') hasCommand = true
+    else if (item.action?.includes('search')) hasSearch = true
+  }
+
+  const parts: string[] = []
+  if (hasRead) parts.push('Explored files')
+  if (hasCommand) parts.push('ran commands')
+  if (hasWrite) parts.push('edited files')
+  if (hasSearch && !hasRead) parts.push('searched codebase')
+  if (parts.length === 0) {
+    if (hasThought) return 'Analyzed task'
+    return 'Working through task'
+  }
+
+  return parts.join(', ')
 }
 
 export function activitySummary(items: AgentActivity[]): string {
@@ -408,6 +514,17 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
         if (event.data.callId && activities[index].callId !== event.data.callId) continue
         if (activities[index].action !== finished.action || activities[index].target !== finished.target) continue
         activities[index].state = event.data.status ? (event.data.status === 'success' ? 'done' : 'error') : /^(Error:|Blocked|User denied)/.test(event.data.result) ? 'error' : 'done'
+        if (typeof event.data.elapsed_ms === 'number') {
+          activities[index].elapsedMs = event.data.elapsed_ms
+        }
+        const lineMatch = typeof event.data.result === 'string' && event.data.result.match(/\+(\d+)\/-(\d+) lines/)
+        if (lineMatch) {
+          const add = parseInt(lineMatch[1], 10)
+          const del = parseInt(lineMatch[2], 10)
+          if (!isNaN(add) && !isNaN(del)) {
+            activities[index].diffStats = { additions: add, deletions: del }
+          }
+        }
         const viewedImage = event.data.action === 'view_image' ? viewedImageDataUri(event.data.result) : null
         activities[index].result = viewedImage ? event.data.result.replace(viewedImage, '[Image displayed below]') : event.data.result
         if (event.data.action === 'read_file') {
@@ -536,8 +653,25 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
     }
   }
 
-  const items = activities.slice(-25)
-  return { summary: activitySummary(activities), items, groups: groupActivities(items), timeline: timeline.slice(-60) }
+  let totalDurationSecs: number | undefined
+  for (const event of progress) {
+    if (event.type === 'RunCompleted' && typeof event.data?.summary?.durationSecs === 'number') {
+      totalDurationSecs = event.data.summary.durationSecs
+    }
+  }
+
+  const naturalSummary = generateNaturalActivitySummary(activities, timeline)
+  const durationText = formatDurationText(totalDurationSecs)
+
+  const items = activities.slice(-50)
+  return {
+    summary: activitySummary(activities),
+    naturalSummary,
+    durationText,
+    items,
+    groups: groupActivities(items),
+    timeline: timeline.slice(-80),
+  }
 }
 
 export interface WebSearchSource {

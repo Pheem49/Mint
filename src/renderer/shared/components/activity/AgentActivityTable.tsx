@@ -126,49 +126,95 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
     const isItemExpanded = Boolean(expandedIndices[itemKey])
     const output = activity.result?.trim()
     const inlineResult = extractResultPreview(activity.action, output)
-    const isFileAction = activity.kind === 'file' || activity.action === 'write_file' || activity.action === 'edit_file' || activity.action === 'read_file'
+    const isFileAction =
+      activity.kind === 'file' ||
+      activity.action === 'write_file' ||
+      activity.action === 'edit_file' ||
+      activity.action === 'read_file'
+    const isCommand =
+      activity.action === 'run_shell' ||
+      activity.action === 'run_command' ||
+      activity.action === 'bash' ||
+      activity.kind === 'terminal'
+
     const cleanTarget = activity.target ? activity.target.split(' #')[0].trim() : ''
     const fileName = getFilename(cleanTarget)
+
+    const verb =
+      activity.semanticVerb ||
+      (isCommand
+        ? 'Ran'
+        : isFileAction
+          ? activity.action === 'read_file'
+            ? 'Analyzed'
+            : 'Edited'
+          : activity.label || activity.action || 'Executed')
 
     return (
       <Fragment key={itemKey}>
         <div
-          className="agent-activity-item"
+          className={`agent-activity-item modern-timeline-row ${isItemExpanded ? 'is-expanded' : ''}`}
           data-kind={activity.kind}
           data-state={activity.state}
           style={{ cursor: output ? 'pointer' : 'default' }}
           onClick={() => output && toggleExpandItem(itemKey)}
         >
-          <span className="agent-activity-icon-wrap" aria-hidden="true">
-            {renderActivityIcon(activity.kind, activity.target, activity.action)}
-          </span>
-          <span className="agent-activity-label">
-            <span className="agent-activity-tool-name">{activity.label || activity.action}</span>
-          </span>
+          <span className="modern-timeline-verb">{verb}</span>
+
+          {isFileAction && (
+            <span className="modern-timeline-icon-wrap" aria-hidden="true">
+              {renderActivityIcon(activity.kind, cleanTarget, activity.action)}
+            </span>
+          )}
+
           <span
-            className="agent-activity-text"
-            title={activity.target}
-            style={isItemExpanded ? { whiteSpace: 'normal', wordBreak: 'break-all', overflow: 'visible', textOverflow: 'clip' } : undefined}
+            className={`agent-activity-text modern-timeline-target ${isFileAction ? 'is-file-target' : ''}`}
+            title={
+              isFileAction
+                ? `Drag file to chat or click @ to reference: ${cleanTarget}`
+                : activity.target
+            }
           >
             <span
               className={`agent-activity-target-text ${isFileAction ? 'is-file-target' : ''}`}
               draggable={isFileAction}
-              onDragStart={isFileAction ? (e) => {
-                e.stopPropagation()
-                setWorkspaceDragData(e.dataTransfer, {
-                  path: cleanTarget,
-                  name: fileName,
-                  root: workspacePath,
-                  kind: isImageFileName(cleanTarget) ? 'image' : 'file',
-                })
-              } : undefined}
-              title={isFileAction ? `Drag file to chat or click @ to reference: ${cleanTarget}` : activity.target}
+              onDragStart={
+                isFileAction
+                  ? (e) => {
+                      e.stopPropagation()
+                      setWorkspaceDragData(e.dataTransfer, {
+                        path: cleanTarget,
+                        name: fileName,
+                        root: workspacePath,
+                        kind: isImageFileName(cleanTarget) ? 'image' : 'file',
+                      })
+                    }
+                  : undefined
+              }
             >
-              {activity.target}
+              {isFileAction ? fileName : (activity.intentTitle || activity.target)}
             </span>
+
+            {activity.lineRange && (
+              <span className="modern-timeline-line-range">{activity.lineRange}</span>
+            )}
+
+            {activity.diffStats &&
+              (activity.diffStats.additions > 0 || activity.diffStats.deletions > 0) && (
+                <span className="modern-timeline-diff-stats">
+                  {activity.diffStats.additions > 0 && (
+                    <span className="diff-stat-add">+{activity.diffStats.additions}</span>
+                  )}
+                  {activity.diffStats.deletions > 0 && (
+                    <span className="diff-stat-del">-{activity.diffStats.deletions}</span>
+                  )}
+                </span>
+              )}
+
             {inlineResult && <span className="agent-activity-inline-result">{inlineResult}</span>}
           </span>
-          <span className="agent-activity-status-col">
+
+          <span className="agent-activity-status-col modern-timeline-status-col">
             {onReferenceFile && isFileAction && cleanTarget && (
               <button
                 type="button"
@@ -185,22 +231,26 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
             )}
             {renderStatusIndicator(activity.state)}
             {output && (
-              <span
-                className={`agent-activity-chevron${isItemExpanded ? ' is-open' : ''}`}
+              <ChevronRight
+                size={12}
+                className={`modern-timeline-chevron${isItemExpanded ? ' is-open' : ''}`}
                 aria-hidden="true"
-              >
-                <ChevronRight size={12} strokeWidth={2.2} />
-              </span>
+              />
             )}
           </span>
         </div>
         {activity.viewedImage && (
           <div className="agent-activity-inline-preview">
-            <ViewedImage image={activity.viewedImage} chatId={chatId} variant="inline" onOpenArtifact={onOpenArtifact} />
+            <ViewedImage
+              image={activity.viewedImage}
+              chatId={chatId}
+              variant="inline"
+              onOpenArtifact={onOpenArtifact}
+            />
           </div>
         )}
         {isItemExpanded && output && (
-          <div className="agent-activity-output">
+          <div className="agent-activity-output modern-timeline-output">
             {output.includes('[Self-Correction Guidance]') ? (
               <>
                 {output.split('[Self-Correction Guidance]')[0]?.trim() && (
@@ -226,16 +276,14 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
     const isGroupExpanded = Boolean(expandedGroups[group.id])
 
     return (
-      <div key={group.id} className="agent-activity-group">
+      <div key={group.id} className="agent-activity-group modern-timeline-group">
         <div
-          className={`agent-activity-group-header${isGroupExpanded ? ' is-expanded' : ''}`}
+          className={`agent-activity-group-header modern-timeline-row modern-group-row${isGroupExpanded ? ' is-expanded' : ''}`}
           data-state={group.state}
           onClick={() => toggleGroup(group.id)}
         >
-          <span className="agent-activity-icon-wrap" aria-hidden="true">
-            {renderActivityIcon(group.kind, group.items[0]?.target, group.action)}
-          </span>
-          <span className="agent-activity-group-title">
+          <span className="modern-timeline-verb">{group.label || group.action}</span>
+          <span className="agent-activity-group-title modern-timeline-target">
             {group.title}
           </span>
           <span className="agent-activity-group-badges">
@@ -243,94 +291,19 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
               {group.count}
             </span>
             {renderStatusIndicator(group.state)}
-            <span
-              className={`agent-activity-chevron${isGroupExpanded ? ' is-open' : ''}`}
+            <ChevronRight
+              size={12}
+              className={`modern-timeline-chevron${isGroupExpanded ? ' is-open' : ''}`}
               aria-hidden="true"
-            >
-              <ChevronRight size={13} strokeWidth={2.2} />
-            </span>
+            />
           </span>
         </div>
 
         {isGroupExpanded && (
-          <div className="agent-activity-group-subitems">
+          <div className="agent-activity-group-subitems modern-group-subitems">
             {group.items.map((activity, itemIdx) => {
               const itemKey = `${group.id}-${itemIdx}-${activity.target}`
-              const isItemExpanded = Boolean(expandedIndices[itemKey])
-              const output = activity.result?.trim()
-              const inlineResult = extractResultPreview(activity.action, output)
-              const isSubFileAction = group.kind === 'file' || activity.kind === 'file' || group.action === 'write_file' || group.action === 'edit_file' || group.action === 'read_file' || activity.action === 'write_file' || activity.action === 'edit_file' || activity.action === 'read_file'
-              const cleanSubTarget = activity.target ? activity.target.split(' #')[0].trim() : ''
-              const subFileName = getFilename(cleanSubTarget)
-
-              return (
-                <Fragment key={itemKey}>
-                  <div
-                    className="agent-activity-subitem"
-                    data-state={activity.state}
-                    style={{ cursor: output ? 'pointer' : 'default' }}
-                    onClick={() => output && toggleExpandItem(itemKey)}
-                  >
-                    <span className="agent-activity-tree-bullet" aria-hidden="true">
-                      {itemIdx === group.items.length - 1 ? '└─' : '├─'}
-                    </span>
-                    <span
-                      className={`agent-activity-subitem-target ${isSubFileAction ? 'is-file-target' : ''}`}
-                      title={isSubFileAction ? `Drag file to chat or click @ to reference: ${cleanSubTarget}` : activity.target}
-                      draggable={isSubFileAction}
-                      onDragStart={isSubFileAction ? (e) => {
-                        e.stopPropagation()
-                        setWorkspaceDragData(e.dataTransfer, {
-                          path: cleanSubTarget,
-                          name: subFileName,
-                          root: workspacePath,
-                          kind: isImageFileName(cleanSubTarget) ? 'image' : 'file',
-                        })
-                      } : undefined}
-                    >
-                      {activity.target}
-                    </span>
-                    {inlineResult && (
-                      <span className="agent-activity-inline-result">{inlineResult}</span>
-                    )}
-                    <span className="agent-activity-subitem-status">
-                      {onReferenceFile && isSubFileAction && cleanSubTarget && (
-                        <button
-                          type="button"
-                          className="agent-activity-mention-btn"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onReferenceFile(cleanSubTarget)
-                          }}
-                          title={`Reference in chat: ${subFileName}`}
-                          aria-label={`Reference ${subFileName} in chat`}
-                        >
-                          @
-                        </button>
-                      )}
-                      {renderStatusIndicator(activity.state)}
-                      {output && (
-                        <span
-                          className={`agent-activity-chevron${isItemExpanded ? ' is-open' : ''}`}
-                          aria-hidden="true"
-                        >
-                          <ChevronRight size={11} strokeWidth={2.2} />
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  {activity.viewedImage && (
-                    <div className="agent-activity-inline-preview agent-activity-subitem-preview">
-                      <ViewedImage image={activity.viewedImage} chatId={chatId} variant="inline" onOpenArtifact={onOpenArtifact} />
-                    </div>
-                  )}
-                  {isItemExpanded && output && (
-                    <div className="agent-activity-output agent-activity-subitem-output">
-                      <pre>{output}</pre>
-                    </div>
-                  )}
-                </Fragment>
-              )
+              return renderSingleItem(activity, itemKey)
             })}
             {group.action === 'mcp_tool' && progress && (
               <div className="agent-activity-mcp-details" style={{ padding: '4px 12px 10px 24px' }}>
@@ -344,7 +317,7 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
   }
 
   return (
-    <div className="agent-activity-list">
+    <div className="agent-activity-list modern-activity-list">
       {activityView.timeline && activityView.timeline.length > 0
         ? activityView.timeline.map((item, idx) => {
             if (item.kind === 'thought') {
@@ -353,34 +326,28 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
             if (item.kind === 'extendedThinking') {
               const itemKey = item.id || `ext-thought-${idx}`
               const isThoughtExpanded = expandedIndices[itemKey] ?? Boolean(item.streaming)
+              const thoughtSecs = item.elapsedMs ? `${Math.max(1, Math.round(item.elapsedMs / 1000))}s` : ''
+              const thoughtTitle = item.streaming
+                ? 'Thinking…'
+                : thoughtSecs
+                  ? `Thought for ${thoughtSecs}`
+                  : 'Thought'
+
               return (
-                <div key={itemKey} className="agent-activity-thought-step">
+                <div key={itemKey} className="agent-activity-thought-step modern-timeline-thought-item">
                   <div
-                    className={`agent-activity-thought-header${isThoughtExpanded ? ' is-expanded' : ''}`}
+                    className={`agent-activity-thought-header modern-timeline-row modern-thought-row${isThoughtExpanded ? ' is-expanded' : ''}`}
                     onClick={() => toggleExpandItem(itemKey, Boolean(item.streaming))}
                   >
-                    <span className="agent-activity-icon-wrap" aria-hidden="true">
-                      <Brain size={14} className="agent-activity-kind-icon" />
-                    </span>
-                    <span className="agent-activity-thought-title">
-                      Thought
-                      <span className="agent-activity-thought-meta">
-                        {item.streaming
-                          ? ' · Thinking…'
-                          : item.elapsedMs != null
-                            ? ` · ${(item.elapsedMs / 1000).toFixed(1)}s`
-                            : ''}
-                      </span>
-                    </span>
-                    <span
-                      className={`agent-activity-chevron${isThoughtExpanded ? ' is-open' : ''}`}
+                    <span className="modern-timeline-thought-label">{thoughtTitle}</span>
+                    <ChevronRight
+                      size={12}
+                      className={`modern-timeline-chevron${isThoughtExpanded ? ' is-open' : ''}`}
                       aria-hidden="true"
-                    >
-                      <ChevronRight size={13} strokeWidth={2.2} />
-                    </span>
+                    />
                   </div>
                   {isThoughtExpanded && (
-                    <div className="agent-activity-thought-body">
+                    <div className="agent-activity-thought-body modern-thought-body">
                       {item.streaming
                         ? <>{item.thought}<span className="agent-activity-thought-cursor">▍</span></>
                         : (renderFormattedMessage(item.thought) ?? item.thought)}

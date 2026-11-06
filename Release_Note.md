@@ -1,5 +1,18 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Modern Developer-Centric Activity Timeline (CLI, Desktop, and Web)
+- **Developer-Centric Semantic Timeline**: Replaced the rigid boxed table layout in `AgentActivityTable` with a sleek, borderless semantic timeline inspired by modern AI coding assistants (Claude Code / Cursor / Copilot).
+- **Elapsed Duration & Natural Action Header**: The activity drawer header now displays dynamic, human-readable execution status (e.g. `Worked for 2m 14s ⌄` or `Working...`) alongside an aggregated action summary (e.g. `Explored files, ran commands, edited files`), giving users immediate high-level context of agent work at a glance.
+- **Semantic Verbs & File Targets**: Activity rows present clean developer verbs and context:
+  - File Reads: `Analyzed <icon> filename.tsx#L12-45` with targeted line ranges.
+  - File Edits: `Edited <icon> filename.tsx` paired with precise Git diff statistics (`+24` / `-8`).
+  - Terminal Commands: `Ran <intent or command> >` with an expandable chevron to toggle output view.
+  - Thoughts: `Thought for 12s >` with collapsible reasoning details.
+- **Accurate Diff Extraction**: Extended `agentProgress.ts` to calculate real additions and deletions for `edit_file`, `write_file`, and `apply_patch` operations, displaying color-coded green `+N` and red `-N` badges in the timeline.
+- **Preserved Productivity Interactions**: Retained full interactive capabilities including HTML5 file drag-and-drop from timeline rows into the chat composer, `@` quick-reference button on hover, and seamless subagent DAG view switching.
+- **CLI Full-Screen TUI Parity**: Enhanced `interactive::tool_activity` in `mint-cli` to use developer-centric semantic verbs (`Ran`, `Searched`, `Analyzed`, `Edited`) and prefer human-readable intent summaries for shell executions.
+- **Full Platform Parity**: Maintained 100% parity across Desktop UI (`src/renderer/src`), Web UI (`src/renderer/src-web`), and CLI (`crates/mint-cli`), backed by automated tests across Vitest and Cargo test suites.
+
 ## Inline Message Edit & Save & Resend (CLI, Desktop, and Web)
 - **In-Place Inline Message Editor**: Clicking the ✏️ Edit button on any user message now transforms the message bubble into an inline auto-growing editor directly in context, eliminating the disjointed jump down to the composer.
 - **Save & Resend Truncation**: Saving the edited message automatically truncates conversation history from that turn onwards in SQLite (`truncate_interactions_from`), clearing subsequent turns and triggering the model to answer the refined prompt with a completely clean context.
