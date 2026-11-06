@@ -196,9 +196,8 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
                       e.stopPropagation()
                       setWorkspaceDragData(e.dataTransfer, {
                         path: cleanTarget,
-                        name: fileName,
                         root: workspacePath,
-                        kind: isImageFileName(cleanTarget) ? 'image' : 'file',
+                        kind: 'file',
                       })
                     }
                   : undefined

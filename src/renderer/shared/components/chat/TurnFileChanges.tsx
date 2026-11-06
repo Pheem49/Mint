@@ -191,10 +191,9 @@ export const TurnFileChanges = memo(function TurnFileChanges({
             draggable="true"
             data-path={change.path}
             onDragStart={(e) => {
-              setWorkspaceDragData(e, {
+              setWorkspaceDragData(e.dataTransfer, {
                 path: change.path,
-                name: fileName,
-                kind: isImageFileName(change.path) ? 'image' : 'file',
+                kind: 'file',
               })
             }}
           >
@@ -270,15 +269,10 @@ export const TurnFileChanges = memo(function TurnFileChanges({
                     onClick={(e) => {
                       e.stopPropagation()
                       onOpenArtifact({
-                        id: `artifact-file-${change.path}`,
-                        name: fileName,
-                        relativePath: change.path,
                         path: workspacePath ? `${workspacePath.replace(/\/$/, '')}/${change.path.replace(/^\//, '')}` : change.path,
+                        workspacePath: workspacePath || undefined,
                         mimeType: 'text/plain',
-                        size: 0,
-                        updatedAt: Date.now(),
-                        tags: ['file'],
-                        source: 'turn_file_change',
+                        type: 'code',
                       })
                     }}
                   >

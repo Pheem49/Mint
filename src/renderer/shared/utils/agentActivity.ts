@@ -243,13 +243,14 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
   // Diff stats extraction for edit_file / write_file
   let diffStats: { additions: number; deletions: number } | undefined
   if (action === 'edit_file') {
-    const targetText = input.Target ?? input.target ?? ''
-    const replacementText = input.Replacement ?? input.replacement ?? ''
+    const targetText = typeof input.Target === 'string' ? input.Target : typeof input.target === 'string' ? input.target : ''
+    const replacementText = typeof input.Replacement === 'string' ? input.Replacement : typeof input.replacement === 'string' ? input.replacement : ''
     const deletions = targetText ? targetText.split('\n').length : 0
     const additions = replacementText ? replacementText.split('\n').length : 0
     diffStats = { additions, deletions }
   } else if (action === 'write_file' || action === 'note_write') {
-    const content = input.fileContent ?? input.file_content ?? input.Content ?? input.content ?? input.text ?? input.body ?? ''
+    const rawContent = input.fileContent ?? input.file_content ?? input.Content ?? input.content ?? input.text ?? input.body
+    const content = typeof rawContent === 'string' ? rawContent : ''
     const additions = content ? content.split('\n').length : 0
     diffStats = { additions, deletions: 0 }
   }
@@ -554,8 +555,9 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
         if (event.data.callId && activities[index].callId !== event.data.callId) continue
         if (activities[index].action !== finished.action || activities[index].target !== finished.target) continue
         activities[index].state = event.data.status ? (event.data.status === 'success' ? 'done' : 'error') : /^(Error:|Blocked|User denied)/.test(event.data.result) ? 'error' : 'done'
-        if (typeof event.data.elapsed_ms === 'number') {
-          activities[index].elapsedMs = event.data.elapsed_ms
+        const elapsed = event.data.elapsed_ms ?? event.data.elapsedMs
+        if (typeof elapsed === 'number') {
+          activities[index].elapsedMs = elapsed
         }
         const lineMatch = typeof event.data.result === 'string' && event.data.result.match(/\+(\d+)\/-(\d+) lines/)
         if (lineMatch) {
