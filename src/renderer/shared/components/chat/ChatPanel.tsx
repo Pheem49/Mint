@@ -770,11 +770,11 @@ export default function ChatPanel({
       e.dataTransfer?.getData(WORKSPACE_IMAGE_MIME) ||
       e.dataTransfer?.getData(WORKSPACE_PATH_MIME) ||
       e.dataTransfer?.getData('application/x-mint-workspace-path')
+    const plainRef = e.dataTransfer?.getData('text/plain')?.trim() || ''
     const fileRef =
       e.dataTransfer?.getData(WORKSPACE_PATH_MIME) ||
       e.dataTransfer?.getData('application/x-mint-workspace-path') ||
-      e.dataTransfer?.getData('text/plain') ||
-      ''
+      (plainRef.startsWith('@') ? plainRef : '')
     if (wsPath || fileRef) {
       void tryAttachDroppedImage(e.dataTransfer).then((attached) => {
         if (!attached) {
