@@ -9,7 +9,7 @@ import type { AgentProgress, ChatResponse, ChatSession, InteractionMemory, Queue
 export type ConversationTransport = Pick<MintPlatformApi,
   | 'getConversationSnapshot' | 'getConversationChanges' | 'listChatSessions'
   | 'streamChatMessage' | 'cancelChatMessage' | 'submitToolApproval'
-  | 'saveInteractionAgentActivity' | 'clearChatHistory'>
+  | 'saveInteractionAgentActivity' | 'clearChatHistory' | 'truncateInteractionsFrom'>
 
 export interface PendingApproval { token: string; approval: Record<string, unknown> }
 export interface ConversationView extends ConversationState {
@@ -467,6 +467,36 @@ export function createConversationLifecycle(
     }
   }
 
+  async function truncateFrom(fromId: number) {
+    const origin = session
+    try {
+      if (state.sending && runs.has(origin.chatId)) {
+        await cancel()
+      }
+      // Optimistically update local state immediately so UI updates with zero latency
+      const filtered = state.interactions.filter(i => i.id < fromId)
+      const snapshots = { ...state.agentActivitySnapshots }
+      for (const interaction of state.interactions) {
+        if (interaction.id >= fromId) {
+          delete snapshots[String(interaction.id)]
+        }
+      }
+      update({
+        interactions: filtered,
+        agentActivitySnapshots: snapshots,
+        activeTurnId: null,
+      })
+      await transport.truncateInteractionsFrom(origin.chatId, fromId)
+    } catch (error) {
+      if (origin === session) throw error
+    }
+  }
+
+  async function resendFromInteraction(fromId: number, promptText: string, options: PromptOptions = {}) {
+    await truncateFrom(fromId)
+    await sendPrompt(promptText, options)
+  }
+
   async function selectProject(
     choosePath: () => Promise<string | null>,
     navigation: {
@@ -628,6 +658,7 @@ export function createConversationLifecycle(
     subscribe: (notify: () => void) => { subscribers.add(notify); return () => { subscribers.delete(notify) } },
     activate, refreshHistory, refreshSessions, syncHistory, loadOlder, sendPrompt, cancel,
     receiveApproval, resolveApproval, clearHistory, selectProject, watch,
+    truncateFrom, resendFromInteraction,
     queuePrompt, removeQueuedPrompt, editQueuedPrompt, clearQueuedPrompts, setQueuePaused, resumeQueue, steerQueuedPrompt,
     appendInteraction: (row: Omit<InteractionMemory, 'chatId' | 'status'> & Partial<Pick<InteractionMemory, 'chatId' | 'status'>>) =>
       update({ interactions: [...state.interactions, { chatId: session.chatId, status: 'completed', ...row }] }),

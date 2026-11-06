@@ -64,6 +64,18 @@ describe('message update isolation and TurnFileChanges deep module', () => {
   })
   it('does not retain stale user actions', () => {
     expect(unchanged({ onEditMessage: () => {} })).toBe(false)
+    expect(unchanged({ onResendFrom: () => {} })).toBe(false)
+  })
+  it('renders edit action button when onResendFrom is provided', () => {
+    const html = renderToStaticMarkup(
+      <ChatMessageItem
+        {...base}
+        onResendFrom={() => {}}
+        interaction={{ ...base.interaction, userText: 'Sample prompt' }}
+      />
+    )
+    expect(html).toContain('msg-action-btn edit-btn')
+    expect(html).toContain('Edit &amp; resend')
   })
 })
 

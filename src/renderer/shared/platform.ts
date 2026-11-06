@@ -143,6 +143,7 @@ export interface MintPlatformApi {
   saveSubagent(draft: SubagentDraft, workspacePath?: string): Promise<SubagentDefinition>
   deleteSubagent(sourcePath: string): Promise<void>
   clearChatHistory(chatId?: string | null): Promise<number>
+  truncateInteractionsFrom(chatId: string | null | undefined, fromId: number): Promise<number>
   listLibrary(query: import('./types').LibraryQuery): Promise<import('./types').LibraryPage>
   getLibraryItem(id: string): Promise<import('./types').LibraryItem>
   removeLibraryItem(id: string): Promise<void>
@@ -269,7 +270,7 @@ export const authPlatform = {
 /** Conversation transport, persistence, live voice, and checkpoint seam. */
 export const conversationPlatform = {
   getConversationSources: operation('getConversationSources'), saveSourceAttachments: operation('saveSourceAttachments'),
-  clearChatHistory: operation('clearChatHistory'), deleteChatSession: operation('deleteChatSession'),
+  clearChatHistory: operation('clearChatHistory'), truncateInteractionsFrom: operation('truncateInteractionsFrom'), deleteChatSession: operation('deleteChatSession'),
   renameChatSession: operation('renameChatSession'), getRecentInteractions: operation('getRecentInteractions'),
   getConversationSnapshot: operation('getConversationSnapshot'), getConversationChanges: operation('getConversationChanges'),
   saveSystemInteraction: operation('saveSystemInteraction'), listChatSessions: operation('listChatSessions'), pendingCompanionChat: operation('pendingCompanionChat'),

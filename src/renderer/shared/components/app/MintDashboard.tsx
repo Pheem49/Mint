@@ -1770,6 +1770,14 @@ export default function MintDashboard() {
     onClearQueuedPrompts: conversationActions.clearQueuedPrompts,
     onSteerQueuedPrompt: conversationActions.steerQueuedPrompt,
     onResumeQueue: conversationActions.resumeQueue,
+    onResendFrom: async (fromId: number, newPrompt: string) => {
+      if (conversationActions.getSnapshot().sending) return
+      setError('')
+      liveThinkingOpenRef.current = true
+      liveExtendedThinkingOpenRef.current = true
+      setThinkingExpanded(current => ({ ...current, live: true, 'live-extended': true }))
+      await conversationActions.resendFromInteraction(fromId, newPrompt, { agentMode, planMode })
+    },
   }
 
   const stableToggleSidebar = useLatestCallback(toggleSidebar)

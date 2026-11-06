@@ -1,5 +1,21 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Inline Message Edit & Save & Resend (CLI, Desktop, and Web)
+- **In-Place Inline Message Editor**: Clicking the ✏️ Edit button on any user message now transforms the message bubble into an inline auto-growing editor directly in context, eliminating the disjointed jump down to the composer.
+- **Save & Resend Truncation**: Saving the edited message automatically truncates conversation history from that turn onwards in SQLite (`truncate_interactions_from`), clearing subsequent turns and triggering the model to answer the refined prompt with a completely clean context.
+- **Keyboard Shortcuts & Quick Actions**: Equipped with `Esc` to instantly cancel and restore original text, `Ctrl+Enter` / `Cmd+Enter` to save and resend, auto-focus, and cursor placement at the end of the text.
+- **Full-Screen TUI CLI Commands (`/edit` & `/retry`)**: In the Full-Screen TUI, users can enter `/edit` or `/retry` to pull the latest turn prompt directly into the active composer under an explicit notice banner `[Mode: Edit Turn #N — Resending will replace this turn and clear its previous response | Esc to cancel]`. Pressing `Enter` truncates the turn and subsequent responses from SQLite and immediately resends the updated prompt, while `Esc` or `Ctrl+C` cancels edit mode and restores the composer.
+- **Unified Platform Bridge**: Implemented cross-platform endpoints via Tauri command `truncate_interactions_from` on Desktop, `POST /api/interactions/truncate` on Web, and reactive state management in `lifecycle.ts`.
+- **Full Platform Parity**: Maintained across Desktop UI (`src/renderer/src`), Web UI (`src/renderer/src-web`), and Full-Screen TUI CLI (`crates/mint-cli`), backed by automated tests across Vitest and Cargo.
+
+## Drag & Drop File Changes & In-Composer Mentions (CLI, Desktop, and Web)
+- **Draggable Turn File Changes**: In `TurnFileChanges`, each created or modified file item is now fully draggable using standard HTML5 drag-and-drop. Users can drag files directly from the turn summary card (e.g. `generate_harness_pdf.py` or `CalculationCard.tsx`) into the chat composer.
+- **Live Tool Execution Dragging**: In `AgentActivityTable`, target files within active and historical tool rows (`write_file`, `edit_file`, `read_file`) are now draggable into the composer, letting users grab files as soon as the agent begins writing or modifying them.
+- **Click-to-Reference Quick Action (`@`)**: Added a convenient "Reference in chat" button on hover for both file change items and activity tool rows, enabling laptop and trackpad users to instantly bind files into the prompt without dragging.
+- **Direct In-Input Insertion**: Dragging a file or clicking `@` inserts `@relative/path ` directly into the text input box (`<textarea id="chat-input">`) at the cursor position and smoothly focuses it, keeping prompt drafting intuitive and fully editable inline without redundant chip containers.
+- **CLI Full-Screen TUI Parity**: Upgraded `collect_mention_candidates_with_recents` in `crates/mint-cli` to detect recently modified session files (and active git working tree diffs) and prioritize them at the very top of `@` mention auto-completions with the `Recently edited in this session` badge.
+- **Full Platform Parity**: Maintained 100% parity across Desktop UI (`src/renderer/src`), Web UI (`src/renderer/src-web`), and CLI (`crates/mint-cli`), backed by automated tests across Vitest and Cargo test suites.
+
 ## Modern AI Fluid Border Radii (Desktop and Web)
 - **Contemporary Border Radii Tokens**: Upgraded the design token scale in `tokens.css` to the Modern AI aesthetic (`--radius-xs: 6px`, `--radius-sm: 8px`, `--radius-md: 10px`, `--radius-lg: 14px`, `--radius-xl: 18px`, `--radius-2xl: 22px`, `--radius-3xl: 26px`, `--radius-composer: 24px`), delivering fluid, approachable corners across cards, buttons, dialogs, and panels.
 - **Fluid Chat Composer & Prompt Bar**: Elevated the chat form (`#chat-form`), `.smart-context-bar`, and `.project-context-row` to a smooth 24px radius (`var(--radius-composer, 24px)`) across Desktop UI (`src/css/chat.css`), Web UI (`src-web/css/chat.css`), and Mobile (`src-web/css/mobile.css`).

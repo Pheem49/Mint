@@ -471,6 +471,34 @@ pub async fn handle_slash_command(
             mint_core::slash::INIT_AGENTS_MD_PROMPT.to_string(),
         )),
 
+        "/edit" | "/retry" => {
+            let scoped = mint_core::scoped_chat_id(
+                &session.chat_id,
+                Some(&session.current_dir.to_string_lossy()),
+            );
+            if let Ok(memory) = MemoryStore::open_default() {
+                if let Ok(rows) = memory.interactions_for_chat(&scoped) {
+                    if let Some(last) = rows.last() {
+                        let turn_id = last.id;
+                        let prompt_to_run = if rest.is_empty() {
+                            last.user_text.clone()
+                        } else {
+                            rest.to_string()
+                        };
+                        let _ = memory.truncate_interactions_from(&scoped, turn_id);
+                        ui.push_notice(format!(
+                            "Truncated turn #{} from history. Resending with prompt:\n{}",
+                            rows.len(),
+                            prompt_to_run
+                        ));
+                        return Some(SlashResult::ForwardToAgent(prompt_to_run));
+                    }
+                }
+            }
+            ui.push_notice("No previous turn found to edit or retry.");
+            Some(SlashResult::Handled)
+        }
+
         "/fast" => {
             let choice = if rest.is_empty() {
                 let options = vec![

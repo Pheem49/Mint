@@ -3210,4 +3210,21 @@ mod swarm_panel_tests {
         });
         assert!(has_card_bg, "must use gray CARD_BACKGROUND fill");
     }
+
+    #[test]
+    fn test_enter_and_cancel_edit_turn() {
+        let mut state = ChatViewState::default();
+        state.chat_id = "test-chat".to_string();
+        state.editing_turn = Some((42, 2));
+        state.set_draft("first prompt to edit".to_string());
+        state.set_notice("[Mode: Edit Turn #2 — Resending will replace this turn and clear its previous response | Esc to cancel]");
+        assert!(state.editing_turn.is_some());
+        assert_eq!(state.composer_text(), "first prompt to edit");
+        assert!(state.active_notice().unwrap().contains("[Mode: Edit Turn #2"));
+
+        state.cancel_edit_turn();
+        assert!(state.editing_turn.is_none());
+        assert_eq!(state.composer_text(), "");
+        assert!(state.active_notice().is_none());
+    }
 }

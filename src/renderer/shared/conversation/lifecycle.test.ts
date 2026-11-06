@@ -28,6 +28,7 @@ function setup(overrides: Partial<ConversationTransport> = {}, callbacks: Conver
     saveInteractionAgentActivity: async (id: number, progress: AgentProgress[]) => { saved.push({ id, progress }) },
     cancelChatMessage: async () => {},
     clearChatHistory: async () => 1,
+    truncateInteractionsFrom: async () => 1,
     submitToolApproval: async (token: string, approved: boolean, answer?: string) => { submitted.push({ token, approved, answer }) },
     streamChatMessage: (_message: string, onChunk: (chunk: string) => void, _image: unknown, _audio: unknown, _video: unknown, _instruction: unknown, onProgress: (progress: AgentProgress) => void, _document: unknown, _workspace: unknown, chatId: string, _agent: unknown, _plan: unknown, _mcp: unknown, onApproval: (approval: PendingApproval) => void, onStarted: (id: number) => void) => {
       const result = deferred<ChatResponse>()
@@ -579,5 +580,33 @@ describe('Queued messages lifecycle and steering', () => {
       'Line 1\nLine 2\n| H1 | H2 |\n| - | - |\n| V1 | V2 |\n```ui-card\n[{"title":"Card"}]\n```',
       fullText,
     ])
+  })
+
+  it('truncates interactions from a given id and resends prompt', async () => {
+    let truncatedFrom: { chatId: string; fromId: number } | null = null
+    const { lifecycle, streams } = setup({
+      truncateInteractionsFrom: async (chatId, fromId) => {
+        truncatedFrom = { chatId, fromId }
+        return 1
+      },
+    })
+
+    lifecycle.appendInteraction({ id: 1, userText: 'first', aiText: 'reply 1', createdAt: '2026-01-01T00:00:00Z', provider: 'test', model: 'test' })
+    lifecycle.appendInteraction({ id: 2, userText: 'second', aiText: 'reply 2', createdAt: '2026-01-01T00:01:00Z', provider: 'test', model: 'test' })
+    lifecycle.appendInteraction({ id: 3, userText: 'third', aiText: 'reply 3', createdAt: '2026-01-01T00:02:00Z', provider: 'test', model: 'test' })
+
+    expect(lifecycle.getSnapshot().interactions).toHaveLength(3)
+
+    const resendPromise = lifecycle.resendFromInteraction(2, 'edited second')
+    expect(truncatedFrom).toEqual({ chatId: 'A', fromId: 2 })
+    expect(lifecycle.getSnapshot().interactions).toEqual([{ id: 1, userText: 'first', aiText: 'reply 1', createdAt: '2026-01-01T00:00:00Z', provider: 'test', model: 'test', chatId: 'A', status: 'completed' }])
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    streams[0].onChunk('new reply')
+    streams[0].result.resolve({ provider: 'test', model: 'test', text: 'new reply' })
+    await resendPromise
+    expect(lifecycle.getSnapshot().sending).toBe(false)
   })
 })

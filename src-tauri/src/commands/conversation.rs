@@ -606,6 +606,22 @@ pub(crate) async fn clear_chat_history(chat_id: Option<String>) -> Result<usize,
 }
 
 #[tauri::command]
+pub(crate) async fn truncate_interactions_from(
+    chat_id: Option<String>,
+    from_id: i64,
+) -> Result<usize, String> {
+    with_default_memory(move |memory| {
+        memory.truncate_interactions_from(
+            chat_id
+                .as_deref()
+                .unwrap_or(mint_core::DEFAULT_CONVERSATION_ID),
+            from_id,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 pub(crate) async fn submit_tool_approval(
     state: tauri::State<'_, ApprovalsState>,
     token: String,

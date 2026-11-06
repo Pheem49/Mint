@@ -219,6 +219,7 @@ pub fn run() {
             commands::auth::auth_update_profile,
             commands::auth::auth_upload_avatar,
             commands::conversation::clear_chat_history,
+            commands::conversation::truncate_interactions_from,
             commands::integrations::list_learned_skills,
             commands::integrations::add_learned_skill,
             commands::integrations::delete_learned_skill,

@@ -986,6 +986,25 @@ export async function clearChatHistory(chatId?: string | null): Promise<number> 
   return invoke<number>('clear_chat_history', { chatId })
 }
 
+export async function truncateInteractionsFrom(chatId: string | null | undefined, fromId: number): Promise<number> {
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
+    try {
+      const params = new URLSearchParams();
+      if (chatId) params.set('chatId', chatId);
+      params.set('fromId', String(fromId));
+      const res = await authFetch(`${API_BASE}/interactions/truncate?${params.toString()}`, { method: 'POST' });
+      const data = await res.json();
+      return data.status === 'ok' ? 1 : 0;
+    } catch (e) {
+      console.error("Failed to truncate interactions on local server:", e);
+      return 0;
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<number>('truncate_interactions_from', { chatId, fromId })
+}
+
 export async function listSavedPictures(): Promise<PictureEntry[]> {
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();
@@ -2255,6 +2274,7 @@ const _apiCheck: MintPlatformApi = {
   saveSubagent,
   deleteSubagent,
   clearChatHistory,
+  truncateInteractionsFrom,
   listSavedPictures,
   deleteSavedPicture,
   generateImages,

@@ -59,6 +59,7 @@ pub(crate) struct ChatViewState {
     pub(super) selection_anchor: usize,
     pub(super) selection_head: usize,
     pub(super) notice: Option<(String, std::time::Instant)>,
+    pub(super) editing_turn: Option<(i64, usize)>,
     pub(super) dialog: Option<DialogState>,
     pub(super) thought_modal: Option<ThoughtModalState>,
     pub(super) thoughts: Vec<ThinkingSegment>,
@@ -747,7 +748,7 @@ impl ChatViewState {
             {
                 if self
                     .active_notice()
-                    .is_some_and(|notice| !notice.starts_with("Terminal too small"))
+                    .is_some_and(|notice| !notice.starts_with("Terminal too small") && !notice.starts_with("[Mode: Edit"))
                 {
                     self.clear_notice();
                 }
@@ -1456,6 +1457,7 @@ impl ChatViewState {
     pub fn active_notice(&self) -> Option<&str> {
         self.notice.as_ref().and_then(|(text, created)| {
             if text.starts_with("Terminal too small")
+                || self.editing_turn.is_some()
                 || created.elapsed() < std::time::Duration::from_millis(2500)
             {
                 Some(text.as_str())
@@ -1463,6 +1465,41 @@ impl ChatViewState {
                 None
             }
         })
+    }
+
+    pub(super) fn enter_edit_turn(&mut self) -> bool {
+        let scoped = mint_core::scoped_chat_id(
+            &self.chat_id,
+            Some(&self.current_dir.to_string_lossy()),
+        );
+        let Ok(memory) = mint_core::MemoryStore::open_default() else {
+            self.set_notice("Failed to open conversation memory");
+            return false;
+        };
+        let Ok(rows) = memory.interactions_for_chat(&scoped) else {
+            self.set_notice("No previous turn found to edit or retry");
+            return false;
+        };
+        if let Some(last) = rows.last() {
+            let turn_num = rows.len();
+            self.editing_turn = Some((last.id, turn_num));
+            self.set_draft(last.user_text.clone());
+            self.cursor = self.composer.len();
+            self.set_notice(format!(
+                "[Mode: Edit Turn #{} — Resending will replace this turn and clear its previous response | Esc to cancel]",
+                turn_num
+            ));
+            true
+        } else {
+            self.set_notice("No previous turn found to edit or retry");
+            false
+        }
+    }
+
+    pub(super) fn cancel_edit_turn(&mut self) {
+        self.editing_turn = None;
+        self.take_prompt();
+        self.clear_notice();
     }
     pub(super) fn notice_visibility_changed_since_draw(&self, painted_visible: bool) -> bool {
         painted_visible != self.active_notice().is_some()

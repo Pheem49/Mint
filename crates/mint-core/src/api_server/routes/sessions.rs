@@ -211,6 +211,26 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             }
         }
 
+        ("POST", "/api/interactions/truncate") => {
+            let chat_id =
+                query_param(query, "chatId").unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
+            let from_id = query_param(query, "fromId")
+                .and_then(|id| id.parse::<i64>().ok())
+                .unwrap_or(0);
+            let result =
+                with_memory(move |memory| memory.truncate_interactions_from(&chat_id, from_id)).await;
+            if result.is_ok() {
+                send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
+            } else {
+                send_json_response(
+                    socket,
+                    "500 Internal Server Error",
+                    "{\"status\":\"error\"}",
+                )
+                .await;
+            }
+        }
+
         ("POST", "/api/interactions") => {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]

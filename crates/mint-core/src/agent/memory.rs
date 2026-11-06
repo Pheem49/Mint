@@ -833,6 +833,25 @@ impl MemoryStore {
         )?)
     }
 
+    pub fn truncate_interactions_from(
+        &self,
+        chat_id: &str,
+        from_id: i64,
+    ) -> Result<usize, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        let connection = self.connection()?;
+        let _ = connection.execute(
+            "DELETE FROM conversation_source_attachments WHERE interaction_id IN (
+                SELECT id FROM interaction_memories WHERE chat_id = ?1 AND id >= ?2
+            )",
+            params![chat_id, from_id],
+        );
+        Ok(connection.execute(
+            "DELETE FROM interaction_memories WHERE chat_id = ?1 AND id >= ?2",
+            params![chat_id, from_id],
+        )?)
+    }
+
     pub fn delete_chat_session(&self, chat_id: &str) -> Result<usize, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
         if chat_id == CHAT_CLI_ID {
@@ -2100,6 +2119,41 @@ mod conversation_sync_tests {
                 .iter()
                 .any(|change| change.interaction_id == id && change.interaction.is_none())
         );
+    }
+
+    #[test]
+    fn truncate_interactions_from_deletes_specified_and_subsequent_rows() {
+        let memory = store();
+        let id1 = memory
+            .add_interaction_for_chat("cli::test", "prompt 1", "reply 1", "test", "model")
+            .unwrap();
+        let id2 = memory
+            .add_interaction_for_chat("cli::test", "prompt 2", "reply 2", "test", "model")
+            .unwrap();
+        let id3 = memory
+            .add_interaction_for_chat("cli::test", "prompt 3", "reply 3", "test", "model")
+            .unwrap();
+
+        let cursor = memory.latest_conversation_sequence("cli::test").unwrap();
+        let deleted_count = memory.truncate_interactions_from("cli::test", id2).unwrap();
+        assert_eq!(deleted_count, 2);
+
+        let remaining = memory.interactions_for_chat("cli::test").unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, id1);
+
+        let changes = memory
+            .conversation_changes("cli::test", cursor, 100)
+            .unwrap();
+        let tombstones: Vec<i64> = changes
+            .changes
+            .iter()
+            .filter(|c| c.interaction.is_none())
+            .map(|c| c.interaction_id)
+            .collect();
+        assert!(tombstones.contains(&id2));
+        assert!(tombstones.contains(&id3));
+        assert!(!tombstones.contains(&id1));
     }
 
     #[test]

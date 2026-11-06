@@ -848,6 +848,10 @@ impl ChatTui {
                         continue;
                     }
                     match key.code {
+                        KeyCode::Esc if state.editing_turn.is_some() => {
+                            state.cancel_edit_turn();
+                            continue;
+                        }
                         KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             if let Ok(Some(uri)) = crate::image::read_clipboard_image() {
                                 if let Some(current) = pasted_image.as_mut() {
@@ -905,6 +909,45 @@ impl ChatTui {
                             let text = state.take_prompt();
                             state.history_index = None;
                             state.draft_before_history.clear();
+
+                            if state.editing_turn.is_none() {
+                                let trimmed = text.trim();
+                                if trimmed == "/edit" || trimmed == "/retry" {
+                                    state.enter_edit_turn();
+                                    continue;
+                                } else if trimmed.starts_with("/edit ") || trimmed.starts_with("/retry ") {
+                                    let prefix = if trimmed.starts_with("/edit ") { "/edit " } else { "/retry " };
+                                    let new_prompt = trimmed[prefix.len()..].trim().to_string();
+                                    if state.enter_edit_turn() {
+                                        if !new_prompt.is_empty() {
+                                            state.set_draft(new_prompt);
+                                            state.cursor = state.composer.len();
+                                        }
+                                        continue;
+                                    }
+                                }
+                            } else if let Some((from_id, _turn_num)) = state.editing_turn.take() {
+                                state.clear_notice();
+                                if text.trim().is_empty() {
+                                    continue;
+                                }
+                                let scoped = mint_core::scoped_chat_id(
+                                    &state.chat_id,
+                                    Some(&state.current_dir.to_string_lossy()),
+                                );
+                                if let Ok(memory) = mint_core::MemoryStore::open_default() {
+                                    let _ = memory.truncate_interactions_from(&scoped, from_id);
+                                    let chat_id = state.chat_id.clone();
+                                    let workspace = state.current_dir.clone();
+                                    state.reload_transcript_with(&memory, &chat_id, &workspace);
+                                }
+                                return Ok(Some(InteractiveInput {
+                                    text,
+                                    pasted_image,
+                                    switch_mode: false,
+                                }));
+                            }
+
                             state.clear_notice();
                             if !text.trim().is_empty() {
                                 return Ok(Some(InteractiveInput {
@@ -925,6 +968,10 @@ impl ChatTui {
                             state.set_notice("Press Ctrl+D again to exit");
                         }
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            if state.editing_turn.is_some() {
+                                state.cancel_edit_turn();
+                                continue;
+                            }
                             if !state.composer.is_empty() {
                                 state.take_prompt();
                                 state.slash_selected = 0;

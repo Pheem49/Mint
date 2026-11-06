@@ -48,7 +48,7 @@ import WorkspaceSelector from '../workspace/WorkspaceSelector'
 import ToolsPanelToggle from '../workspace/ToolsPanelToggle'
 import { ModsPanel } from '../extensions/ModsPanel'
 import type { ToolSurface } from '../workspace/ToolSurfacePage'
-import { WORKSPACE_PATH_MIME, WORKSPACE_FILE_MIME, WORKSPACE_IMAGE_MIME, isImageFileName, resolveImageToDataUri } from '../../utils/workspaceDrag'
+import { WORKSPACE_PATH_MIME, WORKSPACE_FILE_MIME, WORKSPACE_IMAGE_MIME, isImageFileName, resolveImageToDataUri, formatWorkspaceReference } from '../../utils/workspaceDrag'
 import QueuedMessagesBanner from './QueuedMessagesBanner'
 import '../../css/thinking-status.css'
 import '../../css/slash-choice.css'
@@ -193,6 +193,7 @@ interface ChatPanelContract {
   onClearQueuedPrompts?: () => void
   onSteerQueuedPrompt?: (id: string) => void
   onResumeQueue?: () => void
+  onResendFrom?: (fromId: number, newPrompt: string) => Promise<void> | void
 }
 
 export type ConversationViewModel = Pick<ChatPanelContract,
@@ -309,6 +310,7 @@ export default function ChatPanel({
   onClearQueuedPrompts,
   onSteerQueuedPrompt,
   onResumeQueue,
+  onResendFrom,
   } = { ...conversation, ...actions }
   const message = useComposerDraft(initialMessage, actions.subscribeMessage, actions.getMessage)
   const onThinkingExpandedChange = useLatestCallback(handleThinkingExpandedChange)
@@ -694,6 +696,36 @@ export default function ChatPanel({
   const dragCounter = useRef(0)
   const lastDropTimeRef = useRef(0)
 
+  const resizeInput = useCallback((element: HTMLTextAreaElement) => {
+    element.style.height = 'auto'
+    element.style.height = `${Math.min(element.scrollHeight, 120)}px`
+  }, [])
+
+  // Direct file reference insertion into chat input
+  const handleReferenceFile = useCallback((rawPath: string) => {
+    const formatted = formatWorkspaceReference(rawPath, workspacePath).trim()
+    if (!formatted) return
+    const token = `${formatted} `
+    const textarea = textareaRef.current
+    if (!textarea) {
+      onSetMessage(message.trim() ? `${message.trimEnd()} ${token}` : token)
+      return
+    }
+    const start = textarea.selectionStart ?? message.length
+    const end = textarea.selectionEnd ?? message.length
+    const before = message.slice(0, start)
+    const after = message.slice(end)
+    const spacingBefore = before && !before.endsWith(' ') && !before.endsWith('\n') ? ' ' : ''
+    const updated = `${before}${spacingBefore}${token}${after}`
+    onSetMessage(updated)
+    const nextCursor = (before + spacingBefore + token).length
+    requestAnimationFrame(() => {
+      textarea.focus()
+      textarea.setSelectionRange(nextCursor, nextCursor)
+      resizeInput(textarea)
+    })
+  }, [message, onSetMessage, workspacePath, resizeInput])
+
   const handleDragEnter = (e: DragEvent<HTMLElement>) => {
     e.preventDefault()
     if (e.dataTransfer?.types?.includes('Files')) {
@@ -742,8 +774,7 @@ export default function ChatPanel({
             e.dataTransfer?.getData('application/x-mint-workspace-path') ||
             ''
           if (raw) {
-            appendWorkspaceReference(raw.startsWith('@') ? raw : `@${raw}`)
-            textareaRef.current?.focus()
+            handleReferenceFile(raw)
           }
         }
       })
@@ -1037,10 +1068,6 @@ export default function ChatPanel({
     historyReadyRef.current = false; submittedDuringSessionRef.current = false; lastAutoSpokenIdRef.current = null
   }, [chatId])
 
-  const resizeInput = (element: HTMLTextAreaElement) => {
-    element.style.height = 'auto'
-    element.style.height = `${Math.min(element.scrollHeight, 120)}px`
-  }
   useEffect(() => {
     return () => {
       void speechPlayerRef.current?.dispose()
@@ -1211,9 +1238,7 @@ export default function ChatPanel({
       if (!reference) return
       const trimmed = reference.trim()
       if (wsPath || trimmed.startsWith('@')) {
-        const formatted = trimmed.startsWith('@') ? trimmed : `@${trimmed}`
-        appendWorkspaceReference(formatted)
-        textareaRef.current?.focus()
+        handleReferenceFile(trimmed)
       }
     })
   }
@@ -1253,12 +1278,16 @@ export default function ChatPanel({
               onToggle={toggleActivity}
               pendingApproval={!!pendingApproval}
               chatId={chatId}
+              workspacePath={workspacePath}
+              onReferenceFile={handleReferenceFile}
               onOpenArtifact={openArtifact}
             />
           )}
           <TurnFileChanges
             changes={composerChanges}
             isLive
+            workspacePath={workspacePath}
+            onReferenceFile={handleReferenceFile}
             onOpenArtifact={openArtifact}
             onOpenReview={openAllConversationReview}
           />
@@ -1319,7 +1348,7 @@ export default function ChatPanel({
                         type="button"
                         className={`msg-action-btn copy-btn ${copiedId === 'live' ? 'is-copied' : ''}`}
                         onClick={() => handleCopyMessage('live', throttledStreamedReply)}
-                        title={copiedId === 'live' ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
+                        title={copiedId === 'live' ? 'Copied!' : 'Copy message'}
                       >
                         {renderCopyIcon(copiedId === 'live')}
                       </button>
@@ -1535,6 +1564,7 @@ export default function ChatPanel({
                   interaction={interaction}
                   copiedId={copiedId}
                   onEditMessage={handleEditMessage}
+                  onResendFrom={onResendFrom}
                   speakingText={speakingText}
                   agentActivitySnapshots={agentActivitySnapshots}
                   openActivityIds={openActivityIds}
@@ -1542,6 +1572,8 @@ export default function ChatPanel({
                   speak={speak}
                   toggleActivity={toggleActivity}
                   chatId={chatId}
+                  workspacePath={workspacePath}
+                  onReferenceFile={handleReferenceFile}
                   customProviders={settingsConfig?.customProviders}
                   onOpenArtifact={openArtifact}
                   onOpenReview={openAllConversationReview}

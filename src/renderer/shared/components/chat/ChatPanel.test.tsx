@@ -36,4 +36,18 @@ describe('Shared Tools entry point', () => {
     expect(html).toContain('id="chat-input"')
     expect(html).toContain('placeholder="Ask anything, @ to mention, / for actions"')
   })
+
+  it('renders file reference directly in the chat input when message contains @reference', () => {
+    installRendererPlatform(webAdapter)
+    const fixture = chatPanelFixture()
+    const html = renderToStaticMarkup(createElement(ChatPanel, {
+      ...fixture,
+      conversation: {
+        ...fixture.conversation,
+        message: '@generate_harness_pdf.py ',
+      },
+    } as any))
+    expect(html).toContain('id="chat-input"')
+    expect(html).toContain('@generate_harness_pdf.py ')
+  })
 })

@@ -1,5 +1,5 @@
 import type { ArtifactFile } from '../../utils/artifacts'
-import React, { useMemo } from 'react'
+import React, { useMemo, useState, useRef, useCallback, useEffect } from 'react'
 import { FormattedMessage, renderCopyIcon, renderSpeakerIcon } from '../../utils/markdown'
 import { fallbackNotice } from '../../utils/providers'
 import McpToolResults from '../activity/McpToolResults'
@@ -18,6 +18,7 @@ export interface ChatMessageItemProps {
   interaction: any
   copiedId: string | number | null
   onEditMessage?: (text: string) => void
+  onResendFrom?: (fromId: number, newPrompt: string) => void
   speakingText: string | null
   agentActivitySnapshots: Record<string, any[]>
   openActivityIds?: Record<string, boolean>
@@ -25,6 +26,8 @@ export interface ChatMessageItemProps {
   speak: (text: string) => void
   toggleActivity: (id: string) => void
   chatId?: string
+  workspacePath?: string
+  onReferenceFile?: (filePath: string) => void
   customProviders?: Array<{ id: string; displayName?: string; logoDataUrl?: string }>
   onOpenArtifact?: (artifact: ArtifactFile) => void
   onOpenReview?: () => void
@@ -38,6 +41,7 @@ const ChatMessageItem = React.memo(
       interaction,
       copiedId,
       onEditMessage,
+      onResendFrom,
       speakingText,
       agentActivitySnapshots,
       openActivityIds,
@@ -49,6 +53,48 @@ const ChatMessageItem = React.memo(
       onRewindRequest,
       onRewindError,
     } = props
+
+    const [isEditing, setIsEditing] = useState(false)
+    const [draftText, setDraftText] = useState(interaction.userText || '')
+    const inlineTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+    useEffect(() => {
+      setDraftText(interaction.userText || '')
+    }, [interaction.userText])
+
+    const resizeInlineTextarea = useCallback((el: HTMLTextAreaElement) => {
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 400)}px`
+    }, [])
+
+    const handleStartEdit = useCallback(() => {
+      setIsEditing(true)
+      setDraftText(interaction.userText || '')
+      requestAnimationFrame(() => {
+        if (inlineTextareaRef.current) {
+          inlineTextareaRef.current.focus()
+          const len = inlineTextareaRef.current.value.length
+          inlineTextareaRef.current.setSelectionRange(len, len)
+          resizeInlineTextarea(inlineTextareaRef.current)
+        }
+      })
+    }, [interaction.userText, resizeInlineTextarea])
+
+    const handleCancelEdit = useCallback(() => {
+      setIsEditing(false)
+      setDraftText(interaction.userText || '')
+    }, [interaction.userText])
+
+    const handleSaveAndResend = useCallback(() => {
+      const trimmed = draftText.trim()
+      if (!trimmed) return
+      setIsEditing(false)
+      if (onResendFrom) {
+        onResendFrom(Number(interaction.id), trimmed)
+      } else if (onEditMessage) {
+        onEditMessage(trimmed)
+      }
+    }, [draftText, interaction.id, onResendFrom, onEditMessage])
 
     const isSystemEvent = interaction.provider === 'system' && interaction.model === 'provider_change'
 
@@ -90,31 +136,78 @@ const ChatMessageItem = React.memo(
         {interaction.userText && (
           <div className="message user-message">
             <div className="bubble-wrapper">
-              <div className="message-bubble">{memoizedUserContent}</div>
-              <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>{parseUtcDate(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                <button
-                  type="button"
-                  className={`msg-action-btn copy-btn ${isUserCopied ? 'is-copied' : ''}`}
-                  onClick={() => handleCopyMessage(`user-${interaction.id}`, interaction.userText)}
-                  title={isUserCopied ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy)'}
-                >
-                  {renderCopyIcon(isUserCopied)}
-                </button>
-                {onEditMessage && interaction.provider !== 'system' && (
-                  <button
-                    type="button"
-                    className="msg-action-btn edit-btn"
-                    onClick={() => onEditMessage(interaction.userText)}
-                    title="แก้ไขและส่งใหม่ (Edit & resend)"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 20h9"></path>
-                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                    </svg>
-                  </button>
-                )}
-              </div>
+              {isEditing ? (
+                <div className="inline-edit-container">
+                  <textarea
+                    ref={inlineTextareaRef}
+                    className="inline-edit-textarea"
+                    value={draftText}
+                    onChange={(e) => {
+                      setDraftText(e.target.value)
+                      resizeInlineTextarea(e.currentTarget)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        e.preventDefault()
+                        handleCancelEdit()
+                      } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                        e.preventDefault()
+                        handleSaveAndResend()
+                      }
+                    }}
+                    rows={2}
+                    placeholder="Edit message..."
+                  />
+                  <div className="inline-edit-footer">
+                    <span className="inline-edit-hint">Esc to cancel · Ctrl+Enter to save</span>
+                    <div className="inline-edit-actions">
+                      <button
+                        type="button"
+                        className="inline-edit-btn cancel"
+                        onClick={handleCancelEdit}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-edit-btn submit"
+                        onClick={handleSaveAndResend}
+                        disabled={!draftText.trim()}
+                      >
+                        Save &amp; Resend
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="message-bubble">{memoizedUserContent}</div>
+                  <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>{parseUtcDate(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <button
+                      type="button"
+                      className={`msg-action-btn copy-btn ${isUserCopied ? 'is-copied' : ''}`}
+                      onClick={() => handleCopyMessage(`user-${interaction.id}`, interaction.userText)}
+                      title={isUserCopied ? 'Copied!' : 'Copy'}
+                    >
+                      {renderCopyIcon(isUserCopied)}
+                    </button>
+                    {(onResendFrom || onEditMessage) && interaction.provider !== 'system' && (
+                      <button
+                        type="button"
+                        className="msg-action-btn edit-btn"
+                        onClick={handleStartEdit}
+                        title="Edit & resend"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 20h9"></path>
+                          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -128,6 +221,8 @@ const ChatMessageItem = React.memo(
                 isOpen={Boolean(openActivityIds?.[String(interaction.id)])}
                 onToggle={toggleActivity}
                 chatId={props.chatId || interaction.chatId}
+                workspacePath={props.workspacePath}
+                onReferenceFile={props.onReferenceFile}
                 onOpenArtifact={onOpenArtifact}
               />
             )}
@@ -135,6 +230,8 @@ const ChatMessageItem = React.memo(
               <TurnFileChanges
                 progress={progress}
                 interaction={interaction}
+                workspacePath={props.workspacePath}
+                onReferenceFile={props.onReferenceFile}
                 onOpenArtifact={onOpenArtifact}
                 onOpenReview={onOpenReview}
                 onRewindRequest={onRewindRequest}
@@ -167,7 +264,7 @@ const ChatMessageItem = React.memo(
                   type="button"
                   className={`msg-action-btn copy-btn ${isAiCopied ? 'is-copied' : ''}`}
                   onClick={() => handleCopyMessage(interaction.id, interaction.aiText)}
-                  title={isAiCopied ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
+                  title={isAiCopied ? 'Copied!' : 'Copy message'}
                 >
                   {renderCopyIcon(isAiCopied)}
                 </button>
@@ -189,6 +286,7 @@ const ChatMessageItem = React.memo(
   (prevProps, nextProps) => {
     if (
       prevProps.onEditMessage !== nextProps.onEditMessage ||
+      prevProps.onResendFrom !== nextProps.onResendFrom ||
       prevProps.handleCopyMessage !== nextProps.handleCopyMessage ||
       prevProps.speak !== nextProps.speak ||
       prevProps.toggleActivity !== nextProps.toggleActivity ||
