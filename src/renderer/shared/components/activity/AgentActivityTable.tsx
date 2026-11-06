@@ -49,7 +49,15 @@ function getFilename(target: string): string {
 }
 
 function renderActivityIcon(kind: AgentActivity['kind'], target: string, action?: string) {
-  if (kind === 'file') {
+  const isFile =
+    kind === 'file' ||
+    action === 'read_file' ||
+    action === 'write_file' ||
+    action === 'edit_file' ||
+    action === 'apply_patch' ||
+    action === 'apply_code_edits'
+
+  if (isFile) {
     const filename = getFilename(target)
     const ext = getExtension(filename)
     const icon = materialFileIcon(filename, ext)

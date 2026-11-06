@@ -4,6 +4,7 @@ import { conversationPlatform } from '../../platform'
 import type { AgentProgress, FileChange, GitCheckpoint } from '../../types'
 import type { ArtifactFile } from '../../utils/artifacts'
 import { setWorkspaceDragData, isImageFileName } from '../../utils/workspaceDrag'
+import { materialFileIcon, getExtension } from '../../utils/fileIcons'
 
 const { listGitCheckpoints } = conversationPlatform
 
@@ -176,21 +177,33 @@ export const TurnFileChanges = memo(function TurnFileChanges({
               onClick={() => setOpenFileDiffs((current) => ({ ...current, [change.path]: !current[change.path] }))}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{ color: 'var(--text-muted)', flexShrink: 0 }}
-                  aria-hidden="true"
-                >
-                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
+                {materialFileIcon(fileName, getExtension(fileName)) ? (
+                  <img
+                    src={materialFileIcon(fileName, getExtension(fileName))}
+                    alt=""
+                    width="14"
+                    height="14"
+                    style={{ width: 14, height: 14, flexShrink: 0, objectFit: 'contain' }}
+                    aria-hidden="true"
+                    draggable={false}
+                  />
+                ) : (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ color: 'var(--text-muted)', flexShrink: 0 }}
+                    aria-hidden="true"
+                  >
+                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                )}
                 <span className={`file-changes-filename ${change.created ? 'is-new' : ''}`}>
                   <span className="file-changes-name">{fileName}</span>
                   {subDir && <span className="file-changes-subdir">{subDir}/</span>}

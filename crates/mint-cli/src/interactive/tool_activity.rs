@@ -230,7 +230,7 @@ impl ToolActivity {
         if let Some(tool_summary) = input.get("toolSummary").and_then(Value::as_str) {
             let trimmed = tool_summary.trim();
             if !trimmed.is_empty() && !mint_core::is_dummy_value(trimmed) {
-                return format!("Ran {}", trimmed);
+                return format!("Running {}", trimmed);
             }
         }
         for key in [
@@ -249,13 +249,13 @@ impl ToolActivity {
                         continue;
                     }
                     return match key {
-                        "command" | "cmd" => format!("Ran `{trimmed}`"),
-                        "pattern" | "query" => format!("Searched for {trimmed}"),
+                        "command" | "cmd" => format!("Running `{trimmed}`"),
+                        "pattern" | "query" => format!("Searching for {trimmed}"),
                         "path" => {
                             if action == "write_file" || action == "edit_file" {
-                                format!("Edited {trimmed}")
+                                format!("Editing {trimmed}")
                             } else {
-                                format!("Analyzed {trimmed}")
+                                format!("Reading {trimmed}")
                             }
                         }
                         _ => trimmed.to_string(),

@@ -92,7 +92,7 @@ export function activityKind(action: string, target: string): AgentActivity['kin
   if (['search_code', 'semantic_search', 'knowledge_search', 'web_search', 'image_search', 'memory_recall', 'find_definition', 'find_references'].includes(action)) return 'search'
   if (['run_shell', 'verify', 'run_tests', 'run_typecheck', 'run_linter'].includes(action)) return 'terminal'
   if (['list_files', 'detect_project'].includes(action)) return 'folder'
-  if (['read_file', 'symbols', 'read_diagnostics', 'git_diff', 'apply_patch', 'write_file', 'note_write', 'view_image'].includes(action)) return 'file'
+  if (['read_file', 'symbols', 'read_diagnostics', 'git_diff', 'apply_patch', 'write_file', 'edit_file', 'apply_code_edits', 'note_write', 'view_image'].includes(action)) return 'file'
   if (['calculation', 'calculator'].includes(action)) return 'calc'
   return target.includes('/') && !/\.[^/]+$/.test(target) ? 'folder' : 'tool'
 }

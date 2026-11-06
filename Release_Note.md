@@ -9,6 +9,7 @@
   - Terminal Commands: `Ran <intent or command> >` with an expandable chevron to toggle output view.
   - Thoughts: `Thought for 12s >` with collapsible reasoning details.
 - **Accurate Diff Extraction**: Extended `agentProgress.ts` to calculate real additions and deletions for `edit_file`, `write_file`, and `apply_patch` operations, displaying color-coded green `+N` and red `-N` badges in the timeline.
+- **Dedicated Language & File Icons**: Expanded the centralized Material Icon Theme system (`fileIcons.ts`) with authentic file icons for Python (`.py`, `.ipynb`), Rust (`.rs`), Go, Java, C/C++, C#, TypeScript, JavaScript, Shell/Bash (`.sh`, `.bash`, `.zsh`), SQL/Databases, Dockerfiles, Git, Markdown, PDFs, and more. Both `AgentActivityTable` and `TurnFileChanges` now display dedicated, genuine language icons next to modified/analyzed file names instead of generic placeholders.
 - **Preserved Productivity Interactions**: Retained full interactive capabilities including HTML5 file drag-and-drop from timeline rows into the chat composer, `@` quick-reference button on hover, and seamless subagent DAG view switching.
 - **CLI Full-Screen TUI Parity**: Enhanced `interactive::tool_activity` in `mint-cli` to use developer-centric semantic verbs (`Ran`, `Searched`, `Analyzed`, `Edited`) and prefer human-readable intent summaries for shell executions.
 - **Full Platform Parity**: Maintained 100% parity across Desktop UI (`src/renderer/src`), Web UI (`src/renderer/src-web`), and CLI (`crates/mint-cli`), backed by automated tests across Vitest and Cargo test suites.

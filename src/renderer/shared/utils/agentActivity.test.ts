@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeTool, activitiesFrom, generateNaturalActivitySummary, formatDurationText, groupActivities, isMarkdownContent, cleanMarkdownOutput } from './agentActivity'
+import { describeTool, activitiesFrom, generateNaturalActivitySummary, formatDurationText, groupActivities, isMarkdownContent, cleanMarkdownOutput, activityKind } from './agentActivity'
 import { viewedImagesFrom } from './viewedImages'
 import { reduceLiveAgentProgress } from '../agentProgress'
 import type { AgentProgress } from '../types'
@@ -244,8 +244,16 @@ describe('modern semantic activity timeline metadata', () => {
       Target: 'line1\nline2',
       Replacement: 'line1\nline2\nline3\nline4',
     })
+    expect(tool.kind).toBe('file')
     expect(tool.semanticVerb).toBe('Edited')
     expect(tool.diffStats).toEqual({ additions: 4, deletions: 2 })
+  })
+
+  it('classifies edit_file, write_file, read_file and apply_code_edits as file kind', () => {
+    expect(activityKind('edit_file', 'src/main.py')).toBe('file')
+    expect(activityKind('write_file', 'src/main.py')).toBe('file')
+    expect(activityKind('read_file', 'src/main.py')).toBe('file')
+    expect(activityKind('apply_code_edits', 'src/main.py')).toBe('file')
   })
 
   it('extracts Ran verb and toolSummary intent for run_command', () => {
