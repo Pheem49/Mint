@@ -3220,7 +3220,12 @@ mod swarm_panel_tests {
         state.set_notice("[Mode: Edit Turn #2 — Resending will replace this turn and clear its previous response | Esc to cancel]");
         assert!(state.editing_turn.is_some());
         assert_eq!(state.composer_text(), "first prompt to edit");
-        assert!(state.active_notice().unwrap().contains("[Mode: Edit Turn #2"));
+        assert!(
+            state
+                .active_notice()
+                .unwrap()
+                .contains("[Mode: Edit Turn #2")
+        );
 
         state.cancel_edit_turn();
         assert!(state.editing_turn.is_none());

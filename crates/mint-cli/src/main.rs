@@ -33,11 +33,13 @@ mod browser_cli_regressions {
     #[test]
     fn browser_workflow_command_accepts_a_file_and_rejects_headed_override() {
         let parsed =
-            Cli::try_parse_from(["mint", "browser", "run", "--file", "task.json"])
-                .unwrap();
+            Cli::try_parse_from(["mint", "browser", "run", "--file", "task.json"]).unwrap();
         assert!(matches!(parsed.command, Some(Command::Browser { .. })));
         assert!(Cli::try_parse_from(["mint", "browser", "run"]).is_err());
-        assert!(Cli::try_parse_from(["mint", "browser", "run", "--file", "task.json", "--headed"]).is_err());
+        assert!(
+            Cli::try_parse_from(["mint", "browser", "run", "--file", "task.json", "--headed"])
+                .is_err()
+        );
     }
 }
 pub use interactive::{

@@ -1881,8 +1881,10 @@ mod tests {
             "CalculationCard.tsx".to_string(),
         ];
         let candidates = collect_mention_candidates_with_recents("@Calc", &temp_dir, &recents);
-        assert!(candidates
-            .iter()
-            .any(|c| c.label == "@CalculationCard.tsx" && c.description.contains("Recent")));
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.label == "@CalculationCard.tsx" && c.description.contains("Recent"))
+        );
     }
 }

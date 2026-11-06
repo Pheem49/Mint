@@ -218,7 +218,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 .and_then(|id| id.parse::<i64>().ok())
                 .unwrap_or(0);
             let result =
-                with_memory(move |memory| memory.truncate_interactions_from(&chat_id, from_id)).await;
+                with_memory(move |memory| memory.truncate_interactions_from(&chat_id, from_id))
+                    .await;
             if result.is_ok() {
                 send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
             } else {

@@ -915,8 +915,14 @@ impl ChatTui {
                                 if trimmed == "/edit" || trimmed == "/retry" {
                                     state.enter_edit_turn();
                                     continue;
-                                } else if trimmed.starts_with("/edit ") || trimmed.starts_with("/retry ") {
-                                    let prefix = if trimmed.starts_with("/edit ") { "/edit " } else { "/retry " };
+                                } else if trimmed.starts_with("/edit ")
+                                    || trimmed.starts_with("/retry ")
+                                {
+                                    let prefix = if trimmed.starts_with("/edit ") {
+                                        "/edit "
+                                    } else {
+                                        "/retry "
+                                    };
                                     let new_prompt = trimmed[prefix.len()..].trim().to_string();
                                     if state.enter_edit_turn() {
                                         if !new_prompt.is_empty() {

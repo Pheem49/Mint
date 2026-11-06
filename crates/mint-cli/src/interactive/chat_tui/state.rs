@@ -746,10 +746,9 @@ impl ChatViewState {
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
-                if self
-                    .active_notice()
-                    .is_some_and(|notice| !notice.starts_with("Terminal too small") && !notice.starts_with("[Mode: Edit"))
-                {
+                if self.active_notice().is_some_and(|notice| {
+                    !notice.starts_with("Terminal too small") && !notice.starts_with("[Mode: Edit")
+                }) {
                     self.clear_notice();
                 }
                 self.replace_composer(self.cursor..self.cursor, &character.to_string());
@@ -1468,10 +1467,8 @@ impl ChatViewState {
     }
 
     pub(super) fn enter_edit_turn(&mut self) -> bool {
-        let scoped = mint_core::scoped_chat_id(
-            &self.chat_id,
-            Some(&self.current_dir.to_string_lossy()),
-        );
+        let scoped =
+            mint_core::scoped_chat_id(&self.chat_id, Some(&self.current_dir.to_string_lossy()));
         let Ok(memory) = mint_core::MemoryStore::open_default() else {
             self.set_notice("Failed to open conversation memory");
             return false;
