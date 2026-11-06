@@ -302,6 +302,44 @@ export function formatDurationText(durationSecs?: number): string {
   return `${mins}m ${remSecs}s`
 }
 
+export function isMarkdownContent(action?: string, target?: string, output?: string): boolean {
+  if (!output || !output.trim()) return false
+  if (action === 'run_shell' || action === 'run_command' || action === 'bash') return false
+  const cleanTarget = (target || '').toLowerCase()
+  if (cleanTarget.endsWith('.md') || cleanTarget.endsWith('.markdown') || cleanTarget.endsWith('.txt')) {
+    return true
+  }
+  if (cleanTarget.includes('skill') || output.startsWith('[Loaded skill:')) {
+    return true
+  }
+  if (action === 'note_read' || action === 'web_search') {
+    return true
+  }
+  if (/^#{1,6}\s+/m.test(output) && (output.includes('\n\n') || output.includes('\n- '))) {
+    return true
+  }
+  return false
+}
+
+export function cleanMarkdownOutput(text: string): string {
+  let cleaned = text.trim()
+  cleaned = cleaned.replace(/^\[Loaded skill:\s*([^\]]+)\][\s\n]*/i, '**Skill: $1**\n\n')
+  const frontmatterMatch = cleaned.match(/^(\*\*Skill:[^\n]+\*\*[\s\n]*)?---\s*\n([\s\S]*?)\n---\s*\n/)
+  if (frontmatterMatch) {
+    const prefix = frontmatterMatch[1] ? frontmatterMatch[1].trim() + '\n\n' : ''
+    const yaml = frontmatterMatch[2]
+    const descMatch = yaml.match(/description:\s*([^\n]+(?:\n\s+[^\n]+)*)/)
+    const desc = descMatch ? descMatch[1].replace(/\n\s+/g, ' ').trim() : ''
+    const remaining = cleaned.slice(frontmatterMatch[0].length)
+    if (desc) {
+      cleaned = `${prefix}> ${desc}\n\n${remaining}`
+    } else {
+      cleaned = `${prefix}${remaining}`
+    }
+  }
+  return cleaned
+}
+
 export function generateNaturalActivitySummary(items: AgentActivity[], timeline?: TimelineItem[]): string {
   if (!items || items.length === 0) {
     if (timeline && timeline.some(t => t.kind === 'extendedThinking' || t.kind === 'thought')) {

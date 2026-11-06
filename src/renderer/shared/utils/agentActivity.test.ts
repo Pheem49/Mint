@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeTool, activitiesFrom, generateNaturalActivitySummary, formatDurationText, groupActivities } from './agentActivity'
+import { describeTool, activitiesFrom, generateNaturalActivitySummary, formatDurationText, groupActivities, isMarkdownContent, cleanMarkdownOutput } from './agentActivity'
 import { viewedImagesFrom } from './viewedImages'
 import { reduceLiveAgentProgress } from '../agentProgress'
 import type { AgentProgress } from '../types'
@@ -284,6 +284,31 @@ describe('modern semantic activity timeline metadata', () => {
     expect(groups).toHaveLength(1)
     expect(groups[0].semanticVerb).toBe('Ran')
     expect(groups[0].title).toBe('2 commands')
+  })
+
+  it('detects markdown content for skill and doc reads', () => {
+    expect(isMarkdownContent('read_file', 'SKILL.md', '# Skill content')).toBe(true)
+    expect(isMarkdownContent('read_file', 'README.md', 'Hello world')).toBe(true)
+    expect(isMarkdownContent('read_file', 'a.ts', '[Loaded skill: ffmpeg]')).toBe(true)
+    expect(isMarkdownContent('run_shell', 'npm test', 'PASS 1 test')).toBe(false)
+    expect(isMarkdownContent('read_file', 'src/App.tsx', 'const x = 1;')).toBe(false)
+  })
+
+  it('cleans loaded skill frontmatter into readable markdown callout', () => {
+    const raw = `[Loaded skill: ffmpeg-frame-extractor]
+---
+description: Extract video frames without distortion
+revisions: 1
+---
+
+# Extracting frames
+## Usage
+- Run command`
+    const cleaned = cleanMarkdownOutput(raw)
+    expect(cleaned).toContain('**Skill: ffmpeg-frame-extractor**')
+    expect(cleaned).toContain('> Extract video frames without distortion')
+    expect(cleaned).toContain('# Extracting frames')
+    expect(cleaned).not.toContain('---')
   })
 })
 

@@ -1,7 +1,7 @@
 import type { ArtifactFile } from '../../utils/artifacts'
 import { Fragment, useState } from 'react'
 import type { AgentActivityView, AgentActivity, AgentActivityGroup, TimelineItem } from '../../utils/agentActivity'
-import { cleanIntermediateThought, groupActivities } from '../../utils/agentActivity'
+import { cleanIntermediateThought, groupActivities, isMarkdownContent, cleanMarkdownOutput } from '../../utils/agentActivity'
 import { materialFileIcon, materialFolderIcon, getExtension } from '../../utils/fileIcons'
 import { renderFormattedMessage } from '../../utils/markdown'
 import { ViewedImage } from './ViewedImages'
@@ -254,23 +254,29 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
           </div>
         )}
         {isItemExpanded && output && (
-          <div className="agent-activity-output modern-timeline-output">
-            {output.includes('[Self-Correction Guidance]') ? (
-              <>
-                {output.split('[Self-Correction Guidance]')[0]?.trim() && (
-                  <pre>{output.split('[Self-Correction Guidance]')[0]?.trim()}</pre>
-                )}
-                <div className="diagnostic-guidance-card">
-                  <div className="diagnostic-guidance-header">
-                    <span>💡 Self-Correction Guidance</span>
+          isMarkdownContent(activity.action, activity.target, output) ? (
+            <div className="agent-activity-thought-body modern-thought-body modern-timeline-prose">
+              {renderFormattedMessage(cleanMarkdownOutput(output)) ?? output}
+            </div>
+          ) : (
+            <div className="agent-activity-output modern-timeline-output">
+              {output.includes('[Self-Correction Guidance]') ? (
+                <>
+                  {output.split('[Self-Correction Guidance]')[0]?.trim() && (
+                    <pre>{output.split('[Self-Correction Guidance]')[0]?.trim()}</pre>
+                  )}
+                  <div className="diagnostic-guidance-card">
+                    <div className="diagnostic-guidance-header">
+                      <span>💡 Self-Correction Guidance</span>
+                    </div>
+                    <pre>{output.split('[Self-Correction Guidance]')[1]?.trim()}</pre>
                   </div>
-                  <pre>{output.split('[Self-Correction Guidance]')[1]?.trim()}</pre>
-                </div>
-              </>
-            ) : (
-              <pre>{output}</pre>
-            )}
-          </div>
+                </>
+              ) : (
+                <pre>{output}</pre>
+              )}
+            </div>
+          )
         )}
       </Fragment>
     )

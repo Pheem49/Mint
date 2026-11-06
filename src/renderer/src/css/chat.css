@@ -4801,7 +4801,60 @@ input:checked + .slider:before {
   border-radius: 0 !important;
   color: var(--text-muted) !important;
   font-size: 0.90rem !important;
+  line-height: 1.55;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.modern-thought-body .chat-formatted-body {
+  font-size: 0.90rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+  gap: 6px;
+}
+
+.modern-thought-body .chat-paragraph {
+  font-size: 0.90rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.modern-thought-body .chat-heading {
+  font-size: 0.96rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.modern-thought-body .chat-heading-1 {
+  font-size: 1.05rem;
+}
+
+.modern-thought-body .chat-heading-2 {
+  font-size: 0.98rem;
+}
+
+.modern-thought-body .chat-heading-3 {
+  font-size: 0.92rem;
+}
+
+.modern-thought-body .chat-list-item {
+  font-size: 0.90rem;
   line-height: 1.5;
+  margin: 2px 0 2px 4px;
+  color: var(--text-muted);
+}
+
+.modern-thought-body blockquote {
+  border-left: 2px solid var(--accent);
+  padding: 4px 10px;
+  margin: 6px 0;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-radius: var(--radius-xs, 4px);
+  color: var(--text-soft);
+  font-size: 0.88rem;
 }
 
 .modern-timeline-output {
