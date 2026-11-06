@@ -223,6 +223,7 @@ button {
 /* Code Syntax Highlighting (Driven by tokens.css) */
 .token-command { color: var(--syntax-command); font-weight: 500; }
 .token-keyword { color: var(--syntax-keyword); font-weight: 500; }
+.token-tag { color: var(--syntax-variable, #f43f5e); font-weight: 500; }
 .token-string { color: var(--syntax-string); }
 .token-flag { color: var(--syntax-flag); }
 .token-comment { color: var(--syntax-comment); font-style: italic; }

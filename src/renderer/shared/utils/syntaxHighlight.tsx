@@ -270,6 +270,41 @@ function tokenizeGeneral(line: string, lang: string): Token[] {
       continue
     }
 
+    // HTML / JSX / TSX tags
+    if (line[i] === '<' && (lang === 'html' || lang === 'javascript' || lang === 'typescript')) {
+      if (line[i + 1] === '/') {
+        tokens.push({ type: 'token-tag', text: '</' })
+        i += 2
+        let tag = ''
+        while (i < len && /[a-zA-Z0-9_\-]/.test(line[i])) {
+          tag += line[i]
+          i++
+        }
+        if (tag) tokens.push({ type: 'token-tag', text: tag })
+        continue
+      } else if (/[a-zA-Z]/.test(line[i + 1])) {
+        tokens.push({ type: 'token-tag', text: '<' })
+        i++
+        let tag = ''
+        while (i < len && /[a-zA-Z0-9_\-]/.test(line[i])) {
+          tag += line[i]
+          i++
+        }
+        if (tag) tokens.push({ type: 'token-tag', text: tag })
+        continue
+      }
+    }
+    if ((lang === 'html' || lang === 'javascript' || lang === 'typescript') && line.slice(i, i + 2) === '/>') {
+      tokens.push({ type: 'token-tag', text: '/>' })
+      i += 2
+      continue
+    }
+    if ((lang === 'html' || lang === 'javascript' || lang === 'typescript') && line[i] === '>') {
+      tokens.push({ type: 'token-tag', text: '>' })
+      i++
+      continue
+    }
+
     // Words / Identifiers / Keywords
     if (/[a-zA-Z_$]/.test(line[i])) {
       let word = ''
@@ -293,11 +328,17 @@ function tokenizeGeneral(line: string, lang: string): Token[] {
         tokens.push({ type: 'token-keyword', text: word })
       } else if (['true', 'false', 'null', 'undefined', 'None', 'True', 'False'].includes(word)) {
         tokens.push({ type: 'token-boolean', text: word })
+      } else if (lang === 'python' && ['self', 'cls'].includes(word)) {
+        tokens.push({ type: 'token-variable', text: word })
       } else {
-        // Function call check
+        // Attribute / property check (e.g. attr="val", key: value)
         let peek = i
         while (peek < len && /\s/.test(line[peek])) peek++
-        if (peek < len && line[peek] === '(') {
+        if (peek < len && line[peek] === '=' && line[peek + 1] !== '=' && line[peek + 1] !== '>') {
+          tokens.push({ type: 'token-property', text: word })
+        } else if (peek < len && line[peek] === ':' && line[peek + 1] !== ':') {
+          tokens.push({ type: 'token-property', text: word })
+        } else if (peek < len && line[peek] === '(') {
           tokens.push({ type: 'token-function', text: word })
         } else if (/^[A-Z][a-zA-Z0-9_]*$/.test(word)) {
           tokens.push({ type: 'token-type', text: word })
@@ -308,7 +349,14 @@ function tokenizeGeneral(line: string, lang: string): Token[] {
       continue
     }
 
-    // Punctuation & Operators
+    // Operators
+    if (['=', '+', '-', '*', '/', '%', '!', '&', '|', '^', '?', ':', '~'].includes(line[i])) {
+      tokens.push({ type: 'token-operator', text: line[i] })
+      i++
+      continue
+    }
+
+    // Punctuation
     tokens.push({ type: 'token-punctuation', text: line[i] })
     i++
   }
