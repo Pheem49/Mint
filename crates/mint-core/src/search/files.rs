@@ -108,6 +108,17 @@ pub fn resolve_readable_path(target: &str, workspace: Option<&Path>) -> PathBuf 
                 candidates.push(ws.join(&norm_slash));
             }
             candidates.push(ws.join(trimmed));
+
+            // Defensively recover from duplicated workspace prefixes (e.g. /workspace/workspace/file)
+            let ws_norm = ws.to_string_lossy().replace('\\', "/");
+            let ws_clean = ws_norm.trim_end_matches('/');
+            if let Some(rest) = norm_slash.strip_prefix(ws_clean) {
+                let inner = rest.trim_start_matches('/');
+                if !inner.is_empty() {
+                    candidates.push(PathBuf::from(format!("/{}", inner)));
+                    candidates.push(PathBuf::from(inner));
+                }
+            }
         }
     }
 
@@ -303,6 +314,15 @@ mod tests {
 
         let resolved_win = resolve_readable_path("sub\\sample.md", Some(&temp_dir));
         assert_eq!(resolved_win, test_file);
+
+        // Duplicated workspace prefix recovery
+        let duplicated = format!(
+            "{}/{}",
+            temp_dir.to_string_lossy(),
+            test_file.to_string_lossy().trim_start_matches('/')
+        );
+        let resolved_dup = resolve_readable_path(&duplicated, Some(&temp_dir));
+        assert_eq!(resolved_dup, test_file);
 
         // Non-existent path returns fallback joined with workspace
         let missing = resolve_readable_path("missing.md", Some(&temp_dir));

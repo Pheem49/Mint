@@ -3,9 +3,10 @@ import { ChevronRight, Files, RotateCcw } from 'lucide-react'
 import { EMPTY_AGENT_PROGRESS, parseFileChangesFromProgress } from '../../agentProgress'
 import { conversationPlatform } from '../../platform'
 import type { AgentProgress, FileChange, GitCheckpoint } from '../../types'
-import type { ArtifactFile } from '../../utils/artifacts'
+import { detectArtifactType, type ArtifactFile } from '../../utils/artifacts'
 import { setWorkspaceDragData, isImageFileName } from '../../utils/workspaceDrag'
 import { materialFileIcon, getExtension } from '../../utils/fileIcons'
+import { tokenizeLine } from '../../utils/syntaxHighlight'
 
 const { listGitCheckpoints } = conversationPlatform
 
@@ -268,11 +269,17 @@ export const TurnFileChanges = memo(function TurnFileChanges({
                     title={`Preview ${fileName}`}
                     onClick={(e) => {
                       e.stopPropagation()
+                      const isAbsolute = /^(\/|[a-zA-Z]:[/\\])/.test(change.path)
+                      const resolvedPath = isAbsolute
+                        ? change.path
+                        : workspacePath
+                        ? `${workspacePath.replace(/[/\\]+$/, '')}/${change.path.replace(/^[/\\]+/, '')}`
+                        : change.path
+
                       onOpenArtifact({
-                        path: workspacePath ? `${workspacePath.replace(/\/$/, '')}/${change.path.replace(/^\//, '')}` : change.path,
+                        path: resolvedPath,
                         workspacePath: workspacePath || undefined,
-                        mimeType: 'text/plain',
-                        type: 'code',
+                        type: detectArtifactType(resolvedPath),
                       })
                     }}
                   >
@@ -303,34 +310,61 @@ export const TurnFileChanges = memo(function TurnFileChanges({
 
             {isDiffOpen && (
               <div className="file-changes-diff-box">
-                {change.hunks.map((hunk, hIdx) => (
-                  <div
-                    key={hIdx}
-                    className="file-changes-diff-hunk"
-                    style={{ marginBottom: hIdx < change.hunks.length - 1 ? '10px' : 0 }}
-                  >
-                    {hunk.oldText && (
-                      <div className="file-changes-diff-del">
-                        {hunk.oldText.split('\n').map((line, lIdx) => (
-                          <div key={lIdx} style={{ display: 'flex' }}>
-                            <span className="file-changes-diff-sign-del">-</span>
-                            <span>{line}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {hunk.newText && (
-                      <div className="file-changes-diff-add">
-                        {hunk.newText.split('\n').map((line, lIdx) => (
-                          <div key={lIdx} style={{ display: 'flex' }}>
-                            <span className="file-changes-diff-sign-add">+</span>
-                            <span>{line}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                {change.hunks.map((hunk, hIdx) => {
+                  const fileExt = getExtension(change.path)
+                  return (
+                    <div
+                      key={hIdx}
+                      className="file-changes-diff-hunk"
+                      style={{ marginBottom: hIdx < change.hunks.length - 1 ? '10px' : 0 }}
+                    >
+                      {hunk.oldText && (
+                        <div className="file-changes-diff-del-block">
+                          {hunk.oldText.split('\n').map((line, lIdx) => {
+                            const tokens = tokenizeLine(line, fileExt)
+                            return (
+                              <div key={lIdx} className="file-changes-diff-line file-changes-diff-line-del">
+                                <span className="file-changes-diff-line-content">
+                                  {tokens.length === 0 ? (
+                                    '\u00A0'
+                                  ) : (
+                                    tokens.map((tok, tIdx) => (
+                                      <span key={tIdx} className={tok.type}>
+                                        {tok.text}
+                                      </span>
+                                    ))
+                                  )}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                      {hunk.newText && (
+                        <div className="file-changes-diff-add-block">
+                          {hunk.newText.split('\n').map((line, lIdx) => {
+                            const tokens = tokenizeLine(line, fileExt)
+                            return (
+                              <div key={lIdx} className="file-changes-diff-line file-changes-diff-line-add">
+                                <span className="file-changes-diff-line-content">
+                                  {tokens.length === 0 ? (
+                                    '\u00A0'
+                                  ) : (
+                                    tokens.map((tok, tIdx) => (
+                                      <span key={tIdx} className={tok.type}>
+                                        {tok.text}
+                                      </span>
+                                    ))
+                                  )}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
