@@ -31,6 +31,8 @@ export interface AgentActivityDrawerProps {
   isHistorical?: boolean
   pendingApproval?: boolean
   chatId?: string
+  workspacePath?: string
+  onReferenceFile?: (filePath: string) => void
   onOpenArtifact?: (artifact: ArtifactFile) => void
   key?: any
 }
@@ -47,6 +49,8 @@ export const AgentActivityDrawer = memo(function AgentActivityDrawer({
   isHistorical: isHistoricalProp,
   pendingApproval = false,
   chatId,
+  workspacePath,
+  onReferenceFile,
   onOpenArtifact,
 }: AgentActivityDrawerProps) {
   const effectiveProgress = progress ?? rawProgress ?? []
@@ -174,7 +178,14 @@ export const AgentActivityDrawer = memo(function AgentActivityDrawer({
       {viewMode === 'dag' && hasSubagents ? (
         <SubagentDagView progress={effectiveProgress} isLive={!isHistorical} />
       ) : activityView.items.length > 0 || (activityView.timeline && activityView.timeline.length > 0) ? (
-        <AgentActivityTable activityView={activityView} progress={effectiveProgress} chatId={chatId} onOpenArtifact={onOpenArtifact} />
+        <AgentActivityTable
+          activityView={activityView}
+          progress={effectiveProgress}
+          chatId={chatId}
+          workspacePath={workspacePath}
+          onReferenceFile={onReferenceFile}
+          onOpenArtifact={onOpenArtifact}
+        />
       ) : null}
     </>
   )

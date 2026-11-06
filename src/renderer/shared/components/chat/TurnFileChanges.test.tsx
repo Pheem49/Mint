@@ -83,4 +83,32 @@ describe('TurnFileChanges UI refinement', () => {
     // Show more button
     expect(html).toContain('Show 1 more file')
   })
+
+  it('renders file items as draggable and provides a mention button', () => {
+    const changes = [
+      {
+        path: '/workspace/src/CalculationCard.tsx',
+        created: false,
+        additions: 3,
+        deletions: 3,
+        hunks: [],
+      },
+    ]
+
+    const html = renderToStaticMarkup(
+      <TurnFileChanges
+        changes={changes}
+        workspacePath="/workspace"
+        onReferenceFile={() => {}}
+      />
+    )
+
+    // Should have draggable attribute on the file item
+    expect(html).toContain('draggable="true"')
+    expect(html).toContain('data-path="/workspace/src/CalculationCard.tsx"')
+
+    // Should have a mention button
+    expect(html).toContain('file-changes-mention-btn')
+    expect(html).toContain('Reference in chat')
+  })
 })

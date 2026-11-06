@@ -114,6 +114,14 @@ impl MentionKind {
 }
 
 pub fn collect_mention_candidates(query: &str, current_dir: &Path) -> Vec<MentionCandidate> {
+    collect_mention_candidates_with_recents(query, current_dir, &[])
+}
+
+pub fn collect_mention_candidates_with_recents(
+    query: &str,
+    current_dir: &Path,
+    recent_files: &[String],
+) -> Vec<MentionCandidate> {
     let prefix = query.strip_prefix('@').unwrap_or(query).to_lowercase();
     let mut candidates = Vec::new();
 
@@ -156,7 +164,43 @@ pub fn collect_mention_candidates(query: &str, current_dir: &Path) -> Vec<Mentio
         }
     }
 
-    // 3. Workspace files and folders
+    // 3. Recently modified/written session files (prioritized)
+    let mut auto_recents = Vec::new();
+    let effective_recents: &[String] = if !recent_files.is_empty() {
+        recent_files
+    } else {
+        if let Ok(changes) = mint_core::git::diff::read_workspace_git_diff(current_dir) {
+            for c in changes {
+                auto_recents.push(c.path);
+            }
+        }
+        &auto_recents
+    };
+
+    let mut seen_recents = std::collections::HashSet::new();
+    for file in effective_recents {
+        let clean = file.trim_start_matches('@').trim();
+        if clean.is_empty() {
+            continue;
+        }
+        let file_name = std::path::Path::new(clean)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| clean.to_string());
+        if file_name.to_lowercase().starts_with(&prefix)
+            || clean.to_lowercase().starts_with(&prefix)
+            || prefix.is_empty()
+        {
+            seen_recents.insert(file_name.clone());
+            candidates.push(MentionCandidate {
+                label: format!("@{file_name}"),
+                description: "Recently edited in this session".into(),
+                kind: MentionKind::File,
+            });
+        }
+    }
+
+    // 4. Workspace files and folders
     if let Ok(entries) = std::fs::read_dir(current_dir) {
         let mut file_entries = Vec::new();
         for entry in entries.flatten() {
@@ -166,6 +210,7 @@ pub fn collect_mention_candidates(query: &str, current_dir: &Path) -> Vec<Mentio
                 || name == "node_modules"
                 || name == "dist"
                 || name == "build"
+                || seen_recents.contains(&name)
             {
                 continue;
             }
@@ -1826,5 +1871,18 @@ mod tests {
                 "Plugins should appear before Builtin Contexts"
             );
         }
+    }
+
+    #[test]
+    fn mention_candidates_prioritize_recently_edited_files() {
+        let temp_dir = std::env::current_dir().unwrap();
+        let recents = vec![
+            "generate_harness_pdf.py".to_string(),
+            "CalculationCard.tsx".to_string(),
+        ];
+        let candidates = collect_mention_candidates_with_recents("@Calc", &temp_dir, &recents);
+        assert!(candidates
+            .iter()
+            .any(|c| c.label == "@CalculationCard.tsx" && c.description.contains("Recent")));
     }
 }

@@ -7,6 +7,7 @@ import { renderFormattedMessage } from '../../utils/markdown'
 import { ViewedImage } from './ViewedImages'
 import type { AgentProgress } from '../../types'
 import McpToolResults from './McpToolResults'
+import { setWorkspaceDragData, isImageFileName } from '../../utils/workspaceDrag'
 
 export function InlineThoughtNote({ thought }: { thought: string }) {
   const cleaned = cleanIntermediateThought(thought)
@@ -36,6 +37,8 @@ interface Props {
   activityView: AgentActivityView
   progress?: AgentProgress[]
   chatId?: string
+  workspacePath?: string
+  onReferenceFile?: (filePath: string) => void
   onOpenArtifact?: (artifact: ArtifactFile) => void
 }
 
@@ -100,7 +103,7 @@ function renderStatusIndicator(state: AgentActivity['state']) {
   return <Check size={12} className="agent-activity-status-check" />
 }
 
-export function AgentActivityTable({ activityView, progress, chatId, onOpenArtifact }: Props) {
+export function AgentActivityTable({ activityView, progress, chatId, workspacePath, onReferenceFile, onOpenArtifact }: Props) {
   const groups: AgentActivityGroup[] = activityView.groups || groupActivities(activityView.items)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const [expandedIndices, setExpandedIndices] = useState<Record<string, boolean>>({})
@@ -123,6 +126,9 @@ export function AgentActivityTable({ activityView, progress, chatId, onOpenArtif
     const isItemExpanded = Boolean(expandedIndices[itemKey])
     const output = activity.result?.trim()
     const inlineResult = extractResultPreview(activity.action, output)
+    const isFileAction = activity.kind === 'file' || activity.action === 'write_file' || activity.action === 'edit_file' || activity.action === 'read_file'
+    const cleanTarget = activity.target ? activity.target.split(' #')[0].trim() : ''
+    const fileName = getFilename(cleanTarget)
 
     return (
       <Fragment key={itemKey}>
@@ -144,10 +150,39 @@ export function AgentActivityTable({ activityView, progress, chatId, onOpenArtif
             title={activity.target}
             style={isItemExpanded ? { whiteSpace: 'normal', wordBreak: 'break-all', overflow: 'visible', textOverflow: 'clip' } : undefined}
           >
-            <span className="agent-activity-target-text">{activity.target}</span>
+            <span
+              className={`agent-activity-target-text ${isFileAction ? 'is-file-target' : ''}`}
+              draggable={isFileAction}
+              onDragStart={isFileAction ? (e) => {
+                e.stopPropagation()
+                setWorkspaceDragData(e.dataTransfer, {
+                  path: cleanTarget,
+                  name: fileName,
+                  root: workspacePath,
+                  kind: isImageFileName(cleanTarget) ? 'image' : 'file',
+                })
+              } : undefined}
+              title={isFileAction ? `Drag file to chat or click @ to reference: ${cleanTarget}` : activity.target}
+            >
+              {activity.target}
+            </span>
             {inlineResult && <span className="agent-activity-inline-result">{inlineResult}</span>}
           </span>
           <span className="agent-activity-status-col">
+            {onReferenceFile && isFileAction && cleanTarget && (
+              <button
+                type="button"
+                className="agent-activity-mention-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onReferenceFile(cleanTarget)
+                }}
+                title={`Reference in chat: ${fileName}`}
+                aria-label={`Reference ${fileName} in chat`}
+              >
+                @
+              </button>
+            )}
             {renderStatusIndicator(activity.state)}
             {output && (
               <span
@@ -224,6 +259,9 @@ export function AgentActivityTable({ activityView, progress, chatId, onOpenArtif
               const isItemExpanded = Boolean(expandedIndices[itemKey])
               const output = activity.result?.trim()
               const inlineResult = extractResultPreview(activity.action, output)
+              const isSubFileAction = group.kind === 'file' || activity.kind === 'file' || group.action === 'write_file' || group.action === 'edit_file' || group.action === 'read_file' || activity.action === 'write_file' || activity.action === 'edit_file' || activity.action === 'read_file'
+              const cleanSubTarget = activity.target ? activity.target.split(' #')[0].trim() : ''
+              const subFileName = getFilename(cleanSubTarget)
 
               return (
                 <Fragment key={itemKey}>
@@ -237,8 +275,18 @@ export function AgentActivityTable({ activityView, progress, chatId, onOpenArtif
                       {itemIdx === group.items.length - 1 ? '└─' : '├─'}
                     </span>
                     <span
-                      className="agent-activity-subitem-target"
-                      title={activity.target}
+                      className={`agent-activity-subitem-target ${isSubFileAction ? 'is-file-target' : ''}`}
+                      title={isSubFileAction ? `Drag file to chat or click @ to reference: ${cleanSubTarget}` : activity.target}
+                      draggable={isSubFileAction}
+                      onDragStart={isSubFileAction ? (e) => {
+                        e.stopPropagation()
+                        setWorkspaceDragData(e.dataTransfer, {
+                          path: cleanSubTarget,
+                          name: subFileName,
+                          root: workspacePath,
+                          kind: isImageFileName(cleanSubTarget) ? 'image' : 'file',
+                        })
+                      } : undefined}
                     >
                       {activity.target}
                     </span>
@@ -246,6 +294,20 @@ export function AgentActivityTable({ activityView, progress, chatId, onOpenArtif
                       <span className="agent-activity-inline-result">{inlineResult}</span>
                     )}
                     <span className="agent-activity-subitem-status">
+                      {onReferenceFile && isSubFileAction && cleanSubTarget && (
+                        <button
+                          type="button"
+                          className="agent-activity-mention-btn"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onReferenceFile(cleanSubTarget)
+                          }}
+                          title={`Reference in chat: ${subFileName}`}
+                          aria-label={`Reference ${subFileName} in chat`}
+                        >
+                          @
+                        </button>
+                      )}
                       {renderStatusIndicator(activity.state)}
                       {output && (
                         <span

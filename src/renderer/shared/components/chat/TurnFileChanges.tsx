@@ -3,6 +3,7 @@ import { EMPTY_AGENT_PROGRESS, parseFileChangesFromProgress } from '../../agentP
 import { conversationPlatform } from '../../platform'
 import type { AgentProgress, FileChange, GitCheckpoint } from '../../types'
 import type { ArtifactFile } from '../../utils/artifacts'
+import { setWorkspaceDragData, isImageFileName } from '../../utils/workspaceDrag'
 
 const { listGitCheckpoints } = conversationPlatform
 
@@ -44,10 +45,12 @@ export interface TurnFileChangesProps {
   interaction?: any
   isLive?: boolean
   defaultOpen?: boolean
+  workspacePath?: string
   onOpenArtifact?: (artifact: ArtifactFile) => void
   onOpenReview?: () => void
   onRewindRequest?: (payload: RewindRequestPayload) => void
   onRewindError?: (message: string) => void
+  onReferenceFile?: (filePath: string) => void
 }
 
 export const TurnFileChanges = memo(function TurnFileChanges({
@@ -56,10 +59,12 @@ export const TurnFileChanges = memo(function TurnFileChanges({
   interaction,
   isLive = false,
   defaultOpen = true,
+  workspacePath,
   onOpenArtifact,
   onOpenReview,
   onRewindRequest,
   onRewindError,
+  onReferenceFile,
 }: TurnFileChangesProps) {
   const changes = useMemo(
     () => providedChanges ?? parseFileChangesFromProgress(progress ?? EMPTY_AGENT_PROGRESS),
@@ -151,7 +156,21 @@ export const TurnFileChanges = memo(function TurnFileChanges({
         const dirPath = !commonDir && change.path.includes('/') ? change.path.substring(0, change.path.lastIndexOf('/')) : ''
 
         return (
-          <div key={change.path} className="file-changes-item">
+          <div
+            key={change.path}
+            className="file-changes-item"
+            draggable
+            data-path={change.path}
+            onDragStart={(event) => {
+              event.stopPropagation()
+              setWorkspaceDragData(event.dataTransfer, {
+                path: change.path,
+                name: fileName,
+                root: workspacePath,
+                kind: isImageFileName(change.path) ? 'image' : 'file',
+              })
+            }}
+          >
             <div
               className="file-changes-item-header"
               onClick={() => setOpenFileDiffs((current) => ({ ...current, [change.path]: !current[change.path] }))}
@@ -189,6 +208,21 @@ export const TurnFileChanges = memo(function TurnFileChanges({
                     {change.additions > 0 && <span className="file-changes-count-add">+{change.additions}</span>}
                     {change.deletions > 0 && <span className="file-changes-count-del">-{change.deletions}</span>}
                   </>
+                )}
+                {onReferenceFile && (
+                  <button
+                    type="button"
+                    className="file-changes-mention-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onReferenceFile(change.path)
+                    }}
+                    title={`Reference in chat: ${fileName}`}
+                    aria-label={`Reference ${fileName} in chat`}
+                  >
+                    <span aria-hidden="true">@</span>
+                    <span>Reference in chat</span>
+                  </button>
                 )}
                 {onOpenArtifact && (
                   <button
