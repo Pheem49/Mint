@@ -58,8 +58,8 @@ describe('message update isolation and TurnFileChanges deep module', () => {
       deletions: 1,
       hunks: [{ oldText: 'old', newText: 'new' }],
     }))
-    const html = renderToStaticMarkup(<TurnFileChanges changes={changes} />)
-    expect(html).toContain('1 created, 3 modified')
+    const html = renderToStaticMarkup(<TurnFileChanges changes={changes} defaultOpen={true} />)
+    expect(html).toContain('4 files changed')
     expect(html).toContain('Show 1 more file')
   })
   it('does not retain stale user actions', () => {

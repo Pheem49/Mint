@@ -1,4 +1,5 @@
 import React, { memo, useMemo, useState } from 'react'
+import { ChevronRight, Files, RotateCcw } from 'lucide-react'
 import { EMPTY_AGENT_PROGRESS, parseFileChangesFromProgress } from '../../agentProgress'
 import { conversationPlatform } from '../../platform'
 import type { AgentProgress, FileChange, GitCheckpoint } from '../../types'
@@ -59,7 +60,7 @@ export const TurnFileChanges = memo(function TurnFileChanges({
   changes: providedChanges,
   interaction,
   isLive = false,
-  defaultOpen = true,
+  defaultOpen = false,
   workspacePath,
   onOpenArtifact,
   onOpenReview,
@@ -71,7 +72,7 @@ export const TurnFileChanges = memo(function TurnFileChanges({
     () => providedChanges ?? parseFileChangesFromProgress(progress ?? EMPTY_AGENT_PROGRESS),
     [providedChanges, progress],
   )
-  const [isOpen] = useState(defaultOpen)
+  const [isOpen, setIsOpen] = useState(defaultOpen)
   const [showAll, setShowAll] = useState(false)
   const [openFileDiffs, setOpenFileDiffs] = useState<Record<string, boolean>>({})
 
@@ -91,7 +92,7 @@ export const TurnFileChanges = memo(function TurnFileChanges({
   if (createdCount > 0 && modifiedCount === 0) {
     summaryLabel = `${createdCount} ${createdCount === 1 ? 'file created' : 'files created'}`
   } else if (createdCount > 0 && modifiedCount > 0) {
-    summaryLabel = `${createdCount} created, ${modifiedCount} modified`
+    summaryLabel = `${changes.length} ${changes.length === 1 ? 'file changed' : 'files changed'}`
   } else {
     summaryLabel = `${changes.length} ${changes.length === 1 ? 'file changed' : 'files changed'}`
   }
@@ -145,29 +146,54 @@ export const TurnFileChanges = memo(function TurnFileChanges({
 
   const renderChangesList = () => (
     <div className="file-changes-list" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {commonDir && (
+        <div className="file-changes-common-dir" title={commonDir}>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+          <span className="file-changes-common-dir-text">{commonDir}</span>
+        </div>
+      )}
+
       {visibleChanges.map((change) => {
         const isDiffOpen = Boolean(openFileDiffs[change.path])
-        const normalized = change.path.replace(/\\/g, '/')
-        let relativePath = normalized
-        if (commonDir && (normalized === commonDir || normalized.startsWith(commonDir + '/'))) {
-          relativePath = normalized.slice(commonDir.length + 1)
+        const fileName = change.path.split('/').pop() || change.path
+        let subDir = ''
+        let dirPath = ''
+
+        if (commonDir && change.path.startsWith(commonDir)) {
+          const remainder = change.path.slice(commonDir.length).replace(/^\//, '')
+          const parts = remainder.split('/')
+          if (parts.length > 1) {
+            subDir = parts.slice(0, parts.length - 1).join('/')
+          }
+        } else {
+          const slashIdx = change.path.lastIndexOf('/')
+          if (slashIdx !== -1) {
+            dirPath = change.path.substring(0, slashIdx)
+          }
         }
-        const fileName = relativePath.split('/').pop() || relativePath
-        const subDir = relativePath.includes('/') ? relativePath.substring(0, relativePath.lastIndexOf('/')) : ''
-        const dirPath = !commonDir && change.path.includes('/') ? change.path.substring(0, change.path.lastIndexOf('/')) : ''
 
         return (
           <div
             key={change.path}
             className="file-changes-item"
-            draggable
+            draggable="true"
             data-path={change.path}
-            onDragStart={(event) => {
-              event.stopPropagation()
-              setWorkspaceDragData(event.dataTransfer, {
+            onDragStart={(e) => {
+              setWorkspaceDragData(e, {
                 path: change.path,
                 name: fileName,
-                root: workspacePath,
                 kind: isImageFileName(change.path) ? 'image' : 'file',
               })
             }}
@@ -226,30 +252,35 @@ export const TurnFileChanges = memo(function TurnFileChanges({
                   <button
                     type="button"
                     className="file-changes-mention-btn"
+                    title={`Reference ${change.path} in chat composer`}
+                    aria-label={`Reference ${fileName} in chat composer`}
                     onClick={(e) => {
                       e.stopPropagation()
                       onReferenceFile(change.path)
                     }}
-                    title={`Reference in chat: ${fileName}`}
-                    aria-label={`Reference ${fileName} in chat`}
                   >
-                    <span aria-hidden="true">@</span>
-                    <span>Reference in chat</span>
+                    @ Reference in chat
                   </button>
                 )}
                 {onOpenArtifact && (
                   <button
                     type="button"
                     className="file-changes-preview-btn"
+                    title={`Preview ${fileName}`}
                     onClick={(e) => {
                       e.stopPropagation()
-                      const fallbackContent =
-                        change.created && change.hunks.length > 0
-                          ? change.hunks.map((h) => h.newText).filter(Boolean).join('\n')
-                          : undefined
-                      onOpenArtifact({ path: change.path, content: fallbackContent })
+                      onOpenArtifact({
+                        id: `artifact-file-${change.path}`,
+                        name: fileName,
+                        relativePath: change.path,
+                        path: workspacePath ? `${workspacePath.replace(/\/$/, '')}/${change.path.replace(/^\//, '')}` : change.path,
+                        mimeType: 'text/plain',
+                        size: 0,
+                        updatedAt: Date.now(),
+                        tags: ['file'],
+                        source: 'turn_file_change',
+                      })
                     }}
-                    title="Open Live Preview Split View"
                   >
                     Preview
                   </button>
@@ -337,100 +368,32 @@ export const TurnFileChanges = memo(function TurnFileChanges({
     </div>
   )
 
-  if (isLive) {
-    return (
-      <div className="message ai-message agent-activity-message" style={{ marginTop: '4px', marginBottom: '8px' }}>
-        <div className="agent-activity-card file-changes-card">
-          <div className="file-changes-summary-row">
-            <div className="file-changes-summary">
-              <span className="file-changes-summary-icon" aria-hidden="true">
-                ✓
-              </span>
-              <span className="file-changes-summary-copy">
-                <div className="file-changes-summary-heading">
-                  <span className="file-changes-summary-label">{summaryLabel}</span>
-                  <span className="file-changes-summary-counts">
-                    {totalAdditions > 0 && <span className="file-changes-count-add">+{totalAdditions}</span>}
-                    {totalDeletions > 0 && <span className="file-changes-count-del">-{totalDeletions}</span>}
-                  </span>
-                </div>
-                {commonDir && (
-                  <span className="file-changes-common-dir" title={commonDir}>
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                    </svg>
-                    <span className="file-changes-common-dir-text">{commonDir}</span>
-                  </span>
-                )}
-              </span>
-            </div>
-            {onOpenReview && (
-              <button
-                type="button"
-                className="file-changes-review-btn"
-                title="Review changed code"
-                onClick={onOpenReview}
-              >
-                Review
-              </button>
-            )}
-          </div>
-
-          {isOpen && (
-            <div className="file-changes-list-container" style={{ marginTop: '8px' }}>
-              {renderChangesList()}
-            </div>
-          )}
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="file-changes-summary-container">
+    <div className={`file-changes-summary-container ${isLive ? 'is-live' : ''}`}>
       <div className="agent-activity-card file-changes-card">
-        <div className="file-changes-summary-row">
-          <div className="file-changes-summary">
-            <span className="file-changes-summary-icon" aria-hidden="true">
-              ⊞
+        <div className={`file-changes-summary-row ${isOpen ? 'is-open' : ''}`}>
+          <div
+            className="file-changes-summary-toggle"
+            onClick={() => setIsOpen((prev) => !prev)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setIsOpen((prev) => !prev)
+              }
+            }}
+          >
+            <span className="file-changes-summary-label">{summaryLabel}</span>
+            <span className="file-changes-summary-counts">
+              {totalAdditions > 0 && <span className="file-changes-count-add">+{totalAdditions}</span>}
+              {totalDeletions > 0 && <span className="file-changes-count-del">-{totalDeletions}</span>}
             </span>
-            <span className="file-changes-summary-copy">
-              <div className="file-changes-summary-heading">
-                <span className="file-changes-summary-label">{summaryLabel}</span>
-                <span className="file-changes-summary-counts">
-                  {totalAdditions > 0 && <span className="file-changes-count-add">+{totalAdditions}</span>}
-                  {totalDeletions > 0 && <span className="file-changes-count-del">-{totalDeletions}</span>}
-                </span>
-              </div>
-              {commonDir && (
-                <span className="file-changes-common-dir" title={commonDir}>
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                  </svg>
-                  <span className="file-changes-common-dir-text">{commonDir}</span>
-                </span>
-              )}
-            </span>
+            <ChevronRight
+              size={13}
+              className={`file-changes-chevron ${isOpen ? 'is-open' : ''}`}
+              aria-hidden="true"
+            />
           </div>
           <div className="file-changes-summary-actions">
             {onRewindRequest && (
@@ -440,20 +403,8 @@ export const TurnFileChanges = memo(function TurnFileChanges({
                 onClick={handleRewind}
                 title="Rewind workspace to before these file edits (Git Checkpoint)"
               >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polyline points="1 4 7 4 7 10" />
-                  <path d="M3 9a9 9 0 1 0 2.13-5.36L1 7" />
-                </svg>
-                Undo
+                <RotateCcw size={12} aria-hidden="true" />
+                <span>Undo</span>
               </button>
             )}
             {onOpenReview && (
@@ -463,7 +414,8 @@ export const TurnFileChanges = memo(function TurnFileChanges({
                 title="Review changed code"
                 onClick={onOpenReview}
               >
-                Review
+                <Files size={13} aria-hidden="true" />
+                <span>Review</span>
               </button>
             )}
           </div>

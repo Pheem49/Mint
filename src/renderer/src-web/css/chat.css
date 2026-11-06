@@ -120,8 +120,10 @@
   align-items: flex-start;
 }
 
-/* Activity dashboards need the chat column, not the reply text's intrinsic width. */
+/* Activity dashboards & file changes need the full chat column, not the reply text's intrinsic width. */
 .message.ai-message:has(.agent-activity-history),
+.message.ai-message:has(.file-changes-summary-container),
+.message.ai-message:has(.file-changes-card),
 .message.ai-message.agent-activity-message {
   align-self: stretch;
   width: 100%;
@@ -131,6 +133,8 @@
   z-index: 30;
 }
 .message.ai-message:has(.agent-activity-history) > .bubble-wrapper,
+.message.ai-message:has(.file-changes-summary-container) > .bubble-wrapper,
+.message.ai-message:has(.file-changes-card) > .bubble-wrapper,
 .agent-activity-history { width: 100%; }
 
 .message-time {
@@ -1142,12 +1146,110 @@
   border-color: color-mix(in srgb, var(--status-error, #ef4444) 50%, transparent);
 }
 
+.file-changes-summary-container {
+  width: 100%;
+  align-self: stretch;
+  margin: 6px 0;
+  box-sizing: border-box;
+}
+
 .file-changes-card {
-  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border)) !important;
+  width: 100% !important;
+  border: 1px solid var(--border) !important;
   border-radius: var(--radius-md, 8px) !important;
-  padding: 10px !important;
-  background: var(--surface-bg, #1e1e20) !important;
+  padding: 0 !important;
+  background: var(--bg-surface-raised, #18181b) !important;
   margin-top: 4px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.file-changes-summary-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 6px 14px;
+  box-sizing: border-box;
+}
+
+.file-changes-summary-row.is-open {
+  border-bottom: 1px solid var(--border);
+}
+
+.file-changes-summary-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  min-width: 0;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: var(--radius-xs, 4px);
+  transition: opacity 0.15s ease;
+}
+
+.file-changes-summary-toggle:hover {
+  opacity: 0.9;
+}
+
+.file-changes-summary-label {
+  color: var(--text-main, #f1f5f9);
+  font-size: 0.88rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.file-changes-summary-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.file-changes-chevron {
+  color: var(--text-muted, #94a3b8);
+  transition: transform 0.18s ease;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.file-changes-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.file-changes-summary-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.file-changes-review-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: color-mix(in srgb, var(--text-main) 6%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-main, #f1f5f9);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 4px 10px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.file-changes-review-btn:hover {
+  background: color-mix(in srgb, var(--text-main) 12%, transparent);
+  border-color: var(--border-light, var(--border));
 }
 
 .file-changes-item {
