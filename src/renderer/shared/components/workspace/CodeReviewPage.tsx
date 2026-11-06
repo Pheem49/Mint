@@ -13,6 +13,7 @@ import {
   folderIcon,
   documentIcon,
 } from '../../utils/fileIcons'
+import { tokenizeLine } from '../../utils/syntaxHighlight'
 import '../../css/code-review.css'
 
 export function undoDescription(entry: WorkspaceHistoryEntry) {
@@ -602,25 +603,52 @@ export default function CodeReviewPage({
               <div className="code-review-code-container">
                 {selectedChange.hunks && selectedChange.hunks.length > 0 ? (
                   selectedChange.hunks.map((hunk, hunkIdx) => {
+                    const fileExt = getExtension(selectedChange.path)
                     const oldLines = diffLines(hunk.oldText)
                     const newLines = diffLines(hunk.newText)
                     let lineCounter = 1
                     return (
                       <div className="code-review-hunk-block" key={`${selectedChange.path}-hunk-${hunkIdx}`}>
-                        {oldLines.map((line, idx) => (
-                          <div className="code-review-line is-del" key={`del-${idx}`}>
-                            <span className="code-review-gutter">{lineCounter++}</span>
-                            <span className="code-review-sign">−</span>
-                            <code className="code-review-code-text">{line || ' '}</code>
-                          </div>
-                        ))}
-                        {newLines.map((line, idx) => (
-                          <div className="code-review-line is-add" key={`add-${idx}`}>
-                            <span className="code-review-gutter">{lineCounter++}</span>
-                            <span className="code-review-sign">+</span>
-                            <code className="code-review-code-text">{line || ' '}</code>
-                          </div>
-                        ))}
+                        {oldLines.map((line, idx) => {
+                          const tokens = tokenizeLine(line, fileExt)
+                          return (
+                            <div className="code-review-line is-del" key={`del-${idx}`}>
+                              <span className="code-review-gutter">{lineCounter++}</span>
+                              <span className="code-review-sign">−</span>
+                              <code className="code-review-code-text">
+                                {tokens.length === 0 ? (
+                                  ' '
+                                ) : (
+                                  tokens.map((tok, tIdx) => (
+                                    <span key={tIdx} className={tok.type}>
+                                      {tok.text}
+                                    </span>
+                                  ))
+                                )}
+                              </code>
+                            </div>
+                          )
+                        })}
+                        {newLines.map((line, idx) => {
+                          const tokens = tokenizeLine(line, fileExt)
+                          return (
+                            <div className="code-review-line is-add" key={`add-${idx}`}>
+                              <span className="code-review-gutter">{lineCounter++}</span>
+                              <span className="code-review-sign">+</span>
+                              <code className="code-review-code-text">
+                                {tokens.length === 0 ? (
+                                  ' '
+                                ) : (
+                                  tokens.map((tok, tIdx) => (
+                                    <span key={tIdx} className={tok.type}>
+                                      {tok.text}
+                                    </span>
+                                  ))
+                                )}
+                              </code>
+                            </div>
+                          )
+                        })}
                       </div>
                     )
                   })
