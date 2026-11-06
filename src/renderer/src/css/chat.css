@@ -124,6 +124,8 @@
 .message.ai-message:has(.agent-activity-history),
 .message.ai-message:has(.file-changes-summary-container),
 .message.ai-message:has(.file-changes-card),
+.message.ai-message:has(.chat-artifact-cards),
+.message.ai-message:has(.chat-artifact-card),
 .message.ai-message.agent-activity-message {
   align-self: stretch;
   width: 100%;
@@ -135,6 +137,8 @@
 .message.ai-message:has(.agent-activity-history) > .bubble-wrapper,
 .message.ai-message:has(.file-changes-summary-container) > .bubble-wrapper,
 .message.ai-message:has(.file-changes-card) > .bubble-wrapper,
+.message.ai-message:has(.chat-artifact-cards) > .bubble-wrapper,
+.message.ai-message:has(.chat-artifact-card) > .bubble-wrapper,
 .agent-activity-history { width: 100%; }
 
 .message-time {
@@ -415,6 +419,26 @@
   box-shadow: var(--glow-accent-md), inset 1px 1px 0 rgba(255, 255, 255, 0.2);
 }
 
+.chat-attached-document-card {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.user-message .chat-attached-document-card {
+  background: color-mix(in srgb, rgba(0, 0, 0, 0.38) 85%, var(--surface-bg, #18181b));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.user-message .chat-attached-document-card:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.chat-attached-document-toggle-action:hover {
+  filter: brightness(1.15);
+}
+
 .ai-message {
   transform-origin: bottom left;
 }
@@ -429,6 +453,7 @@
   box-shadow: none;
   color: var(--text-chat, var(--text-main));
   padding: 0; /* keep spacing handled by wrapper */
+  width: 100%;
 }
 
 .message.ai-message.thinking-message .message-bubble {
@@ -2734,6 +2759,7 @@ input:checked + .slider:before {
   box-shadow: none !important;
   border-radius: 0 !important;
   padding: 0 !important;
+  width: 100%;
 }
 
 .input-area {

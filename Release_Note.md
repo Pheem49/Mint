@@ -1,5 +1,12 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Collapsible Document Attachment Cards & Rich File Mentions (CLI, Desktop, and Web)
+- **Collapsible Attached Document Card in User Messages**: Dropping text, markdown, or code documents into the chat composer no longer dumps hundreds of lines of raw text and backend prompt instructions into the user message bubble. Instead, the user bubble cleanly separates authentic prompt text from the attachment, rendering a sleek, collapsed **Attached Document Card** with genuine language/file icons, line counts, and a smooth `[View content ▾]` accordion viewer with one-click copy.
+- **Rich File Mention Chips in Message Stream**: Mentions referencing files (e.g. `@generate_harness_pdf.py` or `@src/app.tsx`) in the message stream now render as clean, modern file tag chips with dedicated Material Icon Theme language icons (Python, TypeScript, Rust, JSON, etc.) and stripped `@` prefixes (matching Cursor / VS Code style), while non-file mentions (e.g. `@web`, `@agent`) preserve their standard badge formatting.
+- **Full-Width Artifact & Document Stretch**: Fixed artifact cards (PDF / PPTX presentations) and tool result containers to stretch across the full chat column width, matching `TurnFileChanges` without shrink-wrapping to the reply text width.
+- **TUI Cleanliness & Parity**: Full-Screen TUI (`mint-cli`) automatically condenses document attachments in the transcript to single-line notices (`[Attached document: <filename> (<N> lines)]`) and pre-fills `/edit` and `/retry` drafts with clean prompt text, preventing giant file dumps in terminal buffers.
+- **Full Platform Parity**: Maintained 100% parity across Desktop UI (`src/renderer/src`), Web UI (`src/renderer/src-web`), and CLI (`crates/mint-cli`), backed by automated Vitest and Cargo test suites.
+
 ## Modern Developer-Centric Activity Timeline (CLI, Desktop, and Web)
 - **Developer-Centric Semantic Timeline**: Replaced the rigid boxed table layout in `AgentActivityTable` with a sleek, borderless semantic timeline inspired by modern AI coding assistants (Claude Code / Cursor / Copilot).
 - **Elapsed Duration & Natural Action Header**: The activity drawer header now displays dynamic, human-readable execution status (e.g. `Worked for 2m 14s ⌄` or `Working...`) alongside an aggregated action summary (e.g. `Explored files, ran commands, edited files`), giving users immediate high-level context of agent work at a glance.

@@ -104,7 +104,17 @@ export const ArtifactCards = memo(function ArtifactCards({
   if (artifacts.length === 0) return null
 
   return (
-    <div className="chat-artifact-cards" style={{ display: 'flex', flexDirection: 'column', gap: '8px', margin: '8px 0 12px' }}>
+    <div
+      className="chat-artifact-cards"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+        margin: '8px 0 12px',
+        width: '100%',
+        boxSizing: 'border-box',
+      }}
+    >
       {artifacts.map((art) => {
         const isPdf = art.name.toLowerCase().endsWith('.pdf')
         const badgeText = isPdf ? 'PDF' : 'PPTX'
@@ -134,6 +144,8 @@ export const ArtifactCards = memo(function ArtifactCards({
               boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
               gap: '12px',
               cursor: 'grab',
+              width: '100%',
+              boxSizing: 'border-box',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>

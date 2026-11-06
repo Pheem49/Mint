@@ -64,5 +64,6 @@ describe('ArtifactCards', () => {
       />
     )
     expect(html).toMatch(/class="chat-artifact-card[^"]*"[^>]*draggable="true"/)
+    expect(html).toContain('width:100%')
   })
 })

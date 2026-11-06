@@ -12,6 +12,8 @@ import SourcesBlock from './SourcesBlock'
 import { TurnFileChanges, type RewindRequestPayload } from './TurnFileChanges'
 import { ToolResultCards } from '../cards/ToolResultCards'
 import { ArtifactCards } from './ArtifactCards'
+import { AttachedDocumentCard } from './AttachedDocumentCard'
+import { parseAttachedDocument } from '../../utils/attachedDocument'
 import ProviderBrandIcon from '../ui/ProviderBrandIcon'
 
 export interface ChatMessageItemProps {
@@ -58,9 +60,13 @@ const ChatMessageItem = React.memo(
     const [draftText, setDraftText] = useState(interaction.userText || '')
     const inlineTextareaRef = useRef<HTMLTextAreaElement | null>(null)
 
-    useEffect(() => {
-      setDraftText(interaction.userText || '')
+    const parsedUserPrompt = useMemo(() => {
+      return parseAttachedDocument(interaction.userText)
     }, [interaction.userText])
+
+    useEffect(() => {
+      setDraftText(parsedUserPrompt.userText || '')
+    }, [parsedUserPrompt.userText])
 
     const resizeInlineTextarea = useCallback((el: HTMLTextAreaElement) => {
       el.style.height = 'auto'
@@ -69,7 +75,7 @@ const ChatMessageItem = React.memo(
 
     const handleStartEdit = useCallback(() => {
       setIsEditing(true)
-      setDraftText(interaction.userText || '')
+      setDraftText(parsedUserPrompt.userText || '')
       requestAnimationFrame(() => {
         if (inlineTextareaRef.current) {
           inlineTextareaRef.current.focus()
@@ -78,12 +84,12 @@ const ChatMessageItem = React.memo(
           resizeInlineTextarea(inlineTextareaRef.current)
         }
       })
-    }, [interaction.userText, resizeInlineTextarea])
+    }, [parsedUserPrompt.userText, resizeInlineTextarea])
 
     const handleCancelEdit = useCallback(() => {
       setIsEditing(false)
-      setDraftText(interaction.userText || '')
-    }, [interaction.userText])
+      setDraftText(parsedUserPrompt.userText || '')
+    }, [parsedUserPrompt.userText])
 
     const handleSaveAndResend = useCallback(() => {
       const trimmed = draftText.trim()
@@ -100,8 +106,14 @@ const ChatMessageItem = React.memo(
 
     const memoizedUserContent = useMemo(() => {
       if (!interaction.userText) return null
-      return <FormattedMessage text={interaction.userText} />
-    }, [interaction.userText])
+      const { userText, attachedDocument } = parsedUserPrompt
+      return (
+        <>
+          {userText && <FormattedMessage text={userText} />}
+          {attachedDocument && <AttachedDocumentCard document={attachedDocument} />}
+        </>
+      )
+    }, [interaction.userText, parsedUserPrompt])
 
     const progress = agentActivitySnapshots[String(interaction.id)] ?? interaction.agentActivity ?? EMPTY_AGENT_PROGRESS
     const webSources = useMemo(() => parseWebSearchSources(progress), [progress])
@@ -187,7 +199,7 @@ const ChatMessageItem = React.memo(
                     <button
                       type="button"
                       className={`msg-action-btn copy-btn ${isUserCopied ? 'is-copied' : ''}`}
-                      onClick={() => handleCopyMessage(`user-${interaction.id}`, interaction.userText)}
+                      onClick={() => handleCopyMessage(`user-${interaction.id}`, parsedUserPrompt.userText || interaction.userText)}
                       title={isUserCopied ? 'Copied!' : 'Copy'}
                     >
                       {renderCopyIcon(isUserCopied)}

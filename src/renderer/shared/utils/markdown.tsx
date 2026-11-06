@@ -20,6 +20,7 @@ const UiGridCard = lazy(() => import('../components/cards/UiGridCard'))
 const UiFeatureCard = lazy(() => import('../components/cards/UiFeatureCard'))
 const UiMockupWidget = lazy(() => import('../components/cards/UiMockupWidget'))
 import { ReleaseNotesCard } from '../components/cards/ReleaseNotesCard'
+import { materialFileIcon, getExtension } from './fileIcons'
 import {
   Info,
   Lightbulb,
@@ -216,6 +217,47 @@ function highlightMentions(node: ReactNode, keyPrefix = 'm'): ReactNode {
     return parts.map((part, i) => {
       if (i % 2 === 1) {
         if (part.startsWith('@')) {
+          const rawName = part.slice(1)
+          const ext = getExtension(rawName)
+          if (ext) {
+            const iconUrl = materialFileIcon(rawName, ext)
+            return (
+              <span
+                key={`${keyPrefix}-${i}`}
+                className="chat-mention chat-file-mention"
+                title={rawName}
+              >
+                {iconUrl ? (
+                  <img
+                    src={iconUrl}
+                    alt=""
+                    width="13"
+                    height="13"
+                    style={{ width: 13, height: 13, flexShrink: 0, objectFit: 'contain' }}
+                    aria-hidden="true"
+                    draggable={false}
+                  />
+                ) : (
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ flexShrink: 0 }}
+                    aria-hidden="true"
+                  >
+                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                )}
+                <span>{rawName}</span>
+              </span>
+            )
+          }
           return (
             <span key={`${keyPrefix}-${i}`} className="chat-mention">
               {part}

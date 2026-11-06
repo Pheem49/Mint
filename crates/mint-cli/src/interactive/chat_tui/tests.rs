@@ -433,6 +433,19 @@ mod dialog_tests {
     }
 
     #[test]
+    fn attached_document_in_user_prompt_is_condensed_in_tui_transcript() {
+        let raw = "@generate_harness_pdf.py ขอปรับหน่อยอะ\n\nAttached document: LICENSE.txt\nUse the extracted document text below when answering.\n\n--- Extracted document text ---\nLine 1\nLine 2\nLine 3\n--- End extracted document text ---";
+        let formatted = super::state::format_user_transcript_text(raw);
+        assert!(formatted.contains("@generate_harness_pdf.py ขอปรับหน่อยอะ"));
+        assert!(formatted.contains("[Attached document: LICENSE.txt (3 lines)]"));
+        assert!(!formatted.contains("Use the extracted document text below when answering."));
+        assert!(!formatted.contains("Line 1\nLine 2\nLine 3"));
+
+        let clean = super::state::clean_user_prompt(raw);
+        assert_eq!(clean, "@generate_harness_pdf.py ขอปรับหน่อยอะ");
+    }
+
+    #[test]
     fn sent_user_message_background_covers_wrapped_text_at_terminal_width() {
         let mut state = ChatViewState::default();
         state.transcript.push(TranscriptEntry::new(

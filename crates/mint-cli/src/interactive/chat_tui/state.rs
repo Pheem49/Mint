@@ -979,8 +979,9 @@ impl ChatViewState {
     }
 
     pub(super) fn append_interaction_row(&mut self, row: &mint_core::InteractionMemory) {
+        let user_display = format_user_transcript_text(&row.user_text);
         self.transcript
-            .push(TranscriptEntry::new(TranscriptRole::User, &row.user_text));
+            .push(TranscriptEntry::new(TranscriptRole::User, user_display));
         let sources = self.push_saved_activity(row.agent_activity.as_ref(), &row.status);
         match row.status.as_str() {
             "completed" => {
@@ -1480,7 +1481,7 @@ impl ChatViewState {
         if let Some(last) = rows.last() {
             let turn_num = rows.len();
             self.editing_turn = Some((last.id, turn_num));
-            self.set_draft(last.user_text.clone());
+            self.set_draft(clean_user_prompt(&last.user_text));
             self.cursor = self.composer.len();
             self.set_notice(format!(
                 "[Mode: Edit Turn #{} — Resending will replace this turn and clear its previous response | Esc to cancel]",
@@ -1656,5 +1657,44 @@ impl ChatViewState {
             side_panel_open: self.mods_open,
             ..Default::default()
         }
+    }
+}
+
+pub(crate) fn format_user_transcript_text(raw: &str) -> String {
+    if let Some(doc_idx) = raw.find("Attached document:") {
+        let prefix = raw[..doc_idx].trim();
+        let rest = &raw[doc_idx..];
+        let filename = rest
+            .strip_prefix("Attached document:")
+            .and_then(|s| s.lines().next())
+            .map(|s| s.trim())
+            .unwrap_or("document");
+
+        let line_count = if let Some(start_extract) = rest.find("--- Extracted document text ---\n") {
+            let content_start = start_extract + "--- Extracted document text ---\n".len();
+            if let Some(end_extract) = rest[content_start..].find("\n--- End extracted document text ---") {
+                rest[content_start..content_start + end_extract].lines().count()
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
+        if prefix.is_empty() {
+            format!("[Attached document: {filename} ({line_count} lines)]")
+        } else {
+            format!("{prefix}\n\n[Attached document: {filename} ({line_count} lines)]")
+        }
+    } else {
+        raw.to_string()
+    }
+}
+
+pub(crate) fn clean_user_prompt(raw: &str) -> String {
+    if let Some(doc_idx) = raw.find("Attached document:") {
+        raw[..doc_idx].trim().to_string()
+    } else {
+        raw.to_string()
     }
 }

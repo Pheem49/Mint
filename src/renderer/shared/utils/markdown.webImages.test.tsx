@@ -160,4 +160,19 @@ describe('web search image links', () => {
     expect(html).toContain('/api/proxy-image?url=https%3A%2F%2Fpbs.twimg.com%2Fprofile_banners%2F1366430884698546176%2F1684330404%2F1500x500')
     expect(html).toContain('alt="Banner Image"')
   })
+
+  it('renders file mention with material icon and strips @ symbol', () => {
+    const html = renderToStaticMarkup(renderFormattedMessage('ดูไฟล์ @generate_harness_pdf.py ให้หน่อย'))
+    expect(html).toContain('class="chat-mention chat-file-mention"')
+    expect(html).toContain('generate_harness_pdf.py')
+    expect(html).not.toContain('@generate_harness_pdf.py')
+  })
+
+  it('preserves @ for non-file mentions like @web or @agent', () => {
+    const html = renderToStaticMarkup(renderFormattedMessage('ถาม @agent หรือค้น @web'))
+    expect(html).toContain('class="chat-mention"')
+    expect(html).toContain('@agent')
+    expect(html).toContain('@web')
+    expect(html).not.toContain('chat-file-mention')
+  })
 })
