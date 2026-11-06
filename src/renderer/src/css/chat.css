@@ -4571,7 +4571,7 @@ input:checked + .slider:before {
 }
 
 .modern-activity-duration {
-  font-size: 0.82rem;
+  font-size: 0.96rem;
   font-weight: 500;
   color: var(--text-soft);
   letter-spacing: -0.01em;
@@ -4581,7 +4581,7 @@ input:checked + .slider:before {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.78rem;
+  font-size: 0.92rem;
   color: var(--text-muted);
   user-select: none;
   padding: 1px 2px;
@@ -4594,7 +4594,7 @@ input:checked + .slider:before {
 }
 
 .modern-activity-natural-summary {
-  font-size: 0.78rem;
+  font-size: 0.92rem;
   color: var(--text-muted);
 }
 
@@ -4617,7 +4617,7 @@ input:checked + .slider:before {
 .modern-activity-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   padding-top: 4px;
 }
 
@@ -4638,11 +4638,12 @@ input:checked + .slider:before {
 .modern-timeline-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 24px;
-  padding: 2px 6px;
+  gap: 9px;
+  min-height: 28px;
+  padding: 3px 6px;
   border-radius: var(--radius-xs, 4px);
-  font-size: 0.78rem;
+  font-size: 0.94rem;
+  line-height: 1.45;
   color: var(--text-soft);
   transition: background 0.12s ease, color 0.12s ease;
   user-select: none;
@@ -4661,8 +4662,8 @@ input:checked + .slider:before {
 .modern-group-row {
   border: none !important;
   background: transparent !important;
-  min-height: 24px !important;
-  padding: 2px 6px !important;
+  min-height: 28px !important;
+  padding: 3px 6px !important;
   box-shadow: none !important;
   border-radius: var(--radius-xs, 4px) !important;
 }
@@ -4675,19 +4676,19 @@ input:checked + .slider:before {
 }
 
 .modern-timeline-verb {
-  font-size: 0.76rem;
+  font-size: 0.92rem;
   font-weight: 500;
   color: var(--text-muted);
   flex-shrink: 0;
-  min-width: 58px;
+  min-width: 68px;
 }
 
 .modern-timeline-icon-wrap {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 15px;
-  height: 15px;
+  width: 17px;
+  height: 17px;
   flex-shrink: 0;
 }
 
@@ -4700,13 +4701,14 @@ input:checked + .slider:before {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 0.94rem;
   font-weight: 450;
   color: var(--text-main);
 }
 
 .modern-timeline-line-range {
   font-family: var(--font-mono, monospace);
-  font-size: 0.72rem;
+  font-size: 0.85rem;
   color: var(--text-muted);
   margin-left: 2px;
   flex-shrink: 0;
@@ -4715,9 +4717,9 @@ input:checked + .slider:before {
 .modern-timeline-diff-stats {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   font-family: var(--font-mono, monospace);
-  font-size: 0.72rem;
+  font-size: 0.88rem;
   font-weight: 500;
   margin-left: 6px;
   flex-shrink: 0;
@@ -4743,10 +4745,10 @@ input:checked + .slider:before {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 5px;
-  min-width: 16px;
-  height: 16px;
-  font-size: 0.68rem;
+  padding: 0 6px;
+  min-width: 18px;
+  height: 18px;
+  font-size: 0.74rem;
   font-weight: 600;
   border-radius: 9999px;
   background: color-mix(in srgb, var(--panel-soft) 70%, transparent);
@@ -4779,27 +4781,27 @@ input:checked + .slider:before {
 }
 
 .modern-timeline-thought-label {
-  font-size: 0.76rem;
+  font-size: 0.92rem;
   color: var(--text-muted);
   font-weight: 500;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
 
 .modern-activity-list .agent-activity-thought-body,
 .modern-thought-body {
   margin-left: 14px !important;
-  margin-top: 2px !important;
+  margin-top: 3px !important;
   margin-bottom: 6px !important;
-  padding: 4px 10px 4px 12px !important;
+  padding: 4px 10px 4px 14px !important;
   border: none !important;
   background: transparent !important;
   border-left: 2px solid color-mix(in srgb, var(--text-muted) 35%, transparent) !important;
   border-radius: 0 !important;
   color: var(--text-muted) !important;
-  font-size: 0.78rem !important;
-  line-height: 1.45;
+  font-size: 0.90rem !important;
+  line-height: 1.5;
 }
 
 .modern-timeline-output {
@@ -4809,7 +4811,7 @@ input:checked + .slider:before {
   border-radius: var(--radius-xs, 4px);
   border: 1px solid var(--border);
   font-family: var(--font-mono, monospace);
-  font-size: 0.74rem;
+  font-size: 0.84rem;
   max-height: 250px;
   overflow-y: auto;
 }

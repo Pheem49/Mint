@@ -54,24 +54,24 @@ function renderActivityIcon(kind: AgentActivity['kind'], target: string, action?
     const ext = getExtension(filename)
     const icon = materialFileIcon(filename, ext)
     if (icon) return <img src={icon} alt="" draggable={false} className="agent-activity-icon-img" />
-    return <FileCode size={14} className="agent-activity-kind-icon" />
+    return <FileCode size={16} className="agent-activity-kind-icon" />
   }
   if (kind === 'folder') {
     const foldername = getFilename(target)
     const icon = materialFolderIcon(foldername, false)
     if (icon) return <img src={icon} alt="" draggable={false} className="agent-activity-icon-img" />
-    return <Folder size={14} className="agent-activity-kind-icon" />
+    return <Folder size={16} className="agent-activity-kind-icon" />
   }
   if (kind === 'calc' || action === 'calculation') {
-    return <Calculator size={14} className="agent-activity-kind-icon" />
+    return <Calculator size={16} className="agent-activity-kind-icon" />
   }
   if (kind === 'search') {
-    return <Search size={14} className="agent-activity-kind-icon" />
+    return <Search size={16} className="agent-activity-kind-icon" />
   }
   if (kind === 'terminal') {
-    return <Terminal size={14} className="agent-activity-kind-icon" />
+    return <Terminal size={16} className="agent-activity-kind-icon" />
   }
-  return <Wrench size={14} className="agent-activity-kind-icon" />
+  return <Wrench size={16} className="agent-activity-kind-icon" />
 }
 
 function extractResultPreview(action: string | undefined, result: string | undefined): string | null {
@@ -96,7 +96,7 @@ function extractResultPreview(action: string | undefined, result: string | undef
 
 function renderStatusIndicator(state: AgentActivity['state']) {
   if (state === 'active') {
-    return <Loader2 size={12} className="agent-activity-status-spin" />
+    return <Loader2 size={13} className="agent-activity-status-spin" />
   }
   if (state === 'retry') {
     return <span className="agent-activity-badge retry" title="Encountered an error but agent retried">Retried</span>
@@ -104,7 +104,7 @@ function renderStatusIndicator(state: AgentActivity['state']) {
   if (state === 'error') {
     return <span className="agent-activity-badge error" title="Action failed">Failed</span>
   }
-  return <Check size={12} className="agent-activity-status-check" />
+  return <Check size={13} className="agent-activity-status-check" />
 }
 
 export function AgentActivityTable({ activityView, progress, chatId, workspacePath, onReferenceFile, onOpenArtifact }: Props) {
