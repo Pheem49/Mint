@@ -1764,7 +1764,7 @@ export default function MintDashboard() {
     onToggleMobileSidebar: () => setMobileSidebarOpen(!mobileSidebarOpen),
     onBackToCode: () => changeView('code'),
     onOpenArtifact: openArtifactSurface,
-    onOpenReview: isDesktopApp ? openReviewSurface : undefined,
+    onOpenReview: openReviewSurface,
     onRemoveQueuedPrompt: conversationActions.removeQueuedPrompt,
     onEditQueuedPrompt: conversationActions.editQueuedPrompt,
     onClearQueuedPrompts: conversationActions.clearQueuedPrompts,

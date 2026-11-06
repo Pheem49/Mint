@@ -385,8 +385,12 @@ export default function ChatPanel({
   })
 
   const openReview = useLatestCallback((title: string, changes: FileChange[]) => {
-    if (onOpenReview) onOpenReview({ id: `review:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: title, changes })
-    else setReviewPage({ title, changes })
+    if (onOpenReview) {
+      setReviewPage(null)
+      onOpenReview({ id: `review:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: title, changes })
+    } else {
+      setReviewPage({ title, changes })
+    }
   })
 
   const openAllConversationReview = useLatestCallback(() => {
