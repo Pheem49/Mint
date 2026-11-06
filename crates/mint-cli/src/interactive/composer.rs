@@ -156,6 +156,13 @@ mod tests {
         let chars: Vec<char> = "/res".chars().collect();
         let results = match_composer_suggestions(&chars, chars.len(), Path::new("."));
         assert!(results.iter().any(|(token, _)| token == "/resume"));
+
+        let chars_r: Vec<char> = "/r".chars().collect();
+        let results_r = match_composer_suggestions(&chars_r, chars_r.len(), Path::new("."));
+        let resume_pos = results_r.iter().position(|(t, _)| t == "/resume");
+        let retry_pos = results_r.iter().position(|(t, _)| t == "/retry");
+        assert!(resume_pos.is_some() && retry_pos.is_some());
+        assert!(resume_pos.unwrap() < retry_pos.unwrap());
     }
 
     #[test]

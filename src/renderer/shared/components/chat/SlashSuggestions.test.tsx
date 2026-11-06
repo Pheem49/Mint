@@ -18,6 +18,10 @@ describe('composer command suggestions', () => {
     const html = render('/st')
     expect(html.indexOf('>/stats<')).toBeLessThan(html.indexOf('>/mods<'))
   })
+  it('shows /resume above /retry when typing /r', () => {
+    const html = render('/r')
+    expect(html.indexOf('>/resume<')).toBeLessThan(html.indexOf('>/retry<'))
+  })
   it('keeps a command argument as a usage hint instead of unrelated search results', () => {
     const html = render('/remember a durable fact')
     expect(html).toContain('/remember')
