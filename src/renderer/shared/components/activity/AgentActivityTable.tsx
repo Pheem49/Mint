@@ -76,7 +76,11 @@ function renderActivityIcon(kind: AgentActivity['kind'], target: string, action?
 
 function extractResultPreview(action: string | undefined, result: string | undefined): string | null {
   if (!result || !result.trim() || action === 'view_image') return null
+  // Do not show inline raw text preview for file operations (filename and diff stats are already shown)
+  if (action === 'read_file' || action === 'write_file' || action === 'edit_file' || action === 'apply_patch') return null
   const firstLine = result.trim().split('\n')[0].trim()
+  // Filter out JSON brackets, objects, or errors
+  if (firstLine.startsWith('[') || firstLine.startsWith('{') || firstLine.startsWith('Error:')) return null
   if (action === 'calculation') {
     const eqIdx = firstLine.indexOf('=')
     if (eqIdx !== -1) {
@@ -84,7 +88,7 @@ function extractResultPreview(action: string | undefined, result: string | undef
       if (val.length > 0 && val.length < 30) return `→ ${val}`
     }
   }
-  if (firstLine.length > 0 && firstLine.length <= 35 && !firstLine.startsWith('Error:') && !firstLine.startsWith('{')) {
+  if (firstLine.length > 0 && firstLine.length <= 35) {
     return `→ ${firstLine}`
   }
   return null
@@ -274,6 +278,11 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
 
   const renderGroup = (group: AgentActivityGroup) => {
     const isGroupExpanded = Boolean(expandedGroups[group.id])
+    const verb =
+      group.semanticVerb ||
+      (group.action?.includes('shell') || group.action?.includes('command')
+        ? 'Ran'
+        : group.label || group.action || 'Executed')
 
     return (
       <div key={group.id} className="agent-activity-group modern-timeline-group">
@@ -282,12 +291,12 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
           data-state={group.state}
           onClick={() => toggleGroup(group.id)}
         >
-          <span className="modern-timeline-verb">{group.label || group.action}</span>
+          <span className="modern-timeline-verb">{verb}</span>
           <span className="agent-activity-group-title modern-timeline-target">
             {group.title}
           </span>
-          <span className="agent-activity-group-badges">
-            <span className="agent-activity-count-badge">
+          <span className="modern-timeline-status-col">
+            <span className="modern-timeline-count-badge">
               {group.count}
             </span>
             {renderStatusIndicator(group.state)}
@@ -339,12 +348,14 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
                     className={`agent-activity-thought-header modern-timeline-row modern-thought-row${isThoughtExpanded ? ' is-expanded' : ''}`}
                     onClick={() => toggleExpandItem(itemKey, Boolean(item.streaming))}
                   >
-                    <span className="modern-timeline-thought-label">{thoughtTitle}</span>
-                    <ChevronRight
-                      size={12}
-                      className={`modern-timeline-chevron${isThoughtExpanded ? ' is-open' : ''}`}
-                      aria-hidden="true"
-                    />
+                    <span className="modern-timeline-thought-label">
+                      {thoughtTitle}
+                      <ChevronRight
+                        size={12}
+                        className={`modern-timeline-chevron inline-chevron${isThoughtExpanded ? ' is-open' : ''}`}
+                        aria-hidden="true"
+                      />
+                    </span>
                   </div>
                   {isThoughtExpanded && (
                     <div className="agent-activity-thought-body modern-thought-body">

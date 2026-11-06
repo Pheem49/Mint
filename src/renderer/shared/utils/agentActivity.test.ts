@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeTool, activitiesFrom, generateNaturalActivitySummary, formatDurationText } from './agentActivity'
+import { describeTool, activitiesFrom, generateNaturalActivitySummary, formatDurationText, groupActivities } from './agentActivity'
 import { viewedImagesFrom } from './viewedImages'
 import { reduceLiveAgentProgress } from '../agentProgress'
 import type { AgentProgress } from '../types'
@@ -273,6 +273,17 @@ describe('modern semantic activity timeline metadata', () => {
     expect(formatDurationText(14)).toBe('14s')
     expect(formatDurationText(120)).toBe('2m')
     expect(formatDurationText(75)).toBe('1m 15s')
+  })
+
+  it('assigns semantic verbs and clean titles to grouped activities', () => {
+    const items = [
+      describeTool('run_shell', { command: 'echo 1' }),
+      describeTool('run_shell', { command: 'echo 2' }),
+    ]
+    const groups = groupActivities(items)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].semanticVerb).toBe('Ran')
+    expect(groups[0].title).toBe('2 commands')
   })
 })
 

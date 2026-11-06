@@ -38,6 +38,7 @@ export interface AgentActivityGroup {
   count: number
   state: 'active' | 'done' | 'error' | 'retry'
   items: AgentActivity[]
+  semanticVerb?: string
 }
 
 export type TimelineItem =
@@ -398,6 +399,7 @@ function finalizeGroup(group: AgentActivityGroup): AgentActivityGroup {
   if (count === 1) {
     group.title = group.items[0].target
     group.state = group.items[0].state
+    group.semanticVerb = group.items[0].semanticVerb
     return group
   }
 
@@ -421,25 +423,25 @@ function finalizeGroup(group: AgentActivityGroup): AgentActivityGroup {
 
   const action = group.action
   const doneCount = group.items.filter((it) => it.state === 'done').length
-  if (action === 'calculation') {
-    group.title = group.state === 'active'
-      ? `Calculating expressions (${doneCount}/${count})`
-      : `Calculated ${count} expressions`
+  if (action === 'calculation' || action === 'calculator') {
+    group.semanticVerb = 'Calculated'
+    group.title = `${count} expressions`
   } else if (action === 'read_file') {
-    group.title = group.state === 'active'
-      ? `Reading files (${doneCount}/${count})`
-      : `Read ${count} files`
-  } else if (action === 'write_file') {
-    group.title = group.state === 'active'
-      ? `Writing files (${doneCount}/${count})`
-      : `Wrote ${count} files`
-  } else if (action === 'search_code' || action === 'semantic_search') {
-    group.title = `Searched codebase (${count} queries)`
-  } else if (action === 'web_search') {
-    group.title = `Searched web (${count} queries)`
+    group.semanticVerb = 'Analyzed'
+    group.title = group.state === 'active' ? `reading files (${doneCount}/${count})` : `${count} files`
+  } else if (action === 'write_file' || action === 'edit_file' || action === 'apply_patch') {
+    group.semanticVerb = 'Edited'
+    group.title = group.state === 'active' ? `writing files (${doneCount}/${count})` : `${count} files`
+  } else if (action === 'run_shell' || action === 'run_command' || action === 'bash') {
+    group.semanticVerb = 'Ran'
+    group.title = `${count} commands`
+  } else if (action === 'search_code' || action === 'semantic_search' || action === 'web_search') {
+    group.semanticVerb = 'Searched'
+    group.title = `${count} queries`
   } else {
+    group.semanticVerb = 'Executed'
     const readableAction = action.replaceAll('_', ' ')
-    group.title = `Executed ${count} ${readableAction}`
+    group.title = `${count} ${readableAction}`
   }
 
   return group
