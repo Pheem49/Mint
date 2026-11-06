@@ -101,13 +101,13 @@ export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({
           </svg>
         </div>
 
-        {/* View mode switcher: Grid (แนวนอน) vs List (แนวตั้ง) */}
+        {/* View mode switcher: Grid vs List */}
         <div className="management-filter-pills" style={{ display: 'inline-flex', gap: 2, padding: 3, flexShrink: 0 }}>
           <button
             type="button"
             className={`management-pill-btn ${viewMode === 'grid' ? 'active' : ''}`}
             onClick={() => handleSetViewMode('grid')}
-            title="Grid view (แนวนอน)"
+            title="Grid view"
             style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -122,7 +122,7 @@ export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({
             type="button"
             className={`management-pill-btn ${viewMode === 'list' ? 'active' : ''}`}
             onClick={() => handleSetViewMode('list')}
-            title="List view (แนวตั้ง)"
+            title="List view"
             style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

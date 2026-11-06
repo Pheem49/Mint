@@ -30,11 +30,11 @@ export default function UiMockupWidget({ data }: { data: UiMockupData }) {
 
   const title = data.title || 'App Preview'
   const subtitle = data.subtitle
-  const dropzoneText = data.dropzoneText || 'ลากไฟล์มาวางที่นี่'
-  const dropzoneHint = data.dropzoneHint || 'หรือเลือกไฟล์จากอุปกรณ์ของคุณ'
-  const buttonText = data.buttonText || 'เลือกไฟล์'
+  const dropzoneText = data.dropzoneText || 'Drag files here'
+  const dropzoneHint = data.dropzoneHint || 'or choose files from your device'
+  const buttonText = data.buttonText || 'Choose file'
   const disclaimer =
-    data.disclaimer || 'ตัวอย่างแนวคิด UI เท่านั้น ยังไม่ใช่เครื่องมือที่ประมวลผลไฟล์ได้จริง'
+    data.disclaimer || 'UI mockup preview only, not a live file processor'
 
   // Options state
   let initialOptions: Array<{ label: string; current: string; choices: string[] }> = []
