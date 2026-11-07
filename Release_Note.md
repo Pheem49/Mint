@@ -1,5 +1,12 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Native Multi-Turn Conversation Continuity (CLI, Desktop, and Web)
+- **Deep Structured Conversation History (`native_messages`)**: Fixed an architectural limitation where `native_messages` was reset to an empty list on each turn. Agent mode (`orchestrate_agent_loop`) and Plain Chat mode (`enrich_request`) now pre-populate the request's native `messages` with structured, alternating `User` and `Assistant` turns from SQLite memory (`build_conversation_history_messages`). Modern tool-calling models (Gemini, Claude, GPT, Ollama) now receive genuine multi-turn conversational context, allowing the agent to naturally follow up on prior discussion (e.g. asking for specific information previously discussed when calling `ask_user`) without context loss.
+- **Expanded Recall Limit (`CONTEXT_LIMIT = 15`)**: Increased the conversation interaction window from 3 to 15 turns, enabling long back-and-forth debugging and discussion without older turns prematurely dropping out of the model's memory.
+- **Multi-Byte Non-Truncating Message Budget (`MAX_CONTEXT_MESSAGE_CHARS = 4000`)**: Raised the per-message historical context ceiling from 200 to 4,000 characters. Detailed Thai conversational prompts, technical explanations, and code snippets are preserved in full rather than aggressively truncated.
+- **Clean Seam & Redundancy Prevention**: When structured `messages` are active, flat conversation transcript strings are omitted from `system_instruction` to avoid duplicate token consumption and provider confusion.
+- **100% Platform Parity**: Implemented in shared `mint-core`, instantly benefiting the CLI TUI, Desktop app, and Web interface with zero platform divergence, backed by automated Rust unit tests (`tests.rs`).
+
 ## Modern Answered Questions & Answers Activity Card (Desktop and Web)
 - **Inline Answered Questions Card**: When an `ask_user` interaction is completed, the agent activity timeline now displays a dedicated questions-and-answers card inspired by modern AI assistant designs, replacing generic timeline text rows (`Asked (Answered: "...") <question>`) with a clean, high-clarity UI.
 - **Visual Design Parity**:

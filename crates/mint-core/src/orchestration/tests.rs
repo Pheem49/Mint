@@ -806,6 +806,225 @@ fn preserves_request_without_history() {
     );
 }
 
+fn insert_completed_turn(
+    store: &MemoryStore,
+    chat_id: &str,
+    user_text: &str,
+    ai_text: &str,
+) -> i64 {
+    let turn = store.start_turn(chat_id, user_text).unwrap();
+    store.claim_turn(chat_id, turn).unwrap();
+    store
+        .finish_turn(turn, ai_text, "test-provider", "test-model", None)
+        .unwrap();
+    turn
+}
+
+#[test]
+fn build_conversation_history_messages_empty_on_fresh_session() {
+    let db_path =
+        std::env::temp_dir().join(format!("mint-test-fresh-{}.sqlite", uuid::Uuid::new_v4()));
+    let store = MemoryStore::open(&db_path);
+    let messages = build_conversation_history_messages(&store, "fresh-session-123", 15, 4000);
+    assert!(messages.is_empty());
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[test]
+fn build_conversation_history_messages_preserves_order_and_roles() {
+    let db_path =
+        std::env::temp_dir().join(format!("mint-test-order-{}.sqlite", uuid::Uuid::new_v4()));
+    let store = MemoryStore::open(&db_path);
+    let chat_id = "test-chat-multi-turn";
+
+    // Insert Turn 1
+    insert_completed_turn(
+        &store,
+        chat_id,
+        "ถามชื่อหน่อยดิ แล้วก็ถามผลไม้ที่ชอบหน่อย",
+        "ได้เลยครับ! คุณชื่ออะไร และชอบทานผลไม้อะไรเป็นพิเศษครับ?",
+    );
+
+    // Insert Turn 2
+    insert_completed_turn(
+        &store,
+        chat_id,
+        "ฉันชื่อภีม ชอบกินมะม่วง",
+        "สวัสดีครับคุณภีม ยินดีที่ได้รู้จักครับ! มะม่วงหวานอร่อยมากครับ",
+    );
+
+    let messages = build_conversation_history_messages(&store, chat_id, 15, 4000);
+    assert_eq!(messages.len(), 4);
+
+    // Verify chronological order and role alternation
+    assert_eq!(messages[0].role, ChatRole::User);
+    assert_eq!(
+        messages[0].content,
+        vec![ContentBlock::Text {
+            text: "ถามชื่อหน่อยดิ แล้วก็ถามผลไม้ที่ชอบหน่อย".to_string()
+        }]
+    );
+
+    assert_eq!(messages[1].role, ChatRole::Assistant);
+    assert_eq!(
+        messages[1].content,
+        vec![ContentBlock::Text {
+            text: "ได้เลยครับ! คุณชื่ออะไร และชอบทานผลไม้อะไรเป็นพิเศษครับ?".to_string()
+        }]
+    );
+
+    assert_eq!(messages[2].role, ChatRole::User);
+    assert_eq!(
+        messages[2].content,
+        vec![ContentBlock::Text {
+            text: "ฉันชื่อภีม ชอบกินมะม่วง".to_string()
+        }]
+    );
+
+    assert_eq!(messages[3].role, ChatRole::Assistant);
+    assert_eq!(
+        messages[3].content,
+        vec![ContentBlock::Text {
+            text: "สวัสดีครับคุณภีม ยินดีที่ได้รู้จักครับ! มะม่วงหวานอร่อยมากครับ".to_string()
+        }]
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[test]
+fn build_conversation_history_messages_handles_empty_ai_text_fallback() {
+    let db_path = std::env::temp_dir().join(format!(
+        "mint-test-fallback-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let store = MemoryStore::open(&db_path);
+    let chat_id = "test-chat-empty-ai";
+
+    insert_completed_turn(&store, chat_id, "run silent task", "   ");
+
+    let messages = build_conversation_history_messages(&store, chat_id, 15, 4000);
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].role, ChatRole::User);
+    assert_eq!(messages[1].role, ChatRole::Assistant);
+    assert_eq!(
+        messages[1].content,
+        vec![ContentBlock::Text {
+            text: "(completed)".to_string()
+        }]
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[test]
+fn build_conversation_history_messages_truncation_preserves_multibyte() {
+    let db_path =
+        std::env::temp_dir().join(format!("mint-test-trunc-{}.sqlite", uuid::Uuid::new_v4()));
+    let store = MemoryStore::open(&db_path);
+    let chat_id = "test-chat-trunc";
+
+    let long_thai = "สวัสดีชาวโลก ".repeat(400); // > 4,000 characters
+    insert_completed_turn(&store, chat_id, &long_thai, "รับทราบครับ");
+
+    let messages = build_conversation_history_messages(&store, chat_id, 15, 4000);
+    assert_eq!(messages.len(), 2);
+    if let ContentBlock::Text { text } = &messages[0].content[0] {
+        assert!(text.ends_with("... [truncated]"));
+        assert_eq!(
+            text.chars().count(),
+            4000 + "... [truncated]".chars().count()
+        );
+    } else {
+        panic!("expected ContentBlock::Text");
+    }
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[test]
+fn render_conversation_transcript_formats_cleanly() {
+    let db_path = std::env::temp_dir().join(format!(
+        "mint-test-transcript-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let store = MemoryStore::open(&db_path);
+    let chat_id = "test-chat-transcript";
+
+    insert_completed_turn(&store, chat_id, "คำถามข้อ 1", "คำตอบข้อ 1");
+
+    let transcript = render_conversation_transcript(&store, chat_id, 15, 4000).unwrap();
+    assert!(transcript.contains("User: คำถามข้อ 1"));
+    assert!(transcript.contains("Assistant: คำตอบข้อ 1"));
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[test]
+fn enrich_request_populates_messages_and_omits_duplicate_transcript() {
+    let db_path =
+        std::env::temp_dir().join(format!("mint-test-enrich-{}.sqlite", uuid::Uuid::new_v4()));
+    let store = MemoryStore::open(&db_path);
+    let chat_id = "test-chat-enrich";
+
+    insert_completed_turn(&store, chat_id, "คุยรอบแรก", "ตอบรอบแรก");
+
+    let request = ChatRequest {
+        message: "คุยรอบสอง".into(),
+        system_instruction: "You are a helpful assistant.".into(),
+        chat_id: Some(chat_id.to_string()),
+        image_data_uri: None,
+        audio_data_uri: None,
+        video_data_uri: None,
+        document_attachment: None,
+        workspace_path: None,
+        agent_id: None,
+        plan_mode: false,
+        pinned_mcp_server: None,
+        messages: None,
+        tools: None,
+        temperature: None,
+        ..Default::default()
+    };
+    let config = MintConfig::default();
+    let enriched = enrich_request(&config, &store, &request).unwrap();
+
+    // Verify structured messages populated: 2 historical + 1 current = 3 messages
+    assert!(enriched.messages.is_some());
+    let msgs = enriched.messages.unwrap();
+    assert_eq!(msgs.len(), 3);
+    assert_eq!(msgs[0].role, ChatRole::User);
+    assert_eq!(
+        msgs[0].content,
+        vec![ContentBlock::Text {
+            text: "คุยรอบแรก".into()
+        }]
+    );
+    assert_eq!(msgs[1].role, ChatRole::Assistant);
+    assert_eq!(
+        msgs[1].content,
+        vec![ContentBlock::Text {
+            text: "ตอบรอบแรก".into()
+        }]
+    );
+    assert_eq!(msgs[2].role, ChatRole::User);
+    assert_eq!(
+        msgs[2].content,
+        vec![ContentBlock::Text {
+            text: "คุยรอบสอง".into()
+        }]
+    );
+
+    // Verify system instruction does NOT duplicate "Recent conversation context:"
+    assert!(
+        !enriched
+            .system_instruction
+            .contains("Recent conversation context:")
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
 #[test]
 fn agent_decision_allows_null_input() {
     let decision = parse_decision(r#"{"thought":"done","action":"finish","input":null}"#)

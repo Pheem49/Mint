@@ -269,6 +269,7 @@ where
         Some(workspace_root.to_string_lossy().as_ref()),
         None,
         config.semantic_fact_recall,
+        true,
     );
     if let Ok(skills) = crate::skills::learned_skills_context(Some(workspace_root), Some(chat_id))
         && !skills.trim().is_empty()

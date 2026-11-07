@@ -1670,10 +1670,15 @@ pub(crate) fn format_user_transcript_text(raw: &str) -> String {
             .map(|s| s.trim())
             .unwrap_or("document");
 
-        let line_count = if let Some(start_extract) = rest.find("--- Extracted document text ---\n") {
+        let line_count = if let Some(start_extract) = rest.find("--- Extracted document text ---\n")
+        {
             let content_start = start_extract + "--- Extracted document text ---\n".len();
-            if let Some(end_extract) = rest[content_start..].find("\n--- End extracted document text ---") {
-                rest[content_start..content_start + end_extract].lines().count()
+            if let Some(end_extract) =
+                rest[content_start..].find("\n--- End extracted document text ---")
+            {
+                rest[content_start..content_start + end_extract]
+                    .lines()
+                    .count()
             } else {
                 0
             }

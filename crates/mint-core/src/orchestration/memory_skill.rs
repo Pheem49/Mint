@@ -133,17 +133,86 @@ pub(crate) fn render_recalled_messages(chat_id: &str, query: &str) -> Option<Str
     })
 }
 
+/// Renders the recent completed conversation history for `chat_id` into a formatted transcript
+/// string, oldest turn first. Returns `None` if there is no prior history.
+pub(crate) fn render_conversation_transcript(
+    memory: &MemoryStore,
+    chat_id: &str,
+    limit: usize,
+    max_chars: usize,
+) -> Option<String> {
+    let mut interactions = memory
+        .recent_completed_interactions_for_chat(chat_id, limit)
+        .ok()?;
+    if interactions.is_empty() {
+        return None;
+    }
+    interactions.reverse();
+    let transcript = interactions
+        .into_iter()
+        .map(|item| {
+            format!(
+                "User: {}\nAssistant: {}",
+                truncate_for_context(&item.user_text, max_chars),
+                truncate_for_context(&item.ai_text, max_chars)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let transcript = transcript.trim();
+    (!transcript.is_empty()).then(|| transcript.to_string())
+}
+
+/// Builds a structured list of alternating `User` and `Assistant` `ChatMessage`s
+/// from the most recent completed interactions in `chat_id`.
+/// This enables multi-turn conversation continuity for native tool-calling models
+/// (Gemini, Claude, OpenAI, Ollama) by populating the request's `messages` array
+/// rather than only flattening prior turns into the system prompt.
+pub(crate) fn build_conversation_history_messages(
+    memory: &MemoryStore,
+    chat_id: &str,
+    limit: usize,
+    max_chars: usize,
+) -> Vec<ChatMessage> {
+    let Ok(mut interactions) = memory.recent_completed_interactions_for_chat(chat_id, limit) else {
+        return Vec::new();
+    };
+    if interactions.is_empty() {
+        return Vec::new();
+    }
+    interactions.reverse();
+
+    let mut messages = Vec::with_capacity(interactions.len() * 2);
+    for item in interactions {
+        let user_text = truncate_for_context(item.user_text.trim(), max_chars);
+        if user_text.is_empty() {
+            continue;
+        }
+        let mut ai_text = truncate_for_context(item.ai_text.trim(), max_chars);
+        if ai_text.is_empty() {
+            ai_text = "(completed)".to_string();
+        }
+        messages.push(ChatMessage::text(ChatRole::User, user_text));
+        messages.push(ChatMessage::text(ChatRole::Assistant, ai_text));
+    }
+    messages
+}
+
 /// Appends saved cross-session memory — the user's profile/preferences (Settings
 /// → Memory) and this chat's recent interaction history — onto `system_prompt`.
 /// Shared by the typed-chat agent loop and the Gemini Live bridge so a Live
 /// session starts with the same "who is this user, what have we already
 /// discussed" context instead of starting blank every call.
+/// When `include_transcript` is false (e.g. native tool calling with structured
+/// `native_messages`), the raw text transcript is omitted to avoid duplicating
+/// context tokens.
 pub(crate) fn append_memory_context(
     system_prompt: &mut String,
     chat_id: &str,
     workspace: Option<&str>,
     query: Option<&str>,
     semantic_fact_recall: bool,
+    include_transcript: bool,
 ) {
     let Ok(memory) = MemoryStore::open_default() else {
         return;
@@ -181,28 +250,19 @@ pub(crate) fn append_memory_context(
         *system_prompt = format!("{}\n\nRemembered facts:\n{}", system_prompt.trim(), facts);
     }
 
-    if let Ok(mut interactions) =
-        memory.recent_completed_interactions_for_chat(chat_id, CONTEXT_LIMIT)
+    if include_transcript
+        && let Some(transcript) = render_conversation_transcript(
+            &memory,
+            chat_id,
+            CONTEXT_LIMIT,
+            MAX_CONTEXT_MESSAGE_CHARS,
+        )
     {
-        interactions.reverse();
-        let transcript = interactions
-            .into_iter()
-            .map(|item| {
-                format!(
-                    "User: {}\nAssistant: {}",
-                    truncate_for_context(&item.user_text, MAX_CONTEXT_MESSAGE_CHARS),
-                    truncate_for_context(&item.ai_text, MAX_CONTEXT_MESSAGE_CHARS)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        if !transcript.is_empty() {
-            *system_prompt = format!(
-                "{}\n\nRecent conversation context:\n{}",
-                system_prompt.trim(),
-                transcript
-            );
-        }
+        *system_prompt = format!(
+            "{}\n\nRecent conversation context:\n{}",
+            system_prompt.trim(),
+            transcript
+        );
     }
 }
 

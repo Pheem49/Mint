@@ -50,16 +50,14 @@ use crate::{
     stream_chat,
 };
 
-const CONTEXT_LIMIT: usize = 3;
+pub(crate) const CONTEXT_LIMIT: usize = 15;
 /// Per-message cap (in `chars`, not bytes — Thai text is multi-byte UTF-8)
 /// applied to each recalled `user_text`/`ai_text` when building the "recent
-/// conversation context" injected into a new task's opening system prompt.
-/// Without this, a single unusually long past answer (a multi-KB agent
-/// summary, a big code dump) gets replayed *in full* into every subsequent
-/// unrelated turn for as long as it stays within the last `CONTEXT_LIMIT`
-/// interactions — this exists purely to nudge the model with recent
-/// continuity, not to re-litigate a whole previous answer.
-const MAX_CONTEXT_MESSAGE_CHARS: usize = 200;
+/// conversation context" injected into a new task's opening system prompt or
+/// structured `native_messages`.
+/// Sized at 4,000 characters to comfortably accommodate rich code snippets,
+/// full multi-line instructions, and Thai conversational text without truncation.
+pub(crate) const MAX_CONTEXT_MESSAGE_CHARS: usize = 4000;
 
 pub async fn resolve_github_links(message: &str, config: &MintConfig) -> String {
     // Check if a GitHub MCP server is configured in Settings
@@ -354,21 +352,50 @@ fn enrich_request(
     memory: &MemoryStore,
     request: &ChatRequest,
 ) -> Result<ChatRequest, MemoryError> {
-    let mut interactions =
-        memory.recent_completed_interactions_for_chat(&request_chat_id(request), CONTEXT_LIMIT)?;
-    interactions.reverse();
-    let transcript = interactions
-        .into_iter()
-        .map(|item| {
-            format!(
-                "User: {}\nAssistant: {}",
-                truncate_for_context(&item.user_text, MAX_CONTEXT_MESSAGE_CHARS),
-                truncate_for_context(&item.ai_text, MAX_CONTEXT_MESSAGE_CHARS)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
     let mut enriched = request.clone();
+
+    // If structured messages were not explicitly provided, build conversation history messages
+    // so multi-turn context is preserved natively in plain chat mode across all providers.
+    if enriched.messages.is_none() {
+        let history = build_conversation_history_messages(
+            memory,
+            &request_chat_id(request),
+            CONTEXT_LIMIT,
+            MAX_CONTEXT_MESSAGE_CHARS,
+        );
+        if !history.is_empty() {
+            let mut messages = history;
+            let mut content = vec![ContentBlock::Text {
+                text: request.message.clone(),
+            }];
+            if let Some(ref img) = request.image_data_uri {
+                for i in img.split_whitespace() {
+                    content.push(ContentBlock::Image {
+                        data_uri: i.to_owned(),
+                    });
+                }
+            }
+            if let Some(ref aud) = request.audio_data_uri {
+                for a in aud.split_whitespace() {
+                    content.push(ContentBlock::Audio {
+                        data_uri: a.to_owned(),
+                    });
+                }
+            }
+            if let Some(ref vid) = request.video_data_uri {
+                for v in vid.split_whitespace() {
+                    content.push(ContentBlock::Video {
+                        data_uri: v.to_owned(),
+                    });
+                }
+            }
+            messages.push(ChatMessage {
+                role: ChatRole::User,
+                content,
+            });
+            enriched.messages = Some(messages);
+        }
+    }
 
     let mut profile_instructions = String::new();
     if let Ok(Some(name)) = memory.get_profile("name")
@@ -430,7 +457,16 @@ fn enrich_request(
     );
     enriched.system_instruction.push_str(&active_model_info);
 
-    if !transcript.is_empty() {
+    // If structured messages are not in use (e.g. no messages array populated),
+    // fallback to injecting recent transcript into system prompt if available.
+    if enriched.messages.is_none()
+        && let Some(transcript) = render_conversation_transcript(
+            memory,
+            &request_chat_id(request),
+            CONTEXT_LIMIT,
+            MAX_CONTEXT_MESSAGE_CHARS,
+        )
+    {
         enriched.system_instruction = format!(
             "{}\n\nRecent conversation context:\n{}",
             enriched.system_instruction.trim(),
@@ -986,12 +1022,29 @@ where
             Some(root.to_string_lossy().as_ref()),
             Some(&resolved_task),
             config.semantic_fact_recall,
+            !system_prompt_native,
         );
         if config.memory_recall
             && let Some(recall) = render_recalled_messages(chat_id, &resolved_task)
         {
             system_prompt = format!("{}\n\n{}", system_prompt.trim(), recall);
         }
+
+        // Structured history for native tool-calling providers, pre-populated with
+        // completed conversation turns so multi-turn context (e.g. earlier questions/answers)
+        // is preserved natively in the model's message sequence.
+        let mut native_messages: Vec<ChatMessage> = MemoryStore::open_default()
+            .map(|memory| {
+                build_conversation_history_messages(
+                    &memory,
+                    chat_id,
+                    CONTEXT_LIMIT,
+                    MAX_CONTEXT_MESSAGE_CHARS,
+                )
+            })
+            .unwrap_or_default();
+        let mut current_turn_added_to_native = false;
+
         // Rough token estimate for the very first request going out — lets
         // the CLI seed its live counter before step 1's real response comes
         // back and there's nothing else to go on yet (~4 chars/token, a
@@ -1000,8 +1053,16 @@ where
         // this — so it undercounts a bit for native tool-calling, but only
         // needs to be in the right ballpark for a still-updating live label,
         // not exact).
+        let history_chars: usize = native_messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .map(|b| match b {
+                ContentBlock::Text { text } => text.chars().count(),
+                _ => 0,
+            })
+            .sum();
         let estimated_first_step_tokens =
-            ((system_prompt.chars().count() + observation.chars().count()) / 4) as u64;
+            ((system_prompt.chars().count() + observation.chars().count() + history_chars) / 4) as u64;
 
         #[allow(unused_assignments)]
         let mut final_provider = config.ai_provider.clone();
@@ -1025,11 +1086,6 @@ where
             &config.ai_provider,
         );
         let mut trajectory: Vec<String> = Vec::new();
-        // Structured history for native tool-calling providers, maintained alongside
-        // `trajectory`/`observation` (which remain the source of truth for the
-        // JSON-prompt fallback path and for the web-search/media-append scans in the
-        // finish handler below, which operate on flattened text either way).
-        let mut native_messages: Vec<ChatMessage> = Vec::new();
         // Gemini's `thoughtSignature` (see `ToolCall::thought_signature`) arrives on
         // `response.tool_calls`, keyed by call id, but the `ContentBlock::ToolUse`
         // that gets pushed onto `native_messages` for this call is only rebuilt
@@ -1164,7 +1220,8 @@ where
             }
 
             let (response, fallback) = if tool_mode == ToolCallingMode::Native {
-                if native_messages.is_empty() {
+                if !current_turn_added_to_native {
+                    current_turn_added_to_native = true;
                     // Native tool-calling providers build the request from `messages`
                     // and ignore ChatRequest.image_data_uri/audio_data_uri/video_data_uri
                     // entirely, so any pending attachment must be embedded as content
