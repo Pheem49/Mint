@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { describeTool, activitiesFrom, generateNaturalActivitySummary, formatDurationText, groupActivities, isMarkdownContent, cleanMarkdownOutput, activityKind } from './agentActivity'
+import {
+  describeTool,
+  activitiesFrom,
+  generateNaturalActivitySummary,
+  formatDurationText,
+  groupActivities,
+  isMarkdownContent,
+  cleanMarkdownOutput,
+  activityKind,
+  isAskUserActivity,
+  extractAskUserQuestions,
+} from './agentActivity'
 import { viewedImagesFrom } from './viewedImages'
 import { reduceLiveAgentProgress } from '../agentProgress'
 import type { AgentProgress } from '../types'
@@ -317,6 +328,73 @@ revisions: 1
     expect(cleaned).toContain('> Extract video frames without distortion')
     expect(cleaned).toContain('# Extracting frames')
     expect(cleaned).not.toContain('---')
+  })
+
+  describe('ask_user activities', () => {
+    it('correctly creates an ask_user activity with single query', () => {
+      const act = describeTool('ask_user', { query: 'Which database should we use?' })
+      expect(isAskUserActivity(act)).toBe(true)
+      expect(act.semanticVerb).toBe('Asked')
+      expect(act.askUserData?.questions).toHaveLength(1)
+      expect(act.askUserData?.questions[0].question).toBe('Which database should we use?')
+    })
+
+    it('correctly creates an ask_user activity with multiple questions', () => {
+      const act = describeTool('ask_user', {
+        header: 'Architecture Choices',
+        questions: [
+          { question: 'Q1: Language?', answer: 'Rust' },
+          { question: 'Q2: Database?', answer: 'PostgreSQL' },
+        ],
+      })
+      expect(isAskUserActivity(act)).toBe(true)
+      expect(act.askUserData?.header).toBe('Architecture Choices')
+      expect(act.askUserData?.questions).toHaveLength(2)
+      expect(act.askUserData?.questions[0].question).toBe('Q1: Language?')
+      expect(act.askUserData?.questions[0].answer).toBe('Rust')
+    })
+
+    it('attaches answer from ToolEnd event in activitiesFrom', () => {
+      const view = activitiesFrom([
+        {
+          type: 'ToolStart',
+          data: {
+            action: 'ask_user',
+            input: { query: 'Choose a port:' },
+          },
+        },
+        {
+          type: 'ToolEnd',
+          data: {
+            action: 'ask_user',
+            result: 'User answered: 8080',
+          },
+        },
+      ])
+
+      expect(view.items).toHaveLength(1)
+      const act = view.items[0]
+      expect(act.state).toBe('done')
+      const questions = extractAskUserQuestions(act)
+      expect(questions).toHaveLength(1)
+      expect(questions[0].question).toBe('Choose a port:')
+      expect(questions[0].answer).toBe('8080')
+    })
+
+    it('extracts questions from legacy (Answered: "...") format in target', () => {
+      const legacyAct = {
+        label: 'ask_user',
+        action: 'ask_user',
+        target: '(Answered: "Python 3.11") Which Python version to use?',
+        kind: 'tool' as const,
+        state: 'done' as const,
+      }
+      expect(isAskUserActivity(legacyAct)).toBe(true)
+      const extracted = extractAskUserQuestions(legacyAct)
+      expect(extracted).toHaveLength(1)
+      expect(extracted[0].question).toBe('Which Python version to use?')
+      expect(extracted[0].answer).toBe('Python 3.11')
+    })
   })
 })
 

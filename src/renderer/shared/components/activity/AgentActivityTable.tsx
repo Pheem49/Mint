@@ -1,10 +1,18 @@
 import type { ArtifactFile } from '../../utils/artifacts'
 import { Fragment, useState } from 'react'
 import type { AgentActivityView, AgentActivity, AgentActivityGroup, TimelineItem } from '../../utils/agentActivity'
-import { cleanIntermediateThought, groupActivities, isMarkdownContent, cleanMarkdownOutput } from '../../utils/agentActivity'
+import {
+  cleanIntermediateThought,
+  groupActivities,
+  isMarkdownContent,
+  cleanMarkdownOutput,
+  isAskUserActivity,
+  extractAskUserQuestions,
+} from '../../utils/agentActivity'
 import { materialFileIcon, materialFolderIcon, getExtension } from '../../utils/fileIcons'
 import { renderFormattedMessage } from '../../utils/markdown'
 import { ViewedImage } from './ViewedImages'
+import { AskUserActivityCard } from './AskUserActivityCard'
 import type { AgentProgress } from '../../types'
 import McpToolResults from './McpToolResults'
 import { setWorkspaceDragData, isImageFileName } from '../../utils/workspaceDrag'
@@ -135,6 +143,26 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
   }
 
   const renderSingleItem = (activity: AgentActivity, itemKey: string) => {
+    if (isAskUserActivity(activity)) {
+      const isAnswered =
+        activity.state === 'done' ||
+        Boolean(activity.askUserData?.questions.some((q) => Boolean(q.answer))) ||
+        activity.target.startsWith('(Answered:') ||
+        Boolean(activity.result?.startsWith('User answered:'))
+      if (isAnswered) {
+        const questions = extractAskUserQuestions(activity)
+        if (questions.length > 0) {
+          return (
+            <AskUserActivityCard
+              key={itemKey}
+              questions={questions}
+              header={activity.askUserData?.header}
+            />
+          )
+        }
+      }
+    }
+
     const isItemExpanded = Boolean(expandedIndices[itemKey])
     const output = activity.result?.trim()
     const inlineResult = extractResultPreview(activity.action, output)
@@ -290,6 +318,23 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
   }
 
   const renderGroup = (group: AgentActivityGroup) => {
+    if (group.action === 'ask_user') {
+      const isAnswered =
+        group.state === 'done' ||
+        group.items.some(
+          (it) =>
+            Boolean(it.askUserData?.questions.some((q) => Boolean(q.answer))) ||
+            it.target.startsWith('(Answered:') ||
+            Boolean(it.result?.startsWith('User answered:')),
+        )
+      if (isAnswered) {
+        const questions = group.items.flatMap(extractAskUserQuestions)
+        if (questions.length > 0) {
+          return <AskUserActivityCard key={group.id} questions={questions} />
+        }
+      }
+    }
+
     const isGroupExpanded = Boolean(expandedGroups[group.id])
     const verb =
       group.semanticVerb ||

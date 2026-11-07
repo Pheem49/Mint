@@ -7,6 +7,11 @@ import type { AgentProgress, ActivePlan, RunTelemetrySummary } from '../types'
 import { isInternalCot } from '../agentProgress'
 import { viewedImageDataUri, viewedImagesFrom, type ViewedImageItem } from './viewedImages'
 
+export interface AskUserItem {
+  question: string
+  answer?: string
+}
+
 export interface AgentActivity {
   label: string
   target: string
@@ -27,6 +32,11 @@ export interface AgentActivity {
   diffStats?: { additions: number; deletions: number }
   /** Elapsed duration in ms or s */
   elapsedMs?: number
+  /** Structured ask_user questions and answers */
+  askUserData?: {
+    header?: string
+    questions: AskUserItem[]
+  }
 }
 
 export interface AgentActivityGroup {
@@ -262,6 +272,7 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
   }
 
   let semanticVerb = 'Executed'
+  let askUserData: AgentActivity['askUserData']
   if (action === 'read_file') {
     semanticVerb = 'Analyzed'
   } else if (action === 'edit_file' || action === 'apply_patch' || action === 'apply_code_edits') {
@@ -276,6 +287,29 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     semanticVerb = 'Calculated'
   } else if (action === 'view_image') {
     semanticVerb = 'Viewed'
+  } else if (action === 'ask_user') {
+    semanticVerb = 'Asked'
+    let questions: AskUserItem[] = []
+    const rawQuestions = input?.questions
+    if (Array.isArray(rawQuestions) && rawQuestions.length > 0) {
+      questions = (rawQuestions as Array<Record<string, unknown> | string>)
+        .map((q) => {
+          if (typeof q === 'string') return { question: q.trim() }
+          const questionText = String(q.question || q.query || q.title || '').trim()
+          const answerText = typeof q.answer === 'string' ? q.answer.trim() : undefined
+          return { question: questionText, answer: answerText }
+        })
+        .filter((q) => q.question.length > 0)
+    } else if (query) {
+      questions = [{ question: query }]
+    }
+    if (questions.length > 0) {
+      const headerText = typeof input?.header === 'string' ? input.header.trim() : undefined
+      askUserData = {
+        header: headerText || undefined,
+        questions,
+      }
+    }
   }
 
   return {
@@ -290,6 +324,7 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     intentTitle,
     lineRange,
     diffStats,
+    askUserData,
   }
 }
 
@@ -553,7 +588,8 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
       for (let index = activities.length - 1; index >= 0; index -= 1) {
         if (activities[index].state !== 'active') continue
         if (event.data.callId && activities[index].callId !== event.data.callId) continue
-        if (activities[index].action !== finished.action || activities[index].target !== finished.target) continue
+        if (activities[index].action !== finished.action) continue
+        if (event.data.input && activities[index].target !== finished.target) continue
         activities[index].state = event.data.status ? (event.data.status === 'success' ? 'done' : 'error') : /^(Error:|Blocked|User denied)/.test(event.data.result) ? 'error' : 'done'
         const elapsed = event.data.elapsed_ms ?? event.data.elapsedMs
         if (typeof elapsed === 'number') {
@@ -578,9 +614,46 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
               : activities[index].label.replace('Reading skill:', 'Read skill preview:')
           }
         }
-        if (activities[index].action === 'ask_user' && event.data.result.startsWith('User answered:')) {
-          const answer = event.data.result.replace('User answered:', '').trim()
-          activities[index].target = `(Answered: "${answer}") ${activities[index].target}`
+        if (activities[index].action === 'ask_user') {
+          let answer: string | undefined
+          if (typeof event.data.result === 'string') {
+            if (event.data.result.startsWith('User answered:')) {
+              answer = event.data.result.replace(/^User answered:\s*/, '').trim()
+              activities[index].target = `(Answered: "${answer}") ${activities[index].target}`
+            } else if (event.data.result.startsWith('User approved')) {
+              answer = 'Approved'
+            } else if (event.data.result.startsWith('User declined')) {
+              answer = 'Declined'
+            }
+          }
+
+          if (answer) {
+            if (!activities[index].askUserData) {
+              const cleanQuestion = activities[index].target.replace(/^\(Answered:\s*".*?"\)\s*/s, '').trim()
+              activities[index].askUserData = {
+                questions: [{ question: cleanQuestion, answer }],
+              }
+            } else if (activities[index].askUserData.questions.length > 0) {
+              let assigned = false
+              if (answer.startsWith('[') && answer.endsWith(']')) {
+                try {
+                  const parsed = JSON.parse(answer)
+                  if (Array.isArray(parsed) && parsed.length === activities[index].askUserData.questions.length) {
+                    parsed.forEach((ans, i) => {
+                      activities[index].askUserData!.questions[i].answer =
+                        typeof ans === 'string' ? ans : JSON.stringify(ans)
+                    })
+                    assigned = true
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+              if (!assigned) {
+                activities[index].askUserData.questions[0].answer = answer
+              }
+            }
+          }
         }
         break
       }
@@ -816,4 +889,38 @@ export function hasSubagentActivity(progress: AgentProgress[]): boolean {
       ((e.type === 'ToolStart' || e.type === 'ToolEnd') &&
         (e.data.subagent || e.data.action === 'dispatch_agents' || e.data.action === 'dispatch_subagent')),
   )
+}
+
+export function isAskUserActivity(activity: AgentActivity): boolean {
+  return (
+    activity.action === 'ask_user' ||
+    activity.label === 'ask_user' ||
+    Boolean(activity.askUserData) ||
+    activity.target.startsWith('(Answered:')
+  )
+}
+
+export function extractAskUserQuestions(activity: AgentActivity): AskUserItem[] {
+  if (activity.askUserData?.questions && activity.askUserData.questions.length > 0) {
+    return activity.askUserData.questions
+  }
+  const match = activity.target.match(/^\(Answered:\s*"(.*?)"\)\s*(.*)$/s)
+  if (match) {
+    return [{ question: match[2].trim(), answer: match[1].trim() }]
+  }
+  let answer: string | undefined
+  if (typeof activity.result === 'string') {
+    if (activity.result.startsWith('User answered:')) {
+      answer = activity.result.replace(/^User answered:\s*/, '').trim()
+    } else if (activity.result.startsWith('User approved')) {
+      answer = 'Approved'
+    } else if (activity.result.startsWith('User declined')) {
+      answer = 'Declined'
+    }
+  }
+  const cleanQuestion = activity.target.replace(/^\(Answered:\s*".*?"\)\s*/s, '').trim()
+  if (cleanQuestion) {
+    return [{ question: cleanQuestion, answer }]
+  }
+  return []
 }

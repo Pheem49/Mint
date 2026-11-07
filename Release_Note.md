@@ -1,5 +1,18 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Modern Answered Questions & Answers Activity Card (Desktop and Web)
+- **Inline Answered Questions Card**: When an `ask_user` interaction is completed, the agent activity timeline now displays a dedicated questions-and-answers card inspired by modern AI assistant designs, replacing generic timeline text rows (`Asked (Answered: "...") <question>`) with a clean, high-clarity UI.
+- **Visual Design Parity**:
+  - **Header Counter**: Displays a small rounded-square `[?]` outline badge alongside a clean question counter (e.g. `1 question` or `3 questions` for multi-question batches).
+  - **Question & Answer Typography**: Highlights each question in prominent primary text (`var(--text-main)`), followed by the user's selected choice or freeform answer in soft secondary gray (`var(--text-soft)`).
+  - **Subtle Dividers**: Seamlessly separates multiple questions with clean hairline horizontal borders (`1px solid var(--border-subtle)`).
+  - **Dark / Light Theme Integration**: Styled with a translucent surface card background, rounded 12px corners (`var(--radius-lg)`), and full support for both Dark and Light UI themes.
+- **Deep Seam & Fallback Parsing**:
+  - Enriched `AgentActivity` in `agentActivity.ts` with structured `askUserData` (supporting single questions or multi-question batches).
+  - Built `extractAskUserQuestions` to extract question and answer pairs from live `ToolEnd` events as well as legacy `(Answered: "...")` historical interactions.
+  - While an `ask_user` request is pending, the timeline retains an active execution indicator so the user focuses on the interactive `ApprovalCard` at the bottom; once answered, it instantly swaps to the answered card.
+- **Full Platform Parity**: Implemented across Desktop (`src/renderer/src/css/chat.css`) and Web (`src/renderer/src-web/css/chat.css`), backed by unit tests (`AskUserActivityCard.test.tsx`, `agentActivity.test.ts`).
+
 ## Compact Chat Input & Toolbar Mode Selector (Desktop and Web)
 - **Compact All-in-One Composer**: Completely redesigned the chat input area across Desktop and Web to reduce vertical idle footprint by over 45% (down from ~180px to ~90px), expanding visible chat viewport space so users can read significantly more conversation history without cramped viewports.
 - **Slim Integrated Project Header**: Retained the Workspace (`📁 Mint-CLI ▾`) and Git Branch (`🌿 Rust ▾`) selectors at the top of the composer as a slim, unified 34px header that seamlessly connects to the chat input container without vertical bloat.
