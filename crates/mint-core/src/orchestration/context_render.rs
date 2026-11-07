@@ -60,14 +60,19 @@ pub(super) fn render_messages_as_text(messages: &[ChatMessage]) -> String {
 pub(super) async fn compact_native_messages(
     config: &MintConfig,
     messages: &[ChatMessage],
+    history_prefix_len: usize,
 ) -> Result<Option<(Vec<ChatMessage>, Option<String>)>, ChatError> {
-    let step_pairs = messages.len().saturating_sub(1) / 2;
-    if step_pairs <= COMPACTION_KEEP_RECENT_STEPS || messages.is_empty() {
+    let step_start = history_prefix_len + 1;
+    if messages.len() <= step_start {
+        return Ok(None);
+    }
+    let step_pairs = (messages.len() - step_start) / 2;
+    if step_pairs <= COMPACTION_KEEP_RECENT_STEPS {
         return Ok(None);
     }
     let compact_pairs = step_pairs - COMPACTION_KEEP_RECENT_STEPS;
     let compact_message_count = compact_pairs * 2;
-    let compacted_range = &messages[1..1 + compact_message_count];
+    let compacted_range = &messages[step_start..step_start + compact_message_count];
 
     let transcript = render_messages_as_text(compacted_range);
     let summary_prompt = format!(
@@ -107,7 +112,12 @@ pub(super) async fn compact_native_messages(
     match summary_result {
         Ok((summary_response, fallback_provider)) => {
             let mut compacted = Vec::with_capacity(messages.len() - compact_message_count + 3);
-            compacted.push(messages[0].clone());
+            if messages.len() > history_prefix_len {
+                compacted.extend_from_slice(&messages[..history_prefix_len]);
+                compacted.push(messages[history_prefix_len].clone());
+            } else {
+                compacted.extend_from_slice(messages);
+            }
             compacted.push(ChatMessage {
                 role: ChatRole::Assistant,
                 content: vec![ContentBlock::Text {
@@ -124,15 +134,19 @@ pub(super) async fn compact_native_messages(
                         .into(),
                 }],
             });
-            compacted.extend_from_slice(&messages[1 + compact_message_count..]);
+            compacted.extend_from_slice(&messages[step_start + compact_message_count..]);
             Ok(Some((compacted, fallback_provider)))
         }
         Err(err) => {
             // LLM summarization failed (timeout, rate limit 429, provider offline, or context limit).
             // Rather than returning Err and leaving native_messages uncompacted (which causes the next
             // agent turn to crash with context window exceeded), fall back to deterministic hard-truncation.
-            let truncated =
-                hard_truncate_native_messages(messages, compact_pairs, &err.to_string());
+            let truncated = hard_truncate_native_messages(
+                messages,
+                history_prefix_len,
+                compact_pairs,
+                &err.to_string(),
+            );
             Ok(Some((
                 truncated,
                 Some(format!("hard-truncate fallback ({err})")),
@@ -143,13 +157,15 @@ pub(super) async fn compact_native_messages(
 
 pub(super) fn hard_truncate_native_messages(
     messages: &[ChatMessage],
+    history_prefix_len: usize,
     compact_pairs: usize,
     error_reason: &str,
 ) -> Vec<ChatMessage> {
+    let step_start = history_prefix_len + 1;
     let compact_message_count = compact_pairs * 2;
-    let compacted_range = if messages.len() > 1 {
-        let end = (1 + compact_message_count).min(messages.len());
-        &messages[1..end]
+    let compacted_range = if messages.len() > step_start {
+        let end = (step_start + compact_message_count).min(messages.len());
+        &messages[step_start..end]
     } else {
         &[]
     };
@@ -195,8 +211,11 @@ pub(super) fn hard_truncate_native_messages(
 
     let mut compacted =
         Vec::with_capacity(messages.len().saturating_sub(compact_message_count) + 3);
-    if !messages.is_empty() {
-        compacted.push(messages[0].clone());
+    if messages.len() > history_prefix_len {
+        compacted.extend_from_slice(&messages[..history_prefix_len]);
+        compacted.push(messages[history_prefix_len].clone());
+    } else {
+        compacted.extend_from_slice(messages);
     }
     compacted.push(ChatMessage {
         role: ChatRole::Assistant,
@@ -210,8 +229,8 @@ pub(super) fn hard_truncate_native_messages(
             text: "Continue the task using the summary above and the recent steps below.".into(),
         }],
     });
-    if messages.len() > 1 + compact_message_count {
-        compacted.extend_from_slice(&messages[1 + compact_message_count..]);
+    if messages.len() > step_start + compact_message_count {
+        compacted.extend_from_slice(&messages[step_start + compact_message_count..]);
     }
     compacted
 }
@@ -870,7 +889,7 @@ mod compaction_progress_tests {
             messages.extend(sample_step_pair(i));
         }
         // 5 step pairs total (11 messages). Compact 2 pairs (steps 0 and 1), keeping steps 2, 3, 4 (3 pairs = 6 msgs).
-        let truncated = hard_truncate_native_messages(&messages, 2, "mock provider failure");
+        let truncated = hard_truncate_native_messages(&messages, 0, 2, "mock provider failure");
 
         assert_eq!(truncated.len(), 1 + 2 + 6);
         assert_eq!(truncated[0].role, ChatRole::User);
@@ -914,13 +933,111 @@ mod compaction_progress_tests {
             ai_provider: "non_existent_provider_that_will_fail".into(),
             ..Default::default()
         };
-        let result = compact_native_messages(&config, &messages).await.unwrap();
+        let result = compact_native_messages(&config, &messages, 0)
+            .await
+            .unwrap();
         assert!(result.is_some());
         let (compacted, fallback) = result.unwrap();
         assert_eq!(compacted.len(), 1 + 2 + 6);
         assert_eq!(compacted[1].role, ChatRole::Assistant);
         assert_eq!(compacted[2].role, ChatRole::User);
         assert!(fallback.as_deref().unwrap_or("").contains("hard-truncate"));
+    }
+
+    #[tokio::test]
+    async fn compact_native_messages_preserves_conversation_history_prefix() {
+        // Build 2 historical conversation turns (4 messages: User, Assistant, User, Assistant)
+        let mut messages = vec![
+            ChatMessage::text(ChatRole::User, "ประวัติคุยรอบ 1"),
+            ChatMessage::text(ChatRole::Assistant, "ตอบประวัติรอบ 1"),
+            ChatMessage::text(ChatRole::User, "ประวัติคุยรอบ 2"),
+            ChatMessage::text(ChatRole::Assistant, "ตอบประวัติรอบ 2"),
+        ];
+        let history_prefix_len = messages.len();
+
+        // Current agent turn initial observation
+        messages.push(ChatMessage::text(ChatRole::User, "งานปัจจุบันรอบ 3"));
+
+        // Current turn execution steps: 5 step pairs (10 messages)
+        for i in 0..5 {
+            messages.extend(sample_step_pair(i));
+        }
+
+        let config = MintConfig {
+            ai_provider: "non_existent_provider_that_will_fail".into(),
+            ..Default::default()
+        };
+
+        let result = compact_native_messages(&config, &messages, history_prefix_len)
+            .await
+            .unwrap();
+        assert!(result.is_some());
+        let (compacted, _) = result.unwrap();
+
+        // Expected structure:
+        // [0..4] Historical conversation messages intact
+        // [4] Current turn initial task intact
+        // [5] Assistant compacted summary of steps 1-2
+        // [6] User continuation prompt
+        // [7..13] Recent 3 step pairs (6 messages)
+        assert_eq!(compacted.len(), 4 + 1 + 2 + 6);
+
+        // Verify history messages remain identical
+        assert_eq!(compacted[0].role, ChatRole::User);
+        assert_eq!(
+            compacted[0].content,
+            vec![ContentBlock::Text {
+                text: "ประวัติคุยรอบ 1".into()
+            }]
+        );
+        assert_eq!(compacted[1].role, ChatRole::Assistant);
+        assert_eq!(
+            compacted[1].content,
+            vec![ContentBlock::Text {
+                text: "ตอบประวัติรอบ 1".into()
+            }]
+        );
+        assert_eq!(compacted[2].role, ChatRole::User);
+        assert_eq!(
+            compacted[2].content,
+            vec![ContentBlock::Text {
+                text: "ประวัติคุยรอบ 2".into()
+            }]
+        );
+        assert_eq!(compacted[3].role, ChatRole::Assistant);
+        assert_eq!(
+            compacted[3].content,
+            vec![ContentBlock::Text {
+                text: "ตอบประวัติรอบ 2".into()
+            }]
+        );
+
+        // Verify current turn initial task intact
+        assert_eq!(compacted[4].role, ChatRole::User);
+        assert_eq!(
+            compacted[4].content,
+            vec![ContentBlock::Text {
+                text: "งานปัจจุบันรอบ 3".into()
+            }]
+        );
+
+        // Verify summary block
+        assert_eq!(compacted[5].role, ChatRole::Assistant);
+        match &compacted[5].content[0] {
+            ContentBlock::Text { text } => {
+                assert!(text.contains("Summary of steps 1-2"));
+                assert!(text.contains("file0.rs"));
+                assert!(text.contains("file1.rs"));
+            }
+            _ => panic!("Expected Text block in summary"),
+        }
+
+        // Verify continuation prompt
+        assert_eq!(compacted[6].role, ChatRole::User);
+
+        // Verify recent step pairs preserved
+        assert_eq!(compacted[7].role, ChatRole::Assistant);
+        assert_eq!(compacted[8].role, ChatRole::Tool);
     }
 
     #[test]

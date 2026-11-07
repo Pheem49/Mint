@@ -208,16 +208,13 @@ pub(crate) fn build_conversation_history_messages(
 /// context tokens.
 pub(crate) fn append_memory_context(
     system_prompt: &mut String,
+    memory: &MemoryStore,
     chat_id: &str,
     workspace: Option<&str>,
     query: Option<&str>,
     semantic_fact_recall: bool,
     include_transcript: bool,
 ) {
-    let Ok(memory) = MemoryStore::open_default() else {
-        return;
-    };
-
     let mut profile_instructions = String::new();
     if let Ok(Some(name)) = memory.get_profile("name")
         && !name.trim().is_empty()
@@ -241,7 +238,7 @@ pub(crate) fn append_memory_context(
     }
 
     if let Some(facts) = render_memory_facts(
-        &memory,
+        memory,
         workspace,
         crate::subagent_name(chat_id),
         query,
@@ -252,7 +249,7 @@ pub(crate) fn append_memory_context(
 
     if include_transcript
         && let Some(transcript) = render_conversation_transcript(
-            &memory,
+            memory,
             chat_id,
             CONTEXT_LIMIT,
             MAX_CONTEXT_MESSAGE_CHARS,

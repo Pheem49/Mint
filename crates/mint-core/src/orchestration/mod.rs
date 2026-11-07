@@ -347,6 +347,73 @@ pub(super) fn truncate_for_context(text: &str, max_chars: usize) -> String {
     truncated
 }
 
+/// Deduplicates building user content blocks across plain chat enrichment and agent turn initialization.
+pub(crate) fn build_user_content_blocks(
+    text: String,
+    image_data: Option<&str>,
+    audio_data: Option<&str>,
+    video_data: Option<&str>,
+) -> Vec<ContentBlock> {
+    let mut content = vec![ContentBlock::Text { text }];
+    if let Some(image_data) = image_data {
+        for img in image_data.split_whitespace() {
+            content.push(ContentBlock::Image {
+                data_uri: img.to_owned(),
+            });
+        }
+    }
+    if let Some(audio_data) = audio_data {
+        for aud in audio_data.split_whitespace() {
+            content.push(ContentBlock::Audio {
+                data_uri: aud.to_owned(),
+            });
+        }
+    }
+    if let Some(video_data) = video_data {
+        for vid in video_data.split_whitespace() {
+            content.push(ContentBlock::Video {
+                data_uri: vid.to_owned(),
+            });
+        }
+    }
+    content
+}
+
+fn construct_system_prompt(
+    config: &MintConfig,
+    memory: &MemoryStore,
+    chat_id: &str,
+    root: &Path,
+    resolved_task: &str,
+    plan_mode: bool,
+    system_prompt_native: bool,
+    user_name: Option<&str>,
+    pinned_mcp_server: Option<&str>,
+) -> String {
+    let mut system_prompt = build_system_prompt(
+        config,
+        plan_mode,
+        system_prompt_native,
+        user_name,
+        pinned_mcp_server,
+    );
+    append_memory_context(
+        &mut system_prompt,
+        memory,
+        chat_id,
+        Some(root.to_string_lossy().as_ref()),
+        Some(resolved_task),
+        config.semantic_fact_recall,
+        !system_prompt_native,
+    );
+    if config.memory_recall
+        && let Some(recall) = render_recalled_messages(chat_id, resolved_task)
+    {
+        system_prompt = format!("{}\n\n{}", system_prompt.trim(), recall);
+    }
+    system_prompt
+}
+
 fn enrich_request(
     config: &MintConfig,
     memory: &MemoryStore,
@@ -355,8 +422,9 @@ fn enrich_request(
     let mut enriched = request.clone();
 
     // If structured messages were not explicitly provided, build conversation history messages
-    // so multi-turn context is preserved natively in plain chat mode across all providers.
-    if enriched.messages.is_none() {
+    // so multi-turn context is preserved natively in plain chat mode across all native providers.
+    let is_native = config.tool_calling_mode() == ToolCallingMode::Native;
+    if is_native && enriched.messages.is_none() {
         let history = build_conversation_history_messages(
             memory,
             &request_chat_id(request),
@@ -365,30 +433,12 @@ fn enrich_request(
         );
         if !history.is_empty() {
             let mut messages = history;
-            let mut content = vec![ContentBlock::Text {
-                text: request.message.clone(),
-            }];
-            if let Some(ref img) = request.image_data_uri {
-                for i in img.split_whitespace() {
-                    content.push(ContentBlock::Image {
-                        data_uri: i.to_owned(),
-                    });
-                }
-            }
-            if let Some(ref aud) = request.audio_data_uri {
-                for a in aud.split_whitespace() {
-                    content.push(ContentBlock::Audio {
-                        data_uri: a.to_owned(),
-                    });
-                }
-            }
-            if let Some(ref vid) = request.video_data_uri {
-                for v in vid.split_whitespace() {
-                    content.push(ContentBlock::Video {
-                        data_uri: v.to_owned(),
-                    });
-                }
-            }
+            let content = build_user_content_blocks(
+                request.message.clone(),
+                request.image_data_uri.as_deref(),
+                request.audio_data_uri.as_deref(),
+                request.video_data_uri.as_deref(),
+            );
             messages.push(ChatMessage {
                 role: ChatRole::User,
                 content,
@@ -1007,8 +1057,12 @@ where
         // multi-agent collaboration can substitute) — matches how `system_prompt`
         // itself is only rebuilt on plan-mode transitions, not every step.
         let system_prompt_native = config.tool_calling_mode() == ToolCallingMode::Native;
-        let mut system_prompt = build_system_prompt(
+        let mut system_prompt = construct_system_prompt(
             config,
+            &memory,
+            chat_id,
+            &root,
+            &resolved_task,
             plan_mode,
             system_prompt_native,
             user_name,
@@ -1016,33 +1070,16 @@ where
         );
         let hooks = crate::hooks::list_hooks(config);
 
-        append_memory_context(
-            &mut system_prompt,
-            chat_id,
-            Some(root.to_string_lossy().as_ref()),
-            Some(&resolved_task),
-            config.semantic_fact_recall,
-            !system_prompt_native,
-        );
-        if config.memory_recall
-            && let Some(recall) = render_recalled_messages(chat_id, &resolved_task)
-        {
-            system_prompt = format!("{}\n\n{}", system_prompt.trim(), recall);
-        }
-
         // Structured history for native tool-calling providers, pre-populated with
         // completed conversation turns so multi-turn context (e.g. earlier questions/answers)
         // is preserved natively in the model's message sequence.
-        let mut native_messages: Vec<ChatMessage> = MemoryStore::open_default()
-            .map(|memory| {
-                build_conversation_history_messages(
-                    &memory,
-                    chat_id,
-                    CONTEXT_LIMIT,
-                    MAX_CONTEXT_MESSAGE_CHARS,
-                )
-            })
-            .unwrap_or_default();
+        let mut native_messages = build_conversation_history_messages(
+            &memory,
+            chat_id,
+            CONTEXT_LIMIT,
+            MAX_CONTEXT_MESSAGE_CHARS,
+        );
+        let history_prefix_len = native_messages.len();
         let mut current_turn_added_to_native = false;
 
         // Rough token estimate for the very first request going out — lets
@@ -1228,30 +1265,12 @@ where
                     // blocks on the first user turn here, not left for the (unused)
                     // top-level fields — otherwise Agent Mode would silently drop
                     // attachments that work fine with Agent Mode off.
-                    let mut content = vec![ContentBlock::Text {
-                        text: observation.clone(),
-                    }];
-                    if let Some(image_data) = pending_image.take() {
-                        for img in image_data.split_whitespace() {
-                            content.push(ContentBlock::Image {
-                                data_uri: img.to_owned(),
-                            });
-                        }
-                    }
-                    if let Some(audio_data) = pending_audio.take() {
-                        for aud in audio_data.split_whitespace() {
-                            content.push(ContentBlock::Audio {
-                                data_uri: aud.to_owned(),
-                            });
-                        }
-                    }
-                    if let Some(video_data) = pending_video.take() {
-                        for vid in video_data.split_whitespace() {
-                            content.push(ContentBlock::Video {
-                                data_uri: vid.to_owned(),
-                            });
-                        }
-                    }
+                    let content = build_user_content_blocks(
+                        observation.clone(),
+                        pending_image.take().as_deref(),
+                        pending_audio.take().as_deref(),
+                        pending_video.take().as_deref(),
+                    );
                     native_messages.push(ChatMessage {
                         role: ChatRole::User,
                         content,
@@ -1837,8 +1856,12 @@ where
                         }) {
                             Ok(ApprovalOutcome::Approved) => {
                                 plan_mode = true;
-                                system_prompt = build_system_prompt(
+                                system_prompt = construct_system_prompt(
                                     config,
+                                    &memory,
+                                    chat_id,
+                                    &root,
+                                    &resolved_task,
                                     plan_mode,
                                     system_prompt_native,
                                     user_name,
@@ -1874,7 +1897,17 @@ where
                 }) {
                     Ok(ApprovalOutcome::Approved) => {
                         plan_mode = false;
-                        system_prompt = build_system_prompt(config, plan_mode, system_prompt_native, user_name, pinned_mcp_server);
+                        system_prompt = construct_system_prompt(
+                            config,
+                            &memory,
+                            chat_id,
+                            &root,
+                            &resolved_task,
+                            plan_mode,
+                            system_prompt_native,
+                            user_name,
+                            pinned_mcp_server,
+                        );
                         "Plan approved by the user. Plan mode is now OFF — write_file, apply_patch, run_shell, and other previously blocked tools are now available. Proceed with implementing the plan.".to_string()
                     }
                     Ok(ApprovalOutcome::Denied) => {
@@ -2250,12 +2283,12 @@ where
                     let compaction_needed = (total_tokens as f64) >= (window as f64) * COMPACTION_TRIGGER_RATIO
                         || (step >= ADAPTIVE_COMPACTION_MIN_STEPS && total_tokens >= ADAPTIVE_COMPACTION_TOKEN_CEILING);
                     if compaction_needed {
-                        let eligible = native_messages.len().saturating_sub(1) / 2 > COMPACTION_KEEP_RECENT_STEPS;
+                        let eligible = native_messages.len().saturating_sub(history_prefix_len + 1) / 2 > COMPACTION_KEEP_RECENT_STEPS;
                         if let Ok(Some((compacted, _))) = run_control::run(report_context_compaction(
                             eligible,
                             total_tokens,
                             window,
-                            compact_native_messages(&active_config, &native_messages),
+                            compact_native_messages(&active_config, &native_messages, history_prefix_len),
                             &mut progress,
                         )).await {
                             native_messages = compacted;

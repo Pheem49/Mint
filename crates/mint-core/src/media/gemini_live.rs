@@ -252,8 +252,9 @@ where
     eprintln!("[gemini-live] connected, sending setup...");
     let (mut ws_write, mut ws_read) = ws_stream.split();
 
-    let user_name = crate::MemoryStore::open_default()
-        .ok()
+    let memory_store = crate::MemoryStore::open_default().ok();
+    let user_name = memory_store
+        .as_ref()
         .and_then(|memory| memory.get_profile("name").ok().flatten());
 
     let mut system_instruction = format!(
@@ -263,14 +264,17 @@ where
     // Same cross-session context (saved profile/preferences + this chat's recent
     // history) the typed-chat agent loop gets, so a Live call isn't a blank slate
     // that's forgotten everything the user already told Mint.
-    crate::orchestration::append_memory_context(
-        &mut system_instruction,
-        chat_id,
-        Some(workspace_root.to_string_lossy().as_ref()),
-        None,
-        config.semantic_fact_recall,
-        true,
-    );
+    if let Some(ref memory) = memory_store {
+        crate::orchestration::append_memory_context(
+            &mut system_instruction,
+            memory,
+            chat_id,
+            Some(workspace_root.to_string_lossy().as_ref()),
+            None,
+            config.semantic_fact_recall,
+            true,
+        );
+    }
     if let Ok(skills) = crate::skills::learned_skills_context(Some(workspace_root), Some(chat_id))
         && !skills.trim().is_empty()
     {

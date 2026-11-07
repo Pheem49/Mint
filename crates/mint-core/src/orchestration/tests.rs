@@ -1026,6 +1026,48 @@ fn enrich_request_populates_messages_and_omits_duplicate_transcript() {
 }
 
 #[test]
+fn enrich_request_injects_transcript_for_non_native_tool_calling() {
+    let db_path = std::env::temp_dir().join(format!(
+        "mint-test-enrich-nonnative-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let store = MemoryStore::open(&db_path);
+    let chat_id = "test-chat-enrich-nonnative";
+
+    insert_completed_turn(&store, chat_id, "คุยรอบแรก", "ตอบรอบแรก");
+
+    let request = ChatRequest {
+        message: "คุยรอบสอง".into(),
+        system_instruction: "You are a helpful assistant.".into(),
+        chat_id: Some(chat_id.to_string()),
+        ..Default::default()
+    };
+    // Provider with ToolCallingMode::JsonPrompt (e.g. huggingface)
+    let config = MintConfig {
+        ai_provider: "huggingface".into(),
+        ..Default::default()
+    };
+    assert_eq!(config.tool_calling_mode(), ToolCallingMode::JsonPrompt);
+
+    let enriched = enrich_request(&config, &store, &request).unwrap();
+
+    // In non-native mode, messages should remain None (since non-native providers
+    // ignore request.messages in plain chat)
+    assert!(enriched.messages.is_none());
+
+    // Instead, recent conversation context transcript must be injected into system instruction
+    assert!(
+        enriched
+            .system_instruction
+            .contains("Recent conversation context:")
+    );
+    assert!(enriched.system_instruction.contains("User: คุยรอบแรก"));
+    assert!(enriched.system_instruction.contains("Assistant: ตอบรอบแรก"));
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[test]
 fn agent_decision_allows_null_input() {
     let decision = parse_decision(r#"{"thought":"done","action":"finish","input":null}"#)
         .expect("null input should parse as default input");
@@ -1203,14 +1245,16 @@ async fn compact_native_messages_is_a_noop_when_history_is_short() {
     // COMPACTION_KEEP_RECENT_STEPS = 3, so exactly 3 step-pairs is nothing to compact yet.
     let messages = native_messages_with_steps(3);
     let config = MintConfig::default();
-    let result = compact_native_messages(&config, &messages).await.unwrap();
+    let result = compact_native_messages(&config, &messages, 0)
+        .await
+        .unwrap();
     assert!(result.is_none());
 }
 
 #[tokio::test]
 async fn compact_native_messages_is_a_noop_for_empty_history() {
     let config = MintConfig::default();
-    let result = compact_native_messages(&config, &[]).await.unwrap();
+    let result = compact_native_messages(&config, &[], 0).await.unwrap();
     assert!(result.is_none());
 }
 
