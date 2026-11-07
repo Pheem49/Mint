@@ -43,6 +43,7 @@ import { useGeminiLiveVoice } from '../../utils/useGeminiLiveVoice'
 import GeminiLiveOverlay from './GeminiLiveOverlay'
 import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../../utils/documentTypes'
 import ModelSelectorPopover from './ModelSelectorPopover'
+import ChatModeSelector from './ChatModeSelector'
 import GitBranchSelector from '../workspace/GitBranchSelector'
 import WorkspaceSelector from '../workspace/WorkspaceSelector'
 import ToolsPanelToggle from '../workspace/ToolsPanelToggle'
@@ -1654,24 +1655,6 @@ export default function ChatPanel({
             {workspacePath && <GitBranchSelector workspacePath={workspacePath} disabled={sending} onBranchChanged={onWorkspaceChanged} />}
           </div>
         )}
-        <div className="smart-context-bar">
-          <label className={`smart-context-option ${agentMode ? 'is-active' : ''}`}>
-            <span className="toggle-switch">
-              <input type="checkbox" checked={agentMode} onChange={(event) => onSetAgentMode(event.target.checked)} />
-              <span className="slider round" />
-            </span>
-            <span className="smart-context-copy"><span className="smart-context-title">Agent mode</span></span>
-          </label>
-          {onSetPlanMode && (
-            <label className={`smart-context-option ${planMode ? 'is-active' : ''}`} title="Investigate read-only and require plan approval before editing files or running commands">
-              <span className="toggle-switch">
-                <input type="checkbox" checked={Boolean(planMode)} onChange={(event) => onSetPlanMode(event.target.checked)} />
-                <span className="slider round" />
-              </span>
-              <span className="smart-context-copy"><span className="smart-context-title">Plan mode</span></span>
-            </label>
-          )}
-        </div>
         {queuedPrompts && queuedPrompts.length > 0 && (
           <QueuedMessagesBanner
             queuedPrompts={queuedPrompts}
@@ -1904,22 +1887,31 @@ export default function ChatPanel({
               <path d="M8 22h8M12 18v4M7 10h10M12 5v10" />
             </svg>
           </button>
-          <ModelSelectorPopover
-            activeProvider={status?.activeProvider ?? ''}
-            activeModel={activeModel}
-            availableProviders={status?.availableProviders ?? []}
-            settingsConfig={settingsConfig}
-            dynamicOllamaModels={dynamicOllamaModels}
-            onSelect={(provider, model) => {
-              if (onSelectModelAndProvider) {
-                onSelectModelAndProvider(provider, model)
-              } else {
-                onSetProvider(provider)
-                onSetModel(model)
-              }
-            }}
-            onUpdateSettings={onUpdateSettings}
-          />
+          <div className="chat-composer-pills">
+            <ModelSelectorPopover
+              activeProvider={status?.activeProvider ?? ''}
+              activeModel={activeModel}
+              availableProviders={status?.availableProviders ?? []}
+              settingsConfig={settingsConfig}
+              dynamicOllamaModels={dynamicOllamaModels}
+              onSelect={(provider, model) => {
+                if (onSelectModelAndProvider) {
+                  onSelectModelAndProvider(provider, model)
+                } else {
+                  onSetProvider(provider)
+                  onSetModel(model)
+                }
+              }}
+              onUpdateSettings={onUpdateSettings}
+            />
+            <ChatModeSelector
+              agentMode={agentMode}
+              onSetAgentMode={onSetAgentMode}
+              planMode={planMode}
+              onSetPlanMode={onSetPlanMode}
+              disabled={sending}
+            />
+          </div>
           <VoicePill
             id="voice-input-btn"
             className="composer-voice-pill"

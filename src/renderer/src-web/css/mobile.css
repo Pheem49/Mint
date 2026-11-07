@@ -570,17 +570,33 @@
     grid-template-rows: minmax(48px, auto) 40px 40px;
   }
 
+  #chat-form .chat-composer-pills,
   #chat-form .model-selector-container {
     grid-column: 1 / -1;
     grid-row: 3;
     display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
     width: 100%;
     min-width: 0;
     height: 40px;
   }
 
+  #chat-form:not(:has(.mint-attachment)) .chat-composer-pills,
   #chat-form:not(:has(.mint-attachment)) .model-selector-container {
     grid-row: 2;
+  }
+
+  #chat-form .chat-composer-pills .chat-mode-selector-wrap {
+    flex: 0 0 auto;
+  }
+
+  #chat-form .chat-composer-pills .model-selector-container {
+    flex: 1 1 auto;
+    min-width: 0;
+    grid-column: unset;
+    grid-row: unset;
   }
 
   #chat-form .model-selector-trigger {
