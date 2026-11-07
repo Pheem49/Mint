@@ -1067,6 +1067,124 @@ fn enrich_request_injects_transcript_for_non_native_tool_calling() {
     let _ = std::fs::remove_file(db_path);
 }
 
+#[tokio::test]
+async fn multi_turn_conversation_continuity_propagates_into_native_messages_and_preserves_context()
+{
+    let db_path = std::env::temp_dir().join(format!(
+        "mint-test-multiturn-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let store = MemoryStore::open(&db_path);
+    let chat_id = "test-multiturn-continuity";
+
+    // Turn 1
+    insert_completed_turn(
+        &store,
+        chat_id,
+        "ฉันชอบสีส้มและผลไม้แอปเปิ้ล",
+        "รับทราบครับ คุณชอบสีส้มและผลไม้แอปเปิ้ล",
+    );
+    // Turn 2
+    insert_completed_turn(&store, chat_id, "ช่วยจำเรื่องนี้ไว้ด้วยนะ", "ได้เลยครับ บันทึกไว้แล้ว");
+
+    // Verify history builder recovers all 4 messages in strict chronological order
+    let history = build_conversation_history_messages(
+        &store,
+        chat_id,
+        CONTEXT_LIMIT,
+        MAX_CONTEXT_MESSAGE_CHARS,
+    );
+    assert_eq!(history.len(), 4);
+    assert_eq!(history[0].role, ChatRole::User);
+    assert_eq!(
+        history[0].content,
+        vec![ContentBlock::Text {
+            text: "ฉันชอบสีส้มและผลไม้แอปเปิ้ล".into()
+        }]
+    );
+    assert_eq!(history[1].role, ChatRole::Assistant);
+    assert_eq!(
+        history[1].content,
+        vec![ContentBlock::Text {
+            text: "รับทราบครับ คุณชอบสีส้มและผลไม้แอปเปิ้ล".into()
+        }]
+    );
+    assert_eq!(history[2].role, ChatRole::User);
+    assert_eq!(
+        history[2].content,
+        vec![ContentBlock::Text {
+            text: "ช่วยจำเรื่องนี้ไว้ด้วยนะ".into()
+        }]
+    );
+    assert_eq!(history[3].role, ChatRole::Assistant);
+    assert_eq!(
+        history[3].content,
+        vec![ContentBlock::Text {
+            text: "ได้เลยครับ บันทึกไว้แล้ว".into()
+        }]
+    );
+
+    // Simulate turn 3 initialization in orchestrate_agent_loop
+    let mut native_messages = history;
+    let history_prefix_len = native_messages.len();
+    assert_eq!(history_prefix_len, 4);
+
+    let current_task = "ใช้ฟีเจอร์ ask_user ถามผลไม้ที่ฉันชอบหน่อย";
+    let content = build_user_content_blocks(current_task.to_string(), None, None, None);
+    native_messages.push(ChatMessage {
+        role: ChatRole::User,
+        content,
+    });
+    assert_eq!(native_messages.len(), 5);
+
+    // System prompt in native mode must NOT contain duplicate text transcript
+    let config = MintConfig::default();
+    let root = std::path::PathBuf::from("/tmp");
+    let system_prompt = construct_system_prompt(
+        &config,
+        &store,
+        chat_id,
+        &root,
+        current_task,
+        false,
+        true,
+        None,
+        None,
+    );
+    assert!(!system_prompt.contains("Recent conversation context:"));
+
+    // Verify compaction boundary preserves all 4 historical turns + initial task
+    for i in 0..5 {
+        native_messages.extend(step_pair(i));
+    }
+    let config_fail = MintConfig {
+        ai_provider: "non_existent_provider_fail".into(),
+        ..Default::default()
+    };
+    let (compacted, _) =
+        compact_native_messages(&config_fail, &native_messages, history_prefix_len)
+            .await
+            .unwrap()
+            .unwrap();
+
+    // 4 historical + 1 initial user + 2 summary/continuation + 6 recent steps = 13 messages
+    assert_eq!(compacted.len(), 4 + 1 + 2 + 6);
+    assert_eq!(
+        compacted[0].content,
+        vec![ContentBlock::Text {
+            text: "ฉันชอบสีส้มและผลไม้แอปเปิ้ล".into()
+        }]
+    );
+    assert_eq!(
+        compacted[4].content,
+        vec![ContentBlock::Text {
+            text: current_task.into()
+        }]
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
 #[test]
 fn agent_decision_allows_null_input() {
     let decision = parse_decision(r#"{"thought":"done","action":"finish","input":null}"#)

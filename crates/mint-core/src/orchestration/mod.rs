@@ -407,7 +407,7 @@ fn construct_system_prompt(
         !system_prompt_native,
     );
     if config.memory_recall
-        && let Some(recall) = render_recalled_messages(chat_id, resolved_task)
+        && let Some(recall) = render_recalled_messages(memory, chat_id, resolved_task)
     {
         system_prompt = format!("{}\n\n{}", system_prompt.trim(), recall);
     }
@@ -447,49 +447,19 @@ fn enrich_request(
         }
     }
 
-    let mut profile_instructions = String::new();
-    if let Ok(Some(name)) = memory.get_profile("name")
-        && !name.trim().is_empty()
-    {
-        profile_instructions.push_str(&format!("User Name: {}\n", name.trim()));
-    }
-    if let Ok(Some(preferences)) = memory.get_profile("preferences")
-        && !preferences.trim().is_empty()
-    {
-        profile_instructions.push_str(&format!(
-            "User Preferences & Profile:\n{}\n",
-            preferences.trim()
-        ));
-    }
-
-    if !profile_instructions.is_empty() {
-        enriched.system_instruction = format!(
-            "{}\n\nUser Profile Information:\n{}",
-            enriched.system_instruction.trim(),
-            profile_instructions.trim()
-        )
-        .trim()
-        .to_owned();
-    }
-
-    if let Some(facts) = render_memory_facts(
+    append_memory_context(
+        &mut enriched.system_instruction,
         memory,
+        &request_chat_id(request),
         request.workspace_path.as_deref(),
-        crate::subagent_name(&request_chat_id(request)),
         Some(&request.message),
         config.semantic_fact_recall,
-    ) {
-        enriched.system_instruction = format!(
-            "{}\n\nRemembered facts:\n{}",
-            enriched.system_instruction.trim(),
-            facts
-        )
-        .trim()
-        .to_owned();
-    }
+        enriched.messages.is_none(),
+    );
 
     if config.memory_recall
-        && let Some(recall) = render_recalled_messages(&request_chat_id(request), &request.message)
+        && let Some(recall) =
+            render_recalled_messages(memory, &request_chat_id(request), &request.message)
     {
         enriched.system_instruction =
             format!("{}\n\n{}", enriched.system_instruction.trim(), recall)
@@ -507,24 +477,6 @@ fn enrich_request(
     );
     enriched.system_instruction.push_str(&active_model_info);
 
-    // If structured messages are not in use (e.g. no messages array populated),
-    // fallback to injecting recent transcript into system prompt if available.
-    if enriched.messages.is_none()
-        && let Some(transcript) = render_conversation_transcript(
-            memory,
-            &request_chat_id(request),
-            CONTEXT_LIMIT,
-            MAX_CONTEXT_MESSAGE_CHARS,
-        )
-    {
-        enriched.system_instruction = format!(
-            "{}\n\nRecent conversation context:\n{}",
-            enriched.system_instruction.trim(),
-            transcript
-        )
-        .trim()
-        .to_owned();
-    }
     Ok(enriched)
 }
 
@@ -1192,7 +1144,20 @@ where
             if !mcp_context.is_empty() { active_system_prompt.push_str(&format!("\n\n{mcp_context}")); }
             // Pin the catalog and only successfully read, unchanged skill bodies
             // to every request, including after JSON history rebuilds/compaction.
-            let visible_history = if active_config.tool_calling_mode() == ToolCallingMode::Native { render_messages_as_text(&native_messages) } else { observation.clone() };
+            let visible_history = if active_config.tool_calling_mode() == ToolCallingMode::Native {
+                if !current_turn_added_to_native {
+                    let history = render_messages_as_text(&native_messages);
+                    if history.is_empty() {
+                        observation.clone()
+                    } else {
+                        format!("{history}\n\nUser: {observation}")
+                    }
+                } else {
+                    render_messages_as_text(&native_messages)
+                }
+            } else {
+                observation.clone()
+            };
             let skill_context = crate::skills::learned_skills_context_with_history(Some(&root), Some(chat_id), &visible_history)
                 .unwrap_or_default();
             if !skill_context.is_empty() {

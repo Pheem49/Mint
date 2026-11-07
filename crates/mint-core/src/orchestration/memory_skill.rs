@@ -107,8 +107,11 @@ const MAX_RECALL_CHARS: usize = 1500;
 /// newest turns are skipped — they're already injected verbatim as "Recent
 /// conversation context". Returns `None` when nothing relevant turns up (or the
 /// query has no searchable token).
-pub(crate) fn render_recalled_messages(chat_id: &str, query: &str) -> Option<String> {
-    let memory = MemoryStore::open_default().ok()?;
+pub(crate) fn render_recalled_messages(
+    memory: &MemoryStore,
+    chat_id: &str,
+    query: &str,
+) -> Option<String> {
     let hits = memory
         .recall_interactions(chat_id, query, CONTEXT_LIMIT, 5)
         .ok()?;
