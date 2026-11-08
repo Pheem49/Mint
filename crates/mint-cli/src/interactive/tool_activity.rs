@@ -184,6 +184,28 @@ impl ToolActivity {
             if let Some(p) = extract_field(&["path"]) {
                 return p;
             }
+        } else if matches!(self.action.as_str(), "create_plan" | "update_plan") {
+            let summary = extract_field(&["summary", "title"]);
+            let steps_count = self
+                .input
+                .get("steps")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or(0);
+            let steps_label = if steps_count > 0 {
+                Some(format!(
+                    "{steps_count} step{}",
+                    if steps_count == 1 { "" } else { "s" }
+                ))
+            } else {
+                None
+            };
+            match (summary, steps_label) {
+                (Some(s), Some(steps)) => return format!("{s} ({steps})"),
+                (Some(s), None) => return s,
+                (None, Some(steps)) => return steps,
+                (None, None) => {}
+            }
         }
 
         for key in [
@@ -692,5 +714,27 @@ mod tests {
             status: None,
         };
         assert_eq!(dummy_only.subject(), "");
+
+        let create_plan_tool = ToolActivity {
+            entry: 0,
+            call_id: None,
+            action: "create_plan".into(),
+            input: serde_json::json!({
+                "summary": "Fix streaming and plan rendering",
+                "steps": [
+                    {"title": "Stream native text", "status": "in_progress"},
+                    {"title": "Render PlanUpdated", "status": "pending"}
+                ]
+            }),
+            subagent: None,
+            started: Instant::now(),
+            elapsed: None,
+            result: None,
+            status: None,
+        };
+        assert_eq!(
+            create_plan_tool.subject(),
+            "Fix streaming and plan rendering (2 steps)"
+        );
     }
 }

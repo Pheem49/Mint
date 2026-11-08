@@ -100,6 +100,10 @@ export function reduceLiveAgentProgress(
     const index = current.findIndex(item => item.type === 'ToolProgress' && item.data.callId === event.data.callId)
     if (index >= 0) { const next = current.slice(); next[index] = event; return next }
   }
+  if (event.type === 'PlanUpdated') {
+    const index = current.findIndex(item => item.type === 'PlanUpdated')
+    if (index >= 0) { const next = current.slice(); next[index] = event; return next }
+  }
 
   if (event.type === 'ThinkingDelta') {
     const index = current.findIndex(
@@ -153,10 +157,12 @@ export function compactAgentProgressForPersistence(progress: AgentProgress[]): A
   for (const event of progress) {
     if (event.type === 'ToolProgress') latestProgress.set(event.data.callId, event)
     if (event.type === 'DeviceState' && event.data.update.state !== 'accepted') latestProgress.set(`device:${event.data.callId}`,event)
+    if (event.type === 'PlanUpdated') latestProgress.set('plan:active', event)
   }
   for (const event of progress) {
     if (event.type === 'ToolProgress' && latestProgress.get(event.data.callId) !== event) continue
     if(event.type==='DeviceState' && event.data.update.state!=='accepted' && latestProgress.get(`device:${event.data.callId}`)!==event) continue
+    if (event.type === 'PlanUpdated' && latestProgress.get('plan:active') !== event) continue
     if (event.type === 'ThinkingDelta') {
       if (!completedIds.has(event.data.id)) {
         const previous = interrupted.get(event.data.id)
@@ -190,6 +196,22 @@ export function compactAgentProgressForPersistence(progress: AgentProgress[]): A
 
 export function hasAgentToolActivity(progress: AgentProgress[]): boolean {
   return progress.some((event) => event.type === 'ToolStart' || event.type === 'ToolEnd')
+}
+
+export function hasAgentDrawerActivity(progress: AgentProgress[]): boolean {
+  return progress.some(
+    (event) =>
+      event.type === 'ToolStart' ||
+      event.type === 'ToolEnd' ||
+      event.type === 'ToolArtifacts' ||
+      event.type === 'DeviceState' ||
+      event.type === 'ToolDiscovery' ||
+      event.type === 'PlanUpdated' ||
+      event.type === 'SubagentStarted' ||
+      event.type === 'SubagentFinished' ||
+      event.type === 'RunCompleted' ||
+      event.type === 'ContextCompaction',
+  )
 }
 
 export function mergeActivitySnapshots(

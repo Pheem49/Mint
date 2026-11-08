@@ -216,6 +216,16 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     case 'exit_plan_mode':
       rawTarget = 'plan approval'
       break
+    case 'create_plan':
+    case 'update_plan': {
+      const summary = activityDetail(input, 'summary') || activityDetail(input, 'title')
+      const stepsCount = Array.isArray(input.steps) ? input.steps.length : 0
+      const stepsLabel = stepsCount > 0 ? `${stepsCount} step${stepsCount === 1 ? '' : 's'}` : ''
+      rawTarget = summary && stepsLabel
+        ? `${summary} (${stepsLabel})`
+        : summary || stepsLabel || 'task plan'
+      break
+    }
     default:
       rawTarget = path || query || command || expression || symbol || city || url || selector || filter || name || tool || action.replaceAll('_', ' ')
       break
@@ -287,6 +297,8 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     semanticVerb = 'Calculated'
   } else if (action === 'view_image') {
     semanticVerb = 'Viewed'
+  } else if (action === 'create_plan' || action === 'update_plan') {
+    semanticVerb = 'Planned'
   } else if (action === 'ask_user') {
     semanticVerb = 'Asked'
     let questions: AskUserItem[] = []

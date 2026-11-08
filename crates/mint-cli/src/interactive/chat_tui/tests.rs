@@ -3245,4 +3245,170 @@ mod swarm_panel_tests {
         assert_eq!(state.composer_text(), "");
         assert!(state.active_notice().is_none());
     }
+
+    #[test]
+    fn plan_updated_renders_and_updates_checklist_in_tui_and_saved_activity() {
+        let mut state = ChatViewState::default();
+        state.push_user("Help me refactor streaming".to_string());
+
+        let initial_plan = mint_core::ActivePlan {
+            objective: "Refactor Streaming".to_string(),
+            tasks: vec![
+                mint_core::PlanTaskItem {
+                    id: "step-1".to_string(),
+                    title: "Stream native direct text".to_string(),
+                    status: "in_progress".to_string(),
+                },
+                mint_core::PlanTaskItem {
+                    id: "step-2".to_string(),
+                    title: "Render PlanUpdated in TUI".to_string(),
+                    status: "pending".to_string(),
+                },
+            ],
+        };
+        state.record_tool_progress(&mint_core::AgentProgress::PlanUpdated { plan: initial_plan });
+
+        let plain = state.plain_transcript_lines().join("\n");
+        assert!(
+            plain.contains("Plan: Refactor Streaming · 0/2 (0%)"),
+            "expected plan header with 0/2 (0%), got:\n{plain}"
+        );
+        assert!(plain.contains("[>] Stream native direct text"));
+        assert!(plain.contains("[ ] Render PlanUpdated in TUI"));
+
+        let updated_plan = mint_core::ActivePlan {
+            objective: "Refactor Streaming".to_string(),
+            tasks: vec![
+                mint_core::PlanTaskItem {
+                    id: "step-1".to_string(),
+                    title: "Stream native direct text".to_string(),
+                    status: "completed".to_string(),
+                },
+                mint_core::PlanTaskItem {
+                    id: "step-2".to_string(),
+                    title: "Render PlanUpdated in TUI".to_string(),
+                    status: "in_progress".to_string(),
+                },
+            ],
+        };
+        state.record_tool_progress(&mint_core::AgentProgress::PlanUpdated {
+            plan: updated_plan.clone(),
+        });
+
+        // Must update the checklist entry in-place rather than duplicating it
+        assert_eq!(state.transcript.len(), 2);
+        let updated_plain = state.plain_transcript_lines().join("\n");
+        assert!(
+            updated_plain.contains("Plan: Refactor Streaming · 1/2 (50%)"),
+            "expected updated plan header with 1/2 (50%), got:\n{updated_plain}"
+        );
+        assert!(updated_plain.contains("[✓] Stream native direct text"));
+        assert!(updated_plain.contains("[>] Render PlanUpdated in TUI"));
+
+        // Verify replay from saved activity also renders the checklist
+        let mut replayed = ChatViewState::default();
+        let saved = serde_json::to_value(vec![mint_core::AgentProgress::PlanUpdated {
+            plan: updated_plan,
+        }])
+        .unwrap();
+        replayed.push_saved_activity(Some(&saved), "completed");
+        let replayed_plain = replayed.plain_transcript_lines().join("\n");
+        assert!(replayed_plain.contains("Plan: Refactor Streaming · 1/2 (50%)"));
+        assert!(replayed_plain.contains("[✓] Stream native direct text"));
+    }
+
+    #[test]
+    fn record_tool_progress_inserts_before_active_assistant_entry() {
+        let mut state = ChatViewState::default();
+        state.push_user("Check Cargo.toml".to_string());
+        state.append_assistant_delta("Let me check:\nLine 2");
+        assert_eq!(state.active_assistant_entry, Some(1));
+
+        state.record_tool_progress(&mint_core::AgentProgress::ToolStart {
+            call_id: Some("call_1".to_string()),
+            action: "read_file".to_string(),
+            input: serde_json::json!({"path": "Cargo.toml"}),
+            subagent: None,
+        });
+
+        // Tool card should be inserted at index 1, shifting active_assistant_entry to 2
+        assert_eq!(state.tools[0].entry, 1);
+        assert_eq!(state.active_assistant_entry, Some(2));
+        assert_eq!(state.transcript[2].role, TranscriptRole::Assistant);
+    }
+
+    #[test]
+    fn finish_thought_with_mismatched_or_repeated_id_does_not_duplicate_notice() {
+        let state = Arc::new(Mutex::new(ChatViewState::default()));
+        let handle = ChatTui::handle(state.clone());
+
+        // Live thought with id "stream-1" followed by finish_thought with mismatched id "stream-2"
+        handle.append_thought_delta(
+            "stream-1",
+            "initial live reasoning",
+            std::time::Duration::from_millis(900),
+        );
+        handle.finish_thought(
+            Some("stream-2"),
+            "final extended thinking",
+            std::time::Duration::from_millis(1500),
+        );
+
+        // Followed by another finish_thought for the same id "stream-2"
+        handle.finish_thought(
+            Some("stream-2"),
+            "additional internal cot",
+            std::time::Duration::from_millis(1800),
+        );
+
+        let locked = state.lock().unwrap();
+        let notices: Vec<_> = locked
+            .transcript
+            .iter()
+            .filter(|e| e.text.starts_with("Thought · "))
+            .collect();
+        assert_eq!(
+            notices.len(),
+            1,
+            "expected exactly 1 Thought notice in transcript, got: {:?}",
+            locked
+                .transcript
+                .iter()
+                .map(|e| &e.text)
+                .collect::<Vec<_>>()
+        );
+        let modal = locked.thought_record().expect("thought record");
+        let joined = modal.lines.join("\n");
+        assert!(joined.contains("initial live reasoning"));
+        assert!(joined.contains("final extended thinking"));
+        assert!(joined.contains("additional internal cot"));
+    }
+
+    #[test]
+    fn refresh_tool_card_preserves_full_subject_beyond_80_columns_in_plain_and_selected_text() {
+        let mut state = ChatViewState::default();
+        let long_path = "crates/mint-cli/src/interactive/chat_tui/very_long_directory_name/deeply_nested_module_file_name_beyond_eighty_chars.rs";
+        assert!(long_path.len() > 100);
+
+        state.record_tool_progress(&mint_core::AgentProgress::ToolStart {
+            call_id: Some("call_long".to_string()),
+            action: "read_file".to_string(),
+            input: serde_json::json!({ "path": long_path }),
+            subagent: None,
+        });
+
+        let plain = state.plain_transcript_lines().join("\n");
+        assert!(
+            plain.contains(long_path),
+            "expected plain_transcript_lines to preserve full path > 80 cols, got:\n{plain}"
+        );
+
+        state.selection_anchor = 0;
+        state.selection_head = 2;
+        let selected = state.selected_text();
+        assert!(
+            selected.contains(long_path),
+            "expected selected_text to preserve full path > 80 cols, got:\n{selected}"
+        );
+    }
 }

@@ -6,8 +6,9 @@ import McpToolResults from '../activity/McpToolResults'
 import ViewedImages from '../activity/ViewedImages'
 import { parseUtcDate } from '../../utils/ui'
 import { parseWebSearchSources } from '../../utils/agentActivity'
-import { EMPTY_AGENT_PROGRESS } from '../../agentProgress'
+import { EMPTY_AGENT_PROGRESS, hasAgentDrawerActivity, thoughtsFrom, extendedThoughtsFrom } from '../../agentProgress'
 import { AgentActivityDrawer } from '../activity/AgentActivityDrawer'
+import { ThinkingBlock } from './ThinkingBlock'
 import SourcesBlock from './SourcesBlock'
 import { TurnFileChanges, type RewindRequestPayload } from './TurnFileChanges'
 import { ToolResultCards } from '../cards/ToolResultCards'
@@ -24,6 +25,8 @@ export interface ChatMessageItemProps {
   speakingText: string | null
   agentActivitySnapshots: Record<string, any[]>
   openActivityIds?: Record<string, boolean>
+  thinkingExpanded?: Record<string, boolean>
+  onThinkingExpandedChange?: (key: string, open: boolean) => void
   handleCopyMessage: (id: string | number, text: string) => void
   speak: (text: string) => void
   toggleActivity: (id: string) => void
@@ -47,6 +50,8 @@ const ChatMessageItem = React.memo(
       speakingText,
       agentActivitySnapshots,
       openActivityIds,
+      thinkingExpanded,
+      onThinkingExpandedChange,
       handleCopyMessage,
       speak,
       toggleActivity,
@@ -116,6 +121,15 @@ const ChatMessageItem = React.memo(
     }, [interaction.userText, parsedUserPrompt])
 
     const progress = agentActivitySnapshots[String(interaction.id)] ?? interaction.agentActivity ?? EMPTY_AGENT_PROGRESS
+    const hasDrawerActivity = useMemo(() => hasAgentDrawerActivity(progress), [progress])
+    const extendedThoughts = useMemo(
+      () => (hasDrawerActivity ? [] : extendedThoughtsFrom(progress)),
+      [hasDrawerActivity, progress],
+    )
+    const shortThoughts = useMemo(
+      () => (hasDrawerActivity || extendedThoughts.length > 0 ? [] : thoughtsFrom(progress)),
+      [hasDrawerActivity, extendedThoughts.length, progress],
+    )
     const webSources = useMemo(() => parseWebSearchSources(progress), [progress])
     const memoizedAiContent = useMemo(() => {
       if (!interaction.aiText) return null
@@ -225,17 +239,37 @@ const ChatMessageItem = React.memo(
         )}
         <div className="message ai-message">
           <div className="bubble-wrapper">
-            {interaction.status !== 'queued' && interaction.status !== 'running' && (
+            {interaction.status !== 'queued' && hasDrawerActivity && (
               <AgentActivityDrawer
                 progress={progress}
                 id={String(interaction.id)}
-                historical
-                isOpen={Boolean(openActivityIds?.[String(interaction.id)])}
+                historical={interaction.status !== 'running'}
+                defaultOpen={interaction.status === 'running'}
+                isOpen={openActivityIds?.[String(interaction.id)] ?? (interaction.status === 'running')}
                 onToggle={toggleActivity}
                 chatId={props.chatId || interaction.chatId}
                 workspacePath={props.workspacePath}
                 onReferenceFile={props.onReferenceFile}
                 onOpenArtifact={onOpenArtifact}
+              />
+            )}
+            {interaction.status !== 'queued' && !hasDrawerActivity && extendedThoughts.length > 0 && (
+              <ThinkingBlock
+                blockKey={`extended-${interaction.id}`}
+                thoughts={extendedThoughts}
+                isLive={interaction.status === 'running'}
+                variant="extended"
+                expanded={thinkingExpanded?.[`extended-${interaction.id}`]}
+                onExpandedChange={onThinkingExpandedChange}
+              />
+            )}
+            {interaction.status !== 'queued' && !hasDrawerActivity && shortThoughts.length > 0 && (
+              <ThinkingBlock
+                blockKey={String(interaction.id)}
+                thoughts={shortThoughts}
+                isLive={interaction.status === 'running'}
+                expanded={thinkingExpanded?.[String(interaction.id)]}
+                onExpandedChange={onThinkingExpandedChange}
               />
             )}
             {interaction.status !== 'queued' && interaction.status !== 'running' && (

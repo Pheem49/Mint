@@ -5,6 +5,7 @@ export {
   thoughtsFrom,
   trimAgentProgress,
   hasAgentToolActivity,
+  hasAgentDrawerActivity,
   mergeActivitySnapshots,
   parseAgentActivity,
   parseFileChangesFromProgress,

@@ -72,6 +72,7 @@ pub(crate) struct ChatViewState {
     pub(crate) theme: crate::terminal_theme::TuiTheme,
     pub(super) assistant_pacer: Option<crate::agent::ProgressiveMarkdownPacer>,
     pub(super) active_assistant_entry: Option<usize>,
+    pub(super) active_plan_entry: Option<usize>,
     pub(super) pending_post_assistant_notices: Vec<String>,
     pub(super) last_assistant_tick: Option<std::time::Instant>,
 }
@@ -129,11 +130,35 @@ impl TuiHandle {
                 && thought.updated_at.is_some()
                 && (id.is_none() || thought.id.as_deref() == id)
             {
-                thought.text = text.to_owned();
+                if !text.trim().is_empty() {
+                    thought.text = text.to_owned();
+                }
                 thought.elapsed = elapsed;
                 thought.updated_at = None;
+            } else if let Some(thought) = state.thoughts.last_mut()
+                && thought.updated_at.is_none()
+                && id.is_some()
+                && thought.id.as_deref() == id
+            {
+                if !text.trim().is_empty() && !thought.text.contains(text.trim()) {
+                    if thought.text.trim().is_empty() {
+                        thought.text = text.to_owned();
+                    } else {
+                        thought.text = format!("{}\n\n{}", thought.text, text.trim());
+                    }
+                }
+                thought.elapsed = elapsed.max(thought.elapsed);
+                state.refresh_thought_modal();
+                return;
             } else if !text.trim().is_empty() {
-                state.finish_live_thought();
+                // Close any in-flight live thought segment without emitting a separate
+                // duplicate "Thought · Xs (Ctrl+T to view)" notice before our own notice.
+                if let Some(live) = state.thoughts.last_mut()
+                    && live.updated_at.is_some()
+                {
+                    live.elapsed = live.elapsed();
+                    live.updated_at = None;
+                }
                 state.thoughts.push(ThinkingSegment {
                     id: id.map(str::to_owned),
                     text: text.to_owned(),
@@ -373,6 +398,10 @@ impl ChatViewState {
             } => {
                 return None;
             }
+            AgentProgress::PlanUpdated { plan } => {
+                self.upsert_active_plan_card(plan);
+                return None;
+            }
             _ => {}
         }
         let (call_id, action, input, subagent, end) = match progress {
@@ -408,9 +437,29 @@ impl ChatViewState {
                 && tool.matches(call_id.as_deref(), action, input, subagent.as_deref())
         });
         let index = existing.unwrap_or_else(|| {
-            let entry = self.transcript.len();
-            self.transcript
-                .push(TranscriptEntry::new(TranscriptRole::Notice, ""));
+            let entry = if let Some(idx) = self.active_assistant_entry
+                && idx <= self.transcript.len()
+            {
+                self.transcript
+                    .insert(idx, TranscriptEntry::new(TranscriptRole::Notice, ""));
+                self.active_assistant_entry = Some(idx + 1);
+                if let Some(plan_idx) = &mut self.active_plan_entry
+                    && *plan_idx >= idx
+                {
+                    *plan_idx += 1;
+                }
+                for tool in &mut self.tools {
+                    if tool.entry >= idx {
+                        tool.entry += 1;
+                    }
+                }
+                idx
+            } else {
+                let entry = self.transcript.len();
+                self.transcript
+                    .push(TranscriptEntry::new(TranscriptRole::Notice, ""));
+                entry
+            };
             self.tools.push(super::tool_activity::ToolActivity {
                 entry,
                 call_id: call_id.clone(),
@@ -438,9 +487,11 @@ impl ChatViewState {
     }
 
     pub(super) fn refresh_tool_card(&mut self, index: usize) {
+        let (default_width, _) = crate::markdown::terminal_size_or_default();
         let tool = &self.tools[index];
-        let lines = tool.lines(80);
-        let plain: Vec<String> = lines
+        let lines = tool.lines(default_width);
+        let unclipped_lines = tool.lines(u16::MAX);
+        let plain: Vec<String> = unclipped_lines
             .iter()
             .map(|line| {
                 line.spans
@@ -455,7 +506,7 @@ impl ChatViewState {
                 text: plain.join("\n"),
                 rendered_lines: lines,
                 plain_lines: plain,
-                rendered_width: 80,
+                rendered_width: default_width,
             };
         }
     }
@@ -856,6 +907,7 @@ impl ChatViewState {
             self.tool_viewer = None;
             self.assistant_pacer = None;
             self.active_assistant_entry = None;
+            self.active_plan_entry = None;
             self.pending_post_assistant_notices.clear();
             self.last_interaction_id = 0;
             self.sync_cursor = 0;
@@ -871,6 +923,7 @@ impl ChatViewState {
         let Some(events) = activity.and_then(serde_json::Value::as_array) else {
             return sources;
         };
+        self.active_plan_entry = None;
         let first_tool = self.tools.len();
         for value in events {
             let Ok(event) = serde_json::from_value::<mint_core::AgentProgress>(value.clone())
@@ -952,6 +1005,9 @@ impl ChatViewState {
                     }
                     mint_core::AgentProgress::RunCompleted { summary } => {
                         self.push_notice(crate::agent::run_summary_lines(summary).join("\n"));
+                    }
+                    mint_core::AgentProgress::PlanUpdated { plan } => {
+                        self.upsert_active_plan_card(plan);
                     }
                     _ => {}
                 }
@@ -1043,6 +1099,7 @@ impl ChatViewState {
         self.tool_viewer = None;
         self.assistant_pacer = None;
         self.active_assistant_entry = None;
+        self.active_plan_entry = None;
         self.pending_post_assistant_notices.clear();
         let scoped = mint_core::scoped_chat_id(chat_id, Some(&workspace.to_string_lossy()));
         self.sync_cursor = memory.latest_conversation_sequence(&scoped).unwrap_or(0);
@@ -1196,6 +1253,69 @@ impl ChatViewState {
             .push(TranscriptEntry::new(TranscriptRole::User, text));
         self.scroll_from_bottom = 0;
         self.swarm_agents.clear();
+        self.active_plan_entry = None;
+    }
+    fn format_plan_checklist_card(plan: &mint_core::ActivePlan) -> String {
+        if plan.tasks.is_empty() {
+            return String::new();
+        }
+        let completed = plan
+            .tasks
+            .iter()
+            .filter(|task| task.status == "completed")
+            .count();
+        let total = plan.tasks.len();
+        let percent = (completed * 100) / total;
+        let objective = if plan.objective.trim().is_empty() {
+            "Implementation Plan"
+        } else {
+            plan.objective.trim()
+        };
+        let mut lines = Vec::with_capacity(plan.tasks.len() + 1);
+        lines.push(format!(
+            "{}📋 Plan: {}{} \x1b[90m· {completed}/{total} ({percent}%)\x1b[0m",
+            crate::terminal_theme::ANSI_ACCENT_BOLD,
+            objective,
+            crate::terminal_theme::ANSI_RESET
+        ));
+        for task in &plan.tasks {
+            let mark = match task.status.as_str() {
+                "completed" => "\x1b[32m[✓]\x1b[0m",
+                "in_progress" => "\x1b[33m[>]\x1b[0m",
+                "failed" => "\x1b[31m[✗]\x1b[0m",
+                _ => "\x1b[90m[ ]\x1b[0m",
+            };
+            lines.push(format!("  {} {}", mark, task.title));
+        }
+        lines.join("\n")
+    }
+    pub(super) fn upsert_active_plan_card(&mut self, plan: &mint_core::ActivePlan) {
+        let text = Self::format_plan_checklist_card(plan);
+        if text.is_empty() {
+            return;
+        }
+        let entry = TranscriptEntry::new(TranscriptRole::Notice, text);
+        if let Some(idx) = self.active_plan_entry
+            && idx < self.transcript.len()
+        {
+            self.transcript[idx] = entry;
+        } else if let Some(idx) = self.active_assistant_entry
+            && idx <= self.transcript.len()
+        {
+            self.transcript.insert(idx, entry);
+            self.active_plan_entry = Some(idx);
+            self.active_assistant_entry = Some(idx + 1);
+            for tool in &mut self.tools {
+                if tool.entry >= idx {
+                    tool.entry += 1;
+                }
+            }
+        } else {
+            let idx = self.transcript.len();
+            self.transcript.push(entry);
+            self.active_plan_entry = Some(idx);
+        }
+        self.scroll_from_bottom = 0;
     }
     pub fn push_notice(&mut self, text: impl Into<String>) {
         let entry = TranscriptEntry::new(TranscriptRole::Notice, text);
@@ -1204,6 +1324,11 @@ impl ChatViewState {
         {
             self.transcript.insert(idx, entry);
             self.active_assistant_entry = Some(idx + 1);
+            if let Some(plan_idx) = &mut self.active_plan_entry
+                && *plan_idx >= idx
+            {
+                *plan_idx += 1;
+            }
             for tool in &mut self.tools {
                 if tool.entry >= idx {
                     tool.entry += 1;
@@ -1249,6 +1374,8 @@ impl ChatViewState {
         pacer.push_delta(delta);
         if self.active_assistant_entry.is_none() {
             self.tick_assistant_reveal();
+        } else {
+            self.tick_assistant_reveal_if_due(std::time::Duration::from_millis(18));
         }
     }
     pub fn begin_assistant_reveal(&mut self, summary: String, post_notices: Vec<String>) {
@@ -1328,6 +1455,7 @@ impl ChatViewState {
         self.swarm_agents.clear();
         self.assistant_pacer = None;
         self.active_assistant_entry = None;
+        self.active_plan_entry = None;
         self.pending_post_assistant_notices.clear();
         if self
             .dialog

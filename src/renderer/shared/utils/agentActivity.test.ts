@@ -12,7 +12,7 @@ import {
   extractAskUserQuestions,
 } from './agentActivity'
 import { viewedImagesFrom } from './viewedImages'
-import { reduceLiveAgentProgress } from '../agentProgress'
+import { reduceLiveAgentProgress, compactAgentProgressForPersistence, hasAgentDrawerActivity } from '../agentProgress'
 import type { AgentProgress } from '../types'
 
 describe('skill reading activity', () => {
@@ -394,6 +394,115 @@ revisions: 1
       expect(extracted).toHaveLength(1)
       expect(extracted[0].question).toBe('Which Python version to use?')
       expect(extracted[0].answer).toBe('Python 3.11')
+    })
+  })
+
+  describe('plan activities and PlanUpdated progress folding', () => {
+    it('describes create_plan and update_plan with Planned semantic verb and summary/step count', () => {
+      const created = describeTool('create_plan', {
+        summary: 'Ship Native Streaming',
+        steps: ['Step 1', 'Step 2', 'Step 3'],
+      })
+      expect(created.semanticVerb).toBe('Planned')
+      expect(created.target).toBe('Ship Native Streaming (3 steps)')
+
+      const updated = describeTool('update_plan', {
+        steps: ['done: Step 1', 'in_progress: Step 2'],
+      })
+      expect(updated.semanticVerb).toBe('Planned')
+      expect(updated.target).toBe('2 steps')
+    })
+
+    it('replaces earlier PlanUpdated snapshots in live and persisted progress', () => {
+      let progress: AgentProgress[] = []
+      progress = reduceLiveAgentProgress(progress, {
+        type: 'PlanUpdated',
+        data: {
+          plan: {
+            objective: 'Ship Native Streaming',
+            tasks: [{ id: 'step-1', title: 'Write test', status: 'in_progress' }],
+          },
+        },
+      })
+      progress = reduceLiveAgentProgress(progress, {
+        type: 'PlanUpdated',
+        data: {
+          plan: {
+            objective: 'Ship Native Streaming',
+            tasks: [{ id: 'step-1', title: 'Write test', status: 'completed' }],
+          },
+        },
+      })
+
+      const planEvents = progress.filter((e) => e.type === 'PlanUpdated')
+      expect(planEvents).toHaveLength(1)
+      expect(planEvents[0].data.plan.tasks[0].status).toBe('completed')
+
+      const compacted = compactAgentProgressForPersistence([
+        {
+          type: 'PlanUpdated',
+          data: {
+            plan: {
+              objective: 'Ship Native Streaming',
+              tasks: [{ id: 'step-1', title: 'Write test', status: 'in_progress' }],
+            },
+          },
+        },
+        {
+          type: 'PlanUpdated',
+          data: {
+            plan: {
+              objective: 'Ship Native Streaming',
+              tasks: [{ id: 'step-1', title: 'Write test', status: 'completed' }],
+            },
+          },
+        },
+      ])
+      expect(compacted.filter((e) => e.type === 'PlanUpdated')).toHaveLength(1)
+    })
+
+    it('distinguishes pure thinking turns (!agentMode) from turns with agent drawer activity', () => {
+      const thinkingOnly: AgentProgress[] = [
+        {
+          type: 'ThinkingDelta',
+          data: { id: 'step-1', delta: 'Let me think...', elapsed_ms: 400 },
+        },
+        {
+          type: 'ExtendedThinking',
+          data: { id: 'step-1', thought: 'Let me think carefully.', elapsed_ms: 800 },
+        },
+      ]
+      expect(hasAgentDrawerActivity(thinkingOnly)).toBe(false)
+
+      const withTool: AgentProgress[] = [
+        ...thinkingOnly,
+        {
+          type: 'ToolStart',
+          data: { call_id: 'c1', action: 'read_file', input: { path: 'README.md' } },
+        },
+      ]
+      expect(hasAgentDrawerActivity(withTool)).toBe(true)
+
+      const withRunSummary: AgentProgress[] = [
+        ...thinkingOnly,
+        {
+          type: 'RunCompleted',
+          data: {
+            summary: {
+              outcome: 'completed',
+              durationSecs: 1.2,
+              stepsExecuted: 1,
+              toolCallsTotal: 0,
+              toolCallsSucceeded: 0,
+              toolCallsFailed: 0,
+              filesModified: [],
+              filesCreated: [],
+              verificationStatus: 'none',
+            },
+          },
+        },
+      ]
+      expect(hasAgentDrawerActivity(withRunSummary)).toBe(true)
     })
   })
 })

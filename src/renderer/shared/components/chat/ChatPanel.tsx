@@ -1576,6 +1576,8 @@ export default function ChatPanel({
                   speakingText={speakingText}
                   agentActivitySnapshots={agentActivitySnapshots}
                   openActivityIds={openActivityIds}
+                  thinkingExpanded={thinkingExpanded}
+                  onThinkingExpandedChange={onThinkingExpandedChange}
                   handleCopyMessage={handleCopyMessage}
                   speak={speak}
                   toggleActivity={toggleActivity}
