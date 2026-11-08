@@ -1343,7 +1343,7 @@ pub async fn run_code_agent_with_options(
                 ..
             } => {
                 let remaining = progress_tool_running
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |running| {
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |running| {
                         Some(running.saturating_sub(1))
                     })
                     .unwrap_or(0)
