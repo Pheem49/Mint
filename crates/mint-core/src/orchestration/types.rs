@@ -522,6 +522,7 @@ pub fn compact_agent_progress(progress: &[AgentProgress]) -> Vec<AgentProgress> 
             } if !matches!(update.state, crate::mcp::device::DevicePhase::Accepted) => {
                 Some(((1, call_id.as_str()), i))
             }
+            AgentProgress::PlanUpdated { .. } => Some(((2, "plan"), i)),
             _ => None,
         })
         .collect();
@@ -533,6 +534,7 @@ pub fn compact_agent_progress(progress: &[AgentProgress]) -> Vec<AgentProgress> 
             } if !matches!(update.state, crate::mcp::device::DevicePhase::Accepted) => {
                 Some((1, call_id.as_str()))
             }
+            AgentProgress::PlanUpdated { .. } => Some((2, "plan")),
             _ => None,
         };
         if key.is_some_and(|key| latest_progress.get(&key) != Some(&index)) {

@@ -14,6 +14,79 @@ fn persist_plan_to_workspace(root: &Path, plan: &ActivePlan) {
     }
 }
 
+fn load_plan_from_workspace(root: &Path) -> Option<ActivePlan> {
+    let plan_file = root.join(".agents").join("plans").join("active_plan.json");
+    let content = std::fs::read_to_string(plan_file).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+fn parse_plan_step_update(raw: &str) -> (&'static str, String) {
+    let trimmed = raw.trim();
+    let lower = trimmed.to_ascii_lowercase();
+
+    const PREFIXES: &[(&str, &str)] = &[
+        ("[x]", "completed"),
+        ("[✓]", "completed"),
+        ("done:", "completed"),
+        ("completed:", "completed"),
+        ("[>]", "in_progress"),
+        ("in_progress:", "in_progress"),
+        ("in-progress:", "in_progress"),
+        ("current:", "in_progress"),
+        ("[!]", "failed"),
+        ("[✗]", "failed"),
+        ("failed:", "failed"),
+        ("blocked:", "failed"),
+        ("[ ]", "pending"),
+        ("[]", "pending"),
+        ("pending:", "pending"),
+        ("todo:", "pending"),
+    ];
+
+    for &(prefix, status) in PREFIXES {
+        if lower.starts_with(prefix) {
+            let rest = trimmed[prefix.len()..]
+                .trim_start_matches(|c: char| c == '-' || c == ':' || c.is_whitespace())
+                .trim();
+            return (
+                status,
+                if rest.is_empty() {
+                    trimmed.to_string()
+                } else {
+                    rest.to_string()
+                },
+            );
+        }
+    }
+
+    // Check trailing parenthesized status markers like "Step 1 (completed)"
+    const SUFFIXES: &[(&str, &str)] = &[
+        ("(completed)", "completed"),
+        ("(done)", "completed"),
+        ("(in_progress)", "in_progress"),
+        ("(in-progress)", "in_progress"),
+        ("(current)", "in_progress"),
+        ("(failed)", "failed"),
+        ("(blocked)", "failed"),
+        ("(pending)", "pending"),
+    ];
+    for &(suffix, status) in SUFFIXES {
+        if lower.ends_with(suffix) {
+            let rest = trimmed[..trimmed.len() - suffix.len()].trim();
+            return (
+                status,
+                if rest.is_empty() {
+                    trimmed.to_string()
+                } else {
+                    rest.to_string()
+                },
+            );
+        }
+    }
+
+    ("pending", trimmed.to_string())
+}
+
 pub(in crate::orchestration) async fn execute(
     action: &str,
     input: &AgentInput,
@@ -71,47 +144,22 @@ pub(in crate::orchestration) async fn execute(
                 .iter()
                 .enumerate()
                 .map(|(idx, step)| {
-                    let lower = step.to_ascii_lowercase();
-                    let status = if lower.starts_with("[x]")
-                        || lower.starts_with("[✓]")
-                        || lower.contains("completed")
-                        || lower.contains("done")
-                    {
-                        "completed".to_string()
-                    } else if lower.starts_with("[>]")
-                        || lower.contains("in_progress")
-                        || lower.contains("current")
-                    {
-                        "in_progress".to_string()
-                    } else {
-                        "pending".to_string()
-                    };
-                    let title = step
-                        .trim_start_matches(|c| {
-                            c == '['
-                                || c == ']'
-                                || c == 'x'
-                                || c == 'X'
-                                || c == '✓'
-                                || c == ' '
-                                || c == '>'
-                        })
-                        .trim()
-                        .to_string();
+                    let (status, title) = parse_plan_step_update(step);
                     PlanTaskItem {
                         id: format!("step-{}", idx + 1),
-                        title: if title.is_empty() {
-                            step.clone()
-                        } else {
-                            title
-                        },
-                        status,
+                        title,
+                        status: status.to_string(),
                     }
                 })
                 .collect();
 
             let objective = if !input.summary.trim().is_empty() {
                 input.summary.trim().to_string()
+            } else if let Some(existing) = load_plan_from_workspace(root)
+                .map(|p| p.objective)
+                .filter(|obj| !obj.trim().is_empty())
+            {
+                existing
             } else {
                 "Implementation Plan".to_string()
             };
@@ -125,12 +173,11 @@ pub(in crate::orchestration) async fn execute(
 
             let mut formatted = String::from("Plan Updated:\n");
             for task in &tasks {
-                let mark = if task.status == "completed" {
-                    "[✓]"
-                } else if task.status == "in_progress" {
-                    "[>]"
-                } else {
-                    "[ ]"
+                let mark = match task.status.as_str() {
+                    "completed" => "[✓]",
+                    "in_progress" => "[>]",
+                    "failed" => "[✗]",
+                    _ => "[ ]",
                 };
                 formatted.push_str(&format!("{} {} ({})\n", mark, task.title, task.status));
             }
@@ -252,10 +299,16 @@ mod tests {
         assert_eq!(plan.tasks.len(), 2);
         assert_eq!(plan.tasks[0].status, "in_progress");
 
-        // Now test update_plan
+        // Now test update_plan without summary (matching tool_catalog schema) and with
+        // colon-prefixed statuses ("done: ...", "in_progress: ...", "pending: ...")
         let update_input = AgentInput {
-            summary: "Test Feature".to_string(),
-            steps: vec!["[x] Step 1".to_string(), "[>] Step 2".to_string()],
+            summary: String::new(),
+            steps: vec![
+                "done: Step 1".to_string(),
+                "in_progress: Inspect current state".to_string(),
+                "[ ] Ensure streaming is done".to_string(),
+                "failed: Broken step".to_string(),
+            ],
             ..AgentInput::default()
         };
         let update_res = execute(
@@ -273,8 +326,15 @@ mod tests {
         assert!(update_res.contains("[✓] Step 1"));
         let updated_content = std::fs::read_to_string(&plan_file).unwrap();
         let updated_plan: ActivePlan = serde_json::from_str(&updated_content).unwrap();
+        assert_eq!(updated_plan.objective, "Test Feature");
         assert_eq!(updated_plan.tasks[0].status, "completed");
+        assert_eq!(updated_plan.tasks[0].title, "Step 1");
         assert_eq!(updated_plan.tasks[1].status, "in_progress");
+        assert_eq!(updated_plan.tasks[1].title, "Inspect current state");
+        assert_eq!(updated_plan.tasks[2].status, "pending");
+        assert_eq!(updated_plan.tasks[2].title, "Ensure streaming is done");
+        assert_eq!(updated_plan.tasks[3].status, "failed");
+        assert_eq!(updated_plan.tasks[3].title, "Broken step");
 
         let _ = std::fs::remove_dir_all(&temp);
     }

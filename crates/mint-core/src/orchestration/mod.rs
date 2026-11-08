@@ -651,8 +651,12 @@ async fn stream_chat_with_network_retry(
     on_stream_chunk: &mut (dyn FnMut(AgentStreamChunk) + Send),
 ) -> Result<(ChatResponse, Option<String>), ChatError> {
     let mut attempt = 0;
-    let mut summary_stream = FinishSummaryStream::default();
+    let tools_enabled = request
+        .tools
+        .as_ref()
+        .is_some_and(|tools| !tools.is_empty());
     loop {
+        let mut summary_stream = FinishSummaryStream::default();
         let result = stream_chat_events_with_fallback(config, request, |event| match event {
             ChatStreamEvent::ReasoningDelta { delta } if !fast_mode && !delta.is_empty() => {
                 progress(AgentProgress::ThinkingDelta {
@@ -665,6 +669,10 @@ async fn stream_chat_with_network_retry(
                 if stream_json_prompt {
                     summary_stream.push_json_prompt(&delta, &mut |chunk| {
                         on_stream_chunk(AgentStreamChunk::FinalSummary(chunk));
+                    });
+                } else {
+                    summary_stream.push_native_text(&delta, tools_enabled, &mut |chunk| {
+                        on_stream_chunk(AgentStreamChunk::DirectText(chunk));
                     });
                 }
             }
@@ -702,11 +710,11 @@ async fn stream_chat_with_network_retry(
                         .is_none_or(|calls| calls.is_empty())
                     && !response.text.is_empty()
                 {
-                    // Plain text from a native tool-calling response is only a final
-                    // answer if the completed model turn contains no tool calls. Buffer
-                    // it until then so an assistant preamble doesn't appear under
-                    // "Mint:" while the requested tools are still about to run.
-                    on_stream_chunk(AgentStreamChunk::DirectText(response.text.clone()));
+                    // Flush any remaining unstreamed direct text (such as a short
+                    // single-line reply held while checking if a tool call followed).
+                    summary_stream.finish_native_text(&response.text, &mut |chunk| {
+                        on_stream_chunk(AgentStreamChunk::DirectText(chunk));
+                    });
                 }
                 return Ok((response, fallback));
             }
@@ -721,6 +729,8 @@ struct FinishSummaryStream {
     tool_arguments: std::collections::HashMap<usize, String>,
     json_prompt: String,
     emitted: String,
+    native_text: String,
+    native_emitted: String,
 }
 
 impl FinishSummaryStream {
@@ -748,10 +758,17 @@ impl FinishSummaryStream {
             .tool_names
             .get(&index)
             .is_some_and(|name| name == "finish")
-            && let Some(arguments) = self.tool_arguments.get(&index)
-            && let Some(summary) = json_string_field_prefix(arguments, "summary")
         {
-            self.emit_new_text(&summary, on_chunk);
+            if let Some(summary) = input
+                .and_then(|val| val.get("summary"))
+                .and_then(Value::as_str)
+            {
+                self.emit_new_text(summary, on_chunk);
+            } else if let Some(arguments) = self.tool_arguments.get(&index)
+                && let Some(summary) = json_string_field_prefix(arguments, "summary")
+            {
+                self.emit_new_text(&summary, on_chunk);
+            }
         }
     }
 
@@ -764,12 +781,58 @@ impl FinishSummaryStream {
         }
     }
 
+    fn push_native_text(
+        &mut self,
+        delta: &str,
+        tools_enabled: bool,
+        on_chunk: &mut (dyn FnMut(String) + Send),
+    ) {
+        if delta.is_empty() {
+            return;
+        }
+        self.native_text.push_str(delta);
+        if !self.tool_names.is_empty() {
+            return;
+        }
+        let trimmed = self.native_text.trim_start();
+        if trimmed.is_empty() {
+            return;
+        }
+        let ready_to_stream = !tools_enabled
+            || !self.native_emitted.is_empty()
+            || trimmed
+                .find('\n')
+                .is_some_and(|nl| !trimmed[nl + 1..].trim().is_empty())
+            || trimmed.chars().count() > 160;
+        if ready_to_stream {
+            let current = trimmed.to_owned();
+            self.emit_new_native_text(&current, on_chunk);
+        }
+    }
+
+    fn finish_native_text(&mut self, full_text: &str, on_chunk: &mut (dyn FnMut(String) + Send)) {
+        let trimmed = full_text.trim_start();
+        if !self.tool_names.is_empty() || trimmed.is_empty() {
+            return;
+        }
+        self.emit_new_native_text(trimmed, on_chunk);
+    }
+
     fn emit_new_text(&mut self, text: &str, on_chunk: &mut (dyn FnMut(String) + Send)) {
         if !text.starts_with(&self.emitted) || text.len() == self.emitted.len() {
             return;
         }
         let delta = text[self.emitted.len()..].to_owned();
         self.emitted.push_str(&delta);
+        on_chunk(delta);
+    }
+
+    fn emit_new_native_text(&mut self, text: &str, on_chunk: &mut (dyn FnMut(String) + Send)) {
+        if !text.starts_with(&self.native_emitted) || text.len() == self.native_emitted.len() {
+            return;
+        }
+        let delta = text[self.native_emitted.len()..].to_owned();
+        self.native_emitted.push_str(&delta);
         on_chunk(delta);
     }
 }
@@ -1396,6 +1459,7 @@ where
             let decisions: Vec<(String, AgentDecision)> = if tool_mode == ToolCallingMode::Native {
                 match response.tool_calls.clone() {
                     Some(calls) if !calls.is_empty() => {
+                        streamed_direct_text.clear();
                         let (decisions, errors) = prepare_native_tool_calls(
                             calls, response.text.trim(), &mut invalid_tool_calls,
                         )?;

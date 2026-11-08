@@ -590,6 +590,156 @@ fn streamed_finish_summary_takes_precedence_over_direct_text() {
 }
 
 #[test]
+fn streams_native_direct_text_incrementally_once_past_single_line_preamble() {
+    let mut stream = FinishSummaryStream::default();
+    let mut chunks = Vec::new();
+
+    // First short line is held briefly in case a tool call follows.
+    stream.push_native_text("Here is the breakdown:\n", true, &mut |delta| {
+        chunks.push(delta)
+    });
+    assert!(chunks.is_empty());
+
+    // As soon as the second line begins with no tool call, the buffered prefix
+    // and subsequent deltas stream live in real time.
+    stream.push_native_text("- Point 1\n", true, &mut |delta| chunks.push(delta));
+    assert_eq!(chunks.concat(), "Here is the breakdown:\n- Point 1\n");
+
+    stream.push_native_text("- Point 2", true, &mut |delta| chunks.push(delta));
+    assert_eq!(
+        chunks.concat(),
+        "Here is the breakdown:\n- Point 1\n- Point 2"
+    );
+
+    // Completing the turn must not duplicate already-streamed direct text.
+    stream.finish_native_text(
+        "Here is the breakdown:\n- Point 1\n- Point 2",
+        &mut |delta| chunks.push(delta),
+    );
+    assert_eq!(
+        chunks.concat(),
+        "Here is the breakdown:\n- Point 1\n- Point 2"
+    );
+}
+
+#[test]
+fn suppresses_native_single_line_preamble_when_tool_call_follows() {
+    let mut stream = FinishSummaryStream::default();
+    let mut direct_output = String::new();
+    let mut summary_output = String::new();
+
+    stream.push_native_text(
+        "ขออ่านไฟล์ config ก่อนนะครับ",
+        true,
+        &mut |delta| direct_output.push_str(&delta),
+    );
+    stream.push_tool_call(
+        0,
+        Some("read_file"),
+        Some(r#"{"path":"Cargo.toml"}"#),
+        None,
+        &mut |delta| summary_output.push_str(&delta),
+    );
+    stream.push_native_text("\nAdditional trailing text", true, &mut |delta| {
+        direct_output.push_str(&delta)
+    });
+
+    assert!(direct_output.is_empty());
+    assert!(summary_output.is_empty());
+}
+
+#[test]
+fn flushes_short_native_direct_reply_on_completion_when_no_tools_called() {
+    let mut stream = FinishSummaryStream::default();
+    let mut output = String::new();
+
+    stream.push_native_text(
+        "สวัสดีครับ! มีอะไรให้ช่วยไหมครับ",
+        true,
+        &mut |delta| output.push_str(&delta),
+    );
+    assert!(output.is_empty());
+
+    stream.finish_native_text(
+        "สวัสดีครับ! มีอะไรให้ช่วยไหมครับ",
+        &mut |delta| output.push_str(&delta),
+    );
+    assert_eq!(output, "สวัสดีครับ! มีอะไรให้ช่วยไหมครับ");
+}
+
+#[test]
+fn streams_native_text_immediately_when_tools_are_disabled() {
+    let mut stream = FinishSummaryStream::default();
+    let mut chunks = Vec::new();
+
+    stream.push_native_text("สวัสดี", false, &mut |delta| chunks.push(delta));
+    stream.push_native_text("ครับ", false, &mut |delta| chunks.push(delta));
+    assert_eq!(chunks, vec!["สวัสดี", "ครับ"]);
+
+    stream.finish_native_text("สวัสดีครับ", &mut |delta| {
+        chunks.push(delta)
+    });
+    assert_eq!(chunks.concat(), "สวัสดีครับ");
+}
+
+#[test]
+fn native_text_with_leading_newlines_after_think_tag_aligns_with_trimmed_response_text() {
+    let mut stream = FinishSummaryStream::default();
+    let mut chunks = Vec::new();
+
+    // After </think>, StreamReplyAccumulator often emits "\n\nLine 1\nLine 2" while
+    // extract_think_tag trims response.text to "Line 1\nLine 2\nLine 3".
+    stream.push_native_text("\n\nLine 1\nLine 2", true, &mut |delta| chunks.push(delta));
+    assert_eq!(chunks, vec!["Line 1\nLine 2"]);
+
+    stream.finish_native_text("Line 1\nLine 2\nLine 3", &mut |delta| chunks.push(delta));
+    assert_eq!(chunks.concat(), "Line 1\nLine 2\nLine 3");
+}
+
+#[test]
+fn compact_agent_progress_keeps_only_the_latest_plan_updated_event() {
+    let events = vec![
+        AgentProgress::PlanUpdated {
+            plan: ActivePlan {
+                objective: "Ship feature".into(),
+                tasks: vec![PlanTaskItem {
+                    id: "step-1".into(),
+                    title: "Write failing test".into(),
+                    status: "in_progress".into(),
+                }],
+            },
+        },
+        AgentProgress::ToolStart {
+            call_id: Some("call_1".into()),
+            action: "read_file".into(),
+            input: serde_json::json!({"path": "src/lib.rs"}),
+            subagent: None,
+        },
+        AgentProgress::PlanUpdated {
+            plan: ActivePlan {
+                objective: "Ship feature".into(),
+                tasks: vec![PlanTaskItem {
+                    id: "step-1".into(),
+                    title: "Write failing test".into(),
+                    status: "completed".into(),
+                }],
+            },
+        },
+    ];
+
+    let compacted = compact_agent_progress(&events);
+    let plans: Vec<_> = compacted
+        .iter()
+        .filter_map(|e| match e {
+            AgentProgress::PlanUpdated { plan } => Some(plan),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(plans.len(), 1);
+    assert_eq!(plans[0].tasks[0].status, "completed");
+}
+
+#[test]
 fn truncate_for_context_leaves_short_text_untouched() {
     assert_eq!(truncate_for_context("hello", 400), "hello");
 }
