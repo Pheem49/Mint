@@ -1401,3 +1401,79 @@ fn extract_think_tag_supports_both_think_and_thought_tags() {
     assert_eq!(cleaned2, "Final answer 2");
     assert_eq!(thought2.as_deref(), Some("Step 2"));
 }
+
+#[tokio::test]
+async fn collect_stream_reply_preserves_multibyte_utf8_split_across_chunks() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let expected_text = "ข้อมูลนี้ค้นหาและตรวจสอบผ่าน Brave Search เรียบร้อยแล้วค่ะ";
+    let sse_line = format!(
+        "data: {}\n\n",
+        json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": expected_text}]
+                }
+            }]
+        })
+    );
+    let bytes = sse_line.into_bytes();
+    // Locate the 3-byte UTF-8 sequence for Thai tone mark `้` (0xE0, 0xB9, 0x89)
+    // and split the HTTP chunk right after the first byte (0xE0).
+    let split_index = bytes
+        .windows(3)
+        .position(|w| w == [0xE0, 0xB9, 0x89])
+        .expect("should contain Thai tone mark UTF-8 bytes")
+        + 1;
+    let first_chunk = bytes[..split_index].to_vec();
+    let second_chunk = bytes[split_index..].to_vec();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 1024];
+        let _ = socket.read(&mut buf).await;
+        let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+        socket.write_all(headers.as_bytes()).await.unwrap();
+        socket
+            .write_all(format!("{:X}\r\n", first_chunk.len()).as_bytes())
+            .await
+            .unwrap();
+        socket.write_all(&first_chunk).await.unwrap();
+        socket.write_all(b"\r\n").await.unwrap();
+        socket.flush().await.unwrap();
+
+        socket
+            .write_all(format!("{:X}\r\n", second_chunk.len()).as_bytes())
+            .await
+            .unwrap();
+        socket.write_all(&second_chunk).await.unwrap();
+        socket.write_all(b"\r\n0\r\n\r\n").await.unwrap();
+        let _ = socket.shutdown().await;
+    });
+
+    let client = Client::new();
+    let response = client
+        .get(format!("http://{addr}/stream"))
+        .send()
+        .await
+        .unwrap();
+    let mut streamed = String::new();
+    let reply = collect_stream_reply(
+        response,
+        StreamFormat::Gemini,
+        "gemini-3.1-flash-lite-preview".into(),
+        &mut |event| {
+            if let ChatStreamEvent::TextDelta { delta } = event {
+                streamed.push_str(&delta);
+            }
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(reply.text, expected_text);
+    assert_eq!(streamed, expected_text);
+}

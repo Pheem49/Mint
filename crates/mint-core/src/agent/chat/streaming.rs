@@ -435,20 +435,23 @@ where
     F: FnMut(ChatStreamEvent),
 {
     let mut bytes = response.bytes_stream();
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
     let mut accumulator = StreamReplyAccumulator::default();
     while let Some(chunk) = bytes.next().await {
-        buffer.push_str(&String::from_utf8_lossy(&chunk?));
-        while let Some(index) = buffer.find('\n') {
-            let line = buffer[..index].trim().to_owned();
+        buffer.extend_from_slice(&chunk?);
+        while let Some(index) = buffer.iter().position(|&b| b == b'\n') {
+            let line = String::from_utf8_lossy(&buffer[..index]).trim().to_owned();
             buffer.drain(..=index);
             if let Some(value) = parse_stream_value(format, &line) {
                 accumulator.consume(format, &value, on_event);
             }
         }
     }
-    if let Some(value) = parse_stream_value(format, buffer.trim()) {
-        accumulator.consume(format, &value, on_event);
+    if !buffer.is_empty() {
+        let trailing = String::from_utf8_lossy(&buffer);
+        if let Some(value) = parse_stream_value(format, trailing.trim()) {
+            accumulator.consume(format, &value, on_event);
+        }
     }
     accumulator.flush_tag_buffer(on_event);
     accumulator.finish(model)
