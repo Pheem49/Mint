@@ -1053,6 +1053,9 @@ export default function MintDashboard() {
         } else if (slashResult.action === 'open_settings') {
           window.location.hash = '#/settings'
           return
+        } else if (slashResult.action === 'start_voice') {
+          window.dispatchEvent(new CustomEvent('mint:trigger-voice'))
+          return
         } else if (slashResult.action === 'resume_session') {
           const query = (slashResult.payload?.query || '').trim().toLowerCase()
           const target = query
@@ -1770,6 +1773,12 @@ export default function MintDashboard() {
     onClearQueuedPrompts: conversationActions.clearQueuedPrompts,
     onSteerQueuedPrompt: conversationActions.steerQueuedPrompt,
     onResumeQueue: conversationActions.resumeQueue,
+    onSyncHistory: () => {
+      void conversationActions.syncHistory()
+    },
+    onReceiveApproval: (approval) => {
+      conversationActions.receiveApproval(conversationId, approval)
+    },
     onResendFrom: async (fromId: number, newPrompt: string) => {
       if (conversationActions.getSnapshot().sending) return
       setError('')

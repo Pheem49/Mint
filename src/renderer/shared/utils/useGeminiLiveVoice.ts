@@ -4,17 +4,198 @@ export type GeminiLiveEvent =
   | { type: 'audioChunk'; data: string }
   | { type: 'transcript'; role: string; text: string }
   | { type: 'turnComplete' }
+  | { type: 'interrupted' }
   | { type: 'toolStatus'; action: string; input: unknown; result?: string | null; error?: string | null }
+  | { type: 'approvalRequested'; token: string; approval: Record<string, unknown> }
   | { type: 'error'; message: string }
   | { type: 'closed' }
 
+export interface GeminiLiveSideEffectCallbacks {
+  onTurnSaved?: () => void
+  onToolActivity?: () => void
+  onApprovalRequested?: (approval: { token: string; approval: Record<string, unknown> }) => void
+}
+
+export function routeGeminiLiveSideEffects(
+  event: GeminiLiveEvent,
+  callbacks: GeminiLiveSideEffectCallbacks,
+) {
+  switch (event.type) {
+    case 'turnComplete':
+    case 'interrupted':
+    case 'closed':
+      callbacks.onTurnSaved?.()
+      break
+    case 'toolStatus':
+      callbacks.onToolActivity?.()
+      break
+    case 'approvalRequested':
+      callbacks.onApprovalRequested?.({ token: event.token, approval: event.approval })
+      break
+  }
+}
+
+export interface StoppableAudioSource {
+  stop: () => void
+  disconnect: () => void
+}
+
+export interface LiveTranscriptFrameState {
+  userTranscript: string
+  assistantTranscript: string
+  userFresh: boolean
+  assistantFresh: boolean
+}
+
+export function applyLiveTranscriptFragment(
+  state: LiveTranscriptFrameState,
+  role: string,
+  text: string,
+) {
+  if (role === 'user') {
+    state.userTranscript = state.userFresh ? text : state.userTranscript + text
+    state.userFresh = false
+  } else {
+    state.assistantTranscript = state.assistantFresh ? text : state.assistantTranscript + text
+    state.assistantFresh = false
+  }
+}
+
+/**
+ * Stops and disconnects all scheduled/playing audio buffer sources immediately,
+ * resetting the playback timeline cursor and speaking indicator. Used both on
+ * user barge-in (`interrupted`) and when ending a Live session.
+ */
+export function stopQueuedAudioPlayback(
+  sources: Set<StoppableAudioSource>,
+  nextPlaybackTimeRef: { current: number },
+  speakingTimeoutRef: { current: number | null },
+  setIsSpeaking: (speaking: boolean) => void,
+) {
+  for (const source of sources) {
+    try {
+      source.stop()
+      source.disconnect()
+    } catch {
+      /* Already ended. */
+    }
+  }
+  sources.clear()
+  nextPlaybackTimeRef.current = 0
+  setIsSpeaking(false)
+  if (speakingTimeoutRef.current !== null && typeof window !== 'undefined') {
+    window.clearTimeout(speakingTimeoutRef.current)
+    speakingTimeoutRef.current = null
+  }
+}
+
 const MIC_SAMPLE_RATE = 16000
 const PLAYBACK_SAMPLE_RATE = 24000
-// ScriptProcessorNode buffer size: small enough for low latency, large enough to avoid
-// excessive send-chunk traffic to the Rust side.
+// Capture chunk size (~128ms at 16kHz, ~42ms at 48kHz): small enough for low latency,
+// large enough to avoid excessive send-chunk traffic to the Rust side.
 const CAPTURE_BUFFER_SIZE = 2048
 
-export interface GeminiLiveVoiceOptions {
+function floatToPcm16Sample(sample: number): number {
+  const clamped = Math.max(-1, Math.min(1, sample))
+  return clamped < 0
+    ? Math.max(-32768, Math.round(clamped * 32768))
+    : Math.min(32767, Math.round(clamped * 32768))
+}
+
+/**
+ * Downsamples Float32 mono audio to 16kHz PCM16 using a continuous time-weighted
+ * boxcar anti-aliasing filter (low-pass average over each output sample window)
+ * instead of nearest-neighbor point sampling, preventing high-frequency aliasing.
+ */
+export function downsampleToPcm16(
+  input: Float32Array,
+  inputSampleRate: number,
+  targetSampleRate: number = MIC_SAMPLE_RATE,
+): Int16Array {
+  if (input.length === 0 || inputSampleRate <= 0 || targetSampleRate <= 0) {
+    return new Int16Array(0)
+  }
+  if (inputSampleRate === targetSampleRate) {
+    const out = new Int16Array(input.length)
+    for (let i = 0; i < input.length; i += 1) {
+      out[i] = floatToPcm16Sample(input[i])
+    }
+    return out
+  }
+  const ratio = inputSampleRate / targetSampleRate
+  const outLength = Math.floor(input.length / ratio)
+  const out = new Int16Array(outLength)
+  for (let i = 0; i < outLength; i += 1) {
+    const start = i * ratio
+    const end = (i + 1) * ratio
+    const firstIdx = Math.floor(start)
+    const lastIdx = Math.floor(end)
+    let avg = 0
+    if (firstIdx === lastIdx) {
+      avg = input[firstIdx] ?? 0
+    } else {
+      let sum = 0
+      let weight = 0
+      const wLeft = firstIdx + 1 - start
+      sum += (input[firstIdx] ?? 0) * wLeft
+      weight += wLeft
+      const interiorEnd = Math.min(lastIdx, input.length)
+      for (let k = firstIdx + 1; k < interiorEnd; k += 1) {
+        sum += input[k]
+        weight += 1
+      }
+      if (lastIdx < input.length && end > lastIdx) {
+        const wRight = end - lastIdx
+        sum += input[lastIdx] * wRight
+        weight += wRight
+      }
+      avg = weight > 0 ? sum / weight : 0
+    }
+    out[i] = floatToPcm16Sample(avg)
+  }
+  return out
+}
+
+export function pcm16ToBase64(pcm: Int16Array): string {
+  const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  return btoa(binary)
+}
+
+const WORKLET_PROCESSOR_NAME = 'mint-gemini-live-capture'
+const WORKLET_SOURCE = `
+class MintGeminiLiveCaptureProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this._buffer = new Float32Array(${CAPTURE_BUFFER_SIZE});
+    this._offset = 0;
+  }
+  process(inputs) {
+    const channel = inputs[0] && inputs[0][0];
+    if (!channel || channel.length === 0) return true;
+    let read = 0;
+    while (read < channel.length) {
+      const space = this._buffer.length - this._offset;
+      const toCopy = Math.min(space, channel.length - read);
+      this._buffer.set(channel.subarray(read, read + toCopy), this._offset);
+      this._offset += toCopy;
+      read += toCopy;
+      if (this._offset >= this._buffer.length) {
+        const chunk = this._buffer.slice(0);
+        this._offset = 0;
+        this.port.postMessage(chunk, [chunk.buffer]);
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('${WORKLET_PROCESSOR_NAME}', MintGeminiLiveCaptureProcessor);
+`
+
+export interface GeminiLiveVoiceOptions extends GeminiLiveSideEffectCallbacks {
   workspacePath?: string | null
   chatId?: string | null
   /** Starts a session and returns its id; `onEvent` fires for the session's lifetime. */
@@ -40,7 +221,16 @@ export interface GeminiLiveVoiceOptions {
  * duplex stream instead of discrete listen-then-send cycles — starting/stopping is
  * driven entirely by `setVoiceMode`.
  */
-export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAudioChunk, stopSession }: GeminiLiveVoiceOptions) {
+export function useGeminiLiveVoice({
+  workspacePath,
+  chatId,
+  startSession,
+  sendAudioChunk,
+  stopSession,
+  onTurnSaved,
+  onToolActivity,
+  onApprovalRequested,
+}: GeminiLiveVoiceOptions) {
   const [isRecording, setIsRecording] = useState(false)
   const [voiceMode, setVoiceMode] = useState(false)
   // Kept separate (rather than one shared line) so the user's own speech stays
@@ -62,14 +252,26 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
   const generationRef = useRef(0)
   const playbackSourcesRef = useRef(new Set<AudioBufferSourceNode>())
   const stopRef = useRef<() => void>(() => {})
+  const sideEffectsRef = useRef<GeminiLiveSideEffectCallbacks>({
+    onTurnSaved,
+    onToolActivity,
+    onApprovalRequested,
+  })
+  sideEffectsRef.current = { onTurnSaved, onToolActivity, onApprovalRequested }
   const micStreamRef = useRef<MediaStream | null>(null)
-  const captureNodesRef = useRef<{ source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode } | null>(null)
+  const captureNodesRef = useRef<{
+    source: MediaStreamAudioSourceNode
+    processor: AudioNode
+    workletPort?: MessagePort
+  } | null>(null)
   const nextPlaybackTimeRef = useRef(0)
   const speakingTimeoutRef = useRef<number | null>(null)
-  // Gemini streams transcripts as small fragments, not whole lines — this tracks
-  // whose fragment is currently being built so same-role fragments accumulate
-  // into one line and a role change (or `turnComplete`) starts a fresh one.
-  const transcriptRoleRef = useRef<string | null>(null)
+  // Gemini streams transcripts as small fragments, not whole lines — track
+  // freshness per role independently so interleaved user/assistant fragments
+  // within the same turn accumulate into their own lines without wiping each
+  // other out, and start fresh after `turnComplete` / `interrupted`.
+  const userTurnFreshRef = useRef(true)
+  const assistantTurnFreshRef = useRef(true)
 
   useEffect(() => {
     voiceModeRef.current = voiceMode
@@ -120,6 +322,15 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
     speakingTimeoutRef.current = window.setTimeout(() => setIsSpeaking(false), quietDelayMs)
   }, [ensureAudioContext])
 
+  const stopPlayback = useCallback(() => {
+    stopQueuedAudioPlayback(
+      playbackSourcesRef.current,
+      nextPlaybackTimeRef,
+      speakingTimeoutRef,
+      setIsSpeaking,
+    )
+  }, [])
+
   const handleEvent = useCallback((event: GeminiLiveEvent) => {
     switch (event.type) {
       case 'audioChunk':
@@ -127,23 +338,39 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
         playAudioChunk(event.data)
         break
       case 'transcript': {
-        const setTranscript = event.role === 'user' ? setUserTranscript : setAssistantTranscript
-        setTranscript((prev) => (transcriptRoleRef.current === event.role ? prev + event.text : event.text))
-        transcriptRoleRef.current = event.role
+        if (event.role === 'user') {
+          const fresh = userTurnFreshRef.current
+          userTurnFreshRef.current = false
+          setUserTranscript((prev) => (fresh ? event.text : prev + event.text))
+        } else {
+          const fresh = assistantTurnFreshRef.current
+          assistantTurnFreshRef.current = false
+          setAssistantTranscript((prev) => (fresh ? event.text : prev + event.text))
+        }
         break
       }
       case 'turnComplete':
-        // Leaves the finished line on screen — only resets which role the next
-        // fragment continues, so the display doesn't flash blank between turns.
-        transcriptRoleRef.current = null
+        // Leaves the finished line on screen — only resets per-role freshness
+        // so the display doesn't flash blank between turns.
+        userTurnFreshRef.current = true
+        assistantTurnFreshRef.current = true
+        break
+      case 'interrupted':
+        // User barged in while Mint was speaking — flush queued audio immediately.
+        stopPlayback()
+        userTurnFreshRef.current = true
+        assistantTurnFreshRef.current = true
         break
       case 'toolStatus':
-        transcriptRoleRef.current = null
+        assistantTurnFreshRef.current = true
         setAssistantTranscript(event.error ? `${event.action} failed: ${event.error}` : `Running ${event.action}...`)
+        break
+      case 'approvalRequested':
         break
       case 'error':
         console.error('Gemini Live session error', event.message)
-        transcriptRoleRef.current = null
+        userTurnFreshRef.current = true
+        assistantTurnFreshRef.current = true
         setAssistantTranscript(event.message)
         setErrorMessage(event.message)
         break
@@ -153,13 +380,19 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
         setVoiceAwaitingResponse(false)
         setIsSpeaking(false)
         sessionIdRef.current = null
-        transcriptRoleRef.current = null
+        userTurnFreshRef.current = true
+        assistantTurnFreshRef.current = true
         setErrorMessage('Live connection closed')
         break
     }
-  }, [playAudioChunk])
+    routeGeminiLiveSideEffects(event, sideEffectsRef.current)
+  }, [playAudioChunk, stopPlayback])
 
   const stopCapture = useCallback(() => {
+    if (captureNodesRef.current?.workletPort) {
+      captureNodesRef.current.workletPort.onmessage = null
+      captureNodesRef.current.workletPort.close?.()
+    }
     captureNodesRef.current?.processor.disconnect()
     captureNodesRef.current?.source.disconnect()
     captureNodesRef.current = null
@@ -170,10 +403,7 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
   const stop = useCallback(() => {
     ++generationRef.current
     stopCapture()
-    for (const source of playbackSourcesRef.current) {
-      try { source.stop(); source.disconnect() } catch { /* Already ended. */ }
-    }
-    playbackSourcesRef.current.clear()
+    stopPlayback()
     analyserRef.current?.disconnect()
     analyserRef.current = null
     const context = audioContextRef.current
@@ -185,14 +415,14 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
     setVoiceAwaitingResponse(false)
     setIsPaused(false)
     isPausedRef.current = false
-    setIsSpeaking(false)
-    if (speakingTimeoutRef.current !== null) {
-      window.clearTimeout(speakingTimeoutRef.current)
-      speakingTimeoutRef.current = null
+    if (sessionId) {
+      stopSession(sessionId)
+        .then(() => {
+          sideEffectsRef.current.onTurnSaved?.()
+        })
+        .catch((error) => console.error('Failed to stop Gemini Live session', error))
     }
-    nextPlaybackTimeRef.current = 0
-    if (sessionId) stopSession(sessionId).catch((error) => console.error('Failed to stop Gemini Live session', error))
-  }, [stopCapture, stopSession])
+  }, [stopCapture, stopPlayback, stopSession])
   stopRef.current = stop
 
   const togglePause = useCallback(() => {
@@ -207,7 +437,8 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
     const generation = ++generationRef.current
     try {
       setErrorMessage('')
-      transcriptRoleRef.current = null
+      userTurnFreshRef.current = true
+      assistantTurnFreshRef.current = true
       setUserTranscript('')
       setAssistantTranscript('')
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -220,7 +451,13 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
       // Gemini as if the user said it — causing duplicated transcripts and Gemini
       // interrupting/looping on its own voice.
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        audio: {
+          sampleRate: MIC_SAMPLE_RATE,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
       })
       if (generation !== generationRef.current) {
         stream.getTracks().forEach(track => track.stop())
@@ -243,30 +480,66 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
       const source = ctx.createMediaStreamSource(stream)
       if (ctx.state === 'suspended') await ctx.resume()
       if (generation !== generationRef.current) { source.disconnect(); return }
-      const processor = ctx.createScriptProcessor(CAPTURE_BUFFER_SIZE, 1, 1)
-      const ratio = ctx.sampleRate / MIC_SAMPLE_RATE
 
-      processor.onaudioprocess = (audioEvent) => {
+      const forwardFloatChunk = (samples: Float32Array) => {
         if (!sessionIdRef.current || isPausedRef.current) return
-        const input = audioEvent.inputBuffer.getChannelData(0)
-        const outLength = Math.floor(input.length / ratio)
-        const pcm = new Int16Array(outLength)
-        for (let i = 0; i < outLength; i += 1) {
-          const sample = input[Math.floor(i * ratio)]
-          pcm[i] = Math.max(-32768, Math.min(32767, Math.round(sample * 32768)))
-        }
-        let binary = ''
-        const bytes = new Uint8Array(pcm.buffer)
-        for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i])
-        sendAudioChunk(sessionIdRef.current, btoa(binary)).catch((error) =>
-          console.error('Failed to send Gemini Live audio chunk', error)
+        const pcm = downsampleToPcm16(samples, ctx.sampleRate, MIC_SAMPLE_RATE)
+        if (pcm.length === 0) return
+        sendAudioChunk(sessionIdRef.current, pcm16ToBase64(pcm)).catch((error) =>
+          console.error('Failed to send Gemini Live audio chunk', error),
         )
       }
 
-      source.connect(processor)
-      if (analyserRef.current) source.connect(analyserRef.current)
-      processor.connect(ctx.destination)
-      captureNodesRef.current = { source, processor }
+      let attachedWorklet = false
+      if (
+        typeof AudioWorkletNode !== 'undefined' &&
+        ctx.audioWorklet &&
+        typeof ctx.audioWorklet.addModule === 'function' &&
+        typeof Blob !== 'undefined' &&
+        typeof URL !== 'undefined' &&
+        typeof URL.createObjectURL === 'function'
+      ) {
+        try {
+          const blob = new Blob([WORKLET_SOURCE], { type: 'application/javascript' })
+          const moduleUrl = URL.createObjectURL(blob)
+          try {
+            await ctx.audioWorklet.addModule(moduleUrl)
+          } finally {
+            URL.revokeObjectURL(moduleUrl)
+          }
+          if (generation !== generationRef.current) {
+            source.disconnect()
+            return
+          }
+          const workletNode = new AudioWorkletNode(ctx, WORKLET_PROCESSOR_NAME, {
+            numberOfInputs: 1,
+            numberOfOutputs: 0,
+            channelCount: 1,
+          })
+          workletNode.port.onmessage = (msgEvent: MessageEvent<Float32Array>) => {
+            if (msgEvent.data instanceof Float32Array) {
+              forwardFloatChunk(msgEvent.data)
+            }
+          }
+          source.connect(workletNode)
+          if (analyserRef.current) source.connect(analyserRef.current)
+          captureNodesRef.current = { source, processor: workletNode, workletPort: workletNode.port }
+          attachedWorklet = true
+        } catch {
+          // Fall back to ScriptProcessorNode below if AudioWorklet registration fails.
+        }
+      }
+
+      if (!attachedWorklet) {
+        const processor = ctx.createScriptProcessor(CAPTURE_BUFFER_SIZE, 1, 1)
+        processor.onaudioprocess = (audioEvent) => {
+          forwardFloatChunk(audioEvent.inputBuffer.getChannelData(0))
+        }
+        source.connect(processor)
+        if (analyserRef.current) source.connect(analyserRef.current)
+        processor.connect(ctx.destination)
+        captureNodesRef.current = { source, processor }
+      }
       setIsRecording(true)
       setVoiceAwaitingResponse(true)
     } catch (error) {

@@ -195,6 +195,8 @@ interface ChatPanelContract {
   onSteerQueuedPrompt?: (id: string) => void
   onResumeQueue?: () => void
   onResendFrom?: (fromId: number, newPrompt: string) => Promise<void> | void
+  onSyncHistory?: () => void
+  onReceiveApproval?: (approval: { token: string; approval: Record<string, unknown> }) => void
 }
 
 export type ConversationViewModel = Pick<ChatPanelContract,
@@ -312,6 +314,8 @@ export default function ChatPanel({
   onSteerQueuedPrompt,
   onResumeQueue,
   onResendFrom,
+  onSyncHistory,
+  onReceiveApproval,
   } = { ...conversation, ...actions }
   const message = useComposerDraft(initialMessage, actions.subscribeMessage, actions.getMessage)
   const onThinkingExpandedChange = useLatestCallback(handleThinkingExpandedChange)
@@ -861,8 +865,30 @@ export default function ChatPanel({
     chatId,
     startSession: startGeminiLiveSession,
     sendAudioChunk: sendGeminiLiveAudioChunk,
-    stopSession: stopGeminiLiveSession
+    stopSession: stopGeminiLiveSession,
+    onTurnSaved: () => {
+      onSyncHistory?.()
+    },
+    onToolActivity: () => {
+      onWorkspaceChanged?.()
+    },
+    onApprovalRequested: (approval) => {
+      onReceiveApproval?.(approval)
+    },
   })
+
+  useEffect(() => {
+    const onTriggerVoice = () => {
+      if (geminiLiveEnabled) {
+        geminiLive.setVoiceMode(true)
+      } else {
+        setVoiceMode(true)
+        void startRecognition()
+      }
+    }
+    window.addEventListener('mint:trigger-voice', onTriggerVoice)
+    return () => window.removeEventListener('mint:trigger-voice', onTriggerVoice)
+  }, [geminiLiveEnabled, geminiLive, setVoiceMode, startRecognition])
 
   const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || videoAttachments.length > 0 || documentName)
   const sendingImageMarkers = Array.from({ length: sendingImageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
@@ -2033,6 +2059,8 @@ export default function ChatPanel({
           onEndCall={() => geminiLive.setVoiceMode(false)}
           voice={settingsConfig?.geminiLiveVoice || 'Puck'}
           voices={GEMINI_LIVE_VOICES}
+          pendingApproval={pendingApproval}
+          onApproval={onApproval}
           onChangeVoice={async (voiceName) => {
             await onSetGeminiLiveVoice(voiceName)
             geminiLive.restart()

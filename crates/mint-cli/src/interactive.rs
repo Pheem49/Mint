@@ -54,6 +54,41 @@ pub static SESSION_APPROVED: std::sync::atomic::AtomicBool =
 pub static SECURITY_SESSION_APPROVED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+static CLI_MIC_RECORDING: Mutex<Option<mint_core::mic_transcribe::MicRecordingHandle>> =
+    Mutex::new(None);
+
+pub(crate) fn is_cli_voice_recording() -> bool {
+    CLI_MIC_RECORDING
+        .lock()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false)
+}
+
+pub(crate) fn start_cli_voice_recording() -> std::result::Result<(), String> {
+    let mut guard = CLI_MIC_RECORDING
+        .lock()
+        .map_err(|_| "Voice recorder lock poisoned".to_string())?;
+    if guard.is_some() {
+        return Err("A voice recording is already in progress.".to_string());
+    }
+    let handle = mint_core::mic_transcribe::start_recording().map_err(|e| e.to_string())?;
+    *guard = Some(handle);
+    Ok(())
+}
+
+pub(crate) fn stop_cli_voice_recording() -> std::result::Result<Option<Vec<u8>>, String> {
+    let handle = CLI_MIC_RECORDING
+        .lock()
+        .map_err(|_| "Voice recorder lock poisoned".to_string())?
+        .take();
+    match handle {
+        Some(h) => mint_core::mic_transcribe::stop_recording(h)
+            .map(Some)
+            .map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
+}
+
 pub struct InteractiveSession {
     pub chat_id: String,
     pub config: MintConfig,
@@ -794,6 +829,7 @@ pub async fn run_interactive_chat_with_session(
         match slash_result {
             Some(SlashResult::Handled) => continue,
             Some(SlashResult::Exit) => {
+                let _ = stop_cli_voice_recording();
                 print_exit_message(&session);
                 break;
             }

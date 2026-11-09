@@ -716,6 +716,58 @@ impl ChatTui {
                         state.mod_input = None;
                         continue;
                     }
+                    if key.code == KeyCode::F(8) && state.dialog.is_none() {
+                        if !super::is_cli_voice_recording() {
+                            match super::start_cli_voice_recording() {
+                                Ok(()) => {
+                                    state.set_notice(
+                                        "🎙 Recording voice… Press F8 to transcribe into composer, or Esc to cancel",
+                                    );
+                                }
+                                Err(err) => {
+                                    state.set_notice(format!("Microphone error: {err}"));
+                                }
+                            }
+                        } else {
+                            match super::stop_cli_voice_recording() {
+                                Ok(Some(wav_bytes)) => {
+                                    state.set_notice("Transcribing voice…");
+                                    let _ = self.draw_state(&state);
+                                    let cfg = mint_core::load_config().unwrap_or_default();
+                                    let transcribed = tokio::task::block_in_place(|| {
+                                        tokio::runtime::Handle::current().block_on(
+                                            mint_core::mic_transcribe::transcribe_recording(
+                                                &cfg, wav_bytes,
+                                            ),
+                                        )
+                                    });
+                                    match transcribed {
+                                        Ok(text) if !text.trim().is_empty() => {
+                                            state.insert_paste(text.trim());
+                                            state.set_notice("✓ Voice transcribed into composer");
+                                        }
+                                        Ok(_) => state.set_notice("No speech detected"),
+                                        Err(err) => state.set_notice(format!(
+                                            "Voice transcription error: {err}"
+                                        )),
+                                    }
+                                }
+                                Ok(None) => state.set_notice("No active voice recording"),
+                                Err(err) => {
+                                    state.set_notice(format!("Voice recording error: {err}"))
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    if key.code == KeyCode::Esc
+                        && super::is_cli_voice_recording()
+                        && state.dialog.is_none()
+                    {
+                        let _ = super::stop_cli_voice_recording();
+                        state.set_notice("Voice recording cancelled");
+                        continue;
+                    }
                     if state.mods_open && state.dialog.is_none() && state.thought_modal.is_none() {
                         let controls = crate::mods_ui::controls(&state.mods);
                         match key.code {
@@ -779,6 +831,7 @@ impl ChatTui {
                         continue;
                     }
                     if key.code == KeyCode::F(6) {
+                        let _ = super::stop_cli_voice_recording();
                         let text = state.composer_text();
                         return Ok(Some(InteractiveInput {
                             text,
@@ -966,6 +1019,7 @@ impl ChatTui {
                         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             if let Some(time) = last_ctrl_d {
                                 if time.elapsed() < DOUBLE_PRESS_TIMEOUT {
+                                    let _ = super::stop_cli_voice_recording();
                                     state.stop_mods();
                                     return Ok(None);
                                 }

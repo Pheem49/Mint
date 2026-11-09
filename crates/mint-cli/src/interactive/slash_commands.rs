@@ -3194,6 +3194,78 @@ pub async fn handle_slash_command(
             }
         }
 
+        "/voice" => {
+            let sub = rest.trim().to_ascii_lowercase();
+            if sub == "stop" || sub == "cancel" {
+                let _ = super::stop_cli_voice_recording();
+                ui.push_notice("Voice recording stopped.");
+                return Some(SlashResult::Handled);
+            }
+            if !super::is_cli_voice_recording()
+                && let Err(err) = super::start_cli_voice_recording()
+            {
+                ui.push_notice(format!("Microphone error: {err}"));
+                return Some(SlashResult::Handled);
+            }
+            let choices = vec![
+                ChoiceItem::with_description(
+                    "Transcribe & Send",
+                    "Stop recording, transcribe speech, and send prompt to Mint",
+                    "send",
+                ),
+                ChoiceItem::with_description(
+                    "Cancel",
+                    "Discard current voice recording",
+                    "cancel",
+                ),
+            ];
+            match ui.prompt_choice(
+                "🎙 Recording Voice",
+                "Speak into your microphone, then select an action:",
+                &choices,
+            ) {
+                Ok(Some(0)) => {
+                    let wav_bytes = match super::stop_cli_voice_recording() {
+                        Ok(Some(bytes)) => bytes,
+                        Ok(None) => {
+                            ui.push_notice("No active voice recording found.");
+                            return Some(SlashResult::Handled);
+                        }
+                        Err(err) => {
+                            ui.push_notice(format!("Voice recording error: {err}"));
+                            return Some(SlashResult::Handled);
+                        }
+                    };
+                    ui.push_notice("Transcribing voice recording…");
+                    match mint_core::mic_transcribe::transcribe_recording(
+                        &session.config,
+                        wav_bytes,
+                    )
+                    .await
+                    {
+                        Ok(text) if !text.trim().is_empty() => {
+                            let cleaned = text.trim().to_string();
+                            ui.push_notice(format!("🎙 Heard: {cleaned}"));
+                            Some(SlashResult::ForwardToAgent(cleaned))
+                        }
+                        Ok(_) => {
+                            ui.push_notice("No speech detected in voice recording.");
+                            Some(SlashResult::Handled)
+                        }
+                        Err(err) => {
+                            ui.push_notice(format!("Voice transcription failed: {err}"));
+                            Some(SlashResult::Handled)
+                        }
+                    }
+                }
+                _ => {
+                    let _ = super::stop_cli_voice_recording();
+                    ui.push_notice("Voice recording cancelled.");
+                    Some(SlashResult::Handled)
+                }
+            }
+        }
+
         _ => {
             // Unknown slash command — treat as normal message to the agent
             None
@@ -4449,5 +4521,27 @@ mod tests {
         assert_eq!(ui.plans[0], plan1_content);
 
         let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[tokio::test]
+    async fn slash_voice_stop_is_handled_cleanly() {
+        let mut session = InteractiveSession {
+            chat_id: mint_core::CHAT_CLI_ID.to_string(),
+            config: MintConfig::default(),
+            current_dir: std::env::current_dir().unwrap(),
+            fast_mode: false,
+            plan_mode: false,
+            pending_image: None,
+            history: Vec::new(),
+            jobs: BackgroundJobs::new(),
+        };
+        let mut ui = MockCommandUi::new();
+        let res = handle_slash_command(&mut session, &mut ui, "/voice stop").await;
+        assert!(matches!(res, Some(SlashResult::Handled)));
+        assert!(
+            ui.notices.iter().any(|n| n.contains("Voice recording")),
+            "expected voice notice, got: {:?}",
+            ui.notices
+        );
     }
 }

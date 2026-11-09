@@ -117,7 +117,7 @@ where
 /// Strips JSON Schema keywords that standard tool-parameter schemas use (built
 /// once and shared across OpenAI/Anthropic/Gemini) but that Gemini's function-
 /// calling `Schema` proto rejects outright.
-pub(super) fn gemini_sanitize_schema(schema: &Value) -> Value {
+pub(crate) fn gemini_sanitize_schema(schema: &Value) -> Value {
     match schema {
         Value::Object(map) => Value::Object(
             map.iter()

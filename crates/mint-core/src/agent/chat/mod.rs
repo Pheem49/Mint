@@ -16,6 +16,7 @@ mod tests;
 
 use anthropic::*;
 use custom::*;
+pub(crate) use gemini::gemini_sanitize_schema;
 use gemini::*;
 use ollama::*;
 use openai::*;

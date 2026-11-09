@@ -91,5 +91,7 @@
   { "token": "/undo", "usage": "", "description": "Undo the latest workspace file action, with conflict checks", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/palette", "usage": "", "description": "Open interactive command palette and action menu", "category": "system", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/browser", "usage": "[on|off|headless|headed|status]", "description": "Configure browser automation tools (on/off) or mode (headless/headed)", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
-  { "token": "/browser status", "usage": "", "description": "Show current browser automation configuration and detected binary", "category": "tools", "surfaces": ["cli", "web", "desktop"] }
+  { "token": "/browser status", "usage": "", "description": "Show current browser automation configuration and detected binary", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/voice", "usage": "[send|stop]", "description": "Record voice input from your microphone or start live voice mode", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "F8", "usage": "", "description": "Toggle microphone voice dictation in the TUI composer", "surfaces": ["cli"] }
 ]

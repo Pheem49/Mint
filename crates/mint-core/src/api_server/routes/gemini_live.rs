@@ -67,11 +67,24 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
             let chat_id = query_param(query, "chatId").unwrap_or_default();
 
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            let tx_approval = tx.clone();
             let handle = crate::gemini_live::start_session(
                 config,
                 root,
                 chat_id,
-                |_| Ok(ApprovalOutcome::Denied),
+                move |approval| {
+                    crate::PENDING_APPROVALS.request_blocking(|token| {
+                        let event = crate::gemini_live::GeminiLiveEvent::ApprovalRequested {
+                            token: token.to_owned(),
+                            approval: approval.clone(),
+                        };
+                        let json_val =
+                            serde_json::to_string(&event).map_err(|error| error.to_string())?;
+                        tx_approval
+                            .send(json_val)
+                            .map_err(|error| error.to_string())
+                    })
+                },
                 move |event| {
                     if let Ok(json_val) = serde_json::to_string(&event) {
                         let _ = tx.send(json_val);
