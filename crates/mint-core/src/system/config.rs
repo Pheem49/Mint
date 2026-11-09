@@ -447,7 +447,7 @@ impl Default for MintConfig {
             local_openai_num_ctx: 32_768,
             ollama_host: String::new(),
             ollama_model: "llama3:latest".into(),
-            ollama_num_ctx: 8192,
+            ollama_num_ctx: 32_768,
             nanobanana_model: "gemini-3.1-flash-image".into(),
             image_gen_provider: "nanobanana".into(),
             dalle_model: "gpt-image-1".into(),
@@ -1498,7 +1498,7 @@ mod tests {
         // Default openai_model is a GPT-5 family model.
         assert_eq!(window_for("openai"), 400_000);
         assert_eq!(window_for("deepseek"), 128_000);
-        assert_eq!(window_for("ollama"), 8_192); // default ollama_num_ctx
+        assert_eq!(window_for("ollama"), 32_768); // default ollama_num_ctx
         assert_eq!(window_for("local_openai"), 32_768); // default local_openai_num_ctx
         assert_eq!(window_for("huggingface"), 128_000);
         assert_eq!(window_for("openrouter"), 128_000); // default openrouter_num_ctx
