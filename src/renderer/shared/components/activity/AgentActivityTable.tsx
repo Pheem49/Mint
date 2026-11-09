@@ -1,11 +1,15 @@
 import type { ArtifactFile } from '../../utils/artifacts'
 import { Fragment, useState } from 'react'
-import type { AgentActivityView, AgentActivity, AgentActivityGroup, TimelineItem } from '../../utils/agentActivity'
+import type { AgentActivityView, AgentActivity, AgentActivityGroup, TimelineItem, DirectoryEntryItem } from '../../utils/agentActivity'
 import {
   cleanIntermediateThought,
   groupActivities,
   isMarkdownContent,
   cleanMarkdownOutput,
+  cleanCommandOutput,
+  parseDirectoryEntries,
+  formatFileSize,
+  summarizeDirectoryListing,
   isAskUserActivity,
   extractAskUserQuestions,
 } from '../../utils/agentActivity'
@@ -72,7 +76,7 @@ function renderActivityIcon(kind: AgentActivity['kind'], target: string, action?
     if (icon) return <img src={icon} alt="" draggable={false} className="agent-activity-icon-img" />
     return <FileCode size={16} className="agent-activity-kind-icon" />
   }
-  if (kind === 'folder') {
+  if (kind === 'folder' || action === 'list_files' || action === 'list_directory' || action === 'list_dir') {
     const foldername = getFilename(target)
     const icon = materialFolderIcon(foldername, false)
     if (icon) return <img src={icon} alt="" draggable={false} className="agent-activity-icon-img" />
@@ -94,9 +98,14 @@ function extractResultPreview(action: string | undefined, result: string | undef
   if (!result || !result.trim() || action === 'view_image') return null
   // Do not show inline raw text preview for file operations (filename and diff stats are already shown)
   if (action === 'read_file' || action === 'write_file' || action === 'edit_file' || action === 'apply_patch') return null
-  const firstLine = result.trim().split('\n')[0].trim()
+  if (action === 'list_files' || action === 'list_directory' || action === 'list_dir') {
+    const summary = summarizeDirectoryListing(result)
+    if (summary) return `→ ${summary}`
+  }
+  const cleaned = cleanCommandOutput(result)
+  const firstLine = cleaned.trim().split('\n')[0].trim()
   // Filter out JSON brackets, objects, or errors
-  if (firstLine.startsWith('[') || firstLine.startsWith('{') || firstLine.startsWith('Error:')) return null
+  if (firstLine.startsWith('[') || firstLine.startsWith('{') || firstLine.startsWith('Error:') || firstLine === '(no output)') return null
   if (action === 'calculation') {
     const eqIdx = firstLine.indexOf('=')
     if (eqIdx !== -1) {
@@ -121,6 +130,105 @@ function renderStatusIndicator(state: AgentActivity['state']) {
     return <span className="agent-activity-badge error" title="Action failed">Failed</span>
   }
   return <Check size={13} className="agent-activity-status-check" />
+}
+
+function DirectoryListingView({
+  entries,
+  workspacePath,
+  onReferenceFile,
+}: {
+  entries: DirectoryEntryItem[]
+  workspacePath?: string
+  onReferenceFile?: (filePath: string) => void
+}) {
+  if (entries.length === 0) {
+    return <div className="modern-directory-empty">(empty directory)</div>
+  }
+
+  const getEntryName = (e: DirectoryEntryItem): string => {
+    if (e.name) return e.name
+    if (e.path) {
+      const parts = e.path.split(/[/\\]/)
+      return parts[parts.length - 1] || e.path
+    }
+    return ''
+  }
+
+  return (
+    <div className="modern-directory-listing" role="list">
+      {entries.map((entry, idx) => {
+        const name = getEntryName(entry)
+        const kind = (entry.kind || '').toLowerCase()
+        const isDir = kind === 'directory' || kind === 'dir' || kind === 'folder'
+        const ext = isDir ? '' : getExtension(name)
+
+        let iconSrc: string | null = null
+        if (isDir) {
+          iconSrc = materialFolderIcon(name, false)
+        } else {
+          iconSrc = materialFileIcon(name, ext)
+        }
+
+        const sizeStr = !isDir ? formatFileSize(entry.size) : ''
+        const fullPath = entry.path || name
+
+        return (
+          <div
+            key={`${name}-${idx}`}
+            className={`modern-directory-item ${isDir ? 'is-directory' : 'is-file'}`}
+            role="listitem"
+            title={fullPath}
+          >
+            <span className="modern-directory-item-icon" aria-hidden="true">
+              {iconSrc ? (
+                <img src={iconSrc} alt="" draggable={false} className="agent-activity-icon-img" />
+              ) : isDir ? (
+                <Folder size={15} className="agent-activity-kind-icon" />
+              ) : (
+                <FileCode size={15} className="agent-activity-kind-icon" />
+              )}
+            </span>
+
+            <span
+              className="modern-directory-item-name"
+              draggable={!isDir}
+              onDragStart={
+                !isDir
+                  ? (e) => {
+                      e.stopPropagation()
+                      setWorkspaceDragData(e.dataTransfer, {
+                        path: fullPath,
+                        root: workspacePath,
+                        kind: 'file',
+                      })
+                    }
+                  : undefined
+              }
+            >
+              {name}{isDir ? '/' : ''}
+            </span>
+
+            {sizeStr && <span className="modern-directory-item-size">{sizeStr}</span>}
+
+            {onReferenceFile && !isDir && (
+              <button
+                type="button"
+                className="agent-activity-mention-btn modern-dir-mention-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onReferenceFile(fullPath)
+                }}
+                title={`Reference in chat: ${name}`}
+                aria-label={`Reference ${name} in chat`}
+              >
+                @
+              </button>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export function AgentActivityTable({ activityView, progress, chatId, workspacePath, onReferenceFile, onOpenArtifact }: Props) {
@@ -171,6 +279,12 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
       activity.action === 'write_file' ||
       activity.action === 'edit_file' ||
       activity.action === 'read_file'
+    const isFolderAction =
+      activity.kind === 'folder' ||
+      activity.action === 'list_files' ||
+      activity.action === 'list_directory' ||
+      activity.action === 'list_dir'
+    const hasIcon = isFileAction || isFolderAction
     const isCommand =
       activity.action === 'run_shell' ||
       activity.action === 'run_command' ||
@@ -184,11 +298,13 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
       activity.semanticVerb ||
       (isCommand
         ? 'Ran'
-        : isFileAction
-          ? activity.action === 'read_file'
-            ? 'Analyzed'
-            : 'Edited'
-          : activity.label || activity.action || 'Executed')
+        : isFolderAction
+          ? 'Explored'
+          : isFileAction
+            ? activity.action === 'read_file'
+              ? 'Analyzed'
+              : 'Edited'
+            : activity.label || activity.action || 'Executed')
 
     return (
       <Fragment key={itemKey}>
@@ -201,7 +317,7 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
         >
           <span className="modern-timeline-verb">{verb}</span>
 
-          {isFileAction && (
+          {hasIcon && (
             <span className="modern-timeline-icon-wrap" aria-hidden="true">
               {renderActivityIcon(activity.kind, cleanTarget, activity.action)}
             </span>
@@ -295,21 +411,41 @@ export function AgentActivityTable({ activityView, progress, chatId, workspacePa
             </div>
           ) : (
             <div className="agent-activity-output modern-timeline-output">
-              {output.includes('[Self-Correction Guidance]') ? (
-                <>
-                  {output.split('[Self-Correction Guidance]')[0]?.trim() && (
-                    <pre>{output.split('[Self-Correction Guidance]')[0]?.trim()}</pre>
-                  )}
-                  <div className="diagnostic-guidance-card">
-                    <div className="diagnostic-guidance-header">
-                      <span>💡 Self-Correction Guidance</span>
-                    </div>
-                    <pre>{output.split('[Self-Correction Guidance]')[1]?.trim()}</pre>
-                  </div>
-                </>
-              ) : (
-                <pre>{output}</pre>
-              )}
+              {(() => {
+                const isDirAction =
+                  activity.action === 'list_files' ||
+                  activity.action === 'list_directory' ||
+                  activity.action === 'list_dir' ||
+                  activity.kind === 'folder'
+                const dirEntries = isDirAction ? parseDirectoryEntries(output) : null
+                if (dirEntries) {
+                  return (
+                    <DirectoryListingView
+                      entries={dirEntries}
+                      workspacePath={workspacePath}
+                      onReferenceFile={onReferenceFile}
+                    />
+                  )
+                }
+
+                if (output.includes('[Self-Correction Guidance]')) {
+                  return (
+                    <>
+                      {output.split('[Self-Correction Guidance]')[0]?.trim() && (
+                        <pre>{cleanCommandOutput(output.split('[Self-Correction Guidance]')[0]?.trim())}</pre>
+                      )}
+                      <div className="diagnostic-guidance-card">
+                        <div className="diagnostic-guidance-header">
+                          <span>💡 Self-Correction Guidance</span>
+                        </div>
+                        <pre>{output.split('[Self-Correction Guidance]')[1]?.trim()}</pre>
+                      </div>
+                    </>
+                  )
+                }
+
+                return <pre>{cleanCommandOutput(output)}</pre>
+              })()}
             </div>
           )
         )}

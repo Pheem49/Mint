@@ -560,13 +560,14 @@ pub(super) fn explored_action_label(
 }
 
 pub(super) fn display_tool_target(path: &str) -> String {
-    if path.trim().is_empty() {
-        ".".into()
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "." || trimmed == "./" {
+        "workspace".into()
     } else {
-        Path::new(path)
+        Path::new(trimmed)
             .file_name()
             .and_then(|name| name.to_str())
-            .unwrap_or(path)
+            .unwrap_or(trimmed)
             .into()
     }
 }

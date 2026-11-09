@@ -4746,7 +4746,7 @@ input:checked + .slider:before {
 
 /* Modern Developer-Centric Activity Timeline (Claude Code / Cursor Style) */
 .modern-activity-history {
-  margin-bottom: 6px;
+  margin-bottom: 12px;
 }
 
 .modern-activity-toggle {
@@ -4826,11 +4826,25 @@ input:checked + .slider:before {
   box-shadow: none !important;
 }
 
+.agent-activity-card-history,
+.modern-activity-content {
+  margin-left: 0 !important;
+  padding: 2px 0 6px 0 !important;
+  border: none !important;
+  box-sizing: border-box;
+  width: 100%;
+}
+
 .modern-activity-list {
   display: flex;
   flex-direction: column;
   gap: 3px;
   padding-top: 4px;
+  margin-left: 12px;
+  padding-left: 8px;
+  border-left: 1.5px solid color-mix(in srgb, var(--border) 60%, transparent);
+  max-width: calc(100% - 12px);
+  box-sizing: border-box;
 }
 
 /* 100% Borderless & Transparent Timeline Rows (Eliminating all legacy boxed borders) */
@@ -4892,7 +4906,7 @@ input:checked + .slider:before {
   font-weight: 500;
   color: var(--text-muted);
   flex-shrink: 0;
-  min-width: 68px;
+  min-width: 48px;
 }
 
 .modern-timeline-icon-wrap {
@@ -5079,6 +5093,86 @@ input:checked + .slider:before {
   font-size: 0.84rem;
   max-height: 250px;
   overflow-y: auto;
+}
+
+.modern-directory-listing {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.82rem;
+}
+
+.modern-directory-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: var(--radius-xs, 4px);
+  color: var(--text-soft);
+  transition: background 0.12s ease, color 0.12s ease;
+  user-select: text;
+}
+
+.modern-directory-item:hover {
+  background: color-mix(in srgb, var(--accent, #38bdf8) 8%, transparent);
+  color: var(--text-main, #fff);
+}
+
+.modern-directory-item:hover .modern-dir-mention-btn {
+  opacity: 1;
+}
+
+.modern-directory-item-icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modern-directory-item-icon img {
+  width: 15px;
+  height: 15px;
+  object-fit: contain;
+}
+
+.modern-directory-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modern-directory-item.is-directory .modern-directory-item-name {
+  color: var(--text-main, #eee);
+  font-weight: 500;
+}
+
+.modern-directory-item-size {
+  flex-shrink: 0;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.modern-dir-mention-btn {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  font-size: 0.72rem;
+  padding: 0 4px;
+  height: 18px;
+  margin-left: 4px;
+}
+
+.modern-directory-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 4px 6px;
 }
 
 .modern-activity-list .agent-activity-group-subitems,

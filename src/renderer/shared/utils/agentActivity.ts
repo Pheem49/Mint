@@ -94,6 +94,7 @@ function activityDetail(input: Record<string, unknown>, key: string): string {
 }
 
 export function formatActivityTarget(value: string): string {
+  if (!value || value === '.' || value === './' || value === 'list files') return 'workspace'
   const compact = value.replace(/^\/home\/([^/]+)/, '~')
   return compact || 'workspace'
 }
@@ -101,7 +102,7 @@ export function formatActivityTarget(value: string): string {
 export function activityKind(action: string, target: string): AgentActivity['kind'] {
   if (['search_code', 'semantic_search', 'knowledge_search', 'web_search', 'image_search', 'memory_recall', 'find_definition', 'find_references'].includes(action)) return 'search'
   if (['run_shell', 'verify', 'run_tests', 'run_typecheck', 'run_linter'].includes(action)) return 'terminal'
-  if (['list_files', 'detect_project'].includes(action)) return 'folder'
+  if (['list_files', 'list_directory', 'list_dir', 'detect_project'].includes(action)) return 'folder'
   if (['read_file', 'symbols', 'read_diagnostics', 'git_diff', 'apply_patch', 'write_file', 'edit_file', 'apply_code_edits', 'note_write', 'view_image'].includes(action)) return 'file'
   if (['calculation', 'calculator'].includes(action)) return 'calc'
   return target.includes('/') && !/\.[^/]+$/.test(target) ? 'folder' : 'tool'
@@ -216,6 +217,22 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     case 'exit_plan_mode':
       rawTarget = 'plan approval'
       break
+    case 'list_files':
+    case 'list_directory':
+    case 'list_dir': {
+      const targetPath =
+        path ||
+        activityDetail(input, 'directory') ||
+        activityDetail(input, 'dir') ||
+        activityDetail(input, 'folder') ||
+        activityDetail(input, 'target')
+      if (!targetPath || targetPath === '.' || targetPath === './' || targetPath === 'list files') {
+        rawTarget = 'workspace'
+      } else {
+        rawTarget = formatActivityTarget(targetPath)
+      }
+      break
+    }
     case 'create_plan':
     case 'update_plan': {
       const summary = activityDetail(input, 'summary') || activityDetail(input, 'title')
@@ -285,6 +302,8 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
   let askUserData: AgentActivity['askUserData']
   if (action === 'read_file') {
     semanticVerb = 'Analyzed'
+  } else if (action === 'list_files' || action === 'list_directory' || action === 'list_dir') {
+    semanticVerb = 'Explored'
   } else if (action === 'edit_file' || action === 'apply_patch' || action === 'apply_code_edits') {
     semanticVerb = 'Edited'
   } else if (action === 'write_file' || action === 'note_write') {
@@ -388,6 +407,257 @@ export function cleanMarkdownOutput(text: string): string {
   return cleaned
 }
 
+export interface DirectoryEntryItem {
+  name?: string
+  path?: string
+  kind?: 'directory' | 'file' | 'symlink' | string
+  size?: number | null
+}
+
+export function formatFileSize(bytes?: number | null): string {
+  if (bytes === null || bytes === undefined || isNaN(bytes)) return ''
+  if (bytes < 0) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${Number(kb.toFixed(1))} KB`
+  const mb = kb / 1024
+  if (mb < 1024) return `${Number(mb.toFixed(1))} MB`
+  const gb = mb / 1024
+  return `${Number(gb.toFixed(1))} GB`
+}
+
+export function parseDirectoryEntries(text: string): DirectoryEntryItem[] | null {
+  if (!text || typeof text !== 'string') return null
+  let trimmed = text.trim()
+
+  if (!trimmed.startsWith('[') && trimmed.includes('stdout:')) {
+    const stdoutMatch = trimmed.match(/stdout:\s*\n([\s\S]*?)(?:\n\s*stderr:|$)/)
+    if (stdoutMatch && stdoutMatch[1]) {
+      trimmed = stdoutMatch[1].trim()
+    }
+  }
+
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) return null
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+
+  if (!Array.isArray(parsed)) return null
+  if (parsed.length === 0) return []
+
+  const isDirEntryArray = parsed.every(
+    (item) =>
+      item &&
+      typeof item === 'object' &&
+      (typeof item.name === 'string' || typeof item.path === 'string') &&
+      ('kind' in item || 'size' in item)
+  )
+
+  if (!isDirEntryArray) return null
+
+  const entries = parsed as DirectoryEntryItem[]
+  const dirs: DirectoryEntryItem[] = []
+  const files: DirectoryEntryItem[] = []
+  const others: DirectoryEntryItem[] = []
+
+  for (const entry of entries) {
+    const kind = (entry.kind || '').toLowerCase()
+    if (kind === 'directory' || kind === 'dir' || kind === 'folder') {
+      dirs.push(entry)
+    } else if (kind === 'file') {
+      files.push(entry)
+    } else {
+      others.push(entry)
+    }
+  }
+
+  const getEntryName = (e: DirectoryEntryItem): string => {
+    if (e.name) return e.name
+    if (e.path) {
+      const parts = e.path.split(/[/\\]/)
+      return parts[parts.length - 1] || e.path
+    }
+    return ''
+  }
+
+  dirs.sort((a, b) => getEntryName(a).localeCompare(getEntryName(b), undefined, { sensitivity: 'base' }))
+  files.sort((a, b) => getEntryName(a).localeCompare(getEntryName(b), undefined, { sensitivity: 'base' }))
+  others.sort((a, b) => getEntryName(a).localeCompare(getEntryName(b), undefined, { sensitivity: 'base' }))
+
+  return [...dirs, ...others, ...files]
+}
+
+export function formatDirectoryListing(text: string): string | null {
+  const entries = parseDirectoryEntries(text)
+  if (!entries) return null
+  if (entries.length === 0) return '(empty directory)'
+
+  const getEntryName = (e: DirectoryEntryItem): string => {
+    if (e.name) return e.name
+    if (e.path) {
+      const parts = e.path.split(/[/\\]/)
+      return parts[parts.length - 1] || e.path
+    }
+    return ''
+  }
+
+  const lines: string[] = []
+
+  for (const entry of entries) {
+    const kind = (entry.kind || '').toLowerCase()
+    const name = getEntryName(entry)
+    if (kind === 'directory' || kind === 'dir' || kind === 'folder') {
+      const displayName = name.endsWith('/') ? name : `${name}/`
+      lines.push(`📁 ${displayName}`)
+    } else if (kind === 'symlink') {
+      const sizeStr = formatFileSize(entry.size)
+      const suffix = sizeStr ? ` (${sizeStr})` : ''
+      lines.push(`🔗 ${name}${suffix}`)
+    } else {
+      const sizeStr = formatFileSize(entry.size)
+      const suffix = sizeStr ? ` (${sizeStr})` : ''
+      lines.push(`📄 ${name}${suffix}`)
+    }
+  }
+
+  return lines.join('\n')
+}
+
+export function summarizeDirectoryListing(text: string): string | null {
+  if (!text || typeof text !== 'string') return null
+  const trimmed = text.trim()
+
+  const entries = parseDirectoryEntries(trimmed)
+  if (entries) {
+    if (entries.length === 0) return 'empty folder'
+    let dirCount = 0
+    let fileCount = 0
+    let otherCount = 0
+
+    for (const item of entries) {
+      const kind = String(item.kind || '').toLowerCase()
+      if (kind === 'directory' || kind === 'dir' || kind === 'folder') {
+        dirCount++
+      } else if (kind === 'file') {
+        fileCount++
+      } else {
+        otherCount++
+      }
+    }
+
+    const total = dirCount + fileCount + otherCount
+    if (total === 0) return 'empty folder'
+
+    if (dirCount > 0 && fileCount > 0) {
+      const folderStr = `${dirCount} folder${dirCount === 1 ? '' : 's'}`
+      const fileStr = `${fileCount} file${fileCount === 1 ? '' : 's'}`
+      const detailed = `${total} items (${folderStr}, ${fileStr})`
+      if (detailed.length <= 35) return detailed
+      return `${total} items`
+    }
+
+    if (dirCount > 0 && fileCount === 0) {
+      return `${dirCount} folder${dirCount === 1 ? '' : 's'}`
+    }
+
+    if (fileCount > 0 && dirCount === 0) {
+      return `${fileCount} file${fileCount === 1 ? '' : 's'}`
+    }
+
+    return `${total} items`
+  }
+
+  // Check if already formatted lines
+  if (!trimmed.startsWith('[') && (trimmed.includes('📁 ') || trimmed.includes('📄 ') || trimmed.includes('🔗 '))) {
+    const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean)
+    const dirCount = lines.filter((l) => l.startsWith('📁')).length
+    const fileCount = lines.filter((l) => l.startsWith('📄') || l.startsWith('🔗')).length
+    const total = dirCount + fileCount
+    if (total === 0) return 'empty folder'
+    if (dirCount > 0 && fileCount > 0) {
+      const detailed = `${total} items (${dirCount} folders, ${fileCount} files)`
+      return detailed.length <= 35 ? detailed : `${total} items`
+    }
+    if (dirCount > 0) return `${dirCount} folder${dirCount === 1 ? '' : 's'}`
+    if (fileCount > 0) return `${fileCount} file${fileCount === 1 ? '' : 's'}`
+    return `${total} items`
+  }
+
+  return null
+}
+
+/**
+ * Strips internal machine/executor envelope lines (`exit:`, `mode:`, `sandboxed:`, empty `stderr:`)
+ * from raw command execution output, returning clean stdout/stderr for human viewing.
+ */
+export function cleanCommandOutput(text: string): string {
+  if (!text || typeof text !== 'string') return ''
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+
+  // If text is serialized directory listing JSON, format it cleanly into readable entries
+  const formattedDir = formatDirectoryListing(trimmed)
+  if (formattedDir) return formattedDir
+
+  const lines = text.split('\n')
+  const hasEnvelope = lines.some((l) => {
+    const t = l.trim()
+    return t.startsWith('mode: ') || t.startsWith('sandboxed: ') || (t.startsWith('exit: ') && lines.some(x => x.trim() === 'stdout:'))
+  })
+
+  if (hasEnvelope) {
+    let section: 'meta' | 'stdout' | 'stderr' = 'meta'
+    const stdoutLines: string[] = []
+    const stderrLines: string[] = []
+
+    for (const line of lines) {
+      const t = line.trim()
+      if (section === 'meta' && (t.startsWith('exit: ') || t.startsWith('mode: ') || t.startsWith('sandboxed: '))) {
+        continue
+      }
+      if (t === 'stdout:') {
+        section = 'stdout'
+        continue
+      }
+      if (t === 'stderr:') {
+        section = 'stderr'
+        continue
+      }
+
+      if (section === 'stdout') {
+        stdoutLines.push(line)
+      } else if (section === 'stderr') {
+        stderrLines.push(line)
+      } else {
+        stdoutLines.push(line)
+      }
+    }
+
+    const cleanStdout = stdoutLines.join('\n').trim()
+    const cleanStderr = stderrLines.join('\n').trim()
+
+    if (cleanStdout && cleanStderr) {
+      const formattedStdout = formatDirectoryListing(cleanStdout) || cleanStdout
+      return `${formattedStdout}\n\n[stderr]\n${cleanStderr}`
+    }
+    if (cleanStderr) {
+      return cleanStderr
+    }
+    if (cleanStdout) {
+      return formatDirectoryListing(cleanStdout) || cleanStdout
+    }
+    return '(no output)'
+  }
+
+  // If there's no full envelope, strip empty trailing `stderr:` or `stderr:\n`
+  const cleaned = trimmed.replace(/\n\s*stderr:\s*$/i, '').trim()
+  return formatDirectoryListing(cleaned) || cleaned
+}
+
 export function generateNaturalActivitySummary(items: AgentActivity[], timeline?: TimelineItem[]): string {
   if (!items || items.length === 0) {
     if (timeline && timeline.some(t => t.kind === 'extendedThinking' || t.kind === 'thought')) {
@@ -400,6 +670,7 @@ export function generateNaturalActivitySummary(items: AgentActivity[], timeline?
   let hasWrite = false
   let hasCommand = false
   let hasSearch = false
+  let hasExplore = false
   let hasThought = Boolean(timeline && timeline.some(t => t.kind === 'extendedThinking'))
 
   for (const item of items) {
@@ -407,13 +678,15 @@ export function generateNaturalActivitySummary(items: AgentActivity[], timeline?
     else if (item.action === 'write_file' || item.action === 'edit_file' || item.action === 'apply_patch') hasWrite = true
     else if (item.action === 'run_shell' || item.action === 'run_command' || item.action === 'bash') hasCommand = true
     else if (item.action?.includes('search')) hasSearch = true
+    else if (item.action === 'list_files' || item.action === 'list_directory' || item.action === 'list_dir' || item.kind === 'folder') hasExplore = true
   }
 
   const parts: string[] = []
+  if (hasExplore && !hasRead) parts.push('Explored workspace')
   if (hasRead) parts.push('Explored files')
   if (hasCommand) parts.push('ran commands')
   if (hasWrite) parts.push('edited files')
-  if (hasSearch && !hasRead) parts.push('searched codebase')
+  if (hasSearch && !hasRead && !hasExplore) parts.push('searched codebase')
   if (parts.length === 0) {
     if (hasThought) return 'Analyzed task'
     return 'Working through task'
@@ -521,6 +794,9 @@ function finalizeGroup(group: AgentActivityGroup): AgentActivityGroup {
   } else if (action === 'run_shell' || action === 'run_command' || action === 'bash') {
     group.semanticVerb = 'Ran'
     group.title = `${count} commands`
+  } else if (action === 'list_files' || action === 'list_directory' || action === 'list_dir') {
+    group.semanticVerb = 'Explored'
+    group.title = `${count} directories`
   } else if (action === 'search_code' || action === 'semantic_search' || action === 'web_search') {
     group.semanticVerb = 'Searched'
     group.title = `${count} queries`

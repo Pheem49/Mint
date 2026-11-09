@@ -15,6 +15,7 @@
   color: var(--text-main, #e8e8ea);
   min-width: 0;
   max-width: 100%;
+  box-sizing: border-box;
   overflow: hidden;
 }
 

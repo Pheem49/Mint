@@ -7,6 +7,11 @@ import {
   groupActivities,
   isMarkdownContent,
   cleanMarkdownOutput,
+  cleanCommandOutput,
+  formatFileSize,
+  formatDirectoryListing,
+  parseDirectoryEntries,
+  summarizeDirectoryListing,
   activityKind,
   isAskUserActivity,
   extractAskUserQuestions,
@@ -503,6 +508,191 @@ revisions: 1
         },
       ]
       expect(hasAgentDrawerActivity(withRunSummary)).toBe(true)
+    })
+  })
+
+  describe('cleanCommandOutput filter', () => {
+    it('strips bookkeeping envelope lines and returns clean stdout', () => {
+      const raw = `exit: 0
+mode: mutating
+sandboxed: true
+stdout:
+PDF generated successfully.
+
+stderr:
+`
+      expect(cleanCommandOutput(raw)).toBe('PDF generated successfully.')
+    })
+
+    it('cleans file listings with readOnly mode', () => {
+      const raw = `exit: 0
+mode: readOnly
+sandboxed: true
+stdout:
+-rw-rw-r-- 1 pheem49 pheem49 9175 พ.ย. 3 17:45 Harness_Presentation.pdf
+
+stderr:
+`
+      expect(cleanCommandOutput(raw)).toBe('-rw-rw-r-- 1 pheem49 pheem49 9175 พ.ย. 3 17:45 Harness_Presentation.pdf')
+    })
+
+    it('returns clean stderr when command fails with no stdout', () => {
+      const raw = `exit: 1
+mode: mutating
+sandboxed: true
+stdout:
+
+stderr:
+ModuleNotFoundError: No module named 'reportlab'
+`
+      expect(cleanCommandOutput(raw)).toBe("ModuleNotFoundError: No module named 'reportlab'")
+    })
+
+    it('strips empty trailing stderr from unstructured output', () => {
+      const raw = `Downloading reportlab-5.1.0.whl
+Successfully installed reportlab
+
+stderr:
+`
+      expect(cleanCommandOutput(raw)).toBe(`Downloading reportlab-5.1.0.whl
+Successfully installed reportlab`)
+    })
+
+    it('handles empty stdout and stderr gracefully', () => {
+      const raw = `exit: 0
+mode: mutating
+sandboxed: true
+stdout:
+
+stderr:
+`
+      expect(cleanCommandOutput(raw)).toBe('(no output)')
+    })
+  })
+
+  describe('list_files exploration and directory formatting', () => {
+    it('describes list_files as Explored workspace when path is .', () => {
+      const activity = describeTool('list_files', { path: '.' })
+      expect(activity.semanticVerb).toBe('Explored')
+      expect(activity.target).toBe('workspace')
+      expect(activity.kind).toBe('folder')
+    })
+
+    it('describes list_files as Explored workspace when path is empty or ./', () => {
+      expect(describeTool('list_files', { path: './' }).target).toBe('workspace')
+      expect(describeTool('list_files', {}).target).toBe('workspace')
+    })
+
+    it('describes list_files with specific subfolder target', () => {
+      const activity = describeTool('list_files', { path: 'src/renderer' })
+      expect(activity.semanticVerb).toBe('Explored')
+      expect(activity.target).toBe('src/renderer')
+      expect(activity.kind).toBe('folder')
+    })
+
+    it('formats file sizes accurately', () => {
+      expect(formatFileSize(0)).toBe('0 B')
+      expect(formatFileSize(500)).toBe('500 B')
+      expect(formatFileSize(1024)).toBe('1 KB')
+      expect(formatFileSize(1536)).toBe('1.5 KB')
+      expect(formatFileSize(3939)).toBe('3.8 KB')
+      expect(formatFileSize(258814)).toBe('252.7 KB')
+      expect(formatFileSize(10485760)).toBe('10 MB')
+      expect(formatFileSize(null)).toBe('')
+      expect(formatFileSize(undefined)).toBe('')
+    })
+
+    it('formats directory listing JSON into clean icons, names and sizes', () => {
+      const json = JSON.stringify([
+        { name: 'Cargo.toml', path: '/repo/Cargo.toml', kind: 'file', size: 3939 },
+        { name: 'src', path: '/repo/src', kind: 'directory', size: null },
+        { name: 'crates', path: '/repo/crates', kind: 'directory', size: null },
+        { name: '.gitignore', path: '/repo/.gitignore', kind: 'file', size: 120 },
+      ])
+      const formatted = formatDirectoryListing(json)
+      expect(formatted).toBe(
+        '📁 crates/\n' +
+        '📁 src/\n' +
+        '📄 .gitignore (120 B)\n' +
+        '📄 Cargo.toml (3.8 KB)'
+      )
+    })
+
+    it('summarizes directory listings cleanly for inline pill previews', () => {
+      const json = JSON.stringify([
+        { name: 'crates', kind: 'directory' },
+        { name: 'src', kind: 'directory' },
+        { name: 'Cargo.toml', kind: 'file', size: 100 },
+      ])
+      expect(summarizeDirectoryListing(json)).toBe('3 items (2 folders, 1 file)')
+
+      const onlyFiles = JSON.stringify([
+        { name: 'a.txt', kind: 'file' },
+        { name: 'b.txt', kind: 'file' },
+      ])
+      expect(summarizeDirectoryListing(onlyFiles)).toBe('2 files')
+
+      const empty = JSON.stringify([])
+      expect(summarizeDirectoryListing(empty)).toBe('empty folder')
+    })
+
+    it('cleanCommandOutput formats directory JSON directly and inside envelopes', () => {
+      const json = JSON.stringify([
+        { name: 'src', kind: 'directory', size: null },
+        { name: 'Cargo.toml', kind: 'file', size: 3939 },
+      ])
+      const cleanedDirect = cleanCommandOutput(json)
+      expect(cleanedDirect).toBe('📁 src/\n📄 Cargo.toml (3.8 KB)')
+
+      const enveloped = `exit: 0
+mode: readOnly
+sandboxed: true
+stdout:
+${json}
+
+stderr:
+`
+      const cleanedEnveloped = cleanCommandOutput(enveloped)
+      expect(cleanedEnveloped).toBe('📁 src/\n📄 Cargo.toml (3.8 KB)')
+    })
+
+    it('natural summary reflects Explored workspace', () => {
+      const items = [describeTool('list_files', { path: '.' })]
+      expect(generateNaturalActivitySummary(items)).toBe('Explored workspace')
+
+      const itemsWithCommand = [
+        describeTool('list_files', { path: '.' }),
+        describeTool('run_shell', { command: 'cargo build' }),
+      ]
+      expect(generateNaturalActivitySummary(itemsWithCommand)).toBe('Explored workspace, ran commands')
+    })
+
+    it('parseDirectoryEntries parses raw JSON and envelopes correctly', () => {
+      const json = JSON.stringify([
+        { name: 'b.txt', kind: 'file', size: 20 },
+        { name: 'src', kind: 'directory', size: null },
+        { name: 'a.txt', kind: 'file', size: 10 },
+      ])
+      const entries = parseDirectoryEntries(json)
+      expect(entries).not.toBeNull()
+      expect(entries).toHaveLength(3)
+      // Directories first, then files sorted
+      expect(entries![0].name).toBe('src')
+      expect(entries![0].kind).toBe('directory')
+      expect(entries![1].name).toBe('a.txt')
+      expect(entries![2].name).toBe('b.txt')
+
+      const enveloped = `exit: 0
+mode: readOnly
+sandboxed: true
+stdout:
+${json}
+
+stderr:
+`
+      const envelopedEntries = parseDirectoryEntries(enveloped)
+      expect(envelopedEntries).toHaveLength(3)
+      expect(envelopedEntries![0].name).toBe('src')
     })
   })
 })
