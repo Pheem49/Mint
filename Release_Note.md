@@ -1,5 +1,15 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Circular Avatar & Custom Provider Logo Cropping with Transparent Alpha (Desktop and Web)
+- **True Circular Canvas Clipping (`ctx.clip`)**: Resolved an issue in `AvatarCropModal` where images cropped inside the circular viewfinder were previously exported as full 512x512 squares. The canvas export pipeline now applies a native circular clipping path (`ctx.arc` + `ctx.clip`) before drawing, ensuring cropped PNG images have transparent alpha outside the circle.
+- **Circular Provider Logo Preview & Header Icon**: Updated `.custom-provider-logo-avatar` and `.custom-provider-logo` in `general.css` to `border-radius: 50%` and `object-fit: cover` (with SVG preset containment), so custom provider logos display consistently as circular avatars matching the crop modal preview across Desktop and Web.
+
+## Minimal Inline Code Styling & Compact Nested List Formatting (Desktop and Web)
+- **Eliminated Stray Whitespace in Nested Lists (`tagListItems`)**: Resolved an issue where nested sub-lists (e.g. bulleted sub-items indented under numbered items) exhibited huge vertical gaps between items. Filtered out stray whitespace newline text nodes in `tagListItems` and explicitly applied `white-space: normal` on `.chat-list-block` and `.chat-list-text > .chat-list-block`, preventing sub-lists from inheriting `white-space: pre-wrap` from parent list text and restoring tight, clean bullet spacing identical to the TUI.
+- **Eliminated Heavy Rectangular Border & Box-Shadow**: Removed the rigid `1px solid` border and drop shadow on `.chat-inline-code` that previously made short inline code snippets (e.g. `null`, `""`, variable names, and file paths) appear as distracting button-like badges.
+- **Natural Text Color Harmony**: Updated inline code text color to inherit directly from surrounding message text (`color: var(--text-chat, inherit)`), ensuring high readability without visual fatigue or accidental hyperlink confusion.
+- **Subtle Surface Tint & Compact Padding**: Replaced the previous pill background with a soft, theme-adaptive surface tint (`var(--bg-surface-hover, rgba(127, 127, 127, 0.14))`), compact `1.5px 5px` padding, and a gentle `4px` border radius across Desktop (`src/renderer/src`) and Web (`src/renderer/src-web`).
+
 ## Modern Activity Timeline Polish, Clean Command Output & Material SVG Directory Listing (CLI, Desktop, and Web)
 - **Activity Drawer Layout & Margin Alignment**: Fixed an issue where nesting margins on `.agent-activity-card-history` caused the `Run summary` telemetry card to overflow the drawer horizontally. Outer headers (`Worked for ...`, natural summary, and `Run summary` card) now span full width flush at `X = 0`, while timeline execution rows (`.modern-activity-list`) are cleanly indented by 12px with a vertical guide line.
 - **Clean Output Filter (`cleanCommandOutput`)**: Automatically strips internal runtime envelope bookkeeping lines (`exit:`, `mode:`, `sandboxed:`, empty `stderr:`) from command execution results in the activity timeline, displaying clean stdout and stderr to the user.

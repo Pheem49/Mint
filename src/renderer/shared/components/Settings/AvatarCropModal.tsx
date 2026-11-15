@@ -7,6 +7,7 @@ interface AvatarCropModalProps {
   onConfirm: (croppedDataUri: string) => Promise<void> | void
   title?: string
   outputFormat?: 'image/jpeg' | 'image/png' | 'image/webp'
+  circular?: boolean
 }
 
 const CROP_SIZE = 280
@@ -18,7 +19,8 @@ export default function AvatarCropModal({
   onClose,
   onConfirm,
   title,
-  outputFormat = 'image/jpeg',
+  outputFormat = 'image/png',
+  circular = true,
 }: AvatarCropModalProps) {
   const [zoom, setZoom] = useState(1)
   const [rotation, setRotation] = useState(0) // in degrees (0, 90, 180, 270)
@@ -196,6 +198,14 @@ export default function AvatarCropModal({
       ctx.imageSmoothingEnabled = true
       ctx.imageSmoothingQuality = 'high'
 
+      if (circular) {
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(OUTPUT_SIZE / 2, OUTPUT_SIZE / 2, OUTPUT_SIZE / 2, 0, Math.PI * 2)
+        ctx.closePath()
+        ctx.clip()
+      }
+
       // Ratio between export output and preview box
       const R = OUTPUT_SIZE / CROP_SIZE
 
@@ -214,6 +224,10 @@ export default function AvatarCropModal({
         imgNaturalSize.width,
         imgNaturalSize.height
       )
+
+      if (circular) {
+        ctx.restore()
+      }
 
       const croppedDataUri = outputFormat === 'image/png'
         ? canvas.toDataURL('image/png')

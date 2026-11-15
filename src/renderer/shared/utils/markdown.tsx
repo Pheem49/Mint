@@ -302,18 +302,20 @@ function findCodeHastNode(preNode: unknown): { properties?: { className?: unknow
 /** Clones each `<li>` child with `ordered`/`index` props so `li` can render a bullet or a number without shared state. */
 function tagListItems(children: ReactNode, opts: { ordered: boolean; start?: number }): ReactNode {
   // `Children.toArray` can include stray whitespace text nodes between <li> siblings (from
-  // loose-list formatting) — those must not consume a number, so index only real elements.
+  // loose-list formatting) — filter those out so they don't produce extra blank lines in pre-wrap.
   let n = 0
-  return Children.toArray(children).map((child) => {
-    if (!isValidElement(child)) return child
-    const index = (opts.start ?? 1) + n
-    n += 1
-    return cloneElement(child as ReactElement<{ ordered?: boolean; index?: number }>, {
-      key: child.key ?? index,
-      ordered: opts.ordered,
-      index,
+  return Children.toArray(children)
+    .filter((child) => isValidElement(child) || (typeof child === 'string' && child.trim() !== ''))
+    .map((child) => {
+      if (!isValidElement(child)) return child
+      const index = (opts.start ?? 1) + n
+      n += 1
+      return cloneElement(child as ReactElement<{ ordered?: boolean; index?: number }>, {
+        key: child.key ?? index,
+        ordered: opts.ordered,
+        index,
+      })
     })
-  })
 }
 
 /** Strips leading/trailing whitespace-only text-node children (the same stray "\n" nodes

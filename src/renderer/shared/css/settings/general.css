@@ -104,8 +104,8 @@
 }
 
 .custom-provider-logo {
-    border-radius: var(--radius-2xs, 4px);
-    object-fit: contain;
+    border-radius: 50%;
+    object-fit: cover;
 }
 
 /* ── Modern Custom Provider Logo Picker ────────────────────────────── */
@@ -181,7 +181,7 @@
     justify-content: center;
     overflow: hidden;
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 8px);
+    border-radius: 50%;
     background: var(--bg-surface-raised, #18181b);
     color: var(--text-muted);
     flex-shrink: 0;
@@ -190,8 +190,13 @@
 .custom-provider-logo-avatar img {
     width: 100%;
     height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+.custom-provider-logo-avatar img[src*="svg"] {
     object-fit: contain;
-    padding: 2px;
+    padding: 6px;
 }
 
 .custom-provider-logo-fallback {

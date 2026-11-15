@@ -250,19 +250,18 @@ button {
 .token-operator { color: var(--syntax-operator); }
 .token-punctuation { color: var(--syntax-punctuation); }
 
-/* Tech Pill Inline Code (ChatGPT style) */
+/* Minimal Inline Code */
 .chat-inline-code {
-  background: var(--bg-surface-soft);
-  border: 1px solid var(--border-default);
-  color: var(--text-primary);
-  padding: 2px 7px;
-  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-surface-hover, rgba(127, 127, 127, 0.14));
+  border: none;
+  color: var(--text-chat, var(--text-primary, inherit));
+  padding: 1.5px 5px;
+  border-radius: var(--radius-xs, 4px);
   font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.86em;
+  font-size: 0.88em;
   font-weight: 500;
   letter-spacing: -0.01em;
-  box-shadow: var(--shadow-sm);
-  display: inline-block;
+  box-shadow: none;
   vertical-align: baseline;
 }
 
