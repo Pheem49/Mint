@@ -1,5 +1,9 @@
 # Release Notes - Mint Agent v1.18.0
 
+## Resilient Mod Worker Execution & CI Test Harness (Core and CI)
+- **In-Process Worker Thread Fallback (`run_worker_loop`)**: Implemented an in-process worker thread execution fallback in `crates/mint-core/src/mods/manager.rs` and `crates/mint-mod-runtime/src/lib.rs`. When running unit tests or in environments where the standalone `mint-mod-host` binary has not yet been compiled on disk, `Worker` gracefully spawns an in-process worker thread communicating over internal channels rather than attempting to re-execute a `libtest` harness binary with `--mint-mod-host`.
+- **Pre-Build Mod Host Binary in CI (`ci.yml`)**: Added an explicit pre-build step for `mint-mod-host` (`cargo build -p mint-cli --bin mint-mod-host`) in `.github/workflows/ci.yml` before running the test suite, ensuring clean GitHub Actions CI runners execute both the out-of-process IPC path and in-process fallback without missing-binary timeouts or exit code 101 errors.
+
 ## Circular Avatar & Custom Provider Logo Cropping with Transparent Alpha (Desktop and Web)
 - **True Circular Canvas Clipping (`ctx.clip`)**: Resolved an issue in `AvatarCropModal` where images cropped inside the circular viewfinder were previously exported as full 512x512 squares. The canvas export pipeline now applies a native circular clipping path (`ctx.arc` + `ctx.clip`) before drawing, ensuring cropped PNG images have transparent alpha outside the circle.
 - **Circular Provider Logo Preview & Header Icon**: Updated `.custom-provider-logo-avatar` and `.custom-provider-logo` in `general.css` to `border-radius: 50%` and `object-fit: cover` (with SVG preset containment), so custom provider logos display consistently as circular avatars matching the crop modal preview across Desktop and Web.
