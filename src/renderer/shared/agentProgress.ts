@@ -100,6 +100,10 @@ export function reduceLiveAgentProgress(
     const index = current.findIndex(item => item.type === 'ToolProgress' && item.data.callId === event.data.callId)
     if (index >= 0) { const next = current.slice(); next[index] = event; return next }
   }
+  if (event.type === 'PlanUpdated') {
+    const index = current.findIndex(item => item.type === 'PlanUpdated')
+    if (index >= 0) { const next = current.slice(); next[index] = event; return next }
+  }
 
   if (event.type === 'ThinkingDelta') {
     const index = current.findIndex(
@@ -153,10 +157,12 @@ export function compactAgentProgressForPersistence(progress: AgentProgress[]): A
   for (const event of progress) {
     if (event.type === 'ToolProgress') latestProgress.set(event.data.callId, event)
     if (event.type === 'DeviceState' && event.data.update.state !== 'accepted') latestProgress.set(`device:${event.data.callId}`,event)
+    if (event.type === 'PlanUpdated') latestProgress.set('plan:active', event)
   }
   for (const event of progress) {
     if (event.type === 'ToolProgress' && latestProgress.get(event.data.callId) !== event) continue
     if(event.type==='DeviceState' && event.data.update.state!=='accepted' && latestProgress.get(`device:${event.data.callId}`)!==event) continue
+    if (event.type === 'PlanUpdated' && latestProgress.get('plan:active') !== event) continue
     if (event.type === 'ThinkingDelta') {
       if (!completedIds.has(event.data.id)) {
         const previous = interrupted.get(event.data.id)
@@ -190,6 +196,22 @@ export function compactAgentProgressForPersistence(progress: AgentProgress[]): A
 
 export function hasAgentToolActivity(progress: AgentProgress[]): boolean {
   return progress.some((event) => event.type === 'ToolStart' || event.type === 'ToolEnd')
+}
+
+export function hasAgentDrawerActivity(progress: AgentProgress[]): boolean {
+  return progress.some(
+    (event) =>
+      event.type === 'ToolStart' ||
+      event.type === 'ToolEnd' ||
+      event.type === 'ToolArtifacts' ||
+      event.type === 'DeviceState' ||
+      event.type === 'ToolDiscovery' ||
+      event.type === 'PlanUpdated' ||
+      event.type === 'SubagentStarted' ||
+      event.type === 'SubagentFinished' ||
+      event.type === 'RunCompleted' ||
+      event.type === 'ContextCompaction',
+  )
 }
 
 export function mergeActivitySnapshots(
@@ -280,11 +302,11 @@ function deriveFileChangesFromProgress(progress: AgentProgress[]): FileChange[] 
         }
       } else if (event.data.action === 'write_file' || event.data.action === 'note_write') {
         const input = (event.data.input as any) || {}
-        let path = input.path || input.name || input.title || input.filePath || ''
+        let path = input.path || input.Path || input.name || input.title || input.filePath || ''
         if (event.data.action === 'note_write' && path && !path.includes('/') && !path.startsWith('.config/')) {
           path = `.config/mint/notes/${path}`
         }
-        const fileContent = input.fileContent ?? input.file_content ?? input.content ?? input.body ?? input.text ?? ''
+        const fileContent = input.fileContent ?? input.file_content ?? input.Content ?? input.content ?? input.body ?? input.text ?? ''
         if (typeof path === 'string' && path.trim()) {
           const additions = fileContent ? fileContent.split('\n').length : 0
           activeEdit = {
@@ -296,13 +318,39 @@ function deriveFileChangesFromProgress(progress: AgentProgress[]): FileChange[] 
             hunks: [{ oldText: '', newText: fileContent }]
           }
         }
+      } else if (event.data.action === 'edit_file') {
+        const input = (event.data.input as any) || {}
+        const path = input.Path || input.path || input.filePath || ''
+        const target = input.Target ?? input.target ?? ''
+        const replacement = input.Replacement ?? input.replacement ?? ''
+        if (typeof path === 'string' && path.trim()) {
+          const deletions = target ? target.split('\n').length : 0
+          const additions = replacement ? replacement.split('\n').length : 0
+          activeEdit = {
+            action: 'edit_file',
+            path: path.trim(),
+            created: false,
+            additions,
+            deletions,
+            hunks: [{ oldText: target, newText: replacement }]
+          }
+        }
       } else {
         activeEdit = null
       }
     } else if (event.type === 'ToolEnd') {
-      if (activeEdit && (event.data.action === 'apply_patch' || event.data.action === 'write_file' || event.data.action === 'note_write')) {
+      if (activeEdit && (event.data.action === 'apply_patch' || event.data.action === 'write_file' || event.data.action === 'note_write' || event.data.action === 'edit_file')) {
         const isError = typeof event.data.result === 'string' && (event.data.result.startsWith('Error:') || event.data.result.startsWith('Failed:'))
         if (!isError) {
+          const lineMatch = typeof event.data.result === 'string' && event.data.result.match(/\+(\d+)\/-(\d+) lines/)
+          if (lineMatch) {
+            const add = parseInt(lineMatch[1], 10)
+            const del = parseInt(lineMatch[2], 10)
+            if (!isNaN(add) && !isNaN(del)) {
+              activeEdit.additions = add
+              activeEdit.deletions = del
+            }
+          }
           try {
             const applied = JSON.parse(event.data.result)
             if (Array.isArray(applied) && applied.length > 0) {

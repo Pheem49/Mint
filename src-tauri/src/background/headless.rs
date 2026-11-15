@@ -8,12 +8,10 @@ use mint_core::{
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager};
 
-use mint_core::browser::{click, navigate, read_page_text, type_text};
-
 const MAX_STEPS: usize = 20;
 const SYSTEM_PROMPT: &str = r#"You are Mint's native background task agent. Return only JSON:
-{"thought":"short progress note","action":"done|propose_folder|propose_write_file|open_url|browser_read|browser_click|browser_type|knowledge_search|propose_bash","target":"path, URL, selector, query, command, or final result","data":"optional file content"}
-Use only one action per response. Background tasks never mutate the filesystem or execute shell commands. Use propose_folder, propose_write_file, and propose_bash so Mint can record a proposal for explicit user approval."#;
+{"thought":"short progress note","action":"done|propose_folder|propose_write_file|propose_url|knowledge_search|propose_bash","target":"path, URL, query, command, or final result","data":"optional file content"}
+Use only one action per response. Background tasks never mutate the filesystem or execute shell commands. Use propose_folder, propose_write_file, propose_url, and propose_bash so Mint can record a proposal for explicit user approval."#;
 
 #[derive(Debug, Deserialize)]
 struct AgentAction {
@@ -174,10 +172,18 @@ async fn execute_action(
                 action.target
             ))
         }
-        "open_url" => navigate(config, &action.target).await,
-        "browser_read" => read_page_text(config).await,
-        "browser_click" => click(config, &action.target).await,
-        "browser_type" => type_text(config, &action.target, &action.data).await,
+        "propose_url" | "open_url" => {
+            store
+                .add_artifact(
+                    &task.id,
+                    json!({ "type": "url_proposal", "url": action.target, "description": format!("Proposed by native task step {step}; explicit approval required") }),
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(format!(
+                "url proposal recorded but not opened: {}",
+                action.target
+            ))
+        }
         "knowledge_search" => {
             let hits = KnowledgeStore::open_default()
                 .map_err(|error| error.to_string())?

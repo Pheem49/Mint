@@ -7,6 +7,11 @@ import type { AgentProgress, ActivePlan, RunTelemetrySummary } from '../types'
 import { isInternalCot } from '../agentProgress'
 import { viewedImageDataUri, viewedImagesFrom, type ViewedImageItem } from './viewedImages'
 
+export interface AskUserItem {
+  question: string
+  answer?: string
+}
+
 export interface AgentActivity {
   label: string
   target: string
@@ -17,6 +22,21 @@ export interface AgentActivity {
   /** Raw ToolEnd output text, shown when the row is expanded in the UI. */
   result?: string
   viewedImage?: ViewedImageItem
+  /** Semantic verb (e.g. 'Analyzed', 'Edited', 'Created', 'Ran', 'Searched') */
+  semanticVerb?: string
+  /** Human-readable intent or title (e.g. toolSummary for commands, or skill title) */
+  intentTitle?: string
+  /** Line range suffix if available, e.g. '#L25-50' */
+  lineRange?: string
+  /** Git diff additions/deletions if available */
+  diffStats?: { additions: number; deletions: number }
+  /** Elapsed duration in ms or s */
+  elapsedMs?: number
+  /** Structured ask_user questions and answers */
+  askUserData?: {
+    header?: string
+    questions: AskUserItem[]
+  }
 }
 
 export interface AgentActivityGroup {
@@ -28,6 +48,7 @@ export interface AgentActivityGroup {
   count: number
   state: 'active' | 'done' | 'error' | 'retry'
   items: AgentActivity[]
+  semanticVerb?: string
 }
 
 export type TimelineItem =
@@ -38,6 +59,10 @@ export type TimelineItem =
 
 export interface AgentActivityView {
   summary: string
+  /** Natural composite summary phrase, e.g. "Explored files, ran commands, edited files" */
+  naturalSummary?: string
+  /** Total elapsed time string if available, e.g. "2m", "14s" */
+  durationText?: string
   items: AgentActivity[]
   groups?: AgentActivityGroup[]
   /** Unified chronological list of thoughts, extended thinking, and tool activities. */
@@ -69,6 +94,7 @@ function activityDetail(input: Record<string, unknown>, key: string): string {
 }
 
 export function formatActivityTarget(value: string): string {
+  if (!value || value === '.' || value === './' || value === 'list files') return 'workspace'
   const compact = value.replace(/^\/home\/([^/]+)/, '~')
   return compact || 'workspace'
 }
@@ -76,8 +102,8 @@ export function formatActivityTarget(value: string): string {
 export function activityKind(action: string, target: string): AgentActivity['kind'] {
   if (['search_code', 'semantic_search', 'knowledge_search', 'web_search', 'image_search', 'memory_recall', 'find_definition', 'find_references'].includes(action)) return 'search'
   if (['run_shell', 'verify', 'run_tests', 'run_typecheck', 'run_linter'].includes(action)) return 'terminal'
-  if (['list_files', 'detect_project'].includes(action)) return 'folder'
-  if (['read_file', 'symbols', 'read_diagnostics', 'git_diff', 'apply_patch', 'write_file', 'note_write', 'view_image'].includes(action)) return 'file'
+  if (['list_files', 'list_directory', 'list_dir', 'detect_project'].includes(action)) return 'folder'
+  if (['read_file', 'symbols', 'read_diagnostics', 'git_diff', 'apply_patch', 'write_file', 'edit_file', 'apply_code_edits', 'note_write', 'view_image'].includes(action)) return 'file'
   if (['calculation', 'calculator'].includes(action)) return 'calc'
   return target.includes('/') && !/\.[^/]+$/.test(target) ? 'folder' : 'tool'
 }
@@ -182,19 +208,41 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     case 'stock':
       rawTarget = query || symbol || '(symbol)'
       break
-    case 'browser_open':
-    case 'browser_navigate':
-      rawTarget = url || '(url)'
-      break
-    case 'browser_click':
-      rawTarget = selector || '(element)'
-      break
     case 'mcp_tool':
       rawTarget = tool ? (server ? `${server}/${tool}` : tool) : (name || 'mcp tool')
       break
     case 'note_write':
       rawTarget = name || path || '(note)'
       break
+    case 'exit_plan_mode':
+      rawTarget = 'plan approval'
+      break
+    case 'list_files':
+    case 'list_directory':
+    case 'list_dir': {
+      const targetPath =
+        path ||
+        activityDetail(input, 'directory') ||
+        activityDetail(input, 'dir') ||
+        activityDetail(input, 'folder') ||
+        activityDetail(input, 'target')
+      if (!targetPath || targetPath === '.' || targetPath === './' || targetPath === 'list files') {
+        rawTarget = 'workspace'
+      } else {
+        rawTarget = formatActivityTarget(targetPath)
+      }
+      break
+    }
+    case 'create_plan':
+    case 'update_plan': {
+      const summary = activityDetail(input, 'summary') || activityDetail(input, 'title')
+      const stepsCount = Array.isArray(input.steps) ? input.steps.length : 0
+      const stepsLabel = stepsCount > 0 ? `${stepsCount} step${stepsCount === 1 ? '' : 's'}` : ''
+      rawTarget = summary && stepsLabel
+        ? `${summary} (${stepsLabel})`
+        : summary || stepsLabel || 'task plan'
+      break
+    }
     default:
       rawTarget = path || query || command || expression || symbol || city || url || selector || filter || name || tool || action.replaceAll('_', ' ')
       break
@@ -202,23 +250,96 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
 
   // Append line range for read_file when startLine / endLine are available
   let target = rawTarget
+  let lineRange: string | undefined
   if (action === 'read_file' && path) {
     const startLine =
       typeof input.startLine === 'number'
         ? input.startLine
         : typeof input.start_line === 'number'
           ? input.start_line
-          : undefined
+          : typeof input.StartLine === 'number'
+            ? input.StartLine
+            : undefined
     const endLine =
       typeof input.endLine === 'number'
         ? input.endLine
         : typeof input.end_line === 'number'
           ? input.end_line
-          : undefined
+          : typeof input.EndLine === 'number'
+            ? input.EndLine
+            : undefined
     if (startLine !== undefined && endLine !== undefined) {
-      target = `${rawTarget} #L${startLine}-${endLine}`
+      lineRange = `#L${startLine}-${endLine}`
+      target = `${rawTarget} ${lineRange}`
     } else if (startLine !== undefined) {
-      target = `${rawTarget} #L${startLine}`
+      lineRange = `#L${startLine}`
+      target = `${rawTarget} ${lineRange}`
+    }
+  }
+
+  // Diff stats extraction for edit_file / write_file
+  let diffStats: { additions: number; deletions: number } | undefined
+  if (action === 'edit_file') {
+    const targetText = typeof input.Target === 'string' ? input.Target : typeof input.target === 'string' ? input.target : ''
+    const replacementText = typeof input.Replacement === 'string' ? input.Replacement : typeof input.replacement === 'string' ? input.replacement : ''
+    const deletions = targetText ? targetText.split('\n').length : 0
+    const additions = replacementText ? replacementText.split('\n').length : 0
+    diffStats = { additions, deletions }
+  } else if (action === 'write_file' || action === 'note_write') {
+    const rawContent = input.fileContent ?? input.file_content ?? input.Content ?? input.content ?? input.text ?? input.body
+    const content = typeof rawContent === 'string' ? rawContent : ''
+    const additions = content ? content.split('\n').length : 0
+    diffStats = { additions, deletions: 0 }
+  }
+
+  // Intent / summary extraction for commands
+  let intentTitle: string | undefined
+  if (action === 'run_shell' || action === 'run_command' || action === 'bash') {
+    intentTitle = activityDetail(input, 'toolSummary') || activityDetail(input, 'summary') || activityDetail(input, 'description')
+  }
+
+  let semanticVerb = 'Executed'
+  let askUserData: AgentActivity['askUserData']
+  if (action === 'read_file') {
+    semanticVerb = 'Analyzed'
+  } else if (action === 'list_files' || action === 'list_directory' || action === 'list_dir') {
+    semanticVerb = 'Explored'
+  } else if (action === 'edit_file' || action === 'apply_patch' || action === 'apply_code_edits') {
+    semanticVerb = 'Edited'
+  } else if (action === 'write_file' || action === 'note_write') {
+    semanticVerb = 'Edited'
+  } else if (action === 'run_shell' || action === 'run_command' || action === 'bash') {
+    semanticVerb = 'Ran'
+  } else if (action?.includes('search')) {
+    semanticVerb = 'Searched'
+  } else if (action === 'calculation' || action === 'calculator') {
+    semanticVerb = 'Calculated'
+  } else if (action === 'view_image') {
+    semanticVerb = 'Viewed'
+  } else if (action === 'create_plan' || action === 'update_plan') {
+    semanticVerb = 'Planned'
+  } else if (action === 'ask_user') {
+    semanticVerb = 'Asked'
+    let questions: AskUserItem[] = []
+    const rawQuestions = input?.questions
+    if (Array.isArray(rawQuestions) && rawQuestions.length > 0) {
+      questions = (rawQuestions as Array<Record<string, unknown> | string>)
+        .map((q) => {
+          if (typeof q === 'string') return { question: q.trim() }
+          const questionText = String(q.question || q.query || q.title || '').trim()
+          const answerText = typeof q.answer === 'string' ? q.answer.trim() : undefined
+          return { question: questionText, answer: answerText }
+        })
+        .filter((q) => q.question.length > 0)
+    } else if (query) {
+      questions = [{ question: query }]
+    }
+    if (questions.length > 0) {
+      const headerText = typeof input?.header === 'string' ? input.header.trim() : undefined
+      askUserData = {
+        header: headerText || undefined,
+        questions,
+      }
     }
   }
 
@@ -230,7 +351,348 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     kind: activityKind(action, target),
     state: 'active',
     action,
+    semanticVerb,
+    intentTitle,
+    lineRange,
+    diffStats,
+    askUserData,
   }
+}
+
+export function formatDurationText(durationSecs?: number): string {
+  if (durationSecs === undefined || durationSecs === null || durationSecs <= 0) return ''
+  const secs = Math.round(durationSecs)
+  if (secs < 60) return `${secs}s`
+  const mins = Math.floor(secs / 60)
+  const remSecs = secs % 60
+  if (remSecs === 0) return `${mins}m`
+  return `${mins}m ${remSecs}s`
+}
+
+export function isMarkdownContent(action?: string, target?: string, output?: string): boolean {
+  if (!output || !output.trim()) return false
+  if (action === 'run_shell' || action === 'run_command' || action === 'bash') return false
+  const cleanTarget = (target || '').toLowerCase()
+  if (cleanTarget.endsWith('.md') || cleanTarget.endsWith('.markdown') || cleanTarget.endsWith('.txt')) {
+    return true
+  }
+  if (cleanTarget.includes('skill') || output.startsWith('[Loaded skill:')) {
+    return true
+  }
+  if (action === 'note_read' || action === 'web_search') {
+    return true
+  }
+  if (/^#{1,6}\s+/m.test(output) && (output.includes('\n\n') || output.includes('\n- '))) {
+    return true
+  }
+  return false
+}
+
+export function cleanMarkdownOutput(text: string): string {
+  let cleaned = text.trim()
+  cleaned = cleaned.replace(/^\[Loaded skill:\s*([^\]]+)\][\s\n]*/i, '**Skill: $1**\n\n')
+  const frontmatterMatch = cleaned.match(/^(\*\*Skill:[^\n]+\*\*[\s\n]*)?---\s*\n([\s\S]*?)\n---\s*\n/)
+  if (frontmatterMatch) {
+    const prefix = frontmatterMatch[1] ? frontmatterMatch[1].trim() + '\n\n' : ''
+    const yaml = frontmatterMatch[2]
+    const descMatch = yaml.match(/description:\s*([^\n]+(?:\n\s+[^\n]+)*)/)
+    const desc = descMatch ? descMatch[1].replace(/\n\s+/g, ' ').trim() : ''
+    const remaining = cleaned.slice(frontmatterMatch[0].length)
+    if (desc) {
+      cleaned = `${prefix}> ${desc}\n\n${remaining}`
+    } else {
+      cleaned = `${prefix}${remaining}`
+    }
+  }
+  return cleaned
+}
+
+export interface DirectoryEntryItem {
+  name?: string
+  path?: string
+  kind?: 'directory' | 'file' | 'symlink' | string
+  size?: number | null
+}
+
+export function formatFileSize(bytes?: number | null): string {
+  if (bytes === null || bytes === undefined || isNaN(bytes)) return ''
+  if (bytes < 0) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${Number(kb.toFixed(1))} KB`
+  const mb = kb / 1024
+  if (mb < 1024) return `${Number(mb.toFixed(1))} MB`
+  const gb = mb / 1024
+  return `${Number(gb.toFixed(1))} GB`
+}
+
+export function parseDirectoryEntries(text: string): DirectoryEntryItem[] | null {
+  if (!text || typeof text !== 'string') return null
+  let trimmed = text.trim()
+
+  if (!trimmed.startsWith('[') && trimmed.includes('stdout:')) {
+    const stdoutMatch = trimmed.match(/stdout:\s*\n([\s\S]*?)(?:\n\s*stderr:|$)/)
+    if (stdoutMatch && stdoutMatch[1]) {
+      trimmed = stdoutMatch[1].trim()
+    }
+  }
+
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) return null
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+
+  if (!Array.isArray(parsed)) return null
+  if (parsed.length === 0) return []
+
+  const isDirEntryArray = parsed.every(
+    (item) =>
+      item &&
+      typeof item === 'object' &&
+      (typeof item.name === 'string' || typeof item.path === 'string') &&
+      ('kind' in item || 'size' in item)
+  )
+
+  if (!isDirEntryArray) return null
+
+  const entries = parsed as DirectoryEntryItem[]
+  const dirs: DirectoryEntryItem[] = []
+  const files: DirectoryEntryItem[] = []
+  const others: DirectoryEntryItem[] = []
+
+  for (const entry of entries) {
+    const kind = (entry.kind || '').toLowerCase()
+    if (kind === 'directory' || kind === 'dir' || kind === 'folder') {
+      dirs.push(entry)
+    } else if (kind === 'file') {
+      files.push(entry)
+    } else {
+      others.push(entry)
+    }
+  }
+
+  const getEntryName = (e: DirectoryEntryItem): string => {
+    if (e.name) return e.name
+    if (e.path) {
+      const parts = e.path.split(/[/\\]/)
+      return parts[parts.length - 1] || e.path
+    }
+    return ''
+  }
+
+  dirs.sort((a, b) => getEntryName(a).localeCompare(getEntryName(b), undefined, { sensitivity: 'base' }))
+  files.sort((a, b) => getEntryName(a).localeCompare(getEntryName(b), undefined, { sensitivity: 'base' }))
+  others.sort((a, b) => getEntryName(a).localeCompare(getEntryName(b), undefined, { sensitivity: 'base' }))
+
+  return [...dirs, ...others, ...files]
+}
+
+export function formatDirectoryListing(text: string): string | null {
+  const entries = parseDirectoryEntries(text)
+  if (!entries) return null
+  if (entries.length === 0) return '(empty directory)'
+
+  const getEntryName = (e: DirectoryEntryItem): string => {
+    if (e.name) return e.name
+    if (e.path) {
+      const parts = e.path.split(/[/\\]/)
+      return parts[parts.length - 1] || e.path
+    }
+    return ''
+  }
+
+  const lines: string[] = []
+
+  for (const entry of entries) {
+    const kind = (entry.kind || '').toLowerCase()
+    const name = getEntryName(entry)
+    if (kind === 'directory' || kind === 'dir' || kind === 'folder') {
+      const displayName = name.endsWith('/') ? name : `${name}/`
+      lines.push(`📁 ${displayName}`)
+    } else if (kind === 'symlink') {
+      const sizeStr = formatFileSize(entry.size)
+      const suffix = sizeStr ? ` (${sizeStr})` : ''
+      lines.push(`🔗 ${name}${suffix}`)
+    } else {
+      const sizeStr = formatFileSize(entry.size)
+      const suffix = sizeStr ? ` (${sizeStr})` : ''
+      lines.push(`📄 ${name}${suffix}`)
+    }
+  }
+
+  return lines.join('\n')
+}
+
+export function summarizeDirectoryListing(text: string): string | null {
+  if (!text || typeof text !== 'string') return null
+  const trimmed = text.trim()
+
+  const entries = parseDirectoryEntries(trimmed)
+  if (entries) {
+    if (entries.length === 0) return 'empty folder'
+    let dirCount = 0
+    let fileCount = 0
+    let otherCount = 0
+
+    for (const item of entries) {
+      const kind = String(item.kind || '').toLowerCase()
+      if (kind === 'directory' || kind === 'dir' || kind === 'folder') {
+        dirCount++
+      } else if (kind === 'file') {
+        fileCount++
+      } else {
+        otherCount++
+      }
+    }
+
+    const total = dirCount + fileCount + otherCount
+    if (total === 0) return 'empty folder'
+
+    if (dirCount > 0 && fileCount > 0) {
+      const folderStr = `${dirCount} folder${dirCount === 1 ? '' : 's'}`
+      const fileStr = `${fileCount} file${fileCount === 1 ? '' : 's'}`
+      const detailed = `${total} items (${folderStr}, ${fileStr})`
+      if (detailed.length <= 35) return detailed
+      return `${total} items`
+    }
+
+    if (dirCount > 0 && fileCount === 0) {
+      return `${dirCount} folder${dirCount === 1 ? '' : 's'}`
+    }
+
+    if (fileCount > 0 && dirCount === 0) {
+      return `${fileCount} file${fileCount === 1 ? '' : 's'}`
+    }
+
+    return `${total} items`
+  }
+
+  // Check if already formatted lines
+  if (!trimmed.startsWith('[') && (trimmed.includes('📁 ') || trimmed.includes('📄 ') || trimmed.includes('🔗 '))) {
+    const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean)
+    const dirCount = lines.filter((l) => l.startsWith('📁')).length
+    const fileCount = lines.filter((l) => l.startsWith('📄') || l.startsWith('🔗')).length
+    const total = dirCount + fileCount
+    if (total === 0) return 'empty folder'
+    if (dirCount > 0 && fileCount > 0) {
+      const detailed = `${total} items (${dirCount} folders, ${fileCount} files)`
+      return detailed.length <= 35 ? detailed : `${total} items`
+    }
+    if (dirCount > 0) return `${dirCount} folder${dirCount === 1 ? '' : 's'}`
+    if (fileCount > 0) return `${fileCount} file${fileCount === 1 ? '' : 's'}`
+    return `${total} items`
+  }
+
+  return null
+}
+
+/**
+ * Strips internal machine/executor envelope lines (`exit:`, `mode:`, `sandboxed:`, empty `stderr:`)
+ * from raw command execution output, returning clean stdout/stderr for human viewing.
+ */
+export function cleanCommandOutput(text: string): string {
+  if (!text || typeof text !== 'string') return ''
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+
+  // If text is serialized directory listing JSON, format it cleanly into readable entries
+  const formattedDir = formatDirectoryListing(trimmed)
+  if (formattedDir) return formattedDir
+
+  const lines = text.split('\n')
+  const hasEnvelope = lines.some((l) => {
+    const t = l.trim()
+    return t.startsWith('mode: ') || t.startsWith('sandboxed: ') || (t.startsWith('exit: ') && lines.some(x => x.trim() === 'stdout:'))
+  })
+
+  if (hasEnvelope) {
+    let section: 'meta' | 'stdout' | 'stderr' = 'meta'
+    const stdoutLines: string[] = []
+    const stderrLines: string[] = []
+
+    for (const line of lines) {
+      const t = line.trim()
+      if (section === 'meta' && (t.startsWith('exit: ') || t.startsWith('mode: ') || t.startsWith('sandboxed: '))) {
+        continue
+      }
+      if (t === 'stdout:') {
+        section = 'stdout'
+        continue
+      }
+      if (t === 'stderr:') {
+        section = 'stderr'
+        continue
+      }
+
+      if (section === 'stdout') {
+        stdoutLines.push(line)
+      } else if (section === 'stderr') {
+        stderrLines.push(line)
+      } else {
+        stdoutLines.push(line)
+      }
+    }
+
+    const cleanStdout = stdoutLines.join('\n').trim()
+    const cleanStderr = stderrLines.join('\n').trim()
+
+    if (cleanStdout && cleanStderr) {
+      const formattedStdout = formatDirectoryListing(cleanStdout) || cleanStdout
+      return `${formattedStdout}\n\n[stderr]\n${cleanStderr}`
+    }
+    if (cleanStderr) {
+      return cleanStderr
+    }
+    if (cleanStdout) {
+      return formatDirectoryListing(cleanStdout) || cleanStdout
+    }
+    return '(no output)'
+  }
+
+  // If there's no full envelope, strip empty trailing `stderr:` or `stderr:\n`
+  const cleaned = trimmed.replace(/\n\s*stderr:\s*$/i, '').trim()
+  return formatDirectoryListing(cleaned) || cleaned
+}
+
+export function generateNaturalActivitySummary(items: AgentActivity[], timeline?: TimelineItem[]): string {
+  if (!items || items.length === 0) {
+    if (timeline && timeline.some(t => t.kind === 'extendedThinking' || t.kind === 'thought')) {
+      return 'Thinking'
+    }
+    return 'Working'
+  }
+
+  let hasRead = false
+  let hasWrite = false
+  let hasCommand = false
+  let hasSearch = false
+  let hasExplore = false
+  let hasThought = Boolean(timeline && timeline.some(t => t.kind === 'extendedThinking'))
+
+  for (const item of items) {
+    if (item.action === 'read_file') hasRead = true
+    else if (item.action === 'write_file' || item.action === 'edit_file' || item.action === 'apply_patch') hasWrite = true
+    else if (item.action === 'run_shell' || item.action === 'run_command' || item.action === 'bash') hasCommand = true
+    else if (item.action?.includes('search')) hasSearch = true
+    else if (item.action === 'list_files' || item.action === 'list_directory' || item.action === 'list_dir' || item.kind === 'folder') hasExplore = true
+  }
+
+  const parts: string[] = []
+  if (hasExplore && !hasRead) parts.push('Explored workspace')
+  if (hasRead) parts.push('Explored files')
+  if (hasCommand) parts.push('ran commands')
+  if (hasWrite) parts.push('edited files')
+  if (hasSearch && !hasRead && !hasExplore) parts.push('searched codebase')
+  if (parts.length === 0) {
+    if (hasThought) return 'Analyzed task'
+    return 'Working through task'
+  }
+
+  return parts.join(', ')
 }
 
 export function activitySummary(items: AgentActivity[]): string {
@@ -296,6 +758,7 @@ function finalizeGroup(group: AgentActivityGroup): AgentActivityGroup {
   if (count === 1) {
     group.title = group.items[0].target
     group.state = group.items[0].state
+    group.semanticVerb = group.items[0].semanticVerb
     return group
   }
 
@@ -319,25 +782,28 @@ function finalizeGroup(group: AgentActivityGroup): AgentActivityGroup {
 
   const action = group.action
   const doneCount = group.items.filter((it) => it.state === 'done').length
-  if (action === 'calculation') {
-    group.title = group.state === 'active'
-      ? `Calculating expressions (${doneCount}/${count})`
-      : `Calculated ${count} expressions`
+  if (action === 'calculation' || action === 'calculator') {
+    group.semanticVerb = 'Calculated'
+    group.title = `${count} expressions`
   } else if (action === 'read_file') {
-    group.title = group.state === 'active'
-      ? `Reading files (${doneCount}/${count})`
-      : `Read ${count} files`
-  } else if (action === 'write_file') {
-    group.title = group.state === 'active'
-      ? `Writing files (${doneCount}/${count})`
-      : `Wrote ${count} files`
-  } else if (action === 'search_code' || action === 'semantic_search') {
-    group.title = `Searched codebase (${count} queries)`
-  } else if (action === 'web_search') {
-    group.title = `Searched web (${count} queries)`
+    group.semanticVerb = 'Analyzed'
+    group.title = group.state === 'active' ? `reading files (${doneCount}/${count})` : `${count} files`
+  } else if (action === 'write_file' || action === 'edit_file' || action === 'apply_patch') {
+    group.semanticVerb = 'Edited'
+    group.title = group.state === 'active' ? `writing files (${doneCount}/${count})` : `${count} files`
+  } else if (action === 'run_shell' || action === 'run_command' || action === 'bash') {
+    group.semanticVerb = 'Ran'
+    group.title = `${count} commands`
+  } else if (action === 'list_files' || action === 'list_directory' || action === 'list_dir') {
+    group.semanticVerb = 'Explored'
+    group.title = `${count} directories`
+  } else if (action === 'search_code' || action === 'semantic_search' || action === 'web_search') {
+    group.semanticVerb = 'Searched'
+    group.title = `${count} queries`
   } else {
+    group.semanticVerb = 'Executed'
     const readableAction = action.replaceAll('_', ' ')
-    group.title = `Executed ${count} ${readableAction}`
+    group.title = `${count} ${readableAction}`
   }
 
   return group
@@ -410,8 +876,21 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
       for (let index = activities.length - 1; index >= 0; index -= 1) {
         if (activities[index].state !== 'active') continue
         if (event.data.callId && activities[index].callId !== event.data.callId) continue
-        if (activities[index].action !== finished.action || activities[index].target !== finished.target) continue
+        if (activities[index].action !== finished.action) continue
+        if (event.data.input && activities[index].target !== finished.target) continue
         activities[index].state = event.data.status ? (event.data.status === 'success' ? 'done' : 'error') : /^(Error:|Blocked|User denied)/.test(event.data.result) ? 'error' : 'done'
+        const elapsed = event.data.elapsed_ms ?? event.data.elapsedMs
+        if (typeof elapsed === 'number') {
+          activities[index].elapsedMs = elapsed
+        }
+        const lineMatch = typeof event.data.result === 'string' && event.data.result.match(/\+(\d+)\/-(\d+) lines/)
+        if (lineMatch) {
+          const add = parseInt(lineMatch[1], 10)
+          const del = parseInt(lineMatch[2], 10)
+          if (!isNaN(add) && !isNaN(del)) {
+            activities[index].diffStats = { additions: add, deletions: del }
+          }
+        }
         const viewedImage = event.data.action === 'view_image' ? viewedImageDataUri(event.data.result) : null
         activities[index].result = viewedImage ? event.data.result.replace(viewedImage, '[Image displayed below]') : event.data.result
         if (event.data.action === 'read_file') {
@@ -423,9 +902,46 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
               : activities[index].label.replace('Reading skill:', 'Read skill preview:')
           }
         }
-        if (activities[index].action === 'ask_user' && event.data.result.startsWith('User answered:')) {
-          const answer = event.data.result.replace('User answered:', '').trim()
-          activities[index].target = `(Answered: "${answer}") ${activities[index].target}`
+        if (activities[index].action === 'ask_user') {
+          let answer: string | undefined
+          if (typeof event.data.result === 'string') {
+            if (event.data.result.startsWith('User answered:')) {
+              answer = event.data.result.replace(/^User answered:\s*/, '').trim()
+              activities[index].target = `(Answered: "${answer}") ${activities[index].target}`
+            } else if (event.data.result.startsWith('User approved')) {
+              answer = 'Approved'
+            } else if (event.data.result.startsWith('User declined')) {
+              answer = 'Declined'
+            }
+          }
+
+          if (answer) {
+            if (!activities[index].askUserData) {
+              const cleanQuestion = activities[index].target.replace(/^\(Answered:\s*".*?"\)\s*/s, '').trim()
+              activities[index].askUserData = {
+                questions: [{ question: cleanQuestion, answer }],
+              }
+            } else if (activities[index].askUserData.questions.length > 0) {
+              let assigned = false
+              if (answer.startsWith('[') && answer.endsWith(']')) {
+                try {
+                  const parsed = JSON.parse(answer)
+                  if (Array.isArray(parsed) && parsed.length === activities[index].askUserData.questions.length) {
+                    parsed.forEach((ans, i) => {
+                      activities[index].askUserData!.questions[i].answer =
+                        typeof ans === 'string' ? ans : JSON.stringify(ans)
+                    })
+                    assigned = true
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+              if (!assigned) {
+                activities[index].askUserData.questions[0].answer = answer
+              }
+            }
+          }
         }
         break
       }
@@ -540,8 +1056,25 @@ function deriveActivitiesFrom(progress: AgentProgress[]): AgentActivityView {
     }
   }
 
-  const items = activities.slice(-25)
-  return { summary: activitySummary(activities), items, groups: groupActivities(items), timeline: timeline.slice(-60) }
+  let totalDurationSecs: number | undefined
+  for (const event of progress) {
+    if (event.type === 'RunCompleted' && typeof event.data?.summary?.durationSecs === 'number') {
+      totalDurationSecs = event.data.summary.durationSecs
+    }
+  }
+
+  const naturalSummary = generateNaturalActivitySummary(activities, timeline)
+  const durationText = formatDurationText(totalDurationSecs)
+
+  const items = activities.slice(-50)
+  return {
+    summary: activitySummary(activities),
+    naturalSummary,
+    durationText,
+    items,
+    groups: groupActivities(items),
+    timeline: timeline.slice(-80),
+  }
 }
 
 export interface WebSearchSource {
@@ -644,4 +1177,38 @@ export function hasSubagentActivity(progress: AgentProgress[]): boolean {
       ((e.type === 'ToolStart' || e.type === 'ToolEnd') &&
         (e.data.subagent || e.data.action === 'dispatch_agents' || e.data.action === 'dispatch_subagent')),
   )
+}
+
+export function isAskUserActivity(activity: AgentActivity): boolean {
+  return (
+    activity.action === 'ask_user' ||
+    activity.label === 'ask_user' ||
+    Boolean(activity.askUserData) ||
+    activity.target.startsWith('(Answered:')
+  )
+}
+
+export function extractAskUserQuestions(activity: AgentActivity): AskUserItem[] {
+  if (activity.askUserData?.questions && activity.askUserData.questions.length > 0) {
+    return activity.askUserData.questions
+  }
+  const match = activity.target.match(/^\(Answered:\s*"(.*?)"\)\s*(.*)$/s)
+  if (match) {
+    return [{ question: match[2].trim(), answer: match[1].trim() }]
+  }
+  let answer: string | undefined
+  if (typeof activity.result === 'string') {
+    if (activity.result.startsWith('User answered:')) {
+      answer = activity.result.replace(/^User answered:\s*/, '').trim()
+    } else if (activity.result.startsWith('User approved')) {
+      answer = 'Approved'
+    } else if (activity.result.startsWith('User declined')) {
+      answer = 'Declined'
+    }
+  }
+  const cleanQuestion = activity.target.replace(/^\(Answered:\s*".*?"\)\s*/s, '').trim()
+  if (cleanQuestion) {
+    return [{ question: cleanQuestion, answer }]
+  }
+  return []
 }

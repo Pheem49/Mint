@@ -42,6 +42,9 @@ async function run(){
  check(document.documentElement.scrollWidth<=innerWidth,'long source message fits viewport')
  if(location.search.includes('source-preview')){document.getElementById('qa-results')!.textContent='';return}
  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await waitFor(()=>!document.querySelector('.library-preview'),'Close image preview')
+ click('[data-filter="image"]');await waitFor(()=>Boolean(document.querySelector('.library-grid-sizes')),'Image filter shows grid size controls')
+ click('[data-grid-size="large"]');await waitFor(()=>Boolean(document.querySelector('.library-items.is-grid-large')),'Grid size switches to large')
+ click('[data-grid-size="normal"]');await waitFor(()=>Boolean(document.querySelector('.library-items.is-grid-normal')),'Grid size switches back to normal')
  click('[data-filter="file"]');await waitFor(()=>document.querySelectorAll('.library-item').length===2,'Files filter')
  click('[data-preview="notes"]');await waitFor(()=>Boolean(document.querySelector('.library-preview pre')?.textContent?.includes('Regression reference')),'Document preview')
  check(document.querySelector('.library-preview pre')?.textContent?.includes('Regression reference'),'text preview reads original file')

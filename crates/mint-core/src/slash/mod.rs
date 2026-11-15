@@ -227,7 +227,12 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             agent_mode: true,
             plan_mode: false,
         },
-        "/release-notes" => message(crate::release_notes::text()),
+        "/release-notes"
+        | "/release_notes"
+        | "/release-note"
+        | "/release_note"
+        | "/releasenotes"
+        | "/releasenote" => message(crate::release_notes::text()),
         "/clear" => SlashResponse::Applied {
             markdown: "🧹 Conversation history cleared.".into(),
             effects: vec![SlashEffect::HistoryCleared],
@@ -515,14 +520,64 @@ fn cmd_plan(req: &SlashRequest, rest: &str) -> SlashResponse {
             markdown: "📋 Plan Mode **OFF**.".into(),
             effects: vec![SlashEffect::PlanModeChanged { enabled: false }],
         }
-    } else if trimmed == "list" {
+    } else if trimmed == "list" || trimmed.starts_with("list ") {
+        let list_arg = trimmed.trim_start_matches("list").trim();
         let ws = req.workspace();
         let plan_dir = ws.join(".agents").join("plans");
-        let mut entries = Vec::new();
-        if let Ok(rd) = std::fs::read_dir(&plan_dir) {
-            for entry in rd.flatten() {
-                let path = entry.path();
-                if path.is_file() {
+        if !list_arg.is_empty() {
+            let arg = list_arg;
+            let mut found_content = None;
+            if let Ok(rd) = std::fs::read_dir(&plan_dir) {
+                let mut files: Vec<_> = rd
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_file())
+                    .collect();
+                files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+                if let Ok(idx) = arg.parse::<usize>() {
+                    if let Some(path) = idx.checked_sub(1).and_then(|i| files.get(i)) {
+                        if let Ok(content) = std::fs::read_to_string(path) {
+                            let name = path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or_default()
+                                .to_string();
+                            found_content = Some((name, content));
+                        }
+                    }
+                } else {
+                    for path in &files {
+                        let name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        if name.contains(arg) {
+                            if let Ok(content) = std::fs::read_to_string(path) {
+                                found_content = Some((name, content));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            match found_content {
+                Some((name, content)) => message(format!("### Plan: {}\n\n{}", name, content)),
+                None => error(format!(
+                    "No saved plan matching \"{}\" under `.agents/plans/`",
+                    arg
+                )),
+            }
+        } else {
+            let mut entries = Vec::new();
+            if let Ok(rd) = std::fs::read_dir(&plan_dir) {
+                let mut files: Vec<_> = rd
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_file())
+                    .collect();
+                files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+                for (idx, path) in files.iter().enumerate() {
                     let name = path
                         .file_name()
                         .and_then(|n| n.to_str())
@@ -530,16 +585,23 @@ fn cmd_plan(req: &SlashRequest, rest: &str) -> SlashResponse {
                         .to_string();
                     let first_line = std::fs::read_to_string(&path)
                         .ok()
-                        .and_then(|s| s.lines().next().map(|l| l.trim().to_string()))
+                        .and_then(|s| {
+                            s.lines()
+                                .find(|l| !l.trim().is_empty())
+                                .map(|l| l.trim().trim_start_matches('#').trim().to_string())
+                        })
                         .unwrap_or_default();
-                    entries.push(format!("- **{}**: {}", name, first_line));
+                    entries.push(format!("- **[{}] `{}`**: {}", idx + 1, name, first_line));
                 }
             }
-        }
-        if entries.is_empty() {
-            message("No saved plans found under `.agents/plans/`.")
-        } else {
-            message(format!("### Saved Plans\n\n{}", entries.join("\n")))
+            if entries.is_empty() {
+                message("No saved plans found under `.agents/plans/`.")
+            } else {
+                message(format!(
+                    "### Saved Plans\n\n{}\n\n*Type `/plan list <number>` or `/plan show <name>` to view.*",
+                    entries.join("\n")
+                ))
+            }
         }
     } else if let Some(show_arg) = trimmed.strip_prefix("show") {
         let arg = show_arg.trim();
@@ -547,17 +609,35 @@ fn cmd_plan(req: &SlashRequest, rest: &str) -> SlashResponse {
         let plan_dir = ws.join(".agents").join("plans");
         let mut found_content = None;
         if let Ok(rd) = std::fs::read_dir(&plan_dir) {
-            for entry in rd.flatten() {
-                let path = entry.path();
-                let name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or_default()
-                    .to_string();
-                if name.contains(arg) {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
+            let mut files: Vec<_> = rd
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file())
+                .collect();
+            files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+            if let Ok(idx) = arg.parse::<usize>() {
+                if let Some(path) = idx.checked_sub(1).and_then(|i| files.get(i)) {
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        let name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or_default()
+                            .to_string();
                         found_content = Some((name, content));
-                        break;
+                    }
+                }
+            } else {
+                for path in &files {
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    if name.contains(arg) {
+                        if let Ok(content) = std::fs::read_to_string(path) {
+                            found_content = Some((name, content));
+                            break;
+                        }
                     }
                 }
             }
@@ -927,16 +1007,33 @@ fn capitalize_effort(s: &str) -> String {
 fn cmd_thinking(rest: &str, config: &mut MintConfig) -> SlashResponse {
     let model = config.active_model().to_string();
     let supported = config.is_thinking_supported();
+    let has_native = MintConfig::has_native_thinking_api(&config.ai_provider, &model);
+    let mode_desc = if !supported {
+        "Non-text model (image/audio/embedding)"
+    } else if has_native {
+        "Native Reasoning API"
+    } else {
+        "Prompted CoT (<think>)"
+    };
     let (current_enabled, current_effort) = config.resolved_thinking();
     let raw = rest.trim().to_ascii_lowercase();
 
+    if !supported && raw != "off" && raw != "disable" && raw != "false" {
+        return message(format!(
+            "⚠️ **Thinking is not available for `{model}`**\n\n\
+             `{model}` is classified as a non-text model (image/audio/embedding), which does not support Chain-of-Thought reasoning."
+        ));
+    }
+
     if raw.is_empty() {
-        let status_label = if !supported {
-            "Not supported by active model".to_string()
-        } else if current_enabled {
-            format!("ON (Effort: {})", capitalize_effort(current_effort))
+        let status_label = if current_enabled {
+            format!(
+                "ON ({}, Effort: {})",
+                mode_desc,
+                capitalize_effort(current_effort)
+            )
         } else {
-            "OFF".to_string()
+            format!("OFF ({mode_desc})")
         };
 
         let mut choices = Vec::new();
@@ -976,14 +1073,15 @@ fn cmd_thinking(rest: &str, config: &mut MintConfig) -> SlashResponse {
             "⚠️ Thinking is **not supported** by the current active model.".to_string()
         } else if current_enabled {
             format!(
-                "✅ Thinking is **ON** (Effort: **{}**)",
-                capitalize_effort(current_effort)
+                "✅ Thinking is **ON** (Effort: **{}**, Mode: `{}`)",
+                capitalize_effort(current_effort),
+                mode_desc
             )
         } else {
-            "⏸️ Thinking is **OFF**".to_string()
+            format!("⏸️ Thinking is **OFF** (Mode: `{mode_desc}`)")
         };
         return message(format!(
-            "🧠 **Thinking Status**\n\n- Active Model: `{model}`\n- Supported: **{supported}**\n- State: {status_label}\n\nUsage: `/thinking [on|off|low|medium|high|extra_high]`"
+            "🧠 **Thinking Status**\n\n- Active Model: `{model}`\n- Supported: **{supported}** (`{mode_desc}`)\n- State: {status_label}\n\nUsage: `/thinking [on|off|low|medium|high|extra_high]`"
         ));
     }
 
@@ -1019,16 +1117,11 @@ fn cmd_thinking(rest: &str, config: &mut MintConfig) -> SlashResponse {
     config.thinking_enabled = new_enabled;
     config.thinking_effort = new_effort.clone();
 
-    let text = if !supported {
+    let text = if new_enabled {
         format!(
-            "🧠 Updated thinking preference for `{model}` to **{}** (Effort: **{}**).\n*Note: `{model}` may not natively emit reasoning tokens.*",
-            if new_enabled { "ON" } else { "OFF" },
-            capitalize_effort(&new_effort)
-        )
-    } else if new_enabled {
-        format!(
-            "🧠 Thinking **ON** for `{model}` (Effort: **{}**).",
-            capitalize_effort(&new_effort)
+            "🧠 Thinking **ON** for `{model}` (Effort: **{}**, Mode: `{}`).",
+            capitalize_effort(&new_effort),
+            mode_desc
         )
     } else {
         format!("🧠 Thinking **OFF** for `{model}`.")
@@ -1372,17 +1465,7 @@ fn cmd_steps(rest: &str, config: &mut MintConfig) -> SlashResponse {
 }
 
 fn cmd_browser(rest: &str, config: &mut MintConfig) -> SlashResponse {
-    let raw = rest.trim();
-    let current_enabled = config
-        .extra
-        .get("browserAutomationEnabled")
-        .and_then(serde_json::Value::as_bool)
-        != Some(false);
-    let current_mode = config
-        .extra
-        .get("browserAgentMode")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("headless");
+    let raw = rest.trim().to_ascii_lowercase();
     let custom_exe = config
         .extra
         .get("browserExecutable")
@@ -1393,149 +1476,22 @@ fn cmd_browser(rest: &str, config: &mut MintConfig) -> SlashResponse {
     } else {
         "Auto-detect (Chrome / Chromium / Edge)"
     };
-    let width = config
-        .extra
-        .get("browserViewportWidth")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(1440);
-    let height = config
-        .extra
-        .get("browserViewportHeight")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(900);
-    let debug_url = config
-        .extra
-        .get("browserDebugUrl")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("http://127.0.0.1:9222/json/list");
 
-    if raw.is_empty() {
-        return SlashResponse::NeedsChoice {
-            command: "/browser".into(),
-            title: format!(
-                "🌐 Browser Automation Configuration\n• Tools: {}\n• Mode: {}\nSelect an option to configure or run `/browser [on|off|headless|headed|status]`",
-                if current_enabled {
-                    "Enabled (on)"
-                } else {
-                    "Disabled (off)"
-                },
-                if current_mode == "headless" {
-                    "headless Browser"
-                } else {
-                    "headed Automation"
-                }
-            ),
-            options: vec![
-                SlashChoice {
-                    label: format!(
-                        "on — Enable browser automation tools{}",
-                        if current_enabled { " (current)" } else { "" }
-                    ),
-                    value: "on".into(),
-                },
-                SlashChoice {
-                    label: format!(
-                        "off — Disable browser automation tools{}",
-                        if !current_enabled { " (current)" } else { "" }
-                    ),
-                    value: "off".into(),
-                },
-                SlashChoice {
-                    label: format!(
-                        "headless Browser — Run silently in background without window{}",
-                        if current_mode == "headless" {
-                            " (current)"
-                        } else {
-                            ""
-                        }
-                    ),
-                    value: "headless".into(),
-                },
-                SlashChoice {
-                    label: format!(
-                        "headed Automation — Show browser window on screen{}",
-                        if current_mode == "headed" {
-                            " (current)"
-                        } else {
-                            ""
-                        }
-                    ),
-                    value: "headed".into(),
-                },
-                SlashChoice {
-                    label: "status — View current configuration & detected Chrome".into(),
-                    value: "status".into(),
-                },
-            ],
+    if !raw.is_empty() && raw != "status" {
+        return SlashResponse::Message {
+            markdown: "Usage: `/browser` or `/browser status`.\n\n*Note: Agent tools `browser_*` have been superseded by headless Chrome shell execution and `mint browser run`.*".into(),
         };
     }
 
-    let normalized = raw.to_ascii_lowercase();
-    match normalized.as_str() {
-        "status" => SlashResponse::Message {
-            markdown: format!(
-                "### 🌐 Browser Automation Status\n\n\
-                 - **Tools Enabled**: {}\n\
-                 - **Browser Mode**: {}\n\
-                 - **Viewport Size**: `{}` × `{}`\n\
-                 - **Executable**: `{}`\n\
-                 - **Debugging Endpoint**: `{}`\n\n\
-                 *Use `/browser on` or `/browser off` to toggle tools, and `/browser headless` or `/browser headed` to change display mode.*",
-                if current_enabled {
-                    "🟢 **Enabled** (`on`)"
-                } else {
-                    "🔴 **Disabled** (`off`)"
-                },
-                if current_mode == "headless" {
-                    "🕶️ `headless Browser` (runs in background)"
-                } else {
-                    "🖥️ `headed Automation` (shows window)"
-                },
-                width,
-                height,
-                exe_display,
-                debug_url
-            ),
-        },
-        "on" | "enable" => {
-            config
-                .extra
-                .insert("browserAutomationEnabled".into(), serde_json::json!(true));
-            SlashResponse::Applied {
-                markdown: "🟢 **Browser automation tools enabled (`on`)**.\nAgent can inspect web pages and capture screenshots using Headless Chromium.".into(),
-                effects: vec![SlashEffect::ConfigChanged],
-            }
-        }
-        "off" | "disable" => {
-            config
-                .extra
-                .insert("browserAutomationEnabled".into(), serde_json::json!(false));
-            SlashResponse::Applied {
-                markdown: "🔴 **Browser automation tools disabled (`off`)**.".into(),
-                effects: vec![SlashEffect::ConfigChanged],
-            }
-        }
-        "headless" | "headless browser" => {
-            config
-                .extra
-                .insert("browserAgentMode".into(), serde_json::json!("headless"));
-            SlashResponse::Applied {
-                markdown: "🕶️ **Browser mode set to `headless Browser`**.\nAutomation will run silently in the background without opening a window.".into(),
-                effects: vec![SlashEffect::ConfigChanged],
-            }
-        }
-        "headed" | "headed automation" => {
-            config
-                .extra
-                .insert("browserAgentMode".into(), serde_json::json!("headed"));
-            SlashResponse::Applied {
-                markdown: "🖥️ **Browser mode set to `headed Automation`**.\nAutomation will display the browser window on screen in real time.".into(),
-                effects: vec![SlashEffect::ConfigChanged],
-            }
-        }
-        _ => SlashResponse::Message {
-            markdown: "Usage: `/browser [on|off|headless|headed|status]`".into(),
-        },
+    SlashResponse::Message {
+        markdown: format!(
+            "### 🌐 Browser Automation Status\n\n\
+             - **Engine**: Headless Chromium (CLI shell execution)\n\
+             - **Executable**: `{}`\n\
+             - **Interactive Runner**: `mint browser run --file <workflow.json>`\n\n\
+             Browsing is executed via `google-chrome --headless=new` through `run_shell` or bounded headless workflows with `mint browser run`.",
+            exe_display
+        ),
     }
 }
 
@@ -2843,17 +2799,24 @@ mod tests {
     #[test]
     fn release_notes_are_available_on_every_surface() {
         for surface in ["cli", "desktop", "web"] {
-            match execute(
-                &req_surface("/release-notes", surface),
-                &mut MintConfig::default(),
-            ) {
-                SlashResponse::Message { markdown } => {
-                    assert!(markdown.starts_with("# Release Notes - Mint Agent"));
+            for cmd in [
+                "/release-notes",
+                "/release_notes",
+                "/release-note",
+                "/release_note",
+            ] {
+                match execute(&req_surface(cmd, surface), &mut MintConfig::default()) {
+                    SlashResponse::Message { markdown } => {
+                        assert!(
+                            markdown.starts_with("# Release Notes - Mint Agent"),
+                            "failed for command {cmd} on {surface}"
+                        );
+                    }
+                    other => panic!(
+                        "expected release notes for {cmd} on {surface}, got {}",
+                        serde_json::to_value(other).unwrap()
+                    ),
                 }
-                other => panic!(
-                    "expected release notes on {surface}, got {}",
-                    serde_json::to_value(other).unwrap()
-                ),
             }
         }
     }
@@ -3239,6 +3202,46 @@ mod tests {
                 serde_json::to_value(other)
             ),
         }
+
+        let temp = std::env::temp_dir().join(format!("mint-core-plan-test-{}", std::process::id()));
+        let plans_dir = temp.join(".agents").join("plans");
+        std::fs::create_dir_all(&plans_dir).unwrap();
+        std::fs::write(
+            plans_dir.join("20261102-190000-arch.md"),
+            "# Architecture Plan\n1. Module seam",
+        )
+        .unwrap();
+
+        let req_ws = |input: &str| SlashRequest {
+            input: input.to_string(),
+            surface: Some("cli".to_string()),
+            cwd: Some(temp.to_string_lossy().to_string()),
+            chat_id: None,
+        };
+
+        match execute(&req_ws("/plan list"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("Architecture Plan"));
+                assert!(markdown.contains("20261102-190000-arch.md"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        match execute(&req_ws("/plan list 1"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("# Architecture Plan"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        match execute(&req_ws("/plan show 1"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("# Architecture Plan"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        let _ = std::fs::remove_dir_all(temp);
     }
 
     #[test]
@@ -3419,14 +3422,24 @@ mod tests {
             other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
         }
 
-        // 5. Non-reasoning model accepts preference with advisory note
+        // 5. Non-native chat model accepts preference with Prompted CoT mode
         cfg.ai_provider = "openai".into();
         cfg.openai_model = "gpt-4o".into();
         match execute(&req("/thinking on"), &mut cfg) {
             SlashResponse::Applied { markdown, .. } => {
-                assert!(markdown.contains("may not natively emit reasoning tokens"));
+                assert!(markdown.contains("Prompted CoT (<think>)"));
             }
             other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 6. Non-text media model rejects enabling thinking
+        cfg.ai_provider = "gemini".into();
+        cfg.gemini_model = "nano-banana-pro-preview".into();
+        match execute(&req("/thinking on"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("Thinking is not available"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
         }
     }
 
@@ -3560,80 +3573,30 @@ mod tests {
     fn browser_slash_command_behavior() {
         let mut cfg = MintConfig::default();
 
-        // 1. Bare /browser returns NeedsChoice with options
+        // 1. Bare /browser returns status message
         match execute(&req("/browser"), &mut cfg) {
-            SlashResponse::NeedsChoice {
-                command, options, ..
-            } => {
-                assert_eq!(command, "/browser");
-                assert!(options.iter().any(|o| o.value == "on"));
-                assert!(options.iter().any(|o| o.value == "off"));
-                assert!(options.iter().any(|o| o.value == "headless"));
-                assert!(options.iter().any(|o| o.value == "headed"));
-                assert!(options.iter().any(|o| o.value == "status"));
-            }
-            other => panic!(
-                "expected NeedsChoice, got {:?}",
-                serde_json::to_value(other)
-            ),
-        }
-
-        // 2. /browser status returns informative message
-        match execute(&req("/browser status"), &mut cfg) {
             SlashResponse::Message { markdown } => {
                 assert!(markdown.contains("Browser Automation Status"));
-                assert!(markdown.contains("Enabled"));
-                assert!(markdown.contains("headless Browser"));
+                assert!(markdown.contains("Headless Chromium"));
             }
             other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
         }
 
-        // 3. /browser off disables tools
-        match execute(&req("/browser off"), &mut cfg) {
-            SlashResponse::Applied { effects, .. } => {
-                assert!(effects.contains(&SlashEffect::ConfigChanged));
-                assert_eq!(
-                    cfg.extra.get("browserAutomationEnabled"),
-                    Some(&serde_json::json!(false))
-                );
+        // 2. /browser status also returns informative message
+        match execute(&req("/browser status"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("Browser Automation Status"));
+                assert!(markdown.contains("mint browser run"));
             }
-            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
         }
 
-        // 4. /browser on re-enables tools
+        // 3. /browser with invalid subcommand gives usage
         match execute(&req("/browser on"), &mut cfg) {
-            SlashResponse::Applied { effects, .. } => {
-                assert!(effects.contains(&SlashEffect::ConfigChanged));
-                assert_eq!(
-                    cfg.extra.get("browserAutomationEnabled"),
-                    Some(&serde_json::json!(true))
-                );
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("Usage: `/browser` or `/browser status`"));
             }
-            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
-        }
-
-        // 5. /browser headed switches mode
-        match execute(&req("/browser headed"), &mut cfg) {
-            SlashResponse::Applied { effects, .. } => {
-                assert!(effects.contains(&SlashEffect::ConfigChanged));
-                assert_eq!(
-                    cfg.extra.get("browserAgentMode"),
-                    Some(&serde_json::json!("headed"))
-                );
-            }
-            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
-        }
-
-        // 6. /browser headless switches mode back
-        match execute(&req("/browser headless"), &mut cfg) {
-            SlashResponse::Applied { effects, .. } => {
-                assert!(effects.contains(&SlashEffect::ConfigChanged));
-                assert_eq!(
-                    cfg.extra.get("browserAgentMode"),
-                    Some(&serde_json::json!("headless"))
-                );
-            }
-            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
         }
     }
 }

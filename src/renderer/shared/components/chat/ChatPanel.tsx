@@ -36,18 +36,20 @@ import { SubagentStatusStrip } from '../activity/SubagentStatusStrip'
 import { VirtualChatHistory, type VirtualChatHistoryHandle } from './VirtualChatHistory'
 import type { ArtifactFile } from '../../utils/artifacts'
 import type { AgentProgress, ChatResponse, DiffHunk, FileChange, GitCheckpoint, QueuedPrompt, RuntimeStatus } from '../../types'
-import { shouldShowSessionDivider, formatSessionDividerLabel } from '../../utils/ui'
+import { shouldShowSessionDivider, formatSessionDividerLabel, createTrimmedImagePreview } from '../../utils/ui'
 import { useVoiceInput } from '@/voiceInput'
 import VoicePill from './VoicePill'
 import { useGeminiLiveVoice } from '../../utils/useGeminiLiveVoice'
 import GeminiLiveOverlay from './GeminiLiveOverlay'
 import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../../utils/documentTypes'
 import ModelSelectorPopover from './ModelSelectorPopover'
+import ChatModeSelector from './ChatModeSelector'
 import GitBranchSelector from '../workspace/GitBranchSelector'
 import WorkspaceSelector from '../workspace/WorkspaceSelector'
 import ToolsPanelToggle from '../workspace/ToolsPanelToggle'
 import { ModsPanel } from '../extensions/ModsPanel'
 import type { ToolSurface } from '../workspace/ToolSurfacePage'
+import { WORKSPACE_PATH_MIME, WORKSPACE_FILE_MIME, WORKSPACE_IMAGE_MIME, isImageFileName, resolveImageToDataUri, formatWorkspaceReference } from '../../utils/workspaceDrag'
 import QueuedMessagesBanner from './QueuedMessagesBanner'
 import '../../css/thinking-status.css'
 import '../../css/slash-choice.css'
@@ -78,7 +80,7 @@ export function ThinkingElapsedMeta() {
   )
 }
 
-const STREAM_MARKDOWN_UPDATE_MS = 120
+const STREAM_MARKDOWN_UPDATE_MS = 32
 
 function useThrottledValue<T>(value: T, intervalMs: number): T {
   const [throttledValue, setThrottledValue] = useState(value)
@@ -150,6 +152,7 @@ interface ChatPanelContract {
   onSelectVideo: (event: ChangeEvent<HTMLInputElement>) => void
   onSelectDocument: (event: ChangeEvent<HTMLInputElement>) => void
   onPasteImage: (clipboardData: DataTransfer) => boolean
+  onAttachImage?: (image: { dataUri: string; previewDataUri?: string; objectUrl?: string; name: string }) => void
   onSetMessage: (message: string) => void
   onSendVoiceMessage: (message: string, audioDataUri?: string | null) => Promise<void>
   onRemoveImage: (idx: number) => void
@@ -191,6 +194,9 @@ interface ChatPanelContract {
   onClearQueuedPrompts?: () => void
   onSteerQueuedPrompt?: (id: string) => void
   onResumeQueue?: () => void
+  onResendFrom?: (fromId: number, newPrompt: string) => Promise<void> | void
+  onSyncHistory?: () => void
+  onReceiveApproval?: (approval: { token: string; approval: Record<string, unknown> }) => void
 }
 
 export type ConversationViewModel = Pick<ChatPanelContract,
@@ -269,6 +275,7 @@ export default function ChatPanel({
   onSelectVideo,
   onSelectDocument,
   onPasteImage,
+  onAttachImage,
   onSetMessage,
   onSendVoiceMessage,
   onRemoveImage,
@@ -306,6 +313,9 @@ export default function ChatPanel({
   onClearQueuedPrompts,
   onSteerQueuedPrompt,
   onResumeQueue,
+  onResendFrom,
+  onSyncHistory,
+  onReceiveApproval,
   } = { ...conversation, ...actions }
   const message = useComposerDraft(initialMessage, actions.subscribeMessage, actions.getMessage)
   const onThinkingExpandedChange = useLatestCallback(handleThinkingExpandedChange)
@@ -380,8 +390,12 @@ export default function ChatPanel({
   })
 
   const openReview = useLatestCallback((title: string, changes: FileChange[]) => {
-    if (onOpenReview) onOpenReview({ id: `review:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: title, changes })
-    else setReviewPage({ title, changes })
+    if (onOpenReview) {
+      setReviewPage(null)
+      onOpenReview({ id: `review:${Date.now()}`, kind: 'review', title: 'Review', reviewTitle: title, changes })
+    } else {
+      setReviewPage({ title, changes })
+    }
   })
 
   const openAllConversationReview = useLatestCallback(() => {
@@ -691,6 +705,36 @@ export default function ChatPanel({
   const dragCounter = useRef(0)
   const lastDropTimeRef = useRef(0)
 
+  const resizeInput = useCallback((element: HTMLTextAreaElement) => {
+    element.style.height = 'auto'
+    element.style.height = `${Math.min(element.scrollHeight, 120)}px`
+  }, [])
+
+  // Direct file reference insertion into chat input
+  const handleReferenceFile = useCallback((rawPath: string) => {
+    const formatted = formatWorkspaceReference(rawPath, workspacePath).trim()
+    if (!formatted) return
+    const token = `${formatted} `
+    const textarea = textareaRef.current
+    if (!textarea) {
+      onSetMessage(message.trim() ? `${message.trimEnd()} ${token}` : token)
+      return
+    }
+    const start = textarea.selectionStart ?? message.length
+    const end = textarea.selectionEnd ?? message.length
+    const before = message.slice(0, start)
+    const after = message.slice(end)
+    const spacingBefore = before && !before.endsWith(' ') && !before.endsWith('\n') ? ' ' : ''
+    const updated = `${before}${spacingBefore}${token}${after}`
+    onSetMessage(updated)
+    const nextCursor = (before + spacingBefore + token).length
+    requestAnimationFrame(() => {
+      textarea.focus()
+      textarea.setSelectionRange(nextCursor, nextCursor)
+      resizeInput(textarea)
+    })
+  }, [message, onSetMessage, workspacePath, resizeInput])
+
   const handleDragEnter = (e: DragEvent<HTMLElement>) => {
     e.preventDefault()
     if (e.dataTransfer?.types?.includes('Files')) {
@@ -711,6 +755,14 @@ export default function ChatPanel({
 
   const handleDragOver = (e: DragEvent<HTMLElement>) => {
     e.preventDefault()
+    if (
+      e.dataTransfer?.types?.includes(WORKSPACE_PATH_MIME) ||
+      e.dataTransfer?.types?.includes(WORKSPACE_FILE_MIME) ||
+      e.dataTransfer?.types?.includes(WORKSPACE_IMAGE_MIME) ||
+      e.dataTransfer?.types?.includes('application/x-mint-workspace-path')
+    ) {
+      e.dataTransfer.dropEffect = 'copy'
+    }
   }
 
   const handleDrop = (e: DragEvent<HTMLElement>) => {
@@ -718,6 +770,27 @@ export default function ChatPanel({
     e.stopPropagation()
     dragCounter.current = 0
     setIsDragging(false)
+
+    const wsPath =
+      e.dataTransfer?.getData(WORKSPACE_IMAGE_MIME) ||
+      e.dataTransfer?.getData(WORKSPACE_PATH_MIME) ||
+      e.dataTransfer?.getData('application/x-mint-workspace-path')
+    const plainRef = e.dataTransfer?.getData('text/plain')?.trim() || ''
+    const fileRef =
+      e.dataTransfer?.getData(WORKSPACE_PATH_MIME) ||
+      e.dataTransfer?.getData('application/x-mint-workspace-path') ||
+      (plainRef.startsWith('@') ? plainRef : '')
+    if (wsPath || fileRef) {
+      void tryAttachDroppedImage(e.dataTransfer).then((attached) => {
+        if (!attached) {
+          const raw = fileRef || wsPath
+          if (raw) {
+            handleReferenceFile(raw)
+          }
+        }
+      })
+      return
+    }
 
     const now = Date.now()
     if (now - lastDropTimeRef.current < 250) {
@@ -792,8 +865,30 @@ export default function ChatPanel({
     chatId,
     startSession: startGeminiLiveSession,
     sendAudioChunk: sendGeminiLiveAudioChunk,
-    stopSession: stopGeminiLiveSession
+    stopSession: stopGeminiLiveSession,
+    onTurnSaved: () => {
+      onSyncHistory?.()
+    },
+    onToolActivity: () => {
+      onWorkspaceChanged?.()
+    },
+    onApprovalRequested: (approval) => {
+      onReceiveApproval?.(approval)
+    },
   })
+
+  useEffect(() => {
+    const onTriggerVoice = () => {
+      if (geminiLiveEnabled) {
+        geminiLive.setVoiceMode(true)
+      } else {
+        setVoiceMode(true)
+        void startRecognition()
+      }
+    }
+    window.addEventListener('mint:trigger-voice', onTriggerVoice)
+    return () => window.removeEventListener('mint:trigger-voice', onTriggerVoice)
+  }, [geminiLiveEnabled, geminiLive, setVoiceMode, startRecognition])
 
   const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || videoAttachments.length > 0 || documentName)
   const sendingImageMarkers = Array.from({ length: sendingImageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
@@ -1006,10 +1101,6 @@ export default function ChatPanel({
     historyReadyRef.current = false; submittedDuringSessionRef.current = false; lastAutoSpokenIdRef.current = null
   }, [chatId])
 
-  const resizeInput = (element: HTMLTextAreaElement) => {
-    element.style.height = 'auto'
-    element.style.height = `${Math.min(element.scrollHeight, 120)}px`
-  }
   useEffect(() => {
     return () => {
       void speechPlayerRef.current?.dispose()
@@ -1113,13 +1204,77 @@ export default function ChatPanel({
     if (!trimmed) return
     onSetMessage(message.trim() ? `${message.trimEnd()} ${trimmed} ` : `${trimmed} `)
   }
+
+  const tryAttachDroppedImage = async (dataTransfer: DataTransfer): Promise<boolean> => {
+    if (!onAttachImage) return false
+
+    const rawImage = dataTransfer.getData(WORKSPACE_IMAGE_MIME)
+    let imagePayload: { path?: string; root?: string; url?: string; name?: string } | null = null
+    if (rawImage) {
+      try {
+        imagePayload = JSON.parse(rawImage)
+      } catch {
+        // ignore
+      }
+    }
+
+    const wsPath =
+      imagePayload?.path ||
+      dataTransfer.getData(WORKSPACE_PATH_MIME) ||
+      dataTransfer.getData('application/x-mint-workspace-path')
+    const plainText = dataTransfer.getData('text/plain')
+    const uriList = dataTransfer.getData('text/uri-list')
+    const candidatePath = (wsPath || plainText || uriList || '').replace(/^@/, '').trim()
+
+    const isImg =
+      Boolean(imagePayload) ||
+      isImageFileName(candidatePath) ||
+      candidatePath.startsWith('blob:') ||
+      candidatePath.startsWith('data:image/') ||
+      Boolean(imagePayload?.url)
+    if (!isImg) return false
+
+    const name = imagePayload?.name || candidatePath.split(/[\\/]/).pop()?.split('?')[0] || 'image.png'
+    const root = imagePayload?.root || workspacePath || ''
+    const url =
+      imagePayload?.url ||
+      (candidatePath.startsWith('http') || candidatePath.startsWith('blob:') || candidatePath.startsWith('data:image/')
+        ? candidatePath
+        : '')
+
+    let dataUri = ''
+    if (url) {
+      dataUri = await resolveImageToDataUri(url, root, (p, r) => runtimePlatform.readWorkspaceImage(p, r))
+    }
+    if (!dataUri && candidatePath) {
+      dataUri = await resolveImageToDataUri(candidatePath, root, (p, r) => runtimePlatform.readWorkspaceImage(p, r))
+    }
+
+    if (dataUri) {
+      const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
+      onAttachImage({ dataUri, previewDataUri, name })
+      textareaRef.current?.focus()
+      return true
+    }
+    return false
+  }
+
   const handleWorkspaceDrop = (event: DragEvent<HTMLElement>) => {
-    const reference =
-      event.dataTransfer.getData('application/x-mint-workspace-path') ||
-      event.dataTransfer.getData('text/plain')
-    if (!reference.trim().startsWith('@')) return
     event.preventDefault()
-    appendWorkspaceReference(reference)
+    const wsPath =
+      event.dataTransfer.getData(WORKSPACE_PATH_MIME) ||
+      event.dataTransfer.getData('application/x-mint-workspace-path')
+    const plainText = event.dataTransfer.getData('text/plain')
+    const reference = wsPath || plainText
+
+    void tryAttachDroppedImage(event.dataTransfer).then((attached) => {
+      if (attached) return
+      if (!reference) return
+      const trimmed = reference.trim()
+      if (wsPath || trimmed.startsWith('@')) {
+        handleReferenceFile(trimmed)
+      }
+    })
   }
   const isEmptyChat = interactions.length === 0 && !sending && !pendingApproval
 
@@ -1157,12 +1312,16 @@ export default function ChatPanel({
               onToggle={toggleActivity}
               pendingApproval={!!pendingApproval}
               chatId={chatId}
+              workspacePath={workspacePath}
+              onReferenceFile={handleReferenceFile}
               onOpenArtifact={openArtifact}
             />
           )}
           <TurnFileChanges
             changes={composerChanges}
             isLive
+            workspacePath={workspacePath}
+            onReferenceFile={handleReferenceFile}
             onOpenArtifact={openArtifact}
             onOpenReview={openAllConversationReview}
           />
@@ -1188,7 +1347,7 @@ export default function ChatPanel({
                 />
               )}
               <div className="message-bubble">
-                <McpToolResults progress={agentProgress} running chatId={chatId} />
+                <McpToolResults progress={agentProgress} running chatId={chatId} mode="artifacts-only" />
                 <ViewedImages progress={agentProgress} chatId={chatId} onOpenArtifact={openArtifact} />
                 <span>
                   {compaction ? (
@@ -1223,7 +1382,7 @@ export default function ChatPanel({
                         type="button"
                         className={`msg-action-btn copy-btn ${copiedId === 'live' ? 'is-copied' : ''}`}
                         onClick={() => handleCopyMessage('live', throttledStreamedReply)}
-                        title={copiedId === 'live' ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
+                        title={copiedId === 'live' ? 'Copied!' : 'Copy message'}
                       >
                         {renderCopyIcon(copiedId === 'live')}
                       </button>
@@ -1281,7 +1440,7 @@ export default function ChatPanel({
               background: 'var(--bg-backdrop)',
               backdropFilter: 'blur(8px)',
               border: '2px dashed var(--accent)',
-              borderRadius: '16px',
+              borderRadius: 'var(--radius-xl, 18px)',
               margin: '12px',
               display: 'flex',
               flexDirection: 'column',
@@ -1404,7 +1563,7 @@ export default function ChatPanel({
       <div className="chat-container" ref={chatContainerRef} onScroll={handleChatScroll} style={{ overflowAnchor: 'none' }}>
         {hasOlder && onLoadOlder && (
           <button type="button" className="load-older-messages" disabled={loadingOlder}
-            style={{ display: 'block', margin: '0 auto 20px', padding: '7px 14px', borderRadius: 8,
+            style={{ display: 'block', margin: '0 auto 20px', padding: '7px 14px', borderRadius: 'var(--radius-md, 10px)',
               border: '1px solid var(--border-color, #3a3a3a)', background: 'var(--surface, #252525)',
               color: 'var(--text-secondary, #c0c0c0)', cursor: loadingOlder ? 'default' : 'pointer' }}
             onClick={async () => {
@@ -1439,13 +1598,18 @@ export default function ChatPanel({
                   interaction={interaction}
                   copiedId={copiedId}
                   onEditMessage={handleEditMessage}
+                  onResendFrom={onResendFrom}
                   speakingText={speakingText}
                   agentActivitySnapshots={agentActivitySnapshots}
                   openActivityIds={openActivityIds}
+                  thinkingExpanded={thinkingExpanded}
+                  onThinkingExpandedChange={onThinkingExpandedChange}
                   handleCopyMessage={handleCopyMessage}
                   speak={speak}
                   toggleActivity={toggleActivity}
                   chatId={chatId}
+                  workspacePath={workspacePath}
+                  onReferenceFile={handleReferenceFile}
                   customProviders={settingsConfig?.customProviders}
                   onOpenArtifact={openArtifact}
                   onOpenReview={openAllConversationReview}
@@ -1519,24 +1683,6 @@ export default function ChatPanel({
             {workspacePath && <GitBranchSelector workspacePath={workspacePath} disabled={sending} onBranchChanged={onWorkspaceChanged} />}
           </div>
         )}
-        <div className="smart-context-bar">
-          <label className={`smart-context-option ${agentMode ? 'is-active' : ''}`}>
-            <span className="toggle-switch">
-              <input type="checkbox" checked={agentMode} onChange={(event) => onSetAgentMode(event.target.checked)} />
-              <span className="slider round" />
-            </span>
-            <span className="smart-context-copy"><span className="smart-context-title">Agent mode</span></span>
-          </label>
-          {onSetPlanMode && (
-            <label className={`smart-context-option ${planMode ? 'is-active' : ''}`} title="Investigate read-only and require plan approval before editing files or running commands">
-              <span className="toggle-switch">
-                <input type="checkbox" checked={Boolean(planMode)} onChange={(event) => onSetPlanMode(event.target.checked)} />
-                <span className="slider round" />
-              </span>
-              <span className="smart-context-copy"><span className="smart-context-title">Plan mode</span></span>
-            </label>
-          )}
-        </div>
         {queuedPrompts && queuedPrompts.length > 0 && (
           <QueuedMessagesBanner
             queuedPrompts={queuedPrompts}
@@ -1559,7 +1705,12 @@ export default function ChatPanel({
             onSubmit(event)
           }}
           onDragOver={(event) => {
-            if (event.dataTransfer.types.includes('application/x-mint-workspace-path')) {
+            if (
+              event.dataTransfer.types.includes(WORKSPACE_PATH_MIME) ||
+              event.dataTransfer.types.includes(WORKSPACE_FILE_MIME) ||
+              event.dataTransfer.types.includes(WORKSPACE_IMAGE_MIME) ||
+              event.dataTransfer.types.includes('application/x-mint-workspace-path')
+            ) {
               event.preventDefault()
               event.dataTransfer.dropEffect = 'copy'
             }
@@ -1664,6 +1815,18 @@ export default function ChatPanel({
               if (historyIndex !== null) setHistoryIndex(null)
             }}
             onKeyDown={handleInputKeyDown}
+            onDragOver={(event) => {
+              if (
+                event.dataTransfer.types.includes(WORKSPACE_PATH_MIME) ||
+                event.dataTransfer.types.includes(WORKSPACE_FILE_MIME) ||
+                event.dataTransfer.types.includes(WORKSPACE_IMAGE_MIME) ||
+                event.dataTransfer.types.includes('application/x-mint-workspace-path') ||
+                event.dataTransfer.types.includes('text/plain')
+              ) {
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'copy'
+              }
+            }}
             onDrop={handleWorkspaceDrop}
             placeholder="Ask anything, @ to mention, / for actions"
             rows={1}
@@ -1752,22 +1915,31 @@ export default function ChatPanel({
               <path d="M8 22h8M12 18v4M7 10h10M12 5v10" />
             </svg>
           </button>
-          <ModelSelectorPopover
-            activeProvider={status?.activeProvider ?? ''}
-            activeModel={activeModel}
-            availableProviders={status?.availableProviders ?? []}
-            settingsConfig={settingsConfig}
-            dynamicOllamaModels={dynamicOllamaModels}
-            onSelect={(provider, model) => {
-              if (onSelectModelAndProvider) {
-                onSelectModelAndProvider(provider, model)
-              } else {
-                onSetProvider(provider)
-                onSetModel(model)
-              }
-            }}
-            onUpdateSettings={onUpdateSettings}
-          />
+          <div className="chat-composer-pills">
+            <ModelSelectorPopover
+              activeProvider={status?.activeProvider ?? ''}
+              activeModel={activeModel}
+              availableProviders={status?.availableProviders ?? []}
+              settingsConfig={settingsConfig}
+              dynamicOllamaModels={dynamicOllamaModels}
+              onSelect={(provider, model) => {
+                if (onSelectModelAndProvider) {
+                  onSelectModelAndProvider(provider, model)
+                } else {
+                  onSetProvider(provider)
+                  onSetModel(model)
+                }
+              }}
+              onUpdateSettings={onUpdateSettings}
+            />
+            <ChatModeSelector
+              agentMode={agentMode}
+              onSetAgentMode={onSetAgentMode}
+              planMode={planMode}
+              onSetPlanMode={onSetPlanMode}
+              disabled={sending}
+            />
+          </div>
           <VoicePill
             id="voice-input-btn"
             className="composer-voice-pill"
@@ -1887,6 +2059,8 @@ export default function ChatPanel({
           onEndCall={() => geminiLive.setVoiceMode(false)}
           voice={settingsConfig?.geminiLiveVoice || 'Puck'}
           voices={GEMINI_LIVE_VOICES}
+          pendingApproval={pendingApproval}
+          onApproval={onApproval}
           onChangeVoice={async (voiceName) => {
             await onSetGeminiLiveVoice(voiceName)
             geminiLive.restart()

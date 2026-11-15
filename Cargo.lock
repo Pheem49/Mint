@@ -3394,7 +3394,7 @@ dependencies = [
 
 [[package]]
 name = "mint-cli"
-version = "1.17.0"
+version = "1.18.0"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
@@ -3423,7 +3423,7 @@ dependencies = [
 
 [[package]]
 name = "mint-companion"
-version = "1.17.0"
+version = "1.18.0"
 dependencies = [
  "dirs",
  "futures-util",
@@ -3439,7 +3439,7 @@ dependencies = [
 
 [[package]]
 name = "mint-companion-protocol"
-version = "1.17.0"
+version = "1.18.0"
 dependencies = [
  "dirs",
  "serde",
@@ -3448,7 +3448,7 @@ dependencies = [
 
 [[package]]
 name = "mint-core"
-version = "1.17.0"
+version = "1.18.0"
 dependencies = [
  "base64 0.22.1",
  "bcrypt",
@@ -3494,7 +3494,7 @@ dependencies = [
 
 [[package]]
 name = "mint-desktop"
-version = "1.17.0"
+version = "1.18.0"
 dependencies = [
  "base64 0.22.1",
  "dirs",
@@ -3521,7 +3521,7 @@ dependencies = [
 
 [[package]]
 name = "mint-mod-runtime"
-version = "1.17.0"
+version = "1.18.0"
 dependencies = [
  "cpu-time",
  "oxc",

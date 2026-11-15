@@ -12,7 +12,7 @@
   color: var(--text-main);
   background: var(--panel-bg);
   border: 1px solid var(--border-default, var(--border));
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
   font-family: var(--font-sans, Inter, system-ui, sans-serif);
 }
@@ -45,7 +45,7 @@
   min-height: 32px;
   padding: 6px 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   text-align: start;
   font: inherit;
@@ -62,7 +62,7 @@
 .slash-suggestions-empty { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; color: var(--text-muted); font-size: 13px; }
 .slash-suggestions-hint { padding: 7px 12px; border-top: 1px solid var(--border-default, var(--border)); color: var(--text-muted); font-size: 10px; }
 @media (max-width: 760px) {
-  #chat-form > .slash-suggestions-popup { max-height: min(34dvh, 280px); border-radius: 16px; }
+  #chat-form > .slash-suggestions-popup { max-height: min(34dvh, 280px); border-radius: var(--radius-xl); }
   .slash-suggestion-item { min-height: 40px; }
   .slash-cmd-name { max-width: 48%; overflow: hidden; text-overflow: ellipsis; }
 }

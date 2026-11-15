@@ -25,7 +25,7 @@ mod diff_render;
 mod live_status;
 mod markdown_render;
 use approval_prompts::*;
-use diff_render::*;
+pub(crate) use diff_render::*;
 pub(crate) use live_status::*;
 pub(crate) use markdown_render::*;
 
@@ -483,7 +483,11 @@ fn tui_approval(
         AgentApproval::UserApproval { title, prompt } => yes_no(title, prompt.to_owned()),
         AgentApproval::EnterPlanMode { reason } => yes_no("Enter plan mode?", reason.to_owned()),
         AgentApproval::ExitPlanMode { plan } => {
-            let outcome = yes_no("Review plan", plan.to_owned());
+            tui.push_plan(plan);
+            let outcome = yes_no(
+                "Review plan",
+                "Do you want to proceed with this plan?".to_string(),
+            );
             if outcome == ApprovalOutcome::Approved {
                 match save_plan_file(root, plan) {
                     Ok(path) => tui.push_notice(format!("Plan saved to {}", path.display())),
@@ -1339,7 +1343,7 @@ pub async fn run_code_agent_with_options(
                 ..
             } => {
                 let remaining = progress_tool_running
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |running| {
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |running| {
                         Some(running.saturating_sub(1))
                     })
                     .unwrap_or(0)
@@ -1509,9 +1513,12 @@ pub async fn run_code_agent_with_options(
         }
     };
 
-    // Providers may still stream internally, but the CLI deliberately waits
-    // for AgentResult.summary so it can render one complete Markdown document.
-    let on_chunk = |_summary: String| {};
+    let chunk_tui = options.tui.clone();
+    let on_chunk = move |delta: String| {
+        if let Some(tui) = &chunk_tui {
+            tui.append_assistant_delta(&delta);
+        }
+    };
 
     let user_name = MemoryStore::open_default()
         .ok()
@@ -1628,17 +1635,18 @@ pub async fn run_code_agent_with_options(
     let worked_line = format!("{DIM}{label} {}{RESET}", "─".repeat(fill_len));
 
     if let Some(tui) = &options.tui {
-        tui.push_assistant(res.summary.clone());
+        let mut post_notices = Vec::new();
         if let Ok(mut status) = live_status.lock()
             && !status.web_sources.is_empty()
         {
             let sources = status.web_sources.drain(..).collect::<Vec<_>>();
             let text = format_tui_web_sources(&sources, MAX_TUI_WEB_SOURCES);
             if !text.is_empty() {
-                tui.push_notice(text);
+                post_notices.push(text);
             }
         }
-        tui.push_notice(worked_line);
+        post_notices.push(worked_line);
+        tui.begin_assistant_reveal(res.summary.clone(), post_notices);
         avatar_bridge.on_talking(false);
         return Ok(res);
     }
@@ -1783,7 +1791,14 @@ mod format_markdown_bold_tests {
             strip_ansi(&out).contains("print(1)"),
             "code content dropped: {out}"
         );
-        assert!(out.contains('│'), "missing gutter bar: {out}");
+        assert!(
+            !out.contains('│'),
+            "code block should not have vertical pipe gutter: {out}"
+        );
+        assert!(
+            strip_ansi(&out).contains("  print(1)"),
+            "code block should be indented with 2 spaces: {out}"
+        );
     }
 
     #[test]

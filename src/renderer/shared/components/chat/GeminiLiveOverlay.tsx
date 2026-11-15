@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Mic, MicOff, PhoneOff, Volume2 } from 'lucide-react'
 import { VoicePoweredOrb } from '../ui/voice-powered-orb'
 import { Button } from '../ui/button'
+import { ApprovalCard } from './ApprovalCard'
 import './GeminiLiveOverlay.css'
 
 export interface GeminiLiveOverlayProps {
@@ -16,6 +17,8 @@ export interface GeminiLiveOverlayProps {
   voices: readonly string[]
   onChangeVoice: (voice: string) => void
   analyserRef?: RefObject<AnalyserNode | null>
+  pendingApproval?: any | null
+  onApproval?: (approved: boolean, autoApprove?: boolean, answer?: string) => void
 }
 const STATUS_LABEL: Record<GeminiLiveOverlayProps['status'], string> = {
   connecting: 'Connecting', listening: 'Listening', speaking: 'Speaking',
@@ -30,14 +33,27 @@ const STATUS_HINT: Record<GeminiLiveOverlayProps['status'], string> = {
   error: 'End this call and try again when you’re ready.',
 }
 
+export function resolveLiveOverlayEscape(state: {
+  voicePickerOpen: boolean
+  hasPendingApproval: boolean
+}): 'close_voice_picker' | 'ignore' | 'end_call' {
+  if (state.voicePickerOpen) return 'close_voice_picker'
+  if (state.hasPendingApproval) return 'ignore'
+  return 'end_call'
+}
+
 export default function GeminiLiveOverlay({
   status, userTranscript, assistantTranscript, isPaused, onTogglePause, onEndCall,
-  voice, voices, onChangeVoice, analyserRef,
+  voice, voices, onChangeVoice, analyserRef, pendingApproval, onApproval,
 }: GeminiLiveOverlayProps) {
   const [voicePickerOpen, setVoicePickerOpen] = useState(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const endCall = useRef(onEndCall)
   endCall.current = onEndCall
+  const voicePickerOpenRef = useRef(voicePickerOpen)
+  voicePickerOpenRef.current = voicePickerOpen
+  const hasPendingApprovalRef = useRef(Boolean(pendingApproval && onApproval))
+  hasPendingApprovalRef.current = Boolean(pendingApproval && onApproval)
   // The decorative orb must not own a microphone in this call surface.
   const emptyAnalyser = useRef<AnalyserNode | null>(null)
   useEffect(() => {
@@ -47,9 +63,26 @@ export default function GeminiLiveOverlay({
     const dialog = dialogRef.current!
     dialog.querySelector<HTMLButtonElement>('[data-call-control]:not(:disabled), [aria-label="End Live conversation"]')?.focus()
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); endCall.current(); return }
+      if (event.key === 'Escape') {
+        const action = resolveLiveOverlayEscape({
+          voicePickerOpen: voicePickerOpenRef.current,
+          hasPendingApproval: hasPendingApprovalRef.current,
+        })
+        if (action === 'close_voice_picker') {
+          event.preventDefault()
+          setVoicePickerOpen(false)
+        } else if (action === 'end_call') {
+          event.preventDefault()
+          endCall.current()
+        }
+        return
+      }
       if (event.key !== 'Tab') return
-      const controls = Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled), [tabindex="0"]'))
+      const controls = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex="0"]',
+        ),
+      )
       const first = controls[0], last = controls[controls.length - 1]
       if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
         event.preventDefault(); last?.focus()
@@ -85,6 +118,15 @@ export default function GeminiLiveOverlay({
             {assistantTranscript && <p className="gemini-live-transcript-line"><span className="gemini-live-transcript-speaker">Mint</span>{assistantTranscript}</p>}
           </> : <p className="live-orb-empty">{status === 'connecting' ? 'Your conversation will appear here.' : status === 'error' ? 'No conversation yet.' : 'Say something to get started…'}</p>}
         </div>
+        {pendingApproval && onApproval && (
+          <div className="gemini-live-approval" style={{ width: '100%', textAlign: 'left' }}>
+            <ApprovalCard
+              key={pendingApproval.id || JSON.stringify(pendingApproval)}
+              pendingApproval={pendingApproval}
+              onApproval={onApproval}
+            />
+          </div>
+        )}
         <div className="gemini-live-voice-picker">
           <Button type="button" variant="ghost" className="gemini-live-voice-btn" aria-label="Change voice" aria-expanded={voicePickerOpen} aria-haspopup="listbox" onClick={() => setVoicePickerOpen(open => !open)}>
             <Volume2 size={16} aria-hidden="true" /><span>{voice}</span>

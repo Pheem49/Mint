@@ -70,6 +70,9 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --no-deps
 
+      - name: Build mod host binary for tests
+        run: cargo build -p mint-cli --bin mint-mod-host
+
       - name: Run Rust tests
         run: cargo test -p mint-core -p mint-cli -p mint-companion-protocol -p mint-companion
 

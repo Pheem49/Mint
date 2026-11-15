@@ -108,7 +108,7 @@ async function run() {
   await until(() => document.querySelector<HTMLImageElement>('.artifact-preview-panel img')?.naturalWidth)
   check(!document.querySelector('.tool-surface-drop-overlay'), 'dropping clears the drag overlay')
   check(calls.filter(call => call.startsWith('serve:')).length === 0 && calls.filter(call => call.startsWith('image:')).length === 1, 'image reads directly without starting any background preview service')
-  check(!document.querySelector('[aria-label="Open in Mint Browser (Mint Auto)"]'), 'direct images do not offer an HTTP-only browser action')
+  check(!document.querySelector('[aria-label="Open preview"]'), 'direct images do not offer an HTTP-only browser action')
   await drop('notes.md'); await until(() => document.querySelector('.artifact-preview-panel')?.textContent?.includes('Preview heading') && !document.querySelector('.artifact-preview-panel')?.textContent?.includes('# Preview heading'))
   check(true, 'Markdown opens rendered content')
   await drop('main.py'); await until(() => document.querySelector('.artifact-preview-panel')?.textContent?.includes('Hello from Workspace'))

@@ -2,10 +2,9 @@ import React, { lazy, Suspense, useEffect, useState } from 'react'
 import AuthGate from '../shared/components/app/AuthGate'
 import ChunkErrorBoundary from '../shared/components/app/ChunkErrorBoundary'
 import ModalErrorBoundary from '../shared/components/app/ModalErrorBoundary'
+import { ErrorRecovery } from '../shared/components/ui/error-recovery'
 import { lazyWithRetry, scheduleIdlePreload } from '../shared/utils/lazyWithRetry'
 import { listen } from './tauri'
-import BrowserShell from './components/BrowserShell'
-import BrowserSuggestionsPopup from './components/BrowserSuggestionsPopup'
 
 const SettingsWindow = lazyWithRetry(() => import('./components/SettingsWindow'))
 const SpotlightWindow = lazy(() => import('./components/SpotlightWindow'))
@@ -22,8 +21,6 @@ function getCurrentRoute(): string {
 }
 
 export default function App() {
-  const isBrowserShell = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mint-browser-shell') === '1'
-  const isBrowserSuggestions = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mint-browser-suggestions') === '1'
   const [route, setRoute] = useState(getCurrentRoute)
 
   useEffect(() => {
@@ -65,10 +62,6 @@ export default function App() {
     return () => window.removeEventListener('vite:preloadError', handlePreloadError)
   }, [])
 
-  if (isBrowserShell) return <BrowserShell />
-  if (isBrowserSuggestions) return <BrowserSuggestionsPopup />
-
-
   // Auxiliary overlay windows (spotlight/widget/proactive-glow/screen-picker)
   // belong to an already-running, already-authenticated main session, so
   // they render without their own login gate.
@@ -105,6 +98,19 @@ export default function App() {
       <Suspense fallback={null}>
         <LiveTranslateControls />
       </Suspense>
+    )
+  }
+
+  if (route.startsWith('/error-preview') || route.startsWith('/error-recovery')) {
+    return (
+      <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-canvas, #09090b)' }}>
+        <ErrorRecovery
+          onBackToChat={() => {
+            window.location.hash = '#/'
+          }}
+          onRefresh={() => window.location.reload()}
+        />
+      </div>
     )
   }
 

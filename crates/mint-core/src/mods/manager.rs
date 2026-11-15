@@ -318,9 +318,14 @@ fn binding_ids(root: &Path) -> Result<BTreeSet<String>, String> {
     Ok(ids)
 }
 
+enum WorkerInput {
+    Process(ChildStdin),
+    Thread(mpsc::Sender<Value>),
+}
+
 struct Worker {
-    child: Child,
-    input: ChildStdin,
+    child: Option<Child>,
+    input: WorkerInput,
     output: mpsc::Receiver<Result<Value, String>>,
     preview: bool,
     phase: String,
@@ -331,39 +336,23 @@ struct Worker {
 }
 impl Drop for Worker {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 impl Worker {
-    fn start(
-        root: &Path,
-        chat: &str,
-        compiled: &str,
-        state: &Value,
-        permissions: Vec<String>,
-        preview: bool,
-    ) -> Result<(Self, Value), String> {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let name = if cfg!(windows) {
-            "mint-mod-host.exe"
-        } else {
-            "mint-mod-host"
-        };
-        let sibling = exe
-            .parent()
-            .ok_or("Executable directory missing")?
-            .join(name);
-        let development = exe.parent().and_then(Path::parent).map(|p| p.join(name));
-        let mut command = if sibling.is_file() {
-            Command::new(sibling)
-        } else if let Some(p) = development.filter(|p| p.is_file()) {
-            Command::new(p)
-        } else {
-            let mut c = Command::new(exe);
-            c.arg("--mint-mod-host");
-            c
-        };
+    fn spawn_process(
+        mut command: Command,
+    ) -> Result<
+        (
+            Option<Child>,
+            WorkerInput,
+            mpsc::Receiver<Result<Value, String>>,
+        ),
+        String,
+    > {
         let mut child = command
             .current_dir(std::env::temp_dir())
             .env_clear()
@@ -395,6 +384,80 @@ impl Worker {
                 }
             }
         });
+        Ok((Some(child), WorkerInput::Process(input), rx))
+    }
+
+    fn spawn_thread() -> Result<
+        (
+            Option<Child>,
+            WorkerInput,
+            mpsc::Receiver<Result<Value, String>>,
+        ),
+        String,
+    > {
+        let (to_worker_tx, to_worker_rx) = mpsc::channel::<Value>();
+        let (from_worker_tx, from_worker_rx) = mpsc::channel::<Result<Value, String>>();
+        let rx = Arc::new(Mutex::new(to_worker_rx));
+        let tx = Arc::new(Mutex::new(from_worker_tx));
+        std::thread::spawn(move || {
+            let rx_clone = Arc::clone(&rx);
+            let tx_clone = Arc::clone(&tx);
+            let _ = mint_mod_runtime::run_worker_loop(
+                move || {
+                    rx_clone
+                        .lock()
+                        .map_err(|e| e.to_string())?
+                        .recv()
+                        .map_err(|e| e.to_string())
+                },
+                move |val| {
+                    if let Ok(tx) = tx_clone.lock() {
+                        let _ = tx.send(Ok(val));
+                    }
+                },
+            );
+        });
+        Ok((None, WorkerInput::Thread(to_worker_tx), from_worker_rx))
+    }
+
+    fn find_mod_host(exe: &Path, name: &str) -> Option<PathBuf> {
+        let sibling = exe.parent()?.join(name);
+        if sibling.is_file() {
+            return Some(sibling);
+        }
+        // Cargo places test binaries in `target/<profile>/deps/` or
+        // `target/<profile>/build/<pkg>/<hash>/out/`, while `mint-mod-host`
+        // lives in `target/<profile>/`.
+        exe.ancestors()
+            .skip(2)
+            .take(5)
+            .map(|dir| dir.join(name))
+            .find(|candidate| candidate.is_file())
+    }
+
+    fn start(
+        root: &Path,
+        chat: &str,
+        compiled: &str,
+        state: &Value,
+        permissions: Vec<String>,
+        preview: bool,
+    ) -> Result<(Self, Value), String> {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let name = if cfg!(windows) {
+            "mint-mod-host.exe"
+        } else {
+            "mint-mod-host"
+        };
+        let (child, input, rx) = if let Some(host) = Self::find_mod_host(&exe, name) {
+            Self::spawn_process(Command::new(host))?
+        } else if !cfg!(test) && exe.file_stem().and_then(|s| s.to_str()) == Some("mint") {
+            let mut c = Command::new(exe);
+            c.arg("--mint-mod-host");
+            Self::spawn_process(c)?
+        } else {
+            Self::spawn_thread()?
+        };
         let mut worker = Self {
             child,
             input,
@@ -469,9 +532,12 @@ impl Worker {
         }
     }
     fn send(&mut self, value: &Value) -> Result<(), String> {
-        writeln!(self.input, "{value}")
-            .and_then(|_| self.input.flush())
-            .map_err(|e| e.to_string())
+        match &mut self.input {
+            WorkerInput::Process(stdin) => writeln!(stdin, "{value}")
+                .and_then(|_| stdin.flush())
+                .map_err(|e| e.to_string()),
+            WorkerInput::Thread(tx) => tx.send(value.clone()).map_err(|e| e.to_string()),
+        }
     }
     fn exchange(&mut self, request: &Value) -> Result<Value, String> {
         self.phase = request["kind"].as_str().unwrap_or("register").to_owned();

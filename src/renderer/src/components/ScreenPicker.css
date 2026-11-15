@@ -197,7 +197,7 @@
   position: absolute;
   z-index: 1;
   outline: 2px solid var(--accent);
-  border-radius: 4px;
+  border-radius: var(--radius-2xs, 4px);
   box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 38%, transparent);
   pointer-events: none;
 }

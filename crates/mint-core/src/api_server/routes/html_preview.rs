@@ -32,8 +32,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             .as_str()
             .ok_or("Missing preview path")?
             .to_string();
-        let mint = body["mintBrowser"].as_bool().unwrap_or(false);
-        let mut config = load_config().map_err(|e| e.to_string())?;
+        let config = load_config().map_err(|e| e.to_string())?;
         let worker_config = config.clone();
         let preview = tokio::task::spawn_blocking(move || {
             crate::system::html_preview::start(
@@ -54,12 +53,6 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             .map_err(|e| e.to_string())?
             .error_for_status()
             .map_err(|e| e.to_string())?;
-        if mint {
-            if crate::enable_browser_tools(&mut config) {
-                crate::save_config(&config).map_err(|e| e.to_string())?;
-            }
-            crate::browser::spawn_automation_browser_with_url(&config, Some(url)).await?;
-        }
         Ok::<_, String>(preview)
     }
     .await;

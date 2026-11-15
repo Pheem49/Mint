@@ -51,6 +51,32 @@ impl LibraryStore {
             [],
         )?;
         tx.commit()?;
+        if connection
+            .query_row(
+                "SELECT 1 FROM library_migrations WHERE name='thumbnails-v2-800px'",
+                [],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_none()
+        {
+            connection.execute(
+                "UPDATE library_items SET thumbnail_status='pending' WHERE kind IN ('image', 'video')",
+                [],
+            )?;
+            let mut statement = connection
+                .prepare("SELECT id FROM library_items WHERE kind IN ('image', 'video')")?;
+            let ids: Vec<String> = statement
+                .query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            for id in ids {
+                self.enqueue_thumbnail(id);
+            }
+            connection.execute(
+                "INSERT OR IGNORE INTO library_migrations(name) VALUES('thumbnails-v2-800px')",
+                [],
+            )?;
+        }
         Ok(())
     }
 }

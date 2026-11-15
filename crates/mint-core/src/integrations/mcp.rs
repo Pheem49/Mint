@@ -1055,7 +1055,7 @@ impl McpRemoteSession {
 
                 let handle = MCP_ASYNC_RUNTIME.spawn(async move {
                     let mut stream = resp.bytes_stream();
-                    let mut buffer = String::new();
+                    let mut buffer = Vec::new();
                     let mut current_event: Option<String> = None;
                     let mut current_data: Vec<String> = Vec::new();
 
@@ -1064,14 +1064,12 @@ impl McpRemoteSession {
                             Ok(b) => b,
                             Err(_) => break,
                         };
-                        let text = match std::str::from_utf8(&bytes) {
-                            Ok(t) => t,
-                            Err(_) => continue,
-                        };
-                        buffer.push_str(text);
+                        buffer.extend_from_slice(&bytes);
 
-                        while let Some(pos) = buffer.find('\n') {
-                            let line = buffer[..pos].trim_end_matches('\r').to_string();
+                        while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
+                            let line = String::from_utf8_lossy(&buffer[..pos])
+                                .trim_end_matches('\r')
+                                .to_string();
                             buffer.drain(..=pos);
 
                             if line.is_empty() {

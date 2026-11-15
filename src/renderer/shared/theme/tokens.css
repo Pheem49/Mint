@@ -60,14 +60,16 @@
   --indigo-600: #4f46e5;
 
   /* Base Radii */
+  --radius-2xs: 4px;
   --radius-xs: 6px;
   --radius-sm: 8px;
-  --radius-md: 12px;
+  --radius-md: 10px;
   --radius-lg: 14px;
-  --radius-xl: 16px;
-  --radius-2xl: 20px;
-  --radius-3xl: 24px;
+  --radius-xl: 18px;
+  --radius-2xl: 22px;
+  --radius-3xl: 26px;
   --radius-full: 9999px;
+  --radius-composer: 24px;
 
   /* Default Accent (Mint) */
   --accent-default: var(--mint-500);

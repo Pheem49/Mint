@@ -36,13 +36,20 @@ impl ChoiceItem {
 }
 
 pub trait CommandUi {
-    fn uses_inline_resume_picker(&self) -> bool {
-        false
-    }
     fn push_notice_str(&mut self, text: &str);
     fn push_command_output_str(&mut self, text: &str);
+    fn push_release_notes(&mut self, notes: &str) {
+        self.push_command_output(notes);
+    }
+    #[allow(dead_code)]
+    fn push_plan(&mut self, plan: &str) {
+        self.push_command_output(plan);
+    }
     fn set_status(&mut self, lines: Vec<String>);
     fn clear_status(&mut self);
+    fn open_thought_viewer(&mut self) -> Result<()> {
+        Ok(())
+    }
     fn prompt_choice(
         &mut self,
         title: &str,
@@ -152,6 +159,14 @@ impl CommandUi for FullScreenCommandUi<'_> {
         self.handle.push_command(text);
     }
 
+    fn push_release_notes(&mut self, notes: &str) {
+        self.handle.push_release_notes(notes);
+    }
+
+    fn push_plan(&mut self, plan: &str) {
+        self.handle.push_plan(plan);
+    }
+
     fn set_status(&mut self, lines: Vec<String>) {
         self.handle.set_status(lines);
     }
@@ -243,6 +258,13 @@ impl CommandUi for FullScreenCommandUi<'_> {
         }
     }
 
+    fn open_thought_viewer(&mut self) -> Result<()> {
+        if let Ok(mut state) = self.state.lock() {
+            state.open_thought_modal();
+        }
+        Ok(())
+    }
+
     fn reload_transcript(&mut self, chat_id: &str, workspace: &std::path::Path) {
         if let Ok(mut state) = self.state.lock() {
             state.reload_transcript(chat_id, workspace);
@@ -260,8 +282,23 @@ impl ClassicCommandUi {
 }
 
 impl CommandUi for ClassicCommandUi {
-    fn uses_inline_resume_picker(&self) -> bool {
-        true
+    fn open_thought_viewer(&mut self) -> Result<()> {
+        if let Some(record) = crate::interactive::get_last_thought() {
+            let _ = crate::interactive::show_thought_viewer(&record.thought, &record.elapsed_str);
+        } else {
+            self.push_notice_str("No recent thought process recorded for this turn.");
+        }
+        Ok(())
+    }
+
+    fn prompt_resume_picker(
+        &mut self,
+        _sessions: Vec<mint_core::ChatSession>,
+        current_dir: &std::path::Path,
+        _current_branch: Option<String>,
+        active_chat_id: &str,
+    ) -> Result<Option<String>> {
+        crate::interactive::prompt_resume_session_picker(current_dir, active_chat_id)
     }
 
     fn push_notice_str(&mut self, text: &str) {
@@ -411,6 +448,8 @@ impl CommandUi for ClassicCommandUi {
 pub struct MockCommandUi {
     pub notices: Vec<String>,
     pub command_outputs: Vec<String>,
+    pub release_notes: Vec<String>,
+    pub plans: Vec<String>,
     pub status: Vec<String>,
     pub choice_answers: Vec<Option<usize>>,
     pub text_answers: Vec<Option<String>>,
@@ -431,6 +470,15 @@ impl CommandUi for MockCommandUi {
 
     fn push_command_output_str(&mut self, text: &str) {
         self.command_outputs.push(text.to_string());
+    }
+
+    fn push_release_notes(&mut self, notes: &str) {
+        self.release_notes.push(notes.to_string());
+    }
+
+    fn push_plan(&mut self, plan: &str) {
+        self.plans.push(plan.to_string());
+        self.command_outputs.push(plan.to_string());
     }
 
     fn set_status(&mut self, lines: Vec<String>) {

@@ -132,6 +132,7 @@ pub async fn run() -> Result<()> {
         Command::new("node")
             .current_dir(&root)
             .env("MINT_TAILSCALE_HOST", url.trim_start_matches("https://"))
+            .env("VITE_CONFIG_NATIVE_IGNORE_WARNING", "true")
             .arg(vite)
             .args([
                 "preview",

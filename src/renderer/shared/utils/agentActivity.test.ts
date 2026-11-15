@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { describeTool, activitiesFrom } from './agentActivity'
+import {
+  describeTool,
+  activitiesFrom,
+  generateNaturalActivitySummary,
+  formatDurationText,
+  groupActivities,
+  isMarkdownContent,
+  cleanMarkdownOutput,
+  cleanCommandOutput,
+  formatFileSize,
+  formatDirectoryListing,
+  parseDirectoryEntries,
+  summarizeDirectoryListing,
+  activityKind,
+  isAskUserActivity,
+  extractAskUserQuestions,
+} from './agentActivity'
 import { viewedImagesFrom } from './viewedImages'
-import { reduceLiveAgentProgress } from '../agentProgress'
+import { reduceLiveAgentProgress, compactAgentProgressForPersistence, hasAgentDrawerActivity } from '../agentProgress'
 import type { AgentProgress } from '../types'
 
 describe('skill reading activity', () => {
@@ -228,6 +244,456 @@ describe('live progress retention across multi-step turns', () => {
     expect(view.items[14].target).toBe('echo step 14')
     // Timeline must not drop the early groups
     expect(view.timeline?.length).toBeGreaterThan(15)
+  })
+})
+
+describe('modern semantic activity timeline metadata', () => {
+  it('extracts Analyzed verb and line range for read_file', () => {
+    const tool = describeTool('read_file', { path: 'src/App.tsx', startLine: 25, endLine: 50 })
+    expect(tool.semanticVerb).toBe('Analyzed')
+    expect(tool.lineRange).toBe('#L25-50')
+  })
+
+  it('extracts Edited verb and diff stats for edit_file', () => {
+    const tool = describeTool('edit_file', {
+      Path: 'src/App.tsx',
+      Target: 'line1\nline2',
+      Replacement: 'line1\nline2\nline3\nline4',
+    })
+    expect(tool.kind).toBe('file')
+    expect(tool.semanticVerb).toBe('Edited')
+    expect(tool.diffStats).toEqual({ additions: 4, deletions: 2 })
+  })
+
+  it('classifies edit_file, write_file, read_file and apply_code_edits as file kind', () => {
+    expect(activityKind('edit_file', 'src/main.py')).toBe('file')
+    expect(activityKind('write_file', 'src/main.py')).toBe('file')
+    expect(activityKind('read_file', 'src/main.py')).toBe('file')
+    expect(activityKind('apply_code_edits', 'src/main.py')).toBe('file')
+  })
+
+  it('extracts Ran verb and toolSummary intent for run_command', () => {
+    const tool = describeTool('run_command', {
+      CommandLine: 'npm run build:ui',
+      toolSummary: 'Build UI for Desktop and Web',
+    })
+    expect(tool.semanticVerb).toBe('Ran')
+    expect(tool.intentTitle).toBe('Build UI for Desktop and Web')
+  })
+
+  it('generates natural composite activity summary', () => {
+    const view = activitiesFrom([
+      { type: 'ToolStart', data: { action: 'read_file', input: { path: 'a.ts' } } },
+      { type: 'ToolEnd', data: { action: 'read_file', input: { path: 'a.ts' }, result: 'ok' } },
+      { type: 'ToolStart', data: { action: 'run_shell', input: { command: 'cargo check' } } },
+      { type: 'ToolEnd', data: { action: 'run_shell', input: { command: 'cargo check' }, result: 'ok' } },
+      { type: 'ToolStart', data: { action: 'write_file', input: { path: 'b.ts', content: 'hello' } } },
+      { type: 'ToolEnd', data: { action: 'write_file', input: { path: 'b.ts' }, result: 'ok' } },
+    ])
+    expect(view.naturalSummary).toBe('Explored files, ran commands, edited files')
+  })
+
+  it('formats duration cleanly', () => {
+    expect(formatDurationText(14)).toBe('14s')
+    expect(formatDurationText(120)).toBe('2m')
+    expect(formatDurationText(75)).toBe('1m 15s')
+  })
+
+  it('assigns semantic verbs and clean titles to grouped activities', () => {
+    const items = [
+      describeTool('run_shell', { command: 'echo 1' }),
+      describeTool('run_shell', { command: 'echo 2' }),
+    ]
+    const groups = groupActivities(items)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].semanticVerb).toBe('Ran')
+    expect(groups[0].title).toBe('2 commands')
+  })
+
+  it('detects markdown content for skill and doc reads', () => {
+    expect(isMarkdownContent('read_file', 'SKILL.md', '# Skill content')).toBe(true)
+    expect(isMarkdownContent('read_file', 'README.md', 'Hello world')).toBe(true)
+    expect(isMarkdownContent('read_file', 'a.ts', '[Loaded skill: ffmpeg]')).toBe(true)
+    expect(isMarkdownContent('run_shell', 'npm test', 'PASS 1 test')).toBe(false)
+    expect(isMarkdownContent('read_file', 'src/App.tsx', 'const x = 1;')).toBe(false)
+  })
+
+  it('cleans loaded skill frontmatter into readable markdown callout', () => {
+    const raw = `[Loaded skill: ffmpeg-frame-extractor]
+---
+description: Extract video frames without distortion
+revisions: 1
+---
+
+# Extracting frames
+## Usage
+- Run command`
+    const cleaned = cleanMarkdownOutput(raw)
+    expect(cleaned).toContain('**Skill: ffmpeg-frame-extractor**')
+    expect(cleaned).toContain('> Extract video frames without distortion')
+    expect(cleaned).toContain('# Extracting frames')
+    expect(cleaned).not.toContain('---')
+  })
+
+  describe('ask_user activities', () => {
+    it('correctly creates an ask_user activity with single query', () => {
+      const act = describeTool('ask_user', { query: 'Which database should we use?' })
+      expect(isAskUserActivity(act)).toBe(true)
+      expect(act.semanticVerb).toBe('Asked')
+      expect(act.askUserData?.questions).toHaveLength(1)
+      expect(act.askUserData?.questions[0].question).toBe('Which database should we use?')
+    })
+
+    it('correctly creates an ask_user activity with multiple questions', () => {
+      const act = describeTool('ask_user', {
+        header: 'Architecture Choices',
+        questions: [
+          { question: 'Q1: Language?', answer: 'Rust' },
+          { question: 'Q2: Database?', answer: 'PostgreSQL' },
+        ],
+      })
+      expect(isAskUserActivity(act)).toBe(true)
+      expect(act.askUserData?.header).toBe('Architecture Choices')
+      expect(act.askUserData?.questions).toHaveLength(2)
+      expect(act.askUserData?.questions[0].question).toBe('Q1: Language?')
+      expect(act.askUserData?.questions[0].answer).toBe('Rust')
+    })
+
+    it('attaches answer from ToolEnd event in activitiesFrom', () => {
+      const view = activitiesFrom([
+        {
+          type: 'ToolStart',
+          data: {
+            action: 'ask_user',
+            input: { query: 'Choose a port:' },
+          },
+        },
+        {
+          type: 'ToolEnd',
+          data: {
+            action: 'ask_user',
+            result: 'User answered: 8080',
+          },
+        },
+      ])
+
+      expect(view.items).toHaveLength(1)
+      const act = view.items[0]
+      expect(act.state).toBe('done')
+      const questions = extractAskUserQuestions(act)
+      expect(questions).toHaveLength(1)
+      expect(questions[0].question).toBe('Choose a port:')
+      expect(questions[0].answer).toBe('8080')
+    })
+
+    it('extracts questions from legacy (Answered: "...") format in target', () => {
+      const legacyAct = {
+        label: 'ask_user',
+        action: 'ask_user',
+        target: '(Answered: "Python 3.11") Which Python version to use?',
+        kind: 'tool' as const,
+        state: 'done' as const,
+      }
+      expect(isAskUserActivity(legacyAct)).toBe(true)
+      const extracted = extractAskUserQuestions(legacyAct)
+      expect(extracted).toHaveLength(1)
+      expect(extracted[0].question).toBe('Which Python version to use?')
+      expect(extracted[0].answer).toBe('Python 3.11')
+    })
+  })
+
+  describe('plan activities and PlanUpdated progress folding', () => {
+    it('describes create_plan and update_plan with Planned semantic verb and summary/step count', () => {
+      const created = describeTool('create_plan', {
+        summary: 'Ship Native Streaming',
+        steps: ['Step 1', 'Step 2', 'Step 3'],
+      })
+      expect(created.semanticVerb).toBe('Planned')
+      expect(created.target).toBe('Ship Native Streaming (3 steps)')
+
+      const updated = describeTool('update_plan', {
+        steps: ['done: Step 1', 'in_progress: Step 2'],
+      })
+      expect(updated.semanticVerb).toBe('Planned')
+      expect(updated.target).toBe('2 steps')
+    })
+
+    it('replaces earlier PlanUpdated snapshots in live and persisted progress', () => {
+      let progress: AgentProgress[] = []
+      progress = reduceLiveAgentProgress(progress, {
+        type: 'PlanUpdated',
+        data: {
+          plan: {
+            objective: 'Ship Native Streaming',
+            tasks: [{ id: 'step-1', title: 'Write test', status: 'in_progress' }],
+          },
+        },
+      })
+      progress = reduceLiveAgentProgress(progress, {
+        type: 'PlanUpdated',
+        data: {
+          plan: {
+            objective: 'Ship Native Streaming',
+            tasks: [{ id: 'step-1', title: 'Write test', status: 'completed' }],
+          },
+        },
+      })
+
+      const planEvents = progress.filter((e) => e.type === 'PlanUpdated')
+      expect(planEvents).toHaveLength(1)
+      expect(planEvents[0].data.plan.tasks[0].status).toBe('completed')
+
+      const compacted = compactAgentProgressForPersistence([
+        {
+          type: 'PlanUpdated',
+          data: {
+            plan: {
+              objective: 'Ship Native Streaming',
+              tasks: [{ id: 'step-1', title: 'Write test', status: 'in_progress' }],
+            },
+          },
+        },
+        {
+          type: 'PlanUpdated',
+          data: {
+            plan: {
+              objective: 'Ship Native Streaming',
+              tasks: [{ id: 'step-1', title: 'Write test', status: 'completed' }],
+            },
+          },
+        },
+      ])
+      expect(compacted.filter((e) => e.type === 'PlanUpdated')).toHaveLength(1)
+    })
+
+    it('distinguishes pure thinking turns (!agentMode) from turns with agent drawer activity', () => {
+      const thinkingOnly: AgentProgress[] = [
+        {
+          type: 'ThinkingDelta',
+          data: { id: 'step-1', delta: 'Let me think...', elapsed_ms: 400 },
+        },
+        {
+          type: 'ExtendedThinking',
+          data: { id: 'step-1', thought: 'Let me think carefully.', elapsed_ms: 800 },
+        },
+      ]
+      expect(hasAgentDrawerActivity(thinkingOnly)).toBe(false)
+
+      const withTool: AgentProgress[] = [
+        ...thinkingOnly,
+        {
+          type: 'ToolStart',
+          data: { call_id: 'c1', action: 'read_file', input: { path: 'README.md' } },
+        },
+      ]
+      expect(hasAgentDrawerActivity(withTool)).toBe(true)
+
+      const withRunSummary: AgentProgress[] = [
+        ...thinkingOnly,
+        {
+          type: 'RunCompleted',
+          data: {
+            summary: {
+              outcome: 'completed',
+              durationSecs: 1.2,
+              stepsExecuted: 1,
+              toolCallsTotal: 0,
+              toolCallsSucceeded: 0,
+              toolCallsFailed: 0,
+              filesModified: [],
+              filesCreated: [],
+              verificationStatus: 'none',
+            },
+          },
+        },
+      ]
+      expect(hasAgentDrawerActivity(withRunSummary)).toBe(true)
+    })
+  })
+
+  describe('cleanCommandOutput filter', () => {
+    it('strips bookkeeping envelope lines and returns clean stdout', () => {
+      const raw = `exit: 0
+mode: mutating
+sandboxed: true
+stdout:
+PDF generated successfully.
+
+stderr:
+`
+      expect(cleanCommandOutput(raw)).toBe('PDF generated successfully.')
+    })
+
+    it('cleans file listings with readOnly mode', () => {
+      const raw = `exit: 0
+mode: readOnly
+sandboxed: true
+stdout:
+-rw-rw-r-- 1 pheem49 pheem49 9175 พ.ย. 3 17:45 Harness_Presentation.pdf
+
+stderr:
+`
+      expect(cleanCommandOutput(raw)).toBe('-rw-rw-r-- 1 pheem49 pheem49 9175 พ.ย. 3 17:45 Harness_Presentation.pdf')
+    })
+
+    it('returns clean stderr when command fails with no stdout', () => {
+      const raw = `exit: 1
+mode: mutating
+sandboxed: true
+stdout:
+
+stderr:
+ModuleNotFoundError: No module named 'reportlab'
+`
+      expect(cleanCommandOutput(raw)).toBe("ModuleNotFoundError: No module named 'reportlab'")
+    })
+
+    it('strips empty trailing stderr from unstructured output', () => {
+      const raw = `Downloading reportlab-5.1.0.whl
+Successfully installed reportlab
+
+stderr:
+`
+      expect(cleanCommandOutput(raw)).toBe(`Downloading reportlab-5.1.0.whl
+Successfully installed reportlab`)
+    })
+
+    it('handles empty stdout and stderr gracefully', () => {
+      const raw = `exit: 0
+mode: mutating
+sandboxed: true
+stdout:
+
+stderr:
+`
+      expect(cleanCommandOutput(raw)).toBe('(no output)')
+    })
+  })
+
+  describe('list_files exploration and directory formatting', () => {
+    it('describes list_files as Explored workspace when path is .', () => {
+      const activity = describeTool('list_files', { path: '.' })
+      expect(activity.semanticVerb).toBe('Explored')
+      expect(activity.target).toBe('workspace')
+      expect(activity.kind).toBe('folder')
+    })
+
+    it('describes list_files as Explored workspace when path is empty or ./', () => {
+      expect(describeTool('list_files', { path: './' }).target).toBe('workspace')
+      expect(describeTool('list_files', {}).target).toBe('workspace')
+    })
+
+    it('describes list_files with specific subfolder target', () => {
+      const activity = describeTool('list_files', { path: 'src/renderer' })
+      expect(activity.semanticVerb).toBe('Explored')
+      expect(activity.target).toBe('src/renderer')
+      expect(activity.kind).toBe('folder')
+    })
+
+    it('formats file sizes accurately', () => {
+      expect(formatFileSize(0)).toBe('0 B')
+      expect(formatFileSize(500)).toBe('500 B')
+      expect(formatFileSize(1024)).toBe('1 KB')
+      expect(formatFileSize(1536)).toBe('1.5 KB')
+      expect(formatFileSize(3939)).toBe('3.8 KB')
+      expect(formatFileSize(258814)).toBe('252.7 KB')
+      expect(formatFileSize(10485760)).toBe('10 MB')
+      expect(formatFileSize(null)).toBe('')
+      expect(formatFileSize(undefined)).toBe('')
+    })
+
+    it('formats directory listing JSON into clean icons, names and sizes', () => {
+      const json = JSON.stringify([
+        { name: 'Cargo.toml', path: '/repo/Cargo.toml', kind: 'file', size: 3939 },
+        { name: 'src', path: '/repo/src', kind: 'directory', size: null },
+        { name: 'crates', path: '/repo/crates', kind: 'directory', size: null },
+        { name: '.gitignore', path: '/repo/.gitignore', kind: 'file', size: 120 },
+      ])
+      const formatted = formatDirectoryListing(json)
+      expect(formatted).toBe(
+        '📁 crates/\n' +
+        '📁 src/\n' +
+        '📄 .gitignore (120 B)\n' +
+        '📄 Cargo.toml (3.8 KB)'
+      )
+    })
+
+    it('summarizes directory listings cleanly for inline pill previews', () => {
+      const json = JSON.stringify([
+        { name: 'crates', kind: 'directory' },
+        { name: 'src', kind: 'directory' },
+        { name: 'Cargo.toml', kind: 'file', size: 100 },
+      ])
+      expect(summarizeDirectoryListing(json)).toBe('3 items (2 folders, 1 file)')
+
+      const onlyFiles = JSON.stringify([
+        { name: 'a.txt', kind: 'file' },
+        { name: 'b.txt', kind: 'file' },
+      ])
+      expect(summarizeDirectoryListing(onlyFiles)).toBe('2 files')
+
+      const empty = JSON.stringify([])
+      expect(summarizeDirectoryListing(empty)).toBe('empty folder')
+    })
+
+    it('cleanCommandOutput formats directory JSON directly and inside envelopes', () => {
+      const json = JSON.stringify([
+        { name: 'src', kind: 'directory', size: null },
+        { name: 'Cargo.toml', kind: 'file', size: 3939 },
+      ])
+      const cleanedDirect = cleanCommandOutput(json)
+      expect(cleanedDirect).toBe('📁 src/\n📄 Cargo.toml (3.8 KB)')
+
+      const enveloped = `exit: 0
+mode: readOnly
+sandboxed: true
+stdout:
+${json}
+
+stderr:
+`
+      const cleanedEnveloped = cleanCommandOutput(enveloped)
+      expect(cleanedEnveloped).toBe('📁 src/\n📄 Cargo.toml (3.8 KB)')
+    })
+
+    it('natural summary reflects Explored workspace', () => {
+      const items = [describeTool('list_files', { path: '.' })]
+      expect(generateNaturalActivitySummary(items)).toBe('Explored workspace')
+
+      const itemsWithCommand = [
+        describeTool('list_files', { path: '.' }),
+        describeTool('run_shell', { command: 'cargo build' }),
+      ]
+      expect(generateNaturalActivitySummary(itemsWithCommand)).toBe('Explored workspace, ran commands')
+    })
+
+    it('parseDirectoryEntries parses raw JSON and envelopes correctly', () => {
+      const json = JSON.stringify([
+        { name: 'b.txt', kind: 'file', size: 20 },
+        { name: 'src', kind: 'directory', size: null },
+        { name: 'a.txt', kind: 'file', size: 10 },
+      ])
+      const entries = parseDirectoryEntries(json)
+      expect(entries).not.toBeNull()
+      expect(entries).toHaveLength(3)
+      // Directories first, then files sorted
+      expect(entries![0].name).toBe('src')
+      expect(entries![0].kind).toBe('directory')
+      expect(entries![1].name).toBe('a.txt')
+      expect(entries![2].name).toBe('b.txt')
+
+      const enveloped = `exit: 0
+mode: readOnly
+sandboxed: true
+stdout:
+${json}
+
+stderr:
+`
+      const envelopedEntries = parseDirectoryEntries(enveloped)
+      expect(envelopedEntries).toHaveLength(3)
+      expect(envelopedEntries![0].name).toBe('src')
+    })
   })
 })
 

@@ -197,7 +197,7 @@
 
 .crop-viewport {
     position: relative;
-    border-radius: 4px;
+    border-radius: var(--radius-2xs, 4px);
     overflow: hidden;
     cursor: grab;
     user-select: none;
@@ -245,28 +245,28 @@
     top: 4px;
     left: 4px;
     border-width: 3px 0 0 3px;
-    border-top-left-radius: 3px;
+    border-top-left-radius: var(--radius-2xs, 4px);
 }
 
 .crop-bracket-tr {
     top: 4px;
     right: 4px;
     border-width: 3px 3px 0 0;
-    border-top-right-radius: 3px;
+    border-top-right-radius: var(--radius-2xs, 4px);
 }
 
 .crop-bracket-bl {
     bottom: 4px;
     left: 4px;
     border-width: 0 0 3px 3px;
-    border-bottom-left-radius: 3px;
+    border-bottom-left-radius: var(--radius-2xs, 4px);
 }
 
 .crop-bracket-br {
     bottom: 4px;
     right: 4px;
     border-width: 0 3px 3px 0;
-    border-bottom-right-radius: 3px;
+    border-bottom-right-radius: var(--radius-2xs, 4px);
 }
 
 .crop-hint-drag {

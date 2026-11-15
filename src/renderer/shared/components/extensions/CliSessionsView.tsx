@@ -358,7 +358,10 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
                       {shortId}
                     </span>
                     {isActive && (
-                      <span className="code-active-badge">active</span>
+                      <span className="code-active-badge">
+                        <span className="code-active-dot" aria-hidden="true" />
+                        <span>active</span>
+                      </span>
                     )}
                   </div>
 
@@ -443,9 +446,7 @@ export const CliSessionsView: React.FC<CliSessionsViewProps> = React.memo(functi
                         {session.title || 'Untitled Session'}
                       </div>
                       <div className="code-session-snippet">
-                        <span style={{ color: 'var(--interactive-fg)', opacity: 0.8, marginRight: '4px' }}>
-                          &gt;
-                        </span>
+                        <span className="code-session-prompt-symbol">&gt;</span>
                         <span>{session.title || 'Interactive shell'}</span>
                       </div>
                     </>

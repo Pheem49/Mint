@@ -69,7 +69,12 @@ pub fn popular_models_for_provider(provider: &str) -> &'static [&'static str] {
     }
 }
 
-pub const DEEPSEEK_MODEL_PRESETS: &[&str] = &["deepseek-chat", "deepseek-reasoner"];
+pub const DEEPSEEK_MODEL_PRESETS: &[&str] = &[
+    "deepseek-flash",
+    "deepseek-v4-pro",
+    "deepseek-chat",
+    "deepseek-reasoner",
+];
 
 pub const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
     "Qwen/Qwen3.6-27B",

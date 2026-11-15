@@ -19,6 +19,7 @@ try{
  permission=defer();session=defer();voice.setVoiceMode(true);await wait(50);const live=stream();permission.resolve(live);await wait(50);session.resolve('live');await wait(100);
  assert(voice.isRecording&&voice.analyserRef.current,'active call exposes its existing audio analyser');
  eventHandler({type:'audioChunk',data:btoa('\0\0\0\0')});await wait(50);const ctx=contexts.at(-1);assert(ctx.sources.length===1,'normal streamed playback still works');
+ eventHandler({type:'interrupted'});await wait(50);assert(ctx.sources[0].stopped&&!voice.isSpeaking&&voice.isRecording,'barge-in interruption stops queued playback immediately without closing mic session');
  voice.setVoiceMode(false);await wait(100);
  assert(live.track.stopped&&ctx.state==='closed'&&ctx.sources[0].stopped&&!voice.analyserRef.current,'ending releases microphone, output audio, analyser and audio context');
  const count=ctx.sources.length;eventHandler({type:'audioChunk',data:btoa('\0\0')});await wait(50);assert(ctx.sources.length===count&&contexts.length===1,'late events cannot restart audio after call ends');

@@ -2,6 +2,7 @@ import React, { Suspense, useEffect, useState } from 'react'
 import AuthGate from '../shared/components/app/AuthGate'
 import ChunkErrorBoundary from '../shared/components/app/ChunkErrorBoundary'
 import ModalErrorBoundary from '../shared/components/app/ModalErrorBoundary'
+import { ErrorRecovery } from '../shared/components/ui/error-recovery'
 import PullToRefresh from './components/PullToRefresh'
 import { lazyWithRetry, scheduleIdlePreload } from '../shared/utils/lazyWithRetry'
 
@@ -91,6 +92,19 @@ export default function App() {
     return () => window.removeEventListener('vite:preloadError', handlePreloadError)
   }, [])
 
+
+  if (route.startsWith('/error-preview') || route.startsWith('/error-recovery')) {
+    return (
+      <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-canvas, #09090b)' }}>
+        <ErrorRecovery
+          onBackToChat={() => {
+            window.location.hash = '#/'
+          }}
+          onRefresh={() => window.location.reload()}
+        />
+      </div>
+    )
+  }
 
   let content = <MintDashboard />
 

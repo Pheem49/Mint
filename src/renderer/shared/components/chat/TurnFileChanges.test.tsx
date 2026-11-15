@@ -63,7 +63,7 @@ describe('TurnFileChanges UI refinement', () => {
       },
     ]
 
-    const html = renderToStaticMarkup(<TurnFileChanges changes={changes} />)
+    const html = renderToStaticMarkup(<TurnFileChanges changes={changes} defaultOpen={true} />)
 
     // Summary label and common directory in header
     expect(html).toContain('4 files created')
@@ -82,5 +82,49 @@ describe('TurnFileChanges UI refinement', () => {
 
     // Show more button
     expect(html).toContain('Show 1 more file')
+  })
+
+  it('renders file items as draggable and provides a mention button', () => {
+    const changes = [
+      {
+        path: '/workspace/src/CalculationCard.tsx',
+        created: false,
+        additions: 3,
+        deletions: 3,
+        hunks: [],
+      },
+    ]
+
+    const html = renderToStaticMarkup(
+      <TurnFileChanges
+        changes={changes}
+        defaultOpen={true}
+        workspacePath="/workspace"
+        onReferenceFile={() => {}}
+      />
+    )
+
+    // Should have draggable attribute on the file item
+    expect(html).toContain('draggable="true"')
+    expect(html).toContain('data-path="/workspace/src/CalculationCard.tsx"')
+
+    // Should have a mention button
+    expect(html).toContain('file-changes-mention-btn')
+    expect(html).toContain('Reference in chat')
+  })
+
+  it('renders modern collapsed summary pill with counts and Review button (matching Claude/Cursor style)', () => {
+    const changes = [
+      { path: 'file1.py', created: false, additions: 263, deletions: 38, hunks: [] },
+      { path: 'file2.py', created: false, additions: 10, deletions: 2, hunks: [] },
+    ]
+    const html = renderToStaticMarkup(<TurnFileChanges changes={changes} onOpenReview={() => {}} />)
+    expect(html).toContain('2 files changed')
+    expect(html).toContain('+273')
+    expect(html).toContain('-40')
+    expect(html).toContain('file-changes-chevron')
+    expect(html).toContain('file-changes-review-btn')
+    expect(html).toContain('Review')
+    expect(html).not.toContain('file-changes-summary-icon')
   })
 })

@@ -235,7 +235,7 @@ export default function DesktopTitlebar({
     View: [
       { label: sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar', shortcut: 'Ctrl+B', action: onToggleSidebar },
       { label: 'Toggle terminal', shortcut: 'Ctrl+`', action: onToggleTerminal },
-      { label: 'Open Browser panel', shortcut: 'Ctrl+Shift+B', action: onOpenBrowser },
+      { label: 'Open in default browser', shortcut: 'Ctrl+Shift+B', action: onOpenBrowser },
       { label: 'Zoom in', shortcut: 'Ctrl++', action: () => updateZoom(zoom + 0.1) },
       { label: 'Zoom out', shortcut: 'Ctrl+-', action: () => updateZoom(zoom - 0.1) },
       { label: 'Reset zoom', shortcut: 'Ctrl+0', disabled: zoom === 1, action: () => updateZoom(1) },
@@ -328,7 +328,7 @@ export default function DesktopTitlebar({
               <div><dt>Open workspace</dt><dd><kbd>Ctrl+O</kbd></dd></div>
               <div><dt>Toggle sidebar</dt><dd><kbd>Ctrl+B</kbd></dd></div>
               <div><dt>Toggle terminal</dt><dd><kbd>Ctrl+`</kbd></dd></div>
-              <div><dt>Open Browser panel</dt><dd><kbd>Ctrl+Shift+B</kbd></dd></div>
+              <div><dt>Open in default browser</dt><dd><kbd>Ctrl+Shift+B</kbd></dd></div>
               <div><dt>Settings</dt><dd><kbd>Ctrl+,</kbd></dd></div>
               <div><dt>Zoom</dt><dd><kbd>Ctrl++</kbd> <kbd>Ctrl+-</kbd> <kbd>Ctrl+0</kbd></dd></div>
               <div><dt>Fullscreen</dt><dd><kbd>F11</kbd></dd></div>

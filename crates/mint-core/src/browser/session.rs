@@ -3,19 +3,11 @@
 use super::{
     cdp::{cdp_call_raw, fetch_pages},
     interact::selector_to_js_find,
-    logging::log_action,
 };
 use crate::MintConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs::File,
-    future::Future,
-    hash::{Hash, Hasher},
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::BTreeSet, future::Future, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 tokio::task_local! {
@@ -55,14 +47,9 @@ pub struct BrowserActionResult {
 pub struct BrowserSession {
     id: String,
     tab: Option<String>,
-    leases: BTreeMap<String, TabLease>,
     observation: Option<BrowserObservation>,
     last_known: Option<BrowserObservation>,
     screenshot: Option<super::evidence::ScreenshotEvidence>,
-    attempts: BTreeMap<ActionAttemptKey, usize>,
-    preceding_attempt: Option<ActionAttemptKey>,
-    blocked: bool,
-    used: bool,
     runtime: Option<super::runtime::ManagedBrowser>,
     runtime_config: Option<MintConfig>,
     owned_tabs: BTreeSet<String>,
@@ -74,14 +61,9 @@ impl Default for BrowserSession {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             tab: None,
-            leases: BTreeMap::new(),
             observation: None,
             last_known: None,
             screenshot: None,
-            attempts: BTreeMap::new(),
-            preceding_attempt: None,
-            blocked: false,
-            used: false,
             runtime: None,
             runtime_config: None,
             owned_tabs: BTreeSet::new(),
@@ -138,60 +120,8 @@ pub async fn capture_metadata() -> Value {
     state.lock().await.capture_metadata.clone()
 }
 
-// Explicit unlock also releases a briefly inherited descriptor during a
-// concurrent fork/exec; relying on the last descriptor closing can leave a
-// finished tab looking busy until the child reaches exec.
-struct TabLease(File);
-impl Drop for TabLease {
-    fn drop(&mut self) {
-        let _ = self.0.unlock();
-    }
-}
-
-fn lease(config: &MintConfig, tab: &str) -> Result<TabLease, String> {
-    let mut hash = std::collections::hash_map::DefaultHasher::new();
-    endpoint(config).hash(&mut hash);
-    tab.hash(&mut hash);
-    let dir = std::env::temp_dir().join("mint-browser-leases");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(dir.join(format!("{:x}.lock", hash.finish())))
-        .map_err(|e| e.to_string())?;
-    file.try_lock()
-        .map_err(|_| "tab_busy: another Mint operation owns this tab".to_string())?;
-    Ok(TabLease(file))
-}
-
-/// Desktop callers can opt into explicit targeting without breaking old calls.
-pub async fn with_tab<F: Future>(
-    config: &MintConfig,
-    tab: Option<&str>,
-    future: F,
-) -> Result<F::Output, String> {
-    let id = match tab {
-        Some(id) => id.to_owned(),
-        None => fetch_pages(config)
-            .await?
-            .iter()
-            .find(|p| p["type"] == "page")
-            .and_then(|p| p["id"].as_str())
-            .ok_or("tab_unavailable")?
-            .to_owned(),
-    };
-    let _lease = lease(config, &id)?;
-    Ok(TARGET.scope(id, future).await)
-}
-
 fn endpoint(config: &MintConfig) -> &str {
-    config
-        .extra
-        .get("browserDebugUrl")
-        .and_then(Value::as_str)
-        .unwrap_or("http://127.0.0.1:9222/json/list")
+    super::cdp::debug_endpoint(config)
 }
 
 async fn tab_request(config: &MintConfig, operation: &str) -> Result<Value, String> {
@@ -298,79 +228,11 @@ fn target(args: &Value, session: &BrowserSession) -> Result<String, String> {
     }
 }
 
-fn modifying(action: &str) -> bool {
-    matches!(
-        action,
-        "browser_open"
-            | "browser_click"
-            | "browser_type"
-            | "browser_fill"
-            | "browser_select"
-            | "browser_scroll"
-            | "browser_mouse_click"
-            | "browser_key_press"
-            | "browser_mouse_move"
-    )
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct ActionAttemptKey {
-    tab: String,
-    action: String,
-    target: String,
-    arguments: String,
-}
-
 async fn target_state(config: &MintConfig, selector: Option<&str>) -> Result<Value, String> {
     let Some(selector) = selector else {
         return Ok(Value::Null);
     };
     evaluate(config, format!("(() => {{ {} globalThis.__mintAttemptTarget=el; if (!el?.isConnected) return null; const nodes=globalThis.__mintNodes ||= {{ids:new WeakMap(),next:0,documentId:(crypto.randomUUID?.() || String(performance.timeOrigin)+Math.random())}}; if (!nodes.ids.has(el)) nodes.ids.set(el,++nodes.next); return {{id:nodes.documentId+':'+nodes.ids.get(el),value:el.value ?? null,checked:el.checked ?? null,expanded:el.getAttribute('aria-expanded')}}; }})()",selector_to_js_find(selector))).await
-}
-
-fn attempt_arguments(action: &str, args: &Value) -> String {
-    match action {
-        "browser_type" | "browser_fill" => json!([args["text"].as_str().unwrap_or("")]),
-        "browser_select" => json!([args["value"].as_str().unwrap_or("")]),
-        "browser_open" => json!([args["url"].as_str().unwrap_or("").trim()]),
-        "browser_key_press" => json!([args["key"].as_str().unwrap_or("")]),
-        "browser_scroll" => json!([
-            args["x"].as_f64().unwrap_or(0.0),
-            args["y"].as_f64().unwrap_or(600.0)
-        ]),
-        "browser_mouse_click" | "browser_mouse_move" => json!([
-            args["x"],
-            args["y"],
-            args["button"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .unwrap_or("left")
-        ]),
-        _ => json!([]),
-    }
-    .to_string()
-}
-
-pub(crate) async fn finish_evidence() -> bool {
-    match SESSION.try_with(|s| s.try_lock().map(|s| s.used).unwrap_or(true)) {
-        Ok(used) => used,
-        Err(_) => false,
-    }
-}
-
-#[allow(dead_code)]
-pub(crate) async fn last_state() -> String {
-    SESSION
-        .try_with(|s| {
-            s.try_lock().ok().and_then(|s| {
-                s.last_known
-                    .as_ref()
-                    .map(|o| format!("tab={}, url={}, title={}", o.tab_id, o.url, o.title))
-            })
-        })
-        .ok()
-        .flatten()
-        .unwrap_or_default()
 }
 
 /// Box the operation future so callers can compose many browser steps without
@@ -384,44 +246,24 @@ pub fn execute_action<'a>(
         if SESSION.try_with(|_| ()).is_err() {
             return run_session(execute_action(config, action, args)).await;
         }
-        let started = Instant::now();
+        let action = super::workflow::normalize_action(action);
         let state = SESSION.with(Arc::clone);
         let mut session = state.lock().await;
-        if config.disabled_tools.iter().any(|tool| tool == action)
-            || config.extra.get("browserAutomationEnabled") == Some(&json!(false))
-        {
-            return Err(format!("Browser tool '{action}' is disabled"));
-        }
-        if action == "browser_open" {
+        if action == "open" {
             super::navigate::validate_url(args["url"].as_str().unwrap_or(""))?;
         }
         let starting = session.runtime_config.is_none();
         if starting {
-            let endpoint = endpoint(config);
-            let parsed = reqwest::Url::parse(endpoint).map_err(|e| e.to_string())?;
-            let external = config.extra.get("browserUseExisting") == Some(&json!(true))
-                || !matches!(
-                    parsed.host_str(),
-                    Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
-                )
-                || parsed.port_or_known_default() != Some(9222);
-            if external {
-                if !super::is_browser_running(config).await {
-                    return Err("Configured browser endpoint is unavailable; start the external browser or remove the endpoint override.".into());
-                }
-                session.runtime_config = Some(config.clone());
-            } else {
-                let runtime = super::runtime::ManagedBrowser::launch(config).await?;
-                let mut run_config = config.clone();
-                run_config
-                    .extra
-                    .insert("browserDebugUrl".into(), json!(runtime.endpoint));
-                run_config
-                    .extra
-                    .insert("__managedBrowser".into(), json!(true));
-                session.runtime_config = Some(run_config);
-                session.runtime = Some(runtime);
-            }
+            let runtime = super::runtime::ManagedBrowser::launch(config).await?;
+            let mut run_config = config.clone();
+            run_config
+                .extra
+                .insert("browserDebugUrl".into(), json!(runtime.endpoint));
+            run_config
+                .extra
+                .insert("__managedBrowser".into(), json!(true));
+            session.runtime_config = Some(run_config);
+            session.runtime = Some(runtime);
         }
         let run_config = session.runtime_config.as_ref().unwrap().clone();
         let mut result = execute_owned(&run_config, action, args, &mut session).await;
@@ -432,28 +274,10 @@ pub fn execute_action<'a>(
             report.insert("runtime".into(), runtime.metadata());
             *text = Value::Object(report).to_string();
         }
-        let report = result
+        let _report = result
             .as_ref()
             .ok()
             .and_then(|r| serde_json::from_str::<Value>(r).ok());
-        log_action(
-            "SESSION_ACTION",
-            &format!(
-                "session={} tab={} action={} durationMs={} status={} verification={}",
-                session.id,
-                session.tab.as_deref().unwrap_or("none"),
-                action,
-                started.elapsed().as_millis(),
-                report
-                    .as_ref()
-                    .and_then(|r| r["status"].as_str())
-                    .unwrap_or(if result.is_ok() { "returned" } else { "failed" }),
-                report
-                    .as_ref()
-                    .and_then(|r| r["verification"].as_str())
-                    .unwrap_or("unverified")
-            ),
-        );
         result
     })
 }
@@ -464,29 +288,16 @@ async fn execute_owned(
     args: &Value,
     session: &mut BrowserSession,
 ) -> Result<String, String> {
-    session.used = true;
-    let tab_operation = args["operation"].as_str().unwrap_or("list");
-    if session.blocked
-        && (modifying(action)
-            || (action == "browser_tabs" && matches!(tab_operation, "open" | "close")))
-    {
-        return Err(
-            "browser_blocked: three attempts without progress; ask the user for takeover".into(),
-        );
-    }
-    if action == "browser_open" {
+    let action = super::workflow::normalize_action(action);
+    if action == "open" {
         super::navigate::validate_url(args["url"].as_str().unwrap_or("").trim())?;
     }
-    if !super::lifecycle::is_browser_running(config).await {
-        super::lifecycle::spawn_automation_browser(config).await?;
-    }
-    if session.tab.is_none() && action != "browser_tabs" {
+    if session.tab.is_none() && action != "tabs" {
         let page = tab_request(config, "new?about:blank").await?;
         let tab = page["id"]
             .as_str()
             .ok_or("Could not create task tab")?
             .to_owned();
-        session.leases.insert(tab.clone(), lease(config, &tab)?);
         session.owned_tabs.insert(tab.clone());
         session.tab = Some(tab);
         if config.extra.get("__managedBrowser") == Some(&json!(true)) {
@@ -495,7 +306,7 @@ async fn execute_owned(
                 .await?;
         }
     }
-    if action == "browser_tabs" {
+    if action == "tabs" {
         return tabs(config, args, session).await;
     }
     let tab = session.tab.clone().ok_or("tab_unavailable")?;
@@ -508,7 +319,7 @@ async fn execute_owned(
     }
     TARGET
         .scope(tab.clone(), async {
-            if action == "browser_screenshot" {
+            if action == "screenshot" {
                 let mode=args["mode"].as_str().filter(|s|!s.is_empty()).unwrap_or("viewport");
                 let data=if mode=="viewport" {
                     let (data,evidence)=super::evidence::capture(config,&tab).await?;
@@ -527,26 +338,17 @@ async fn execute_owned(
                 session.capture_metadata=json!({"url":url,"capturedAt":chrono::Utc::now().to_rfc3339(),"sessionId":session.id,"tabId":tab,"mode":mode});
                 return Ok(format!("data:image/png;base64,{data}"));
             }
-            if action == "browser_read" {
+            if action == "read" {
                 return super::read_page_text(config).await;
             }
-            if action == "browser_observe" {
+            if action == "observe" {
                 let observation = observe_retry(config, &tab, args).await?;
                 session.observation = Some(observation.clone());
                 session.last_known = Some(observation.clone());
-                // Explicit takeover confirmation is the only way to clear a recovery stop.
-                if args["takeoverComplete"] == true {
-                    session.blocked = false;
-                    session.attempts.clear();
-                    session.preceding_attempt = None;
-                }
                 return serde_json::to_string(&observation).map_err(|e| e.to_string());
             }
-            if action == "browser_wait" {
+            if action == "wait" {
                 wait(config, args, session).await?;
-                if let Some(key) = session.preceding_attempt.take() {
-                    session.attempts.remove(&key);
-                }
                 let observation = observe_retry(config, &tab, &json!({})).await?;
                 session.observation = Some(observation.clone());
                 session.last_known = Some(observation.clone());
@@ -562,8 +364,8 @@ async fn execute_owned(
             }
             let mut selector = if matches!(
                 action,
-                "browser_click" | "browser_type" | "browser_fill" | "browser_select"
-            ) || (action == "browser_scroll"
+                "click" | "type" | "fill" | "select"
+            ) || (action == "scroll"
                 && (args["elementRef"].as_str().is_some_and(|s| !s.is_empty())
                     || args["selector"].as_str().is_some_and(|s| !s.is_empty())))
             {
@@ -571,20 +373,20 @@ async fn execute_owned(
             } else {
                 None
             };
-            if matches!(action, "browser_mouse_click" | "browser_mouse_move") {
+            if matches!(action, "mouse_click" | "mouse_move") {
                 let evidence = session
                     .screenshot
                     .as_ref()
                     .ok_or("screenshot_required: capture this tab before coordinate input")?;
                 super::evidence::validate(config, evidence, &tab, args).await?;
             }
-            if matches!(action, "browser_mouse_click" | "browser_mouse_move") {
+            if matches!(action, "mouse_click" | "mouse_move") {
                 selector = Some(format!(
                     "mint-point={},{}",
                     args["x"].as_f64().ok_or("x required")?,
                     args["y"].as_f64().ok_or("y required")?
                 ));
-            } else if action == "browser_key_press" {
+            } else if action == "key_press" {
                 selector = Some("mint-focus=".into());
             }
             let relevant_before = target_state(config, selector.as_deref()).await?;
@@ -593,16 +395,6 @@ async fn execute_owned(
             let before_document =
                 evaluate(config, "globalThis.__mintNodes?.documentId".into()).await?;
             let before_tabs = super::list_tabs(config).await?;
-            let key = ActionAttemptKey {
-                tab: tab.clone(),
-                action: action.into(),
-                target: relevant_before["id"]
-                    .as_str()
-                    .unwrap_or(selector.as_deref().unwrap_or("viewport"))
-                    .into(),
-                arguments: attempt_arguments(action, args),
-            };
-            session.preceding_attempt = Some(key.clone());
             let result = if matches!(action, "browser_mouse_click" | "browser_mouse_move") {
                 super::evidence::input(
                     config,
@@ -653,20 +445,13 @@ async fn execute_owned(
                     || (!relevant_before.is_null()
                         && relevant_before["id"] == relevant_after["id"]
                         && relevant_before != relevant_after)
-                    || (action == "browser_scroll"
+                    || (action == "scroll"
                         && (viewport_changed
                             || result.as_ref().is_ok_and(|v| v == "scroll_verified")));
                 if progress {
                     changes.push(
                         "Action outcome changed; inspect observation for task completion".into(),
                     );
-                    session.attempts.remove(&key);
-                } else {
-                    let attempts = session.attempts.entry(key).or_default();
-                    *attempts += 1;
-                    if *attempts >= 3 {
-                        session.blocked = true;
-                    }
                 }
                 if result.as_ref().is_ok_and(|value| {
                     matches!(value.as_str(), "value_verified" | "scroll_verified")
@@ -677,16 +462,9 @@ async fn execute_owned(
                 session.last_known = Some(after.clone());
             } else {
                 session.observation = None;
-                let attempts = session.attempts.entry(key).or_default();
-                *attempts += 1;
-                if *attempts >= 3 {
-                    session.blocked = true;
-                }
             }
             let error = result.err().or_else(|| {
-                if session.blocked {
-                    Some("browser_blocked: no progress after three attempts".into())
-                } else if observation.is_none() {
+                if observation.is_none() {
                     Some("observation_unavailable: action outcome is ambiguous".into())
                 } else {
                     None
@@ -750,7 +528,6 @@ async fn tabs(
             }
             let tab = tab_request(config, "new?about:blank").await?;
             let id = tab["id"].as_str().ok_or("Missing tab ID")?.to_owned();
-            session.leases.insert(id.clone(), lease(config, &id)?);
             session.owned_tabs.insert(id.clone());
             session.tab = Some(id.clone());
             if config.extra.get("__managedBrowser") == Some(&json!(true)) {
@@ -758,13 +535,11 @@ async fn tabs(
             }
             session.observation = None;
             session.screenshot = None;
-            session.preceding_attempt = None;
             if !url.is_empty() {
                 TARGET.scope(id, super::navigate(config, url)).await?;
             }
             session.observation = None;
             session.screenshot = None;
-            session.preceding_attempt = None;
         }
         "select" | "close" => {
             let id = args["tabId"]
@@ -774,12 +549,8 @@ async fn tabs(
             if !super::list_tabs(config).await?.iter().any(|t| t.id == id) {
                 return Err("tab_unavailable".into());
             }
-            if !session.leases.contains_key(id) {
-                session.leases.insert(id.to_owned(), lease(config, id)?);
-            }
             if operation == "close" {
                 tab_request(config, &format!("close/{id}")).await?;
-                session.leases.remove(id);
                 session.owned_tabs.remove(id);
                 // Retain the closed ID: later calls must fail instead of choosing a new tab.
             } else {
@@ -787,7 +558,6 @@ async fn tabs(
             }
             session.observation = None;
             session.screenshot = None;
-            session.preceding_attempt = None;
         }
         _ => return Err("Unknown tab operation".into()),
     }
@@ -800,17 +570,16 @@ async fn perform(
     args: &Value,
     selector: Option<&str>,
 ) -> Result<String, String> {
+    let action = super::workflow::normalize_action(action);
     let text = args["text"].as_str().unwrap_or("");
     match action {
-        "browser_open" => {
-            super::navigate(config, args["url"].as_str().ok_or("url required")?.trim()).await
-        }
-        "browser_click" => super::click(config, selector.ok_or("target required")?).await,
-        "browser_type" => super::type_text(config, selector.ok_or("target required")?, text).await,
-        "browser_fill" => {
+        "open" => super::navigate(config, args["url"].as_str().ok_or("url required")?.trim()).await,
+        "click" => super::click(config, selector.ok_or("target required")?).await,
+        "type" => super::type_text(config, selector.ok_or("target required")?, text).await,
+        "fill" => {
             super::interact::edit_text(config, selector.ok_or("target required")?, text, true).await
         }
-        "browser_select" => {
+        "select" => {
             let selector = selector.ok_or("target required")?;
             super::get_element_coordinates(config, selector).await?;
             let value = args["value"].as_str().ok_or("value required")?;
@@ -821,7 +590,7 @@ async fn perform(
             }
             Ok("value_verified".into())
         }
-        "browser_scroll" => {
+        "scroll" => {
             let x = args["x"].as_f64().unwrap_or(0.0);
             let y = args["y"].as_f64().unwrap_or(600.0);
             let expression = if let Some(selector) = selector {
@@ -842,18 +611,16 @@ async fn perform(
             }
             .into())
         }
-        "browser_mouse_move" | "browser_mouse_click" => {
+        "mouse_move" | "mouse_click" => {
             let x = args["x"].as_f64().ok_or("x required")?;
             let y = args["y"].as_f64().ok_or("y required")?;
-            if action == "browser_mouse_move" {
+            if action == "mouse_move" {
                 super::mouse_move(config, x, y).await
             } else {
                 super::mouse_click(config, x, y, args["button"].as_str().unwrap_or("left")).await
             }
         }
-        "browser_key_press" => {
-            super::key_press(config, args["key"].as_str().ok_or("key required")?).await
-        }
+        "key_press" => super::key_press(config, args["key"].as_str().ok_or("key required")?).await,
         _ => Err(format!("Unsupported browser action: {action}")),
     }
 }
@@ -902,58 +669,11 @@ async fn wait(config: &MintConfig, args: &Value, session: &BrowserSession) -> Re
 mod tests {
     use super::*;
     use std::process::{Child, Command, Stdio};
+    use std::time::Instant;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    #[tokio::test]
-    async fn browser_session_prevents_duplicate_external_url_launches() {
-        run_session(async {
-            SESSION.with(|s| s.try_lock().unwrap().used = true);
-            let config = MintConfig::default();
-            for background in [false, true] {
-                let mut requested_approval = false;
-                let result = crate::orchestration::execute_tool_from_json(
-                    std::path::Path::new("/tmp"),
-                    &config,
-                    "run_shell",
-                    json!({"command":"xdg-open 'https://example.com'", "background":background}),
-                    "browser-test",
-                    &mut |_| {
-                        requested_approval = true;
-                        Ok(crate::orchestration::ApprovalOutcome::Denied)
-                    },
-                )
-                .await;
-                assert!(result.unwrap_err().to_string().contains("browser_open"));
-                assert!(
-                    !requested_approval,
-                    "duplicate launch must stop before approval or spawn"
-                );
-            }
-            let result = crate::orchestration::execute_tool_from_json(
-                std::path::Path::new("/tmp"),
-                &config,
-                "verify",
-                json!({"commands":["xdg-open https://example.com"]}),
-                "browser-test",
-                &mut |_| panic!("verification must not launch another browser"),
-            )
-            .await;
-            assert!(result.unwrap_err().to_string().contains("browser_open"));
-
-            // Opening local documents still follows the normal approval path.
-            let result = crate::orchestration::execute_tool_from_json(
-                std::path::Path::new("/tmp"),
-                &config,
-                "run_shell",
-                json!({"command":"xdg-open /tmp/report.pdf"}),
-                "browser-test",
-                &mut |_| Ok(crate::orchestration::ApprovalOutcome::Denied),
-            )
-            .await
-            .unwrap();
-            assert!(result.contains("User denied shell command"));
-        })
-        .await;
+    async fn is_endpoint_running(config: &MintConfig) -> bool {
+        super::super::cdp::fetch_pages(config).await.is_ok()
     }
 
     #[test]
@@ -988,16 +708,6 @@ mod tests {
     }
 
     #[test]
-    fn tab_lease_is_exclusive_and_released_on_drop() {
-        let config = MintConfig::default();
-        let tab = uuid::Uuid::new_v4().to_string();
-        let lock = lease(&config, &tab).unwrap();
-        assert!(lease(&config, &tab).is_err());
-        drop(lock);
-        assert!(lease(&config, &tab).is_ok());
-    }
-
-    #[test]
     fn cdp_errors_are_not_successful_actions() {
         assert!(
             super::super::cdp::validate_response(&json!({"error":{"message":"bad command"}}))
@@ -1014,38 +724,11 @@ mod tests {
         assert!(!expression.contains("=== `"));
     }
 
-    #[tokio::test]
-    async fn headed_mode_does_not_hijack_running_port_9222_browser_without_explicit_flag() {
-        let mut config = MintConfig::default();
-        config
-            .extra
-            .insert("browserAgentMode".into(), json!("headed"));
+    #[test]
+    fn session_uses_managed_dynamic_endpoint() {
+        let config = MintConfig::default();
         let endpoint = endpoint(&config);
-        let parsed = reqwest::Url::parse(endpoint).unwrap();
-        let external = config.extra.get("browserUseExisting") == Some(&json!(true))
-            || !matches!(
-                parsed.host_str(),
-                Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
-            )
-            || parsed.port_or_known_default() != Some(9222);
-        assert!(
-            !external,
-            "Headed mode without browserUseExisting must not attach to port 9222"
-        );
-
-        config
-            .extra
-            .insert("browserUseExisting".into(), json!(true));
-        let external_with_flag = config.extra.get("browserUseExisting") == Some(&json!(true))
-            || !matches!(
-                parsed.host_str(),
-                Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
-            )
-            || parsed.port_or_known_default() != Some(9222);
-        assert!(
-            external_with_flag,
-            "Explicit browserUseExisting should allow external attachment"
-        );
+        assert!(!endpoint.is_empty());
     }
 
     struct BrowserFixture {
@@ -1127,7 +810,7 @@ mod tests {
                 profile,
             };
             for _ in 0..100 {
-                if super::super::is_browser_running(&fixture.config).await {
+                if is_endpoint_running(&fixture.config).await {
                     return fixture;
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1178,7 +861,7 @@ mod tests {
         assert_eq!(viewport, (1440, 900));
         assert!(full.1 > viewport.1);
         assert!(element.1 < viewport.1);
-        assert!(super::super::is_browser_running(&fixture.config).await);
+        assert!(is_endpoint_running(&fixture.config).await);
         assert!(!serde_json::to_string(&report).unwrap().contains("base64"));
         let _ = std::fs::remove_dir_all(output);
     }
@@ -1415,32 +1098,6 @@ mod tests {
                     json!({"operation":"select","tabId":tab}),
                 )
                 .await;
-                // Another session cannot steal a tab, even though its own tab is independent.
-                run_session(async {
-                    assert!(
-                        execute_action(
-                            config,
-                            "browser_tabs",
-                            &json!({"operation":"select","tabId":tab})
-                        )
-                        .await
-                        .unwrap_err()
-                        .contains("tab_busy")
-                    );
-                    let independent = call(config, "browser_observe", json!({})).await;
-                    assert_ne!(independent["tabId"], tab);
-                })
-                .await;
-                for _ in 0..3 {
-                    call(config, "browser_click", json!({"selector":"#noop"})).await;
-                }
-                assert!(
-                    execute_action(config, "browser_click", &json!({"selector":"#save"}))
-                        .await
-                        .unwrap_err()
-                        .contains("browser_blocked")
-                );
-                call(config, "browser_observe", json!({"takeoverComplete":true})).await;
                 call(
                     config,
                     "browser_fill",
@@ -1522,16 +1179,6 @@ mod tests {
             call(config,"browser_click",json!({"selector":"#save"})).await;
             assert!(execute_action(config,"browser_wait",&json!({"condition":"text","value":"Never confirmed","timeoutMs":20})).await.is_err());
             TARGET.scope(tab.clone(),async {assert_eq!(evaluate(config,"window.submissions".into()).await.unwrap(),1);}).await;
-            // Re-observing and changing reference IDs must not evade the recovery limit.
-            for _ in 0..3 {
-                let observed = call(config,"browser_observe",json!({})).await;
-                let reference = element(&observed,"No operation");
-                call(config,"browser_click",json!({"elementRef":reference})).await;
-            }
-            assert!(execute_action(config,"browser_fill",&json!({"selector":"#name","text":"blocked"})).await.err().is_some_and(|e|e.contains("browser_blocked")));
-            TARGET.scope(tab.clone(),async {evaluate(config,"document.querySelector('#name').value='User takeover';true".into()).await.unwrap();}).await;
-            let takeover = call(config,"browser_observe",json!({"takeoverComplete":true})).await;
-            assert!(takeover["elements"].as_array().unwrap().iter().any(|e|e["value"] == "User takeover"));
             let failed_navigation = call(config,"browser_open",json!({"url":"http://127.0.0.1:1/"})).await;
             assert_eq!(failed_navigation["status"],"failed_or_ambiguous");
             assert!(failed_navigation["error"].as_str().unwrap().contains("navigation_failed"));
@@ -1568,7 +1215,7 @@ mod tests {
                 assert_eq!(before,call(config,"browser_tabs",json!({"operation":"list"})).await);
             }
             call(config,"browser_tabs",json!({"operation":"open","url":fixture.url})).await;
-            let current=call(config,"browser_observe",json!({})).await["tabId"].as_str().unwrap().to_owned();
+            let _current = call(config,"browser_observe",json!({})).await["tabId"].as_str().unwrap().to_owned();
             for _ in 0..4 {
                 let result=call(config,"browser_open",json!({"url":fixture.url})).await;
                 assert!(result["error"].is_null(),"{result}");
@@ -1593,16 +1240,6 @@ mod tests {
                 assert_eq!(result["error"].is_null(),i<2,"{result}");
                 agent_execute(config,"browser_read",json!({})).await.unwrap();
             }
-            let tabs_before=call(config,"browser_tabs",json!({"operation":"list"})).await;
-            for (action,args) in [("browser_tabs",json!({"operation":"open","url":fixture.url})),("browser_tabs",json!({"operation":"close","tabId":current})),("browser_open",json!({"url":fixture.url}))] {
-                assert!(agent_execute(config,action,args).await.unwrap_err().contains("browser_blocked"));
-                assert_eq!(tabs_before,call(config,"browser_tabs",json!({"operation":"list"})).await);
-            }
-            let other=before["selectedTabId"].as_str().unwrap();
-            call(config,"browser_tabs",json!({"operation":"select","tabId":other})).await;
-            assert!(agent_execute(config,"browser_open",json!({"url":fixture.url})).await.unwrap_err().contains("browser_blocked"));
-            call(config,"browser_tabs",json!({"operation":"select","tabId":current})).await;
-            call(config,"browser_observe",json!({"takeoverComplete":true})).await;
             // Click and key handlers can steal focus or replace the original node.
             for (action,handler,event,replace,text) in [
                 ("browser_type","document.querySelector('#query').focus()","onclick",false,"unwanted"),
@@ -1624,7 +1261,6 @@ mod tests {
                 let error=result["error"].as_str().unwrap_or_else(||panic!("Expected {event} focus rejection: {result}"));
                 assert!(error.contains("focus_changed") || (replace && error.contains("stale_reference")),"{result}");
                 assert_eq!(script(config,"[document.querySelector('#name').value,document.querySelector('#query').value]").await,json!(["old","other"]));
-                call(config,"browser_observe",json!({"takeoverComplete":true})).await;
             }
             script(config,"document.querySelector('#shadow').shadowRoot.innerHTML='<input aria-label=Shadow value=shadow>';true").await;
             let observed=call(config,"browser_observe",json!({})).await;
@@ -1676,58 +1312,6 @@ mod tests {
             assert!(result["error"].is_null(),"{result}");
             assert_eq!(script(config,"[window.presses,window.clicks]").await,json!([1,1]));
         }).await;
-    }
-
-    #[tokio::test]
-    #[ignore = "isolated Chrome; actual Gemini Live task runner and agent executor"]
-    async fn browser_reliability_live_session_keeps_state() {
-        let fixture = BrowserFixture::start().await;
-        let config = fixture.config.clone();
-        let url = fixture.url.clone();
-        // Use the production background runner, not a test-owned run_session.
-        let tab = crate::gemini_live::spawn_live_session(async move {
-            let opened = call(&config,"browser_open",json!({"url":url})).await;
-            let tab = opened["observation"]["tabId"].as_str().unwrap().to_owned();
-            let observed = call(&config,"browser_observe",json!({})).await;
-            assert_eq!(observed["tabId"],tab);
-            assert_eq!(observed["url"],format!("{url}/"));
-            let filled = call(&config,"browser_fill",json!({"elementRef":element(&observed,"Name"),"text":"Live session"})).await;
-            assert_eq!(filled["verification"],"verified");
-            assert_eq!(filled["observation"]["tabId"],tab);
-            let point = script(&config,"(() => {const el=document.querySelector('#noop');el.scrollIntoView({behavior:'instant'});const r=el.getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2]})()").await;
-            agent_execute(&config,"browser_screenshot",json!({})).await.unwrap();
-            // A separate observation/tool batch must retain screenshot evidence.
-            call(&config,"browser_observe",json!({})).await;
-            assert!(script(&config,"scrollY").await.as_f64().unwrap()>0.0);
-            let clicked = call(&config,"browser_mouse_click",json!({"x":point[0],"y":point[1]})).await;
-            assert!(clicked["error"].is_null(),"{clicked}");
-            call(&config,"browser_wait",json!({"condition":"visible","selector":"#noop"})).await;
-            for _ in 0..3 {
-                call(&config,"browser_click",json!({"selector":"#noop"})).await;
-            }
-            assert!(agent_execute(&config,"browser_tabs",json!({"operation":"open"})).await.unwrap_err().contains("browser_blocked"));
-            assert!(agent_execute(&config,"browser_fill",json!({"selector":"#name","text":"blocked"})).await.unwrap_err().contains("browser_blocked"));
-            assert_eq!(call(&config,"browser_observe",json!({})).await["tabId"],tab);
-            tab
-        }).await.unwrap();
-        // Session shutdown releases its leases even when it ends blocked.
-        drop(lease(&fixture.config, &tab).unwrap());
-        let config = fixture.config.clone();
-        let url = fixture.url.clone();
-        let next_tab = crate::gemini_live::spawn_live_session(async move {
-            let opened = call(&config, "browser_open", json!({"url":url})).await;
-            assert!(opened["error"].is_null(), "{opened}");
-            let next_tab = opened["observation"]["tabId"].as_str().unwrap().to_owned();
-            assert_eq!(
-                call(&config, "browser_observe", json!({})).await["tabId"],
-                next_tab
-            );
-            next_tab
-        })
-        .await
-        .unwrap();
-        assert_ne!(tab, next_tab);
-        drop(lease(&fixture.config, &next_tab).unwrap());
     }
 
     #[tokio::test]

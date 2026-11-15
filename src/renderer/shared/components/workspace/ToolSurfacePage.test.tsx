@@ -65,4 +65,17 @@ describe('Tools launcher', () => {
     expect(html).toContain('All open tabs (3)')
     expect(html).toContain('tool-surface-tabs-badge">3</span>')
   })
+
+  it('marks artifact preview tabs as draggable to allow dragging to chat', () => {
+    const previewProps = {
+      ...props,
+      surfaces: [
+        { id: 'pdf-1', kind: 'preview' as const, title: 'Harness_Presentation.pdf', artifact: { path: 'Harness_Presentation.pdf' } },
+        { id: 'term-1', kind: 'terminal' as const, title: 'Terminal' },
+      ],
+      activeSurfaceId: 'pdf-1',
+    }
+    const html = renderToStaticMarkup(<ToolSurfacePage {...previewProps} />)
+    expect(html).toMatch(/class="tool-surface-tab[^"]*"[^>]*draggable="true"/)
+  })
 })

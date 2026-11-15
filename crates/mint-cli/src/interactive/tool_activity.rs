@@ -6,7 +6,7 @@ use ratatui::{
 };
 use serde_json::Value;
 use std::time::{Duration, Instant};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug)]
 pub(super) struct ToolActivity {
@@ -63,8 +63,10 @@ impl ToolActivity {
                 return ToolStatus::Skipped;
             }
             if result.lines().any(|line| {
-                line.strip_prefix("exit: ")
-                    .is_some_and(|code| !matches!(code.trim(), "0" | "unknown"))
+                line.strip_prefix("exit: ").is_some_and(|code| {
+                    let c = code.trim();
+                    !matches!(c, "0" | "unknown") && !c.starts_with("running_in_background")
+                })
             }) || ["error:", "blocked:", "blocked by hook:"]
                 .iter()
                 .any(|prefix| result.trim_start().to_ascii_lowercase().starts_with(prefix))
@@ -152,6 +154,9 @@ impl ToolActivity {
         };
 
         if self.shell() {
+            if let Some(summary) = extract_field(&["toolSummary", "summary"]) {
+                return summary;
+            }
             if let Some(cmd) =
                 extract_field(&["command", "cmd", "script", "exec", "code", "bash", "sh"])
             {
@@ -178,6 +183,28 @@ impl ToolActivity {
         ) {
             if let Some(p) = extract_field(&["path"]) {
                 return p;
+            }
+        } else if matches!(self.action.as_str(), "create_plan" | "update_plan") {
+            let summary = extract_field(&["summary", "title"]);
+            let steps_count = self
+                .input
+                .get("steps")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or(0);
+            let steps_label = if steps_count > 0 {
+                Some(format!(
+                    "{steps_count} step{}",
+                    if steps_count == 1 { "" } else { "s" }
+                ))
+            } else {
+                None
+            };
+            match (summary, steps_label) {
+                (Some(s), Some(steps)) => return format!("{s} ({steps})"),
+                (Some(s), None) => return s,
+                (None, Some(steps)) => return steps,
+                (None, None) => {}
             }
         }
 
@@ -218,6 +245,46 @@ impl ToolActivity {
             }
         }
         String::new()
+    }
+
+    pub fn subagent_action_summary(action: &str, input: &Value) -> String {
+        if let Some(tool_summary) = input.get("toolSummary").and_then(Value::as_str) {
+            let trimmed = tool_summary.trim();
+            if !trimmed.is_empty() && !mint_core::is_dummy_value(trimmed) {
+                return format!("Running {}", trimmed);
+            }
+        }
+        for key in [
+            "description",
+            "command",
+            "cmd",
+            "path",
+            "query",
+            "pattern",
+            "url",
+        ] {
+            if let Some(val) = input.get(key).and_then(Value::as_str) {
+                if let Some(line) = val.lines().find(|l| !l.trim().is_empty()) {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || mint_core::is_dummy_value(trimmed) {
+                        continue;
+                    }
+                    return match key {
+                        "command" | "cmd" => format!("Running `{trimmed}`"),
+                        "pattern" | "query" => format!("Searching for {trimmed}"),
+                        "path" => {
+                            if action == "write_file" || action == "edit_file" {
+                                format!("Editing {trimmed}")
+                            } else {
+                                format!("Reading {trimmed}")
+                            }
+                        }
+                        _ => trimmed.to_string(),
+                    };
+                }
+            }
+        }
+        action.replace('_', " ")
     }
     pub fn lines(&self, width: u16) -> Vec<Line<'static>> {
         let output = self
@@ -438,23 +505,7 @@ pub(super) fn running_summary(tools: &[ToolActivity]) -> Option<String> {
 }
 
 fn clip(text: &str, width: usize) -> String {
-    if UnicodeWidthStr::width(text) <= width {
-        return text.to_owned();
-    }
-    let mut used = 0;
-    let mut clipped = String::new();
-    for ch in text.chars() {
-        let next = ch.width().unwrap_or(0);
-        if used + next > width.saturating_sub(1) {
-            break;
-        }
-        used += next;
-        clipped.push(ch);
-    }
-    if width > 0 {
-        clipped.push('…');
-    }
-    clipped
+    super::format::truncate_to_width(text, width)
 }
 
 #[cfg(test)]
@@ -663,5 +714,27 @@ mod tests {
             status: None,
         };
         assert_eq!(dummy_only.subject(), "");
+
+        let create_plan_tool = ToolActivity {
+            entry: 0,
+            call_id: None,
+            action: "create_plan".into(),
+            input: serde_json::json!({
+                "summary": "Fix streaming and plan rendering",
+                "steps": [
+                    {"title": "Stream native text", "status": "in_progress"},
+                    {"title": "Render PlanUpdated", "status": "pending"}
+                ]
+            }),
+            subagent: None,
+            started: Instant::now(),
+            elapsed: None,
+            result: None,
+            status: None,
+        };
+        assert_eq!(
+            create_plan_tool.subject(),
+            "Fix streaming and plan rendering (2 steps)"
+        );
     }
 }

@@ -27,65 +27,11 @@ export default function AutomationTab({
             </h2>
           </div>
         </div>
-        <div className="toggle-card" style={{ marginBottom: '16px' }}>
-          <div className="toggle-row">
-            <div>
-              <label>Browser automation tools</label>
-              <p className="hint">Allows the agent to open web pages, execute JavaScript/SPA, and capture screenshots automatically using headless Chromium.</p>
-            </div>
-            <label className="settings-toggle-switch">
-              <input
-                type="checkbox"
-                checked={config.browserAutomationEnabled ?? true}
-                onChange={(e) => updateField('browserAutomationEnabled', e.target.checked)}
-              />
-              <span className="settings-toggle-slider"></span>
-            </label>
-          </div>
-        </div>
         <div className="form-grid single">
           <div className="setting-row">
-            <label>Agent browser mode</label>
-            <div className="pill-segmented" role="radiogroup" aria-label="Agent browser mode">
-              {[{ id: 'headless', label: 'Headless' }, { id: 'headed', label: 'Show window' }].map(option => <button key={option.id} type="button" role="radio" aria-checked={config.browserAgentMode === option.id} className={`pill-segmented-btn ${config.browserAgentMode === option.id ? 'active' : ''}`} onClick={() => updateField('browserAgentMode', option.id)}>{option.label}</button>)}
-            </div>
-            <p className="hint">Headless runs in the background. Opening Mint Browser yourself still shows its window.</p>
-          </div>
-          <div className="setting-row">
-            <label>Agent browser executable</label>
+            <label>Chromium executable</label>
             <input type="text" value={config.browserExecutable} placeholder="Auto-detect Chrome / Chromium / Edge" onChange={event => updateField('browserExecutable', event.target.value)} />
-            <p className="hint">Optional executable path for Chromium-based automation. Firefox is not supported by this engine.</p>
-          </div>
-          <div className="setting-row">
-            <label>Browser engine</label>
-            <div className="pill-segmented" role="radiogroup" aria-label="Browser engine">
-              {[
-                { id: 'chromium', label: 'Chromium' },
-                { id: '/usr/bin/firefox', label: 'Firefox' },
-              ].map(o => (
-                <button
-                  key={o.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={config.automationBrowser === o.id}
-                  className={`pill-segmented-btn ${config.automationBrowser === o.id ? 'active' : ''}`}
-                  onClick={() => updateField('automationBrowser', o.id)}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-            <p className="hint">Chromium is bundled; Firefox uses your system install (Linux).</p>
-          </div>
-          <div className="setting-row">
-            <label>Chromium DevTools endpoint</label>
-            <input type="text" value={config.browserDebugUrl} onChange={(e) => updateField('browserDebugUrl', e.target.value)} />
-            <p className="hint">Required for native tab reading and selector clicks.</p>
-          </div>
-          <div className="setting-row">
-            <label>Browser extension context endpoint</label>
-            <input type="text" value={config.browserExtensionContextUrl} onChange={(e) => updateField('browserExtensionContextUrl', e.target.value)} />
-            <p className="hint">Fallback endpoint used when Chromium remote debugging is unavailable.</p>
+            <p className="hint">Optional executable path for headless Chromium operations and CLI browser workflows (`mint browser run`). Firefox is not supported by this engine.</p>
           </div>
         </div>
       </section>

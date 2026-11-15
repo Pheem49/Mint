@@ -5,6 +5,7 @@
  */
 import React, { useState, useEffect } from 'react'
 import { renderApprovalDetails, renderDiff } from '../../utils/approval'
+import { FormattedMessage } from '../../utils/markdown'
 import { DiffReviewModal } from './DiffReviewModal'
 
 interface Props {
@@ -32,6 +33,8 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
   const targetFilePath = skillWrite?.path || writeFile?.path || applyPatch?.path || 'Code Change'
   const diffText = skillWrite?.diff || writeFile?.diff || applyPatch?.diff
   const isAskUser = !!pendingApproval.approval?.AskUser
+  const isExitPlan = !!pendingApproval.approval?.ExitPlanMode
+  const isEnterPlan = !!pendingApproval.approval?.EnterPlanMode
   const mcpTool = pendingApproval.approval?.McpTool
   const MCP_ALLOW_ALL_SENTINEL = '__mcp_allow_all__'
   const askOptions: AskUserOption[] = Array.isArray(pendingApproval.approval?.AskUser?.options)
@@ -58,6 +61,8 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
 
   // Get badge label based on action type
   const getToolMeta = () => {
+    if (isExitPlan) return { badge: 'Plan Review', badgeClass: 'plan' }
+    if (isEnterPlan) return { badge: 'Plan Mode', badgeClass: 'plan' }
     if (skillWrite) return { badge: 'Skill Change', badgeClass: 'edit' }
     if (runShell) return { badge: 'Run Command', badgeClass: details.isDangerous ? 'dangerous' : 'command' }
     if (writeFile || applyPatch) return { badge: 'File Edit', badgeClass: 'edit' }
@@ -94,6 +99,16 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
           variant: 'cancel',
           action: () => onApproval(false),
         },
+      ]
+    : isExitPlan
+    ? [
+        { key: '1', title: 'Approve and proceed', variant: 'approve', action: () => onApproval(true, false) },
+        { key: '2', title: 'Deny (keep planning)', variant: 'cancel', action: () => onApproval(false) },
+      ]
+    : isEnterPlan
+    ? [
+        { key: '1', title: 'Enter plan mode', variant: 'approve', action: () => onApproval(true, false) },
+        { key: '2', title: 'Cancel', variant: 'cancel', action: () => onApproval(false) },
       ]
     : [
         {
@@ -181,7 +196,7 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
                     gap: 6,
                     padding: '4px 10px',
                     fontSize: '0.75rem',
-                    borderRadius: '8px',
+                    borderRadius: 'var(--radius-sm, 8px)',
                     background: 'var(--accent-subtle)',
                     border: '1px solid var(--accent-border)',
                     color: 'var(--interactive-fg)',
@@ -192,6 +207,10 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
                 </button>
               </div>
               {renderDiff(diffText)}
+            </div>
+          ) : isExitPlan ? (
+            <div className="approval-content-box plan-review-content" style={{ maxHeight: '360px', overflowY: 'auto' }}>
+              <FormattedMessage text={details.body} />
             </div>
           ) : (
             <div className={`approval-content-box ${isAskUser ? 'question-text' : ''}`}>
@@ -273,7 +292,7 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
                     <button
                       type="button"
                       className="approval-btn approval-btn-approve"
-                      style={{ whiteSpace: 'nowrap', padding: '9px 16px', borderRadius: '8px' }}
+                      style={{ whiteSpace: 'nowrap', padding: '9px 16px', borderRadius: 'var(--radius-sm, 8px)' }}
                       disabled={isMultiSelect ? selectedOptions.size === 0 && !askAnswer.trim() : !askAnswer.trim()}
                       onClick={() =>
                         onApproval(true, false, isMultiSelect ? buildMultiSelectAnswer() : askAnswer.trim())

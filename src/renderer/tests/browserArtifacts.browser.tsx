@@ -25,7 +25,7 @@ installRendererPlatform({ readMcpArtifact: async (id, chat) => {
 
 const artifacts: AgentProgress = { type: 'ToolArtifacts', data: { callId: 'capture', warnings: [], artifacts: [{ id: 'browser-image', name: 'result.png', mimeType: 'image/png', kind: 'image', size: 12000, chatId: 'browser-chat', callId: 'capture', server: 'browser', metadata: { url: 'http://localhost:3000/search', width: 960, height: 600, capturedAt: '2026-10-19T10:00:00Z' } }] } }
 const original: AgentProgress[] = [
-  { type: 'ToolEnd', data: { action: 'browser_screenshot', callId: 'capture', input: {}, result: 'Screenshot saved as an artifact.', status: 'success' } }, artifacts,
+  { type: 'ToolEnd', data: { action: 'view_image', callId: 'capture', input: { path: 'result.png' }, result: 'Screenshot saved as an artifact.', status: 'success' } }, artifacts,
   // Reopening the same image should not create another gallery card.
   { ...artifacts, data: { ...artifacts.data, callId: 'view-again' } },
   { type: 'RunCompleted', data: { summary: { outcome: 'UNVERIFIED' } as any } },

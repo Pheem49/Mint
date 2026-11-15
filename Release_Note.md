@@ -1,71 +1,222 @@
-# Release Notes - Mint Agent v1.17.0
+# Release Notes - Mint Agent v1.18.0
 
-## Seamless On-Demand Headless Browser Automation (CLI, Desktop, and Web)
-- **Zero-Setup Headless Browsing**: Mint Agent automatically spawns an isolated Chromium instance (`--headless=new`, `--disable-gpu`, `--no-sandbox`, 1440x900 viewport) on demand whenever web inspection or navigation is requested, eliminating the need to run `mint auto` in a separate terminal.
-- **Default Browser Tools**: Enabled `browser_open`, `browser_screenshot`, `browser_read`, `browser_click`, and `browser_observe` by default across all platforms without requiring manual configuration.
-- **Prompt Guidance & Anti-Scraping Rules**: Updated system prompt instructions to prioritize `browser_open` for web URLs / SPAs and strictly forbid writing ad-hoc Python scraping scripts (`urllib`, `requests`) or raw `curl` when inspecting web pages.
-- **Age Gate (18+) & Cookie Consent Protocols**: Automatically dismisses standard Age Verification gates (`"I am 18 or older"`, `"Enter Site"`) and cookie consent banners via `browser_click`; prompts for user confirmation with visual screenshots (`browser_screenshot` + `ask_user`) for sensitive content warnings.
-- **Settings Toggle Parity**: Added the `Browser automation tools` toggle switch in the Automation tab across Desktop and Web Settings (defaulting to enabled).
-- **Interactive Slash Commands (`/browser` & `/browser status`)**: Added the `/browser` command across CLI TUI, Desktop, and Web. Pressing Enter opens an interactive prompt choice to toggle tools (`on`/`off`), switch between `headless Browser` and `headed Automation`, or view browser status and detected Chrome binary via `/browser status`.
+## Resilient Mod Worker Execution & CI Test Harness (Core and CI)
+- **In-Process Worker Thread Fallback (`run_worker_loop`)**: Implemented an in-process worker thread execution fallback in `crates/mint-core/src/mods/manager.rs` and `crates/mint-mod-runtime/src/lib.rs`. When running unit tests or in environments where the standalone `mint-mod-host` binary has not yet been compiled on disk, `Worker` gracefully spawns an in-process worker thread communicating over internal channels rather than attempting to re-execute a `libtest` harness binary with `--mint-mod-host`.
+- **Pre-Build Mod Host Binary in CI (`ci.yml`)**: Added an explicit pre-build step for `mint-mod-host` (`cargo build -p mint-cli --bin mint-mod-host`) in `.github/workflows/ci.yml` before running the test suite, ensuring clean GitHub Actions CI runners execute both the out-of-process IPC path and in-process fallback without missing-binary timeouts or exit code 101 errors.
 
-## Queued Messages & Steering (CLI, Desktop, and Web)
-- **Queued Prompts Tray & Auto-Dispatching**: Users can now queue instructions and multi-modal attachments while the agent is actively executing (`sending`). Queued messages are displayed in a dedicated tray above the composer and auto-dispatched sequentially as soon as the current turn concludes.
-- **Stop with Paused Queue (Safe Interruption)**: Clicking the Stop button halts the active turn while preserving all queued messages in a `⏸ Queue paused` state, allowing users to inspect, resume, edit, or clear queued items safely.
-- **Interrupt & Steer (`->`)**: Clicking the Send Now arrow button on any queued prompt immediately interrupts the running turn and steers the agent directly to the selected queued message.
-- **Composer Edit & Recall (`✎`)**: Clicking the edit button removes the prompt from the queue and restores its full text and attachments back into the composer for immediate revision.
-- **Full-Screen TUI Visual Parity (`crates/mint-cli`)**: Pressing `Enter` while a turn is running queues the prompt with live border feedback (`Queued (N): "..." · Ctrl+D drop`), and `Ctrl+D` immediately pops/drops the last queued message.
+## Circular Avatar & Custom Provider Logo Cropping with Transparent Alpha (Desktop and Web)
+- **True Circular Canvas Clipping (`ctx.clip`)**: Resolved an issue in `AvatarCropModal` where images cropped inside the circular viewfinder were previously exported as full 512x512 squares. The canvas export pipeline now applies a native circular clipping path (`ctx.arc` + `ctx.clip`) before drawing, ensuring cropped PNG images have transparent alpha outside the circle.
+- **Circular Provider Logo Preview & Header Icon**: Updated `.custom-provider-logo-avatar` and `.custom-provider-logo` in `general.css` to `border-radius: 50%` and `object-fit: cover` (with SVG preset containment), so custom provider logos display consistently as circular avatars matching the crop modal preview across Desktop and Web.
 
-## Desktop & Web UI / UX
-- **Clean File Changes Cards**: Extracted repetitive common directory paths to the card header with folder icons, replaced `[NEW FILE]` brackets with sleek rounded green chip badges (`New file`), and redesigned the expander button with a subtle dashed border and rotating chevron icon.
-- **Adaptive Artifact Preview Panel**:
-  - Automatically adapts header tabs based on file capabilities: displays `[Preview | Code]` dual-mode toggles only for renderable formats (`HTML`, `SVG`, `Markdown`), while presenting direct code view with language chip badges (e.g. `[<FileCode /> Python]`, `[<FileCode /> Rust]`) for pure source code and data files.
-  - Image files display dedicated format chip badges (`[🖼️ WEBP]`, `[🖼️ PNG]`, `[🖼️ JPEG]`) along with live image resolution badges (e.g. `1080 × 1620 px`).
-  - Restricted "Open in Mint Browser" action strictly to HTML/Web documents, avoiding misleading browser launches on scripts, code, and images.
-- **Live Tool Activity Retention**: Fixed an issue where older tool execution groups (e.g. `run_shell`) were temporarily trimmed during live agent turns once non-thought events exceeded 20; preserved all tool lifecycle and orchestration events throughout live streaming without dropping earlier progress.
-- **Action-First Tool Activity Parsing**: Eliminated `null`/`undefined` placeholder strings from displayed tool arguments across CLI, Desktop, and Web by prioritizing action-specific fields and sanitizing dummy strings in `mint-core` and frontend utilities.
-- **Resilient Media & Image Proxy**: Added local image proxy (`/api/proxy-image`) with disk LRU caching and SSRF protection to bypass ad-blocker false positives; auto-heals unclosed markdown image links (`![alt](url...`), normalizes Twitter/X banner URLs, and displays a graceful fallback card on load errors.
-- **Provider Brand Badges & Logo Picker**: Vector SVG brand logos in chat message footers across 13+ providers; redesigned custom provider logo picker with preset SVGs, emoji selection, and an upload modal with pan/crop/rotate controls.
-- **Theme Refresh (Studio Dark & Charcoal Onyx)**: Introduced IDE-inspired "Studio Dark" palette (`#101010`), refined dark themes with balanced Charcoal Onyx styling, suppressed colored aurora background glow blobs in Studio Dark for a solid pure black chat canvas (`#101010`), and added sleek neutral gray buttons with subtle mint hover glow.
-- **Configurable Step Limits (`/steps`)**: Control max tool execution steps per turn (10–200, default 40) via `/steps` slash command or Settings across Desktop, Web, and Full-Screen TUI.
-- **Trajectory Export & Diagnostics**: One-click SWE-bench/Agent Protocol v1.0 trajectory export (`.json`); dedicated high-contrast callout styling for self-correction guidance; persistent activity drawer accessible across completed and interrupted turns.
-- **Full-Screen TUI Onboarding Wizard (`mint onboard` & `/onboard`)**:
-  - Overhauled to native Ratatui alternate-screen wizard with responsive edge-to-edge layout and Mint TUI styling.
-  - **Step 1 (Core AI)**: Unified Gemini setup with masked key input (`Ctrl+H`), live model discovery, and integrated model picker.
-  - **Step 2 (Services)**: Grouped checklist with arrow navigation, spacebar toggles, select-all (`a`), and invert (`i`).
-  - **Step 3 (Configurations)**: Paged per-service cards featuring bundled API credentials and real-time model pickers (Anthropic, OpenAI, DeepSeek, Ollama, etc.).
-  - **Step 4 (Summary & Launch)**: Visual configuration overview with direct launch (`Save & Launch Mint`) or exit options.
-  - Added `/onboard` slash command and first-run detection across CLI, Desktop, and Web.
-- **Terminal Polish**: Compact web search citations (top 5 with `Ctrl+O view web_search` smart jump, matched tool-card ANSI color styling, and structured results formatting), automatic source citation reconstruction on session resume (`/resume`), unified command badges, external browser link handling, and non-blocking desktop titlebar during settings.
+## Minimal Inline Code Styling & Compact Nested List Formatting (Desktop and Web)
+- **Eliminated Stray Whitespace in Nested Lists (`tagListItems`)**: Resolved an issue where nested sub-lists (e.g. bulleted sub-items indented under numbered items) exhibited huge vertical gaps between items. Filtered out stray whitespace newline text nodes in `tagListItems` and explicitly applied `white-space: normal` on `.chat-list-block` and `.chat-list-text > .chat-list-block`, preventing sub-lists from inheriting `white-space: pre-wrap` from parent list text and restoring tight, clean bullet spacing identical to the TUI.
+- **Eliminated Heavy Rectangular Border & Box-Shadow**: Removed the rigid `1px solid` border and drop shadow on `.chat-inline-code` that previously made short inline code snippets (e.g. `null`, `""`, variable names, and file paths) appear as distracting button-like badges.
+- **Natural Text Color Harmony**: Updated inline code text color to inherit directly from surrounding message text (`color: var(--text-chat, inherit)`), ensuring high readability without visual fatigue or accidental hyperlink confusion.
+- **Subtle Surface Tint & Compact Padding**: Replaced the previous pill background with a soft, theme-adaptive surface tint (`var(--bg-surface-hover, rgba(127, 127, 127, 0.14))`), compact `1.5px 5px` padding, and a gentle `4px` border radius across Desktop (`src/renderer/src`) and Web (`src/renderer/src-web`).
 
-## Performance & Frontend Optimization
-- **Re-render Isolation**: Decoupled message input state to eliminate full-page re-renders while typing.
-- **Component Splitting**: Isolated streaming elapsed timers into leaf components and lazy-loaded secondary modals.
-- **Zero-Allocation Buffers**: Replaced 32 MiB buffers with lightweight UTF-8 estimators and compact attachment fingerprinting.
-- **Adaptive Polling**: Switched background jobs and status polling to idle-aware intervals that pause on inactive tabs.
-- **GPU Compositing Relief**: Removed backdrop blur filters on scrollable chat containers for smooth virtualized scrolling.
+## Modern Activity Timeline Polish, Clean Command Output & Material SVG Directory Listing (CLI, Desktop, and Web)
+- **Activity Drawer Layout & Margin Alignment**: Fixed an issue where nesting margins on `.agent-activity-card-history` caused the `Run summary` telemetry card to overflow the drawer horizontally. Outer headers (`Worked for ...`, natural summary, and `Run summary` card) now span full width flush at `X = 0`, while timeline execution rows (`.modern-activity-list`) are cleanly indented by 12px with a vertical guide line.
+- **Clean Output Filter (`cleanCommandOutput`)**: Automatically strips internal runtime envelope bookkeeping lines (`exit:`, `mode:`, `sandboxed:`, empty `stderr:`) from command execution results in the activity timeline, displaying clean stdout and stderr to the user.
+- **Semantic Workspace Exploration (`Explored workspace`)**: Enhanced `describeTool` and `semanticVerb` so `list_files` calls on `.` or `./` resolve to `Explored 📁 workspace` rather than `Executed .` or `Executed list files`, with folder icon rendering in the timeline row. Updated `crates/mint-cli/src/agent/live_status.rs` to ensure CLI TUI parity.
+- **Material SVG Directory Listing (`DirectoryListingView`)**: Transformed raw directory listing JSON arrays into a dedicated vector `DirectoryListingView` component. Folders and files are alphabetically sorted and displayed with crisp Material Icon Theme SVGs (`materialFolderIcon`, `materialFileIcon`), human-readable file sizes (`formatFileSize`), quick `@` chat reference buttons, and drag-and-drop support.
 
-## Core Engine & Web API Server
-- **Step Budget Warning & Wrap-Up Synthesis**: Proactive warning at `max_steps - 5` and graceful synthesis pass (`tools: None`) ensuring a complete final answer instead of abrupt termination.
-- **Fault-Tolerant Tool Call Parsing**: Recovers from Markdown fences, DeepSeek thinking tokens, trailing commas, hallucinated nulls, and shell aliases (`bash`, `sh`, `exec`).
-- **Structured Self-Correction Diagnostics**: Diagnostic engine (`diagnostics.rs`) detecting patch indentation drift, line numbering offsets, and compiler errors (Rust, Python, TypeScript) with actionable recovery suggestions.
-- **Standardized Trajectory Schema v1.0**: Versioned, typed trajectory runs (`StandardTrajectoryRun`) with step tokens, thoughts, and replay support via `/trajectory`.
-- **Head-Tail Truncation**: Dual-bound log clipping (first 35 lines context, last 75 lines error output), cutting token overhead by up to 70% while preserving root-cause errors.
-- **Repetition & Loop Guard**: Detects duplicate tool executions and oscillating loops (A→B→A→B), injecting self-correction guidance without aborting the turn.
-- **Context Compaction Role Alternation**: Alternating `Assistant`/`User` format for summaries, fixing HTTP 400 crashes on reasoning models (DeepSeek, Gemini).
-- **Engine Reliability**: Non-blocking SQLite persistence via `spawn_blocking`, low-latency TCP sockets (`TCP_NODELAY`), standardized workspace path resolution, and terminal API noise suppression for high-frequency Library thumbnails (`/thumbnail`), asset content (`/content`), and MCP artifacts.
+## Gemini Live Native Tool Catalog, Real-Time Barge-In, History Persistence & Full Platform Parity (CLI, Desktop, Web, and Core)
+- **Full Native Tool Catalog in Gemini Live (`live_tool_declarations`)**: Replaced the single underspecified `agent_action` wrapper in `gemini_live.rs` with the complete native `tool_catalog` (`list_files`, `read_file`, `search_code`, `git_status`, `web_search`, `weather`, `video_trim`, `mcp_tool`, etc.), sanitized via `gemini_sanitize_schema` and filtered for real-time audio compatibility (omitting terminal/modal-only tools `finish`, `enter_plan_mode`, and `exit_plan_mode` while keeping `agent_action` as a backward-compatible fallback).
+- **Direct & Wrapped Tool Dispatch (`resolve_live_tool_call`)**: Updated the Gemini Live WebSocket tool-call loop to execute both direct tool calls (`name: "git_status"`, `args: {...}`) and legacy `agent_action`-wrapped calls seamlessly through `execute_tool_from_json`.
+- **Voice-First System Instruction Override**: Added a dedicated Live Voice Mode instruction suffix so the model speaks its final response naturally after tool execution instead of attempting to invoke a `finish` tool.
+- **Instant Barge-In Audio Queue Flushing (`GeminiLiveEvent::Interrupted` & `stopQueuedAudioPlayback`)**: Separated `serverContent.interrupted` from `turnComplete` into a dedicated `Interrupted` event. When the user speaks over Mint, the frontend immediately stops and disconnects all scheduled `AudioBufferSourceNode` chunks, resets `nextPlaybackTimeRef` to `0`, and clears the speaking state without dropping the microphone session.
+- **Gemini Live Chat History & Tool Activity Persistence (`LiveTurnAccumulator`)**: Accumulated spoken user transcripts, assistant transcripts, and tool executions (`AgentProgress::ToolStart` / `ToolEnd`) per turn in `gemini_live.rs` and persisted them directly to `MemoryStore` (`interaction_memories` and `agent_activity_json`) under the workspace-scoped `chat_id` on `turnComplete`, `interrupted`, and session close, while triggering immediate frontend history synchronization (`onTurnSaved`).
+- **Web UI Live Tool Approvals & Inline Overlay Approval Card**: Wired `routes/gemini_live.rs` to `PENDING_APPROVALS.request_blocking` (emitting `GeminiLiveEvent::ApprovalRequested`) instead of denying tool approvals on Web, and rendered `ApprovalCard` directly inside `GeminiLiveOverlay.tsx` so both Desktop and Web users can approve or reject voice-triggered tool actions without leaving or being blocked by the Live call overlay.
+- **CLI Full-Screen TUI Voice Dictation (`F8` & `/voice`)**: Added native microphone push-to-talk recording and provider transcription (`mint_core::mic_transcribe`) to the CLI Full-Screen TUI (`F8` shortcut to dictate into the composer, `Esc` to cancel, and `/voice` command across CLI, Desktop, and Web).
+- **Anti-Aliasing Boxcar Resampler & Off-Main-Thread `AudioWorklet` Capture (`downsampleToPcm16`)**: Replaced naive nearest-neighbor point sampling in `useGeminiLiveVoice.ts` with a continuous time-weighted boxcar anti-aliasing filter (eliminating high-frequency aliasing distortion when downsampling 48kHz/44.1kHz mic streams to 16kHz PCM16), and added an off-main-thread `AudioWorkletNode` capture pipeline with automatic `ScriptProcessorNode` fallback.
+- **Section-Budgeted Live System Instruction (`build_live_system_instruction`)**: Replaced the single 12,000-character tail truncation in `gemini_live.rs` with independent budgets for the base prompt (`12,000` chars), memory/conversation context (`6,000` chars preserving both user profile/facts and the newest conversation turns), and learned skills (`4,000` chars), while pinning `LIVE VOICE MODE OVERRIDE` at the very end so it is never truncated.
 
-## Subagents, Swarm Orchestration & Plan Mode
-- **Confirmation-First Planning**: Clarified intent confirmation so conversational acknowledgments ("OK", "understood") don't prematurely trigger code modifications.
-- **Parallel Swarms & Reconnaissance**: Concurrent read-only worker pools (1–8 agents) for multi-file project exploration before plan confirmation.
-- **Transcript Isolation**: Nested subagent micro-actions and child compactions into a dedicated docked status strip and DAG view.
-- **Context Cache Optimization**: Rolling vision window retaining the latest 2 image steps, saving up to 90% in token overhead.
+## Native Multi-Turn Conversation Continuity & Compaction Hardening (CLI, Desktop, and Web)
+- **Deep Structured Conversation History (`native_messages`)**: Fixed an architectural limitation where `native_messages` was reset to an empty list on each turn. Agent mode (`orchestrate_agent_loop`) and Plain Chat mode (`enrich_request`) now pre-populate the request's native `messages` with structured, alternating `User` and `Assistant` turns from SQLite memory (`build_conversation_history_messages`). Modern tool-calling models (Gemini, Claude, GPT, Ollama) now receive genuine multi-turn conversational context, allowing the agent to naturally follow up on prior discussion (e.g. asking for specific information previously discussed when calling `ask_user`) without context loss.
+- **Provider-Aware Transcript Fallback for Non-Native Chat**: Resolved an issue where non-native providers (such as Ollama in `ToolCallingMode::JsonPrompt` or plain text mode) dropped conversation context because they ignore `request.messages`. `enrich_request` now intelligently detects native tool capability: native providers receive structured message sequences, while non-native providers continue receiving rendered conversation transcripts in `system_instruction`.
+- **History-Preserving Context Compaction (`history_prefix_len`)**: Hardened `compact_native_messages` and `hard_truncate_native_messages` so context compaction operates strictly within the current agent turn's intermediate tool steps (`[history_prefix_len + 1..]`), leaving all preceding conversation turns (`[..history_prefix_len]`) and the current turn's initial task observation intact.
+- **Persistent Profile & Fact Retention Across Plan Mode**: Refactored system prompt construction into `construct_system_prompt`, ensuring user profile information and remembered facts are consistently maintained when entering and exiting plan mode.
+- **Unified SQLite Connection & Media Content Packing**: Reused the active `MemoryStore` instance across orchestration steps to avoid redundant SQLite connection opens, and unified media attachment block packing (`build_user_content_blocks`) across plain chat and agent loops.
+- **Expanded Recall Limit (`CONTEXT_LIMIT = 15`)**: Increased the conversation interaction window from 3 to 15 turns, enabling long back-and-forth debugging and discussion without older turns prematurely dropping out of the model's memory.
+- **Multi-Byte Non-Truncating Message Budget (`MAX_CONTEXT_MESSAGE_CHARS = 4000`)**: Raised the per-message historical context ceiling from 200 to 4,000 characters. Detailed Thai conversational prompts, technical explanations, and code snippets are preserved in full rather than aggressively truncated.
+- **100% Platform Parity**: Implemented in shared `mint-core`, instantly benefiting the CLI TUI, Desktop app, and Web interface with zero platform divergence, backed by automated Rust unit tests (`tests.rs`).
 
-## Agent Tools, Browser Automation & Sandbox
-- **Safe Temp Directory Access**: Persistent Linux sandbox mounts for `/tmp` and OS temporary paths across agent tools.
-- **Headless Browser Automation**: Isolated Chromium automation engine for navigation, clicks, inputs, screenshots, and durable artifacts.
-- **State-Based Execution**: Evidence-backed completion verification replacing unconditional duplicate-command skips.
+## Modern Answered Questions & Answers Activity Card (Desktop and Web)
+- **Inline Answered Questions Card**: When an `ask_user` interaction is completed, the agent activity timeline now displays a dedicated questions-and-answers card inspired by modern AI assistant designs, replacing generic timeline text rows (`Asked (Answered: "...") <question>`) with a clean, high-clarity UI.
+- **Visual Design Parity**:
+  - **Header Counter**: Displays a small rounded-square `[?]` outline badge alongside a clean question counter (e.g. `1 question` or `3 questions` for multi-question batches).
+  - **Question & Answer Typography**: Highlights each question in prominent primary text (`var(--text-main)`), followed by the user's selected choice or freeform answer in soft secondary gray (`var(--text-soft)`).
+  - **Subtle Dividers**: Seamlessly separates multiple questions with clean hairline horizontal borders (`1px solid var(--border-subtle)`).
+  - **Dark / Light Theme Integration**: Styled with a translucent surface card background, rounded 12px corners (`var(--radius-lg)`), and full support for both Dark and Light UI themes.
+- **Deep Seam & Fallback Parsing**:
+  - Enriched `AgentActivity` in `agentActivity.ts` with structured `askUserData` (supporting single questions or multi-question batches).
+  - Built `extractAskUserQuestions` to extract question and answer pairs from live `ToolEnd` events as well as legacy `(Answered: "...")` historical interactions.
+  - While an `ask_user` request is pending, the timeline retains an active execution indicator so the user focuses on the interactive `ApprovalCard` at the bottom; once answered, it instantly swaps to the answered card.
+- **Full Platform Parity**: Implemented across Desktop (`src/renderer/src/css/chat.css`) and Web (`src/renderer/src-web/css/chat.css`), backed by unit tests (`AskUserActivityCard.test.tsx`, `agentActivity.test.ts`).
 
-## Mint Companion & Voice Input
-- **Live2D Desktop Companion**: Translucent interface with full-screen character view, OS cursor gaze tracking, and window dragging.
-- **Synchronized TTS Speech**: Centralized speech synthesis with real-time lip-sync and audio leasing.
-- **Non-Destructive Voice Input**: Microphone dictation appends directly to the active draft without auto-submitting.
+## Compact Chat Input & Toolbar Mode Selector (Desktop and Web)
+- **Compact All-in-One Composer**: Completely redesigned the chat input area across Desktop and Web to reduce vertical idle footprint by over 45% (down from ~180px to ~90px), expanding visible chat viewport space so users can read significantly more conversation history without cramped viewports.
+- **Slim Integrated Project Header**: Retained the Workspace (`📁 Mint-CLI ▾`) and Git Branch (`🌿 Rust ▾`) selectors at the top of the composer as a slim, unified 34px header that seamlessly connects to the chat input container without vertical bloat.
+- **Eliminated Bulky Toggle Bar**: Removed the standalone middle `smart-context-bar` that previously consumed an extra ~35px of vertical screen real estate for two toggle switches.
+- **Toolbar Mode Selector Pill (`ChatModeSelector`)**: Moved interaction mode switching down into the bottom action toolbar alongside the Model Selector as a modern pill (`[⚡ Agent ▾]` / `[📋 Plan ▾]` / `[💬 Chat ▾]`). Styled with clean, subdued text colors (without heavy green accent outlines) and positioned on the right side of the toolbar adjacent to voice and send controls. Clicking the pill opens a floating popover menu allowing users to switch between Agent mode, Plan mode (with read-only approval gating), and standard Chat mode.
+- **Harmonized Git Branch Selector & Popover**: Redesigned `GitBranchSelector` across Desktop and Web to achieve complete visual consistency with `WorkspaceSelector` and `ChatModeSelector`:
+  - Unified the trigger button in `.project-context-row` with identical pill styling (`var(--surface-strong)` background, `1px solid var(--border-subtle)`, rounded corners, and smooth hover states).
+  - Replaced legacy raw Unicode glyphs (`⑂`, `⇄`, `＋`, `←`) with standard Lucide SVGs (clean Git branch, remote globe, plus, git graph, and chevron back icons).
+  - Upgraded the popover dialog with glassmorphism backdrop blur, modern 16px corner radius (`var(--radius-xl)`), deep elevation shadow, uppercase category headers, rounded item hover pills, styled track badges, and a sleek search bar.
+  - Styled search input focus and active branch selection with refined neutral gray borders and backgrounds instead of bright green accents.
+- **Single-Line Initial Textarea**: Reduced initial textarea `min-height` to a clean single line (26px) with streamlined padding, while preserving smooth multi-line auto-expansion up to 140px+ as prompts grow.
+- **Full Platform Parity**: Implemented across Desktop (`src/renderer/src/css/chat.css`) and Web (`src/renderer/src-web/css/chat.css`, `mobile.css`), backed by unit tests (`ChatModeSelector.test.tsx`, `ChatPanel.test.tsx`) and full launcher tests.
+
+## Collapsible Document Attachment Cards & Rich File Mentions (CLI, Desktop, and Web)
+- **Collapsible Attached Document Card in User Messages**: Dropping text, markdown, or code documents into the chat composer no longer dumps hundreds of lines of raw text and backend prompt instructions into the user message bubble. Instead, the user bubble cleanly separates authentic prompt text from the attachment, rendering a sleek, collapsed **Attached Document Card** with genuine language/file icons, line counts, and a smooth `[View content ▾]` accordion viewer with one-click copy.
+- **Rich File Mention Chips in Message Stream**: Mentions referencing files (e.g. `@generate_harness_pdf.py` or `@src/app.tsx`) in the message stream now render as clean, modern file tag chips with dedicated Material Icon Theme language icons (Python, TypeScript, Rust, JSON, etc.) and stripped `@` prefixes (matching Cursor / VS Code style), while non-file mentions (e.g. `@web`, `@agent`) preserve their standard badge formatting.
+- **Full-Width Artifact & Document Stretch**: Fixed artifact cards (PDF / PPTX presentations) and tool result containers to stretch across the full chat column width, matching `TurnFileChanges` without shrink-wrapping to the reply text width.
+- **TUI Cleanliness & Parity**: Full-Screen TUI (`mint-cli`) automatically condenses document attachments in the transcript to single-line notices (`[Attached document: <filename> (<N> lines)]`) and pre-fills `/edit` and `/retry` drafts with clean prompt text, preventing giant file dumps in terminal buffers.
+- **Full Platform Parity**: Maintained 100% parity across Desktop UI (`src/renderer/src`), Web UI (`src/renderer/src-web`), and CLI (`crates/mint-cli`), backed by automated Vitest and Cargo test suites.
+
+## Modern Developer-Centric Activity Timeline (CLI, Desktop, and Web)
+- **Developer-Centric Semantic Timeline**: Replaced the rigid boxed table layout in `AgentActivityTable` with a sleek, borderless semantic timeline inspired by modern AI coding assistants (Claude Code / Cursor / Copilot).
+- **Elapsed Duration & Natural Action Header**: The activity drawer header now displays dynamic, human-readable execution status (e.g. `Worked for 2m 14s ⌄` or `Working...`) alongside an aggregated action summary (e.g. `Explored files, ran commands, edited files`), giving users immediate high-level context of agent work at a glance.
+- **Semantic Verbs & File Targets**: Activity rows present clean developer verbs and context:
+  - File Reads: `Analyzed <icon> filename.tsx#L12-45` with targeted line ranges.
+  - File Edits: `Edited <icon> filename.tsx` paired with precise Git diff statistics (`+24` / `-8`).
+  - Terminal Commands: `Ran <intent or command> >` with an expandable chevron to toggle output view.
+  - Thoughts: `Thought for 12s >` with collapsible reasoning details.
+- **Accurate Diff Extraction**: Extended `agentProgress.ts` to calculate real additions and deletions for `edit_file`, `write_file`, and `apply_patch` operations, displaying color-coded green `+N` and red `-N` badges in the timeline.
+- **Dedicated Language & File Icons**: Expanded the centralized Material Icon Theme system (`fileIcons.ts`) with authentic file icons for Python (`.py`, `.ipynb`), Rust (`.rs`), Go, Java, C/C++, C#, TypeScript, JavaScript, Shell/Bash (`.sh`, `.bash`, `.zsh`), SQL/Databases, Dockerfiles, Git, Markdown, PDFs, and more. Both `AgentActivityTable` and `TurnFileChanges` now display dedicated, genuine language icons next to modified/analyzed file names instead of generic placeholders.
+- **Preserved Productivity Interactions**: Retained full interactive capabilities including HTML5 file drag-and-drop from timeline rows into the chat composer, `@` quick-reference button on hover, and seamless subagent DAG view switching.
+- **CLI Full-Screen TUI Parity**: Enhanced `interactive::tool_activity` in `mint-cli` to use developer-centric semantic verbs (`Ran`, `Searched`, `Analyzed`, `Edited`) and prefer human-readable intent summaries for shell executions.
+- **Full Platform Parity**: Maintained 100% parity across Desktop UI (`src/renderer/src`), Web UI (`src/renderer/src-web`), and CLI (`crates/mint-cli`), backed by automated tests across Vitest and Cargo test suites.
+
+## Inline Message Edit & Save & Resend (CLI, Desktop, and Web)
+- **In-Place Inline Message Editor**: Clicking the ✏️ Edit button on any user message now transforms the message bubble into an inline auto-growing editor directly in context, eliminating the disjointed jump down to the composer.
+- **Save & Resend Truncation**: Saving the edited message automatically truncates conversation history from that turn onwards in SQLite (`truncate_interactions_from`), clearing subsequent turns and triggering the model to answer the refined prompt with a completely clean context.
+- **Keyboard Shortcuts & Quick Actions**: Equipped with `Esc` to instantly cancel and restore original text, `Ctrl+Enter` / `Cmd+Enter` to save and resend, auto-focus, and cursor placement at the end of the text.
+- **Full-Screen TUI CLI Commands (`/edit` & `/retry`)**: In the Full-Screen TUI, users can enter `/edit` or `/retry` to pull the latest turn prompt directly into the active composer under an explicit notice banner `[Mode: Edit Turn #N — Resending will replace this turn and clear its previous response | Esc to cancel]`. Pressing `Enter` truncates the turn and subsequent responses from SQLite and immediately resends the updated prompt, while `Esc` or `Ctrl+C` cancels edit mode and restores the composer.
+- **Unified Platform Bridge**: Implemented cross-platform endpoints via Tauri command `truncate_interactions_from` on Desktop, `POST /api/interactions/truncate` on Web, and reactive state management in `lifecycle.ts`.
+- **Full Platform Parity**: Maintained across Desktop UI (`src/renderer/src`), Web UI (`src/renderer/src-web`), and Full-Screen TUI CLI (`crates/mint-cli`), backed by automated tests across Vitest and Cargo.
+
+## Drag & Drop File Changes & In-Composer Mentions (CLI, Desktop, and Web)
+- **Draggable Turn File Changes**: In `TurnFileChanges`, each created or modified file item is now fully draggable using standard HTML5 drag-and-drop. Users can drag files directly from the turn summary card (e.g. `generate_harness_pdf.py` or `CalculationCard.tsx`) into the chat composer.
+- **Sleek Full-Width File Changes Bar**: Redesigned `TurnFileChanges` into a full-width, streamlined summary bar matching modern AI coding assistants (Claude Code / Cursor). Features a compact single-line collapsed header showing `N files changed +add -del >` on the left and a `[ 📄 Review ]` quick action button on the right, with smooth click-to-expand file details and full chat-column width stretch across Desktop and Web.
+- **Live Tool Execution Dragging**: In `AgentActivityTable`, target files within active and historical tool rows (`write_file`, `edit_file`, `read_file`) are now draggable into the composer, letting users grab files as soon as the agent begins writing or modifying them.
+- **Click-to-Reference Quick Action (`@`)**: Added a convenient "Reference in chat" button on hover for both file change items and activity tool rows, enabling laptop and trackpad users to instantly bind files into the prompt without dragging.
+- **Direct In-Input Insertion**: Dragging a file or clicking `@` inserts `@relative/path ` directly into the text input box (`<textarea id="chat-input">`) at the cursor position and smoothly focuses it, keeping prompt drafting intuitive and fully editable inline without redundant chip containers.
+- **CLI Full-Screen TUI Parity**: Upgraded `collect_mention_candidates_with_recents` in `crates/mint-cli` to detect recently modified session files (and active git working tree diffs) and prioritize them at the very top of `@` mention auto-completions with the `Recently edited in this session` badge.
+- **Full Platform Parity**: Maintained 100% parity across Desktop UI (`src/renderer/src`), Web UI (`src/renderer/src-web`), and CLI (`crates/mint-cli`), backed by automated tests across Vitest and Cargo test suites.
+
+## Modern AI Fluid Border Radii (Desktop and Web)
+- **Contemporary Border Radii Tokens**: Upgraded the design token scale in `tokens.css` to the Modern AI aesthetic (`--radius-xs: 6px`, `--radius-sm: 8px`, `--radius-md: 10px`, `--radius-lg: 14px`, `--radius-xl: 18px`, `--radius-2xl: 22px`, `--radius-3xl: 26px`, `--radius-composer: 24px`), delivering fluid, approachable corners across cards, buttons, dialogs, and panels.
+- **Fluid Chat Composer & Prompt Bar**: Elevated the chat form (`#chat-form`), `.smart-context-bar`, and `.project-context-row` to a smooth 24px radius (`var(--radius-composer, 24px)`) across Desktop UI (`src/css/chat.css`), Web UI (`src-web/css/chat.css`), and Mobile (`src-web/css/mobile.css`).
+- **Floating Island Capsule Header & Controls**: Styled the floating island `.chat-header` with modern capsule curvature (`border-radius: var(--radius-full, 9999px)`), transforming breadcrumb `< Code` buttons, session tags (`cli::...`), `Tools` toggles, and action buttons into cohesive rounded pills across Desktop and Web.
+- **Harmonious Model Spotlight & Popover Surfaces**: Updated model spotlight popovers and modal selector dialogs to use `var(--radius-2xl, 22px)`, providing seamless continuity with the new card and container curves.
+- **100% Elimination of Hardcoded Border Radii (Single Source of Truth)**: Completed a repo-wide audit across all UI components and stylesheets. Migrated every remaining hardcoded pixel border radius in Markdown renderers (`markdown.tsx`), rich interactive cards (`ImageSearchCard.tsx`, `ImageGenCard.tsx`, `StockCard.tsx`, `MermaidCard.tsx`, `CalculationCard.tsx`, `WeatherCard.tsx`), modals & overlays (`CommandPalette.tsx`, `SubagentDagView.tsx`, `AgentActivityDrawer.tsx`, `MintDashboard.tsx`, `ModalErrorBoundary.tsx`, `ChunkErrorBoundary.tsx`, `WorkspacePdfPreview.tsx`), and stylesheets (`code-review.css`, `model-selector.css`, `background-terminals.css`, `library.css`, `slash-choice.css`, `queued-messages.css`, `veo-studio.css`, `desktop-tools.css`, `tool-surfaces.css`, `mobile.css`, and Settings stylesheets) to centralized Design Tokens (`var(--radius-*)` with `--radius-2xs: 4px`), guaranteeing full theme-driven consistency with zero hardcoded drift.
+- **Tailwind Utility Synchronization**: Registered semantic radius tokens directly in `ui-tailwind.css` `@theme inline` block ensuring consistent styling for shared components.
+
+## Text Color Customization & Modern Studio Design System (Desktop and Web)
+- **Centralized Text Color Customization & Palette Swatches**: Added a centralized Text Color system in `ThemeTab` with 6 high-contrast curated swatches (Pure White `#ffffff`, Cyber Green `#86efac`, Electric Cyan `#67e8f9`, Retro Amber `#fde047`, Pastel Lilac `#d8b4fe`, Soft Coral `#fda4af`) and custom hex picker with native eyedropper support.
+- **Deep Theme Variable Distribution**: Updated `themeManager.ts` to distribute `--text-main`, `--text-chat`, and `--text-primary` from a single source of truth, deriving `--text-soft`, `--text-secondary`, and `--text-muted` dynamically via `color-mix`, while preserving custom text colors across preset theme switches.
+- **Modern Studio Design Tokens & Border Radii**: Refined base radii in `tokens.css` to a crisp, professional Studio scale (`--radius-xs: 4px`, `--radius-sm: 6px`, `--radius-md: 8px`, `--radius-lg: 10px`, `--radius-xl: 12px`, `--radius-2xl: 14px`, `--radius-3xl: 16px`), aligning the entire UI with Linear / Raycast developer ergonomics.
+- **Subtle User Message Bubbles & Input Form**: Replaced exaggerated 22px bubbles with a refined 12px bubble (`border-radius: var(--radius-xl) var(--radius-xl) var(--radius-xs, 4px) var(--radius-xl)`), and standardized `#chat-form`, slash command popups, and UI cards to tokenized radii across Desktop and Web.
+- **Code Hub Subtle Studio Refinements**: Redesigned `/code` session rows with neutral raised background (`var(--bg-surface-raised)`), clean left accent borders (`border-left: 2px solid var(--accent)`), subtle active badges with glowing accent status dots, muted prompt symbols, and polished `$ resume` chips.
+- **Tools Panel & Session Breadcrumbs Polish**: Toned down excessive green accent styling in Tools tab launcher icons to neutral text tokens, refined active dropdown items to neutral surfaces, and styled the breadcrumb session badge (`cli::<id>`) to match the `< Code` button aesthetic.
+
+## Drag & Drop Support for Side Panel Tools & Artifacts (Desktop and Web)
+- **Automatic Image Attachment on Drag**: Dragging image files or image preview tabs from Tools / Side Panel now automatically resolves the image binary/dataUri and attaches it as an interactive Image Attachment chip (complete with trimmed thumbnail preview and removal button) directly above the composer, feeding vision data straight into multimodal LLMs without requiring extra read turns.
+- **Side Panel Tools Tab Dragging**: Enabled HTML5 dragging on preview tabs within `ToolSurfacePage` (and the tabs switcher dropdown menu). Users can now directly drag tabs (such as generated slides, documents, images) from the Tools panel on the right and drop them into the chat input composer to mention `@relative/path`.
+- **Artifact Preview Header Dragging**: Made the file icon and title container in `ArtifactPreviewPanel` draggable with grab cursors and informative tooltips (`title="<path> (Drag to chat)"`), allowing quick reference dragging directly from the artifact viewer header.
+- **Chat Artifact Cards Dragging**: Enabled dragging on `.chat-artifact-card` items directly in the message stream, allowing users to drag inline presentation/PDF/document cards into the input field.
+- **Deep Seam & Unified Drag Utility (`workspaceDrag.ts`)**: Built deep helpers `setWorkspaceDragData` and `formatWorkspaceReference` under `src/renderer/shared/utils/workspaceDrag.ts` unifying drag data transfer across `WorkspacePanel`, `ToolSurfacePage`, `ArtifactPreviewPanel`, and `ArtifactCards`, setting both `application/x-mint-workspace-path`, `application/x-mint-workspace-file`, and fallback `text/plain`.
+- **Robust Drop & Dragover Ergonomics in Chat**: Upgraded `ChatPanel` and `CollapsiblePasteInput` to handle dragover seamlessly with copy cursors and drop handlers across the input textarea, chat form, and the main conversation area.
+- **English Slide Pagination in Workspace Preview**: Updated slide indicator and page labels in `WorkspacePdfPreview` from Thai to standard English (`Slide {pageNumber} / {pdf.numPages}` and `Slide {pageNumber} of {pdf.numPages}`).
+
+## Context Compaction & Observation Compression Harness (CLI, Desktop, and Web)
+- **File-Backed Output Scratchpad (Cursor / Claude Code Pattern)**: Automatically offloads bulky tool execution logs (> 3,000 characters) to `.mint/scratch/tool_outputs/<timestamp>_<action>_<hash>.log`, presenting the model with clean head/tail previews and an actionable pointer path to prevent token bloat while keeping full raw outputs on-demand.
+- **Progressive Observation Ghosting (Three-Tier Aging)**: Implemented deterministic turn-level aging for historic `ToolResult` messages without LLM invocation cost — retaining recent 3 turns in full (Hot Zone), truncating turns 4–10 to concise summaries (Warm Zone), and collapsing older turns (> 10 turns back) into 1-line tombstones (Cold Zone).
+- **Semantic Tool Superseding**: Automatically detects file modifications (`apply_code_edits`, `write_file`, `patch_file`, `delete_file`) and replaces earlier `read_file` results targeting those modified paths with compact superseding notices, eliminating stale code hallucinations and saving thousands of prompt tokens.
+- **Trajectory Buffer Compaction**: Compacts observation previews for older trajectory items in `rebuild_observation`, keeping the task history bounded and responsive across 50–100+ step autonomous runs.
+- **Structured Milestone Compaction**: Upgraded `compact_native_messages` with structured markdown sections (Core Intent, Files Modified & Validated, Key Decisions & Findings, Pending Actions) ensuring critical state and verified paths are never lost during macro compaction.
+
+## Deep Module Architecture & God Files Refactoring (`mint-core`)
+- **Chat Provider Seam Decomposition (`agent/chat/`)**: Decomposed the 4,651-line `chat.rs` monolith into a deep, modular structure under `crates/mint-core/src/agent/chat/`. Each provider now owns an isolated seam with its own payload construction, thought signature handling, and response decoding:
+  - `gemini.rs` (518 lines): Google Gemini 1.5/2.0 native function calling, thinkingConfig, schema sanitization, and multimodal parts.
+  - `anthropic.rs` (318 lines): Anthropic Messages API client, prompt caching breakpoints, and tool response parsers.
+  - `openai.rs` (582 lines): OpenAI, OpenRouter, and DeepSeek client with reasoning tokens and audio attachments.
+  - `ollama.rs` (321 lines): Ollama native messages and streaming parsers.
+  - `custom.rs` (149 lines): Custom HTTP endpoints and Hugging Face adapters.
+  - `streaming.rs` (466 lines): Server-Sent Events (SSE) accumulator and progressive thought/chunk streams.
+  - `tests.rs` (1,403 lines): Isolated 58-test unit verification suite.
+  - `mod.rs` (856 lines): High-level provider-agnostic coordinator, fallback dispatchers (`send_chat`, `stream_chat`), and public types.
+- **Orchestration Seam Deconstruction (`orchestration/`)**: Reduced the 6,653-line orchestration god file down to 2,587 lines (a 61% reduction) by isolating discrete responsibilities into cohesive modules:
+  - `types.rs` (646 lines): Centralized execution types including `TurnLease`, `TurnStartListener`, `OrchestrationError`, `AskUserOption`, `AgentApproval`, `AgentProgress`, `ToolExecutionRecord`, and `AgentResult`.
+  - `decision_parsing.rs` (736 lines): Deep parsing for LLM output, tool call preparation, schema sanitization, and retry tracking.
+  - `tools/dispatch.rs` (899 lines): Tool execution router, parallel read-only batch execution, code review gatekeeper, and result appending.
+  - `tests.rs`, `mcp_outcome_tests.rs`, `full_skill_result_tests.rs` (2,011 lines): Dedicated unit and regression suites.
+- **100% Backward Compatibility**: Maintained exact API and struct compatibility across all public and crate interfaces for CLI (`crates/mint-cli`), Desktop (`src/renderer/src`), and Web (`src/renderer/src-web`). Fully verified with all 58 chat tests, 180 orchestration tests, and 241 CLI tests passing.
+
+## Library Grid & High-Resolution Thumbnails (Desktop and Web)
+- **Comfortable Card Layout**: Increased default grid card width to 260px (`minmax(260px, 1fr)`) with an expanded 1380px max-width container, delivering a spacious 3–4 column layout with clear preview details.
+- **Grid Density Switcher**: Added a toolbar toggle (`Normal` / `Large`) with localStorage persistence, enabling a 2–3 column mode for closer visual inspection without opening preview modals.
+- **Enhanced 4:3 Aspect Ratio**: Upgraded thumbnail cards from 16:10 to 4:3 with face-aware framing (`object-position: center 20%`) to keep character art, cosplay shots, and portraits centered.
+- **Crisp 800px Previews**: Upgraded backend thumbnail resolution from 360px to 800px with automatic background migration for razor-sharp rendering on HiDPI displays.
+- **Responsive Sidebar Alignment**: Connected `.library-page` offsets to the shell's sidebar expanded/collapsed state with smooth 0.22s sliding transitions.
+
+## Graceful Web Shutdown & CLI Cleanup (`mint web`)
+- **Clean Ctrl+C Termination**: Added shutdown signal handling to `mint web` in `mint-cli`, terminating frontend processes cleanly without false error messages.
+- **Warning Suppression**: Injected `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to silence upstream Vite CommonJS deprecation notices during web launch.
+
+## Test Database Isolation & Centralized Config Routing
+- **Isolated Test Data**: Configured `mint_config_dir()` to route automated test storage to dedicated temporary paths (`/tmp/mint-test/`), preventing test runs from contaminating user databases or sidebar histories.
+- **Unified Path Resolution**: Centralized store routing for `mint-knowledge.sqlite`, `cron-jobs.json`, and `tasks.json` through `mint_config_dir()`.
+- **Regression Cleanup**: Added explicit session and subagent teardown hooks in test runners.
+
+## Interactive Saved Plans Picker & Viewer (`/plan list`) (CLI, Desktop, and Web)
+- **Interactive TUI Plan Picker**: Running `/plan list` in Full-Screen TUI opens an interactive selector showing saved plans sorted by timestamp with instant title previews.
+- **Inline Plan Card Render**: Selecting a plan renders a borderless `#404040` card into the transcript complete with task checkboxes (`[ ]` / `[✓]`) and step statuses.
+- **Shortcuts & Autocompletion**: Added direct viewing via `/plan list <n>` and `/plan show <n>`, plus multi-word subcommand autocompletion (e.g. `/plan `, `/plugin `) in the TUI composer.
+
+## Unified Plan Review & Inline Card UI (CLI, Desktop, and Web)
+- **Framed Transcript Cards**: Replaced raw text dumps for `/release-notes` and plan reviews with continuous borderless cards matching the dark theme.
+- **Compact Approval Modal**: Condensed the plan review modal to a concise approval prompt while presenting the full plan in the transcript with unblocked scrolling.
+- **Session Resume Persistence**: Reconstructed formatted plan cards when resuming past conversations across CLI, Desktop, and Web.
+- **Command Aliases**: Added flexible slash command matching for `/release-notes`, `/release_notes`, `/release-note`, and `/releasenotes`.
+
+## Universal Thinking & Multi-Provider Reasoning (CLI, Desktop, and Web)
+- **Universal Thinking Toggle**: Enabled Thinking controls and effort levels (`Low` to `Extra High`) across all chat models (Gemini, DeepSeek, OpenAI, Anthropic, OpenRouter, Ollama, and Local).
+- **Native Parameter Dispatch**: Sends provider-accurate payloads including Gemini `thinkingConfig`, OpenAI/OpenRouter `reasoning_effort`, Anthropic `budget_tokens`, and DeepSeek V4 reasoning specifications.
+- **Prompt-Based Fallback**: Automatically injects effort-scaled `<think>...</think>` directives for standard chat models without native reasoning APIs.
+- **Non-Text Filter**: Automatically disables reasoning options for image, video, audio, and embedding models.
+
+## Code Block UI & Terminal Copy Ergonomics (CLI, Desktop, and Web)
+- **Frictionless CLI Code Copying**: Replaced vertical border gutters (`│ `) with clean 2-space indentation so terminal mouse selection copies pure, runnable commands.
+- **Smart Line Numbers**: Automatically hides line numbers on short snippets ($\le 5$ lines) with an optional `#` toggle on Desktop and Web.
+- **Typography Enhancements**: Increased code size to 14.5px with 1.65 line height and proper Thai font fallbacks.
+
+## Structure-Aware Progressive AI Streaming (CLI, Desktop, and Web)
+- **Smooth Line-by-Line Reveal**: Streams markdown text, lists, and syntax-highlighted code blocks smoothly with adaptive pacing.
+- **Atomic Block Buffering**: Holds markdown tables and custom UI/Mermaid cards in buffer until complete to eliminate broken syntax flashes mid-stream.
+- **Viewport Ergonomics**: Preserves terminal scroll positions during generation and defers post-turn metadata until streaming finishes.
+
+## Streamlined MCP Tool Activity UI (Desktop and Web)
+- **Accordion Grouping**: Moved raw MCP execution logs out of chat bubbles into collapsible `Executed X mcp_tool` activity accordions.
+- **Clean Conversation Surface**: Reserved chat bubbles strictly for downloadable artifacts, critical notices, and final AI responses.
+
+## Modern Setup & Onboarding TUI Wizards (`mint setup` & `mint onboard`)
+- **Full-Screen Setup Wizard**: Modernized `mint setup` with a 3-step Ratatui TUI categorized across 49 agent tools, native plugins, and launch targets.
+- **High-Contrast Monochrome Styling**: Unified `mint onboard` with solid gray row highlights, active cursor indicators (`█`), and dynamic footer shortcuts.
+- **MCP Shorthand Flags**: Added `-a` (`--args`) and `-e` (`--env`) shorthand options to `mint mcp add`.
+
+## Headless Browser Automation & Anti-Loop Safeguards (CLI, Desktop, and Web)
+- **Headless Chromium Automation**: Replaced legacy headed browser windows with headless Chromium commands (`--headless=new`) and deterministic `mint browser run` workflows.
+- **System Default Browser Previews**: HTML artifacts and previews open directly in your system's default browser across all platforms.
+- **Anti-Loop Protections**: Automatically intercepts stuck tool loops ($\ge 3$ repeated outputs) and deduplicates screenshot analyses using SHA-256 hashes.
+- **Diagnostic Slash Command**: Updated `/browser` and `/browser status` to report detected Chromium binaries and sandbox readiness.
+
+## Shell Execution & Background Job Safeguards
+- **Explicit Background Status**: Clearly marks promoted background commands (>180s) as `exit: running_in_background (job_id: <id>)`.
+- **System Anti-Retry Notice**: Injects background execution notices to prevent agents from triggering redundant retry loops.
+- **TUI Activity Parity**: Ensured the Full-Screen TUI recognizes background processes as actively running.
+
+## 🚀 Architecture Evolution & Future Roadmap
+- **Decommissioned Legacy Browser**: Fully retired the headed Mint Browser subsystem (`mint auto`, port 9222 takeover, and embedded browser frames).
+- **Headless Foundation**: Replaced with a fast, decoupled headless automation engine, establishing a reliable foundation for future web capabilities.

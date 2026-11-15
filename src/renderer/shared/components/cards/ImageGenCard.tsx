@@ -41,7 +41,7 @@ function GeneratedImageTile({ url, single }: { url: string; single: boolean }) {
       style={{
         position: 'relative',
         display: 'block',
-        borderRadius: '10px',
+        borderRadius: 'var(--radius-md, 10px)',
         overflow: 'hidden',
         aspectRatio: single ? undefined : '1 / 1',
         background: 'var(--surface-strong)',
@@ -81,7 +81,7 @@ export default function ImageGenCard({ data }: { data: ImageGenData }) {
       style={{
         background: cardBg,
         color: cardText,
-        borderRadius: '12px',
+        borderRadius: 'var(--radius-xl, 18px)',
         padding: '16px 20px',
         margin: '12px 0',
         boxShadow: 'var(--shadow-md)',

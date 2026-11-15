@@ -11,6 +11,56 @@ interface GitBranchSelectorProps {
   onBranchChanged?: () => void
 }
 
+function BranchIcon({ className = '', width = 14, height = 14 }: { className?: string; width?: number; height?: number }) {
+  return (
+    <svg className={className} width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
+  )
+}
+
+function RemoteGlobeIcon({ className = '', width = 14, height = 14 }: { className?: string; width?: number; height?: number }) {
+  return (
+    <svg className={className} width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+      <path d="M2 12h20" />
+    </svg>
+  )
+}
+
+function PlusIcon({ className = '', width = 14, height = 14 }: { className?: string; width?: number; height?: number }) {
+  return (
+    <svg className={className} width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  )
+}
+
+function GitGraphIcon({ className = '', width = 14, height = 14 }: { className?: string; width?: number; height?: number }) {
+  return (
+    <svg className={className} width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="5" cy="6" r="3" />
+      <circle cx="5" cy="18" r="3" />
+      <line x1="5" y1="9" x2="5" y2="15" />
+      <circle cx="19" cy="9" r="3" />
+      <path d="M5 9c0 4 4 6 8 6h3" />
+    </svg>
+  )
+}
+
+function ChevronBackIcon({ className = '', width = 14, height = 14 }: { className?: string; width?: number; height?: number }) {
+  return (
+    <svg className={className} width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  )
+}
+
 function errorMessage(reason: unknown): string {
   if (reason instanceof Error) return reason.message
   if (typeof reason === 'string') return reason
@@ -139,6 +189,7 @@ export default function GitBranchSelector({ workspacePath, disabled = false, onB
           title={`${error} Select to retry.`}
           aria-label="Git branch unavailable. Retry"
         >
+          <BranchIcon className="git-branch-icon" width={14} height={14} />
           <span className="git-branch-name">Git unavailable</span>
         </button>
       </div>
@@ -289,16 +340,11 @@ export default function GitBranchSelector({ workspacePath, disabled = false, onB
         aria-controls="workspace-branch-menu"
         title={`${branchLabel}${info.isDirty ? ' — uncommitted changes' : ''}`}
       >
-        <svg className="git-branch-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <circle cx="6" cy="5" r="2" />
-          <circle cx="18" cy="6" r="2" />
-          <circle cx="6" cy="19" r="2" />
-          <path d="M6 7v10M8 7c2 4 8 1 8-1" />
-        </svg>
+        <BranchIcon className="git-branch-icon" width={14} height={14} />
         <span className="git-branch-name">{switchingBranch || branchLabel}</span>
         {info.isDirty && <span className="git-branch-dirty" aria-label="Uncommitted changes" />}
-        <svg className="git-branch-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="m6 9 6 6 6-6" />
+        <svg className="git-branch-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="6 9 12 15 18 9" />
         </svg>
       </button>
 
@@ -313,9 +359,9 @@ export default function GitBranchSelector({ workspacePath, disabled = false, onB
           {menuView === 'branches' && (
             <>
               <label className="git-branch-search">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="m20 20-4-4" />
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.3-4.3" />
                 </svg>
                 <input
                   autoFocus
@@ -339,12 +385,16 @@ export default function GitBranchSelector({ workspacePath, disabled = false, onB
                       disabled={Boolean(switchingBranch)}
                       onClick={() => handleSwitch(branch)}
                     >
-                      <span className="git-branch-option-icon" aria-hidden="true">⑂</span>
+                      <span className="git-branch-option-icon" aria-hidden="true">
+                        <BranchIcon width={14} height={14} />
+                      </span>
                       <span>{branch}</span>
                       {selected && (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="m5 12 4 4L19 6" />
-                        </svg>
+                        <span className="git-branch-option-check" aria-hidden="true">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        </span>
                       )}
                     </button>
                   )
@@ -365,7 +415,9 @@ export default function GitBranchSelector({ workspacePath, disabled = false, onB
                         onClick={() => handleRemoteCheckout(remoteBranch)}
                         title={`Create a local tracking branch from ${remoteBranch}`}
                       >
-                        <span className="git-branch-option-icon" aria-hidden="true">⇄</span>
+                        <span className="git-branch-option-icon" aria-hidden="true">
+                          <RemoteGlobeIcon width={14} height={14} />
+                        </span>
                         <span>{remoteBranch}</span>
                         <span className="git-branch-track-label">Track</span>
                       </button>
@@ -378,12 +430,12 @@ export default function GitBranchSelector({ workspacePath, disabled = false, onB
               )}
               <div className="git-branch-actions">
                 <button type="button" onClick={() => { setMenuView('create'); setError('') }}>
-                  <span aria-hidden="true">＋</span>
-                  Create branch
+                  <PlusIcon width={14} height={14} />
+                  <span>Create branch</span>
                 </button>
                 <button type="button" onClick={openGraph}>
-                  <span aria-hidden="true">⑂</span>
-                  Git graph
+                  <GitGraphIcon width={14} height={14} />
+                  <span>Git graph</span>
                 </button>
               </div>
             </>
@@ -392,7 +444,9 @@ export default function GitBranchSelector({ workspacePath, disabled = false, onB
           {menuView === 'create' && (
             <form className="git-branch-create" onSubmit={handleCreateBranch}>
               <div className="git-branch-view-header">
-                <button type="button" onClick={() => { setMenuView('branches'); setError('') }} aria-label="Back to branches">←</button>
+                <button type="button" onClick={() => { setMenuView('branches'); setError('') }} aria-label="Back to branches">
+                  <ChevronBackIcon width={14} height={14} />
+                </button>
                 <strong>Create branch</strong>
               </div>
               <label htmlFor="new-git-branch-name">Branch name</label>
@@ -415,7 +469,9 @@ export default function GitBranchSelector({ workspacePath, disabled = false, onB
           {menuView === 'graph' && (
             <div className="git-graph-view">
               <div className="git-branch-view-header">
-                <button type="button" onClick={() => { setMenuView('branches'); setError('') }} aria-label="Back to branches">←</button>
+                <button type="button" onClick={() => { setMenuView('branches'); setError('') }} aria-label="Back to branches">
+                  <ChevronBackIcon width={14} height={14} />
+                </button>
                 <strong>Git graph</strong>
                 <button type="button" className="git-graph-refresh" onClick={loadGraph} disabled={graphLoading}>Refresh</button>
               </div>

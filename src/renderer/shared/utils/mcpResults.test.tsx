@@ -112,3 +112,32 @@ it('renders warning banner with icon and accessible status', () => {
   expect(html).toContain('Model input was resized/compressed')
 })
 
+describe('artifacts-only mode', () => {
+  it('hides raw calls and discovery when in artifacts-only mode', () => {
+    const progress: any[] = [
+      { type: 'ToolDiscovery', data: { server: 'chrome-devtools', tool: 'navigate_page', message: 'Tool definition ready; preparing the command.' } },
+      { type: 'ToolStart', data: { callId: '1', action: 'mcp_tool', input: { server: 'chrome-devtools', tool: 'navigate_page' } } },
+      { type: 'ToolEnd', data: { callId: '1', action: 'mcp_tool', input: { server: 'chrome-devtools', tool: 'navigate_page' }, status: 'success', result: 'ok' } },
+    ]
+    const fullHtml = renderToStaticMarkup(<McpToolResults progress={progress} />)
+    expect(fullHtml).toContain('chrome-devtools/navigate_page')
+    expect(fullHtml).toContain('Completed')
+
+    const cleanHtml = renderToStaticMarkup(<McpToolResults progress={progress} mode="artifacts-only" />)
+    expect(cleanHtml).toBe('')
+  })
+
+  it('preserves artifacts and warnings in artifacts-only mode', () => {
+    const progress: any[] = [
+      { type: 'ToolStart', data: { callId: '1', action: 'mcp_tool', input: { server: 'chrome-devtools', tool: 'screenshot' } } },
+      { type: 'ToolArtifacts', data: { callId: '1', artifacts: [{ id: 'shot', kind: 'link', name: 'page.png', uri: 'https://example.com/shot.png' }], warnings: ['high resolution'] } },
+      { type: 'ToolEnd', data: { callId: '1', action: 'mcp_tool', input: { server: 'chrome-devtools', tool: 'screenshot' }, status: 'success', result: 'ok' } },
+    ]
+    const html = renderToStaticMarkup(<McpToolResults progress={progress} mode="artifacts-only" />)
+    expect(html).not.toContain('Completed')
+    expect(html).toContain('page.png')
+    expect(html).toContain('high resolution')
+  })
+})
+
+

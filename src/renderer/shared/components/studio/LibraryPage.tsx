@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { Library, RefreshCw, Search, Trash2, X } from 'lucide-react'
+import { Grid2X2, Grid3X3, Library, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import { libraryPlatform } from '../../platform'
 import { createLibraryController } from '../../library/controller'
 import { downloadLibraryFile } from '../../library/useLibraryFile'
@@ -22,12 +22,25 @@ export default function LibraryPage({ chatId, onClose, onOpenConversation }: {
   const [debounced, setDebounced] = useState('')
   const [scope, setScope] = useState('all')
   const [trashed, setTrashed] = useState(() => new URLSearchParams(location.search).get('trash') === '1')
+  const [gridSize, setGridSize] = useState<'normal' | 'large'>(() => {
+    try {
+      const saved = localStorage.getItem('mint:library:grid-size')
+      if (saved === 'normal' || saved === 'large') return saved
+    } catch { /* ignore */ }
+    return 'normal'
+  })
   const [linkedItem, setLinkedItem] = useState<LibraryItem | null>(null)
   const [preview, setPreview] = useState<LibraryItem | null>(null)
   const [downloadError, setDownloadError] = useState('')
   const [downloading, setDownloading] = useState('')
   const [navigation, setNavigation] = useState(0)
   const closePreview = useCallback(() => setPreview(null), [])
+  const updateGridSize = useCallback((size: 'normal' | 'large') => {
+    setGridSize(size)
+    try {
+      localStorage.setItem('mint:library:grid-size', size)
+    } catch { /* ignore */ }
+  }, [])
 
   useEffect(() => {
     const onNavigate = () => setNavigation(value => value + 1)
@@ -119,9 +132,39 @@ export default function LibraryPage({ chatId, onClose, onOpenConversation }: {
               <button key={value} type="button" data-filter={value || 'all'} aria-pressed={kind === value} onClick={() => setKind(value)}>{label}</button>
             ))}
           </div>
-          <button type="button" className="library-trash-toggle" data-view={trashed ? 'active' : 'trash'} aria-pressed={trashed} onClick={() => setTrashed(value => !value)}>
-            {trashed ? <Library size={15} /> : <Trash2 size={15} />} {trashed ? 'Back to library' : 'Trash'}
-          </button>
+          <div className="library-toolbar-actions">
+            {(kind === 'image' || kind === 'video') && (
+              <div className="library-grid-sizes" role="group" aria-label="Grid size">
+                <button
+                  type="button"
+                  className="library-size-toggle"
+                  data-grid-size="normal"
+                  aria-pressed={gridSize === 'normal'}
+                  title="Normal grid (3-4 columns)"
+                  aria-label="Normal grid"
+                  onClick={() => updateGridSize('normal')}
+                >
+                  <Grid3X3 size={15} />
+                  <span>Normal</span>
+                </button>
+                <button
+                  type="button"
+                  className="library-size-toggle"
+                  data-grid-size="large"
+                  aria-pressed={gridSize === 'large'}
+                  title="Large grid (2-3 columns)"
+                  aria-label="Large grid"
+                  onClick={() => updateGridSize('large')}
+                >
+                  <Grid2X2 size={15} />
+                  <span>Large</span>
+                </button>
+              </div>
+            )}
+            <button type="button" className="library-trash-toggle" data-view={trashed ? 'active' : 'trash'} aria-pressed={trashed} onClick={() => setTrashed(value => !value)}>
+              {trashed ? <Library size={15} /> : <Trash2 size={15} />} {trashed ? 'Back to library' : 'Trash'}
+            </button>
+          </div>
         </div>
         <div className="library-search-row">
           <label className="library-search">
@@ -146,7 +189,7 @@ export default function LibraryPage({ chatId, onClose, onOpenConversation }: {
             <p>{trashed ? 'Files you move to Trash can be restored here.' : 'Send an image, video, or file in a conversation to keep it here.'}</p>
           </div>
         ) : null}
-        <div className={`library-items ${kind === 'image' || kind === 'video' ? 'is-grid' : ''}`}>
+        <div className={`library-items ${kind === 'image' || kind === 'video' ? `is-grid is-grid-${gridSize}` : ''}`}>
           {visibleItems.map(item => (
             <LibraryItemCard key={item.id} item={item} linked={linkedItem?.id === item.id} trashed={trashed}
               actionPending={!!state.actionId} downloadPending={!!downloading}

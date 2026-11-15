@@ -6,7 +6,7 @@
   margin: 8px 12px;
   padding: 12px 14px;
   border: 1px solid var(--border, #303036);
-  border-radius: 12px;
+  border-radius: var(--radius-xl, 18px);
   background: var(--bg-overlay, #18181b);
   color: var(--text-main, #f4f4f5);
   overflow-wrap: anywhere;
@@ -19,7 +19,7 @@
   min-height: 32px;
   padding: 4px 10px;
   border: 1px solid var(--border, #303036);
-  border-radius: 8px;
+  border-radius: var(--radius-sm, 8px);
   background: transparent;
   color: inherit;
   cursor: pointer;

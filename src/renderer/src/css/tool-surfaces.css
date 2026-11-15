@@ -301,7 +301,7 @@ body.is-tool-resizing .assistant-workspace {
 
 .tool-surface-switch-menu .tool-surface-launcher-item kbd {
   padding: 3px 5px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs, 6px);
   font-size: 0.64rem;
 }
 
@@ -359,7 +359,7 @@ body.is-tool-resizing .assistant-workspace {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-full, 9999px);
   background: var(--bg-surface-hover);
   color: var(--text-main, #f1f5f9);
   font-size: 0.65rem;
@@ -447,8 +447,8 @@ body.is-tool-resizing .assistant-workspace {
 }
 
 .tool-surface-tabs-dropdown-item.is-active {
-  background: var(--accent-subtle);
-  color: var(--interactive-fg);
+  background: var(--bg-surface-active, var(--surface-strong));
+  color: var(--text-main, #f8fafc);
   font-weight: 550;
 }
 
@@ -474,7 +474,7 @@ body.is-tool-resizing .assistant-workspace {
   width: 20px;
   height: 20px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-2xs, 4px);
   background: transparent;
   color: var(--text-muted, #94a3b8);
   opacity: 0.5;
@@ -672,7 +672,7 @@ body.is-tool-resizing .assistant-workspace {
   height: 28px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 5px 0 0 5px;
+  border-radius: var(--radius-xs, 6px) 0 0 var(--radius-xs, 6px);
   color: var(--text-muted, #9ca3af);
   background: transparent;
   cursor: pointer;
@@ -821,7 +821,7 @@ body.is-tool-resizing .assistant-workspace {
   max-width: clamp(140px, 20vw, 320px);
   padding: 3px 9px;
   border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
-  border-radius: 9999px;
+  border-radius: var(--radius-full, 9999px);
   background: var(--bg-surface-soft);
   font: 500 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--text-muted, #94a3b8);
@@ -906,9 +906,9 @@ body.is-tool-resizing .assistant-workspace {
 .tool-surface-drop-error { color: var(--status-error); }
 .tool-surface-sources { width: 100%; height: 100%; min-width: 0; overflow-y: auto; padding: 12px; }
 .tool-surface-sources .session-sources { margin: 0; padding: 0; border: 0; }
-.tool-surface-menu-icon.is-sources, .tool-surface-tab-icon.is-sources { color: var(--accent); }
-.tool-surface-menu-icon.is-mods, .tool-surface-tab-icon.is-mods { color: var(--accent); }
-.tool-surface-menu-icon.is-background, .tool-surface-tab-icon.is-background { color: var(--accent); }
+.tool-surface-menu-icon.is-sources, .tool-surface-tab-icon.is-sources { color: var(--text-main, #e2e8f0); }
+.tool-surface-menu-icon.is-mods, .tool-surface-tab-icon.is-mods { color: var(--text-main, #e2e8f0); }
+.tool-surface-menu-icon.is-background, .tool-surface-tab-icon.is-background { color: var(--text-main, #e2e8f0); }
 
 .tool-surface-launcher {
   display: flex;
@@ -924,7 +924,7 @@ body.is-tool-resizing .assistant-workspace {
   gap: 12px;
   padding: 0 16px;
   border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
-  border-radius: 12px;
+  border-radius: var(--radius-xl, 18px);
   color: var(--text-main, #e2e8f0);
   background: var(--bg-surface-soft);
   text-align: left;
@@ -956,7 +956,7 @@ body.is-tool-resizing .assistant-workspace {
   margin-left: auto;
   padding: 3px 8px;
   border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.09));
-  border-radius: 6px;
+  border-radius: var(--radius-xs, 6px);
   color: var(--text-muted, #94a3b8);
   background: var(--bg-surface-soft);
   font: 500 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace;

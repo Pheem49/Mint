@@ -28,4 +28,26 @@ describe('Shared Tools entry point', () => {
     expect(shouldProbeOllamaModels({ activeProvider: 'ollama' } as any, {})).toBe(true)
     expect(shouldProbeOllamaModels({ activeProvider: 'gemini' } as any, { ollamaHost: 'http://localhost:11434' })).toBe(true)
   })
+
+  it('renders chat input with workspace drop and dragover handlers', () => {
+    installRendererPlatform(webAdapter)
+    const html = renderToStaticMarkup(createElement(ChatPanel, chatPanelFixture() as any))
+    expect(html).toContain('id="chat-form"')
+    expect(html).toContain('id="chat-input"')
+    expect(html).toContain('placeholder="Ask anything, @ to mention, / for actions"')
+  })
+
+  it('renders file reference directly in the chat input when message contains @reference', () => {
+    installRendererPlatform(webAdapter)
+    const fixture = chatPanelFixture()
+    const html = renderToStaticMarkup(createElement(ChatPanel, {
+      ...fixture,
+      conversation: {
+        ...fixture.conversation,
+        message: '@generate_harness_pdf.py ',
+      },
+    } as any))
+    expect(html).toContain('id="chat-input"')
+    expect(html).toContain('@generate_harness_pdf.py ')
+  })
 })

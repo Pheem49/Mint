@@ -11,12 +11,20 @@ export function createWorkspaceMediaReader(environment: {
   createObjectURL?: (blob: Blob) => string
 }) {
   return async (path: string, workspacePath: string): Promise<WorkspaceMediaSource> => {
+    let cleanPath = path
+    if (workspacePath) {
+      const normWorkspace = workspacePath.replace(/\\/g, '/').replace(/\/+$/, '')
+      const normPath = cleanPath.replace(/\\/g, '/')
+      if (normPath.startsWith(normWorkspace + '/')) {
+        cleanPath = normPath.slice(normWorkspace.length + 1)
+      }
+    }
     if (environment.isNative()) {
       const { invoke } = await import('@tauri-apps/api/core')
-      const source = await invoke<{ path: string; mimeType: string; byteLength: number }>('prepare_workspace_media', { path, workspacePath })
+      const source = await invoke<{ path: string; mimeType: string; byteLength: number }>('prepare_workspace_media', { path: cleanPath, workspacePath })
       return { url: environment.convertFileSrc(source.path), mimeType: source.mimeType, byteLength: source.byteLength, range: true }
     }
-    const response = await environment.fetch(`${environment.apiBase()}/file/media?${new URLSearchParams({ path, workspace: workspacePath })}`)
+    const response = await environment.fetch(`${environment.apiBase()}/file/media?${new URLSearchParams({ path: cleanPath, workspace: workspacePath })}`)
     if (!response.ok) { const value = await response.json().catch(() => ({})); throw Error(value.error || 'Could not read workspace media') }
     const mimeType = response.headers.get('Content-Type')?.split(';')[0] || ''
     if (!/^(application\/pdf|audio\/[\w.+-]+|video\/[\w.+-]+)$/.test(mimeType)) { await response.body?.cancel(); throw Error('Unsupported media response') }

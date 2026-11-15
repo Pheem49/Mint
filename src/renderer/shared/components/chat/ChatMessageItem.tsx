@@ -1,29 +1,38 @@
 import type { ArtifactFile } from '../../utils/artifacts'
-import React, { useMemo } from 'react'
+import React, { useMemo, useState, useRef, useCallback, useEffect } from 'react'
 import { FormattedMessage, renderCopyIcon, renderSpeakerIcon } from '../../utils/markdown'
 import { fallbackNotice } from '../../utils/providers'
 import McpToolResults from '../activity/McpToolResults'
 import ViewedImages from '../activity/ViewedImages'
 import { parseUtcDate } from '../../utils/ui'
 import { parseWebSearchSources } from '../../utils/agentActivity'
-import { EMPTY_AGENT_PROGRESS } from '../../agentProgress'
+import { EMPTY_AGENT_PROGRESS, hasAgentDrawerActivity, thoughtsFrom, extendedThoughtsFrom } from '../../agentProgress'
 import { AgentActivityDrawer } from '../activity/AgentActivityDrawer'
+import { ThinkingBlock } from './ThinkingBlock'
 import SourcesBlock from './SourcesBlock'
 import { TurnFileChanges, type RewindRequestPayload } from './TurnFileChanges'
 import { ToolResultCards } from '../cards/ToolResultCards'
+import { ArtifactCards } from './ArtifactCards'
+import { AttachedDocumentCard } from './AttachedDocumentCard'
+import { parseAttachedDocument } from '../../utils/attachedDocument'
 import ProviderBrandIcon from '../ui/ProviderBrandIcon'
 
 export interface ChatMessageItemProps {
   interaction: any
   copiedId: string | number | null
   onEditMessage?: (text: string) => void
+  onResendFrom?: (fromId: number, newPrompt: string) => void
   speakingText: string | null
   agentActivitySnapshots: Record<string, any[]>
   openActivityIds?: Record<string, boolean>
+  thinkingExpanded?: Record<string, boolean>
+  onThinkingExpandedChange?: (key: string, open: boolean) => void
   handleCopyMessage: (id: string | number, text: string) => void
   speak: (text: string) => void
   toggleActivity: (id: string) => void
   chatId?: string
+  workspacePath?: string
+  onReferenceFile?: (filePath: string) => void
   customProviders?: Array<{ id: string; displayName?: string; logoDataUrl?: string }>
   onOpenArtifact?: (artifact: ArtifactFile) => void
   onOpenReview?: () => void
@@ -37,9 +46,12 @@ const ChatMessageItem = React.memo(
       interaction,
       copiedId,
       onEditMessage,
+      onResendFrom,
       speakingText,
       agentActivitySnapshots,
       openActivityIds,
+      thinkingExpanded,
+      onThinkingExpandedChange,
       handleCopyMessage,
       speak,
       toggleActivity,
@@ -49,14 +61,75 @@ const ChatMessageItem = React.memo(
       onRewindError,
     } = props
 
+    const [isEditing, setIsEditing] = useState(false)
+    const [draftText, setDraftText] = useState(interaction.userText || '')
+    const inlineTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+    const parsedUserPrompt = useMemo(() => {
+      return parseAttachedDocument(interaction.userText)
+    }, [interaction.userText])
+
+    useEffect(() => {
+      setDraftText(parsedUserPrompt.userText || '')
+    }, [parsedUserPrompt.userText])
+
+    const resizeInlineTextarea = useCallback((el: HTMLTextAreaElement) => {
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 400)}px`
+    }, [])
+
+    const handleStartEdit = useCallback(() => {
+      setIsEditing(true)
+      setDraftText(parsedUserPrompt.userText || '')
+      requestAnimationFrame(() => {
+        if (inlineTextareaRef.current) {
+          inlineTextareaRef.current.focus()
+          const len = inlineTextareaRef.current.value.length
+          inlineTextareaRef.current.setSelectionRange(len, len)
+          resizeInlineTextarea(inlineTextareaRef.current)
+        }
+      })
+    }, [parsedUserPrompt.userText, resizeInlineTextarea])
+
+    const handleCancelEdit = useCallback(() => {
+      setIsEditing(false)
+      setDraftText(parsedUserPrompt.userText || '')
+    }, [parsedUserPrompt.userText])
+
+    const handleSaveAndResend = useCallback(() => {
+      const trimmed = draftText.trim()
+      if (!trimmed) return
+      setIsEditing(false)
+      if (onResendFrom) {
+        onResendFrom(Number(interaction.id), trimmed)
+      } else if (onEditMessage) {
+        onEditMessage(trimmed)
+      }
+    }, [draftText, interaction.id, onResendFrom, onEditMessage])
+
     const isSystemEvent = interaction.provider === 'system' && interaction.model === 'provider_change'
 
     const memoizedUserContent = useMemo(() => {
       if (!interaction.userText) return null
-      return <FormattedMessage text={interaction.userText} />
-    }, [interaction.userText])
+      const { userText, attachedDocument } = parsedUserPrompt
+      return (
+        <>
+          {userText && <FormattedMessage text={userText} />}
+          {attachedDocument && <AttachedDocumentCard document={attachedDocument} />}
+        </>
+      )
+    }, [interaction.userText, parsedUserPrompt])
 
     const progress = agentActivitySnapshots[String(interaction.id)] ?? interaction.agentActivity ?? EMPTY_AGENT_PROGRESS
+    const hasDrawerActivity = useMemo(() => hasAgentDrawerActivity(progress), [progress])
+    const extendedThoughts = useMemo(
+      () => (hasDrawerActivity ? [] : extendedThoughtsFrom(progress)),
+      [hasDrawerActivity, progress],
+    )
+    const shortThoughts = useMemo(
+      () => (hasDrawerActivity || extendedThoughts.length > 0 ? [] : thoughtsFrom(progress)),
+      [hasDrawerActivity, extendedThoughts.length, progress],
+    )
     const webSources = useMemo(() => parseWebSearchSources(progress), [progress])
     const memoizedAiContent = useMemo(() => {
       if (!interaction.aiText) return null
@@ -89,51 +162,122 @@ const ChatMessageItem = React.memo(
         {interaction.userText && (
           <div className="message user-message">
             <div className="bubble-wrapper">
-              <div className="message-bubble">{memoizedUserContent}</div>
-              <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>{parseUtcDate(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                <button
-                  type="button"
-                  className={`msg-action-btn copy-btn ${isUserCopied ? 'is-copied' : ''}`}
-                  onClick={() => handleCopyMessage(`user-${interaction.id}`, interaction.userText)}
-                  title={isUserCopied ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy)'}
-                >
-                  {renderCopyIcon(isUserCopied)}
-                </button>
-                {onEditMessage && interaction.provider !== 'system' && (
-                  <button
-                    type="button"
-                    className="msg-action-btn edit-btn"
-                    onClick={() => onEditMessage(interaction.userText)}
-                    title="แก้ไขและส่งใหม่ (Edit & resend)"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 20h9"></path>
-                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                    </svg>
-                  </button>
-                )}
-              </div>
+              {isEditing ? (
+                <div className="inline-edit-container">
+                  <textarea
+                    ref={inlineTextareaRef}
+                    className="inline-edit-textarea"
+                    value={draftText}
+                    onChange={(e) => {
+                      setDraftText(e.target.value)
+                      resizeInlineTextarea(e.currentTarget)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        e.preventDefault()
+                        handleCancelEdit()
+                      } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                        e.preventDefault()
+                        handleSaveAndResend()
+                      }
+                    }}
+                    rows={2}
+                    placeholder="Edit message..."
+                  />
+                  <div className="inline-edit-footer">
+                    <span className="inline-edit-hint">Esc to cancel · Ctrl+Enter to save</span>
+                    <div className="inline-edit-actions">
+                      <button
+                        type="button"
+                        className="inline-edit-btn cancel"
+                        onClick={handleCancelEdit}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-edit-btn submit"
+                        onClick={handleSaveAndResend}
+                        disabled={!draftText.trim()}
+                      >
+                        Save &amp; Resend
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="message-bubble">{memoizedUserContent}</div>
+                  <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>{parseUtcDate(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <button
+                      type="button"
+                      className={`msg-action-btn copy-btn ${isUserCopied ? 'is-copied' : ''}`}
+                      onClick={() => handleCopyMessage(`user-${interaction.id}`, parsedUserPrompt.userText || interaction.userText)}
+                      title={isUserCopied ? 'Copied!' : 'Copy'}
+                    >
+                      {renderCopyIcon(isUserCopied)}
+                    </button>
+                    {(onResendFrom || onEditMessage) && interaction.provider !== 'system' && (
+                      <button
+                        type="button"
+                        className="msg-action-btn edit-btn"
+                        onClick={handleStartEdit}
+                        title="Edit & resend"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 20h9"></path>
+                          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
         <div className="message ai-message">
           <div className="bubble-wrapper">
-            {interaction.status !== 'queued' && interaction.status !== 'running' && (
+            {interaction.status !== 'queued' && hasDrawerActivity && (
               <AgentActivityDrawer
                 progress={progress}
                 id={String(interaction.id)}
-                historical
-                isOpen={Boolean(openActivityIds?.[String(interaction.id)])}
+                historical={interaction.status !== 'running'}
+                defaultOpen={interaction.status === 'running'}
+                isOpen={openActivityIds?.[String(interaction.id)] ?? (interaction.status === 'running')}
                 onToggle={toggleActivity}
                 chatId={props.chatId || interaction.chatId}
+                workspacePath={props.workspacePath}
+                onReferenceFile={props.onReferenceFile}
                 onOpenArtifact={onOpenArtifact}
+              />
+            )}
+            {interaction.status !== 'queued' && !hasDrawerActivity && extendedThoughts.length > 0 && (
+              <ThinkingBlock
+                blockKey={`extended-${interaction.id}`}
+                thoughts={extendedThoughts}
+                isLive={interaction.status === 'running'}
+                variant="extended"
+                expanded={thinkingExpanded?.[`extended-${interaction.id}`]}
+                onExpandedChange={onThinkingExpandedChange}
+              />
+            )}
+            {interaction.status !== 'queued' && !hasDrawerActivity && shortThoughts.length > 0 && (
+              <ThinkingBlock
+                blockKey={String(interaction.id)}
+                thoughts={shortThoughts}
+                isLive={interaction.status === 'running'}
+                expanded={thinkingExpanded?.[String(interaction.id)]}
+                onExpandedChange={onThinkingExpandedChange}
               />
             )}
             {interaction.status !== 'queued' && interaction.status !== 'running' && (
               <TurnFileChanges
                 progress={progress}
                 interaction={interaction}
+                workspacePath={props.workspacePath}
+                onReferenceFile={props.onReferenceFile}
                 onOpenArtifact={onOpenArtifact}
                 onOpenReview={onOpenReview}
                 onRewindRequest={onRewindRequest}
@@ -145,9 +289,10 @@ const ChatMessageItem = React.memo(
               {interaction.status === 'running' && <span>Mint is responding…</span>}
               {interaction.status === 'failed' && <span>This turn failed. Send the prompt again to retry.</span>}
               {interaction.status === 'interrupted' && <span>This turn was interrupted. Send the prompt again to retry.</span>}
-              <McpToolResults progress={progress} running={interaction.status === 'running'} interrupted={interaction.status === 'interrupted'} chatId={props.chatId || interaction.chatId} />
+              <McpToolResults progress={progress} running={interaction.status === 'running'} interrupted={interaction.status === 'interrupted'} chatId={props.chatId || interaction.chatId} mode="artifacts-only" />
               <ViewedImages progress={progress} chatId={props.chatId || interaction.chatId} onOpenArtifact={onOpenArtifact} />
               <ToolResultCards progress={progress} aiText={interaction.aiText} />
+              <ArtifactCards progress={progress} aiText={interaction.aiText} workspacePath={interaction.workspace || undefined} onOpenArtifact={onOpenArtifact} />
               {memoizedAiContent}
             </div>
             {webSources.length > 0 && <SourcesBlock sources={webSources} />}
@@ -165,7 +310,7 @@ const ChatMessageItem = React.memo(
                   type="button"
                   className={`msg-action-btn copy-btn ${isAiCopied ? 'is-copied' : ''}`}
                   onClick={() => handleCopyMessage(interaction.id, interaction.aiText)}
-                  title={isAiCopied ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
+                  title={isAiCopied ? 'Copied!' : 'Copy message'}
                 >
                   {renderCopyIcon(isAiCopied)}
                 </button>
@@ -187,6 +332,7 @@ const ChatMessageItem = React.memo(
   (prevProps, nextProps) => {
     if (
       prevProps.onEditMessage !== nextProps.onEditMessage ||
+      prevProps.onResendFrom !== nextProps.onResendFrom ||
       prevProps.handleCopyMessage !== nextProps.handleCopyMessage ||
       prevProps.speak !== nextProps.speak ||
       prevProps.toggleActivity !== nextProps.toggleActivity ||

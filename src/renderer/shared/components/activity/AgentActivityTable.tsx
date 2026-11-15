@@ -1,10 +1,25 @@
 import type { ArtifactFile } from '../../utils/artifacts'
 import { Fragment, useState } from 'react'
-import type { AgentActivityView, AgentActivity, AgentActivityGroup, TimelineItem } from '../../utils/agentActivity'
-import { cleanIntermediateThought, groupActivities } from '../../utils/agentActivity'
+import type { AgentActivityView, AgentActivity, AgentActivityGroup, TimelineItem, DirectoryEntryItem } from '../../utils/agentActivity'
+import {
+  cleanIntermediateThought,
+  groupActivities,
+  isMarkdownContent,
+  cleanMarkdownOutput,
+  cleanCommandOutput,
+  parseDirectoryEntries,
+  formatFileSize,
+  summarizeDirectoryListing,
+  isAskUserActivity,
+  extractAskUserQuestions,
+} from '../../utils/agentActivity'
 import { materialFileIcon, materialFolderIcon, getExtension } from '../../utils/fileIcons'
 import { renderFormattedMessage } from '../../utils/markdown'
 import { ViewedImage } from './ViewedImages'
+import { AskUserActivityCard } from './AskUserActivityCard'
+import type { AgentProgress } from '../../types'
+import McpToolResults from './McpToolResults'
+import { setWorkspaceDragData, isImageFileName } from '../../utils/workspaceDrag'
 
 export function InlineThoughtNote({ thought }: { thought: string }) {
   const cleaned = cleanIntermediateThought(thought)
@@ -32,7 +47,10 @@ import {
 
 interface Props {
   activityView: AgentActivityView
+  progress?: AgentProgress[]
   chatId?: string
+  workspacePath?: string
+  onReferenceFile?: (filePath: string) => void
   onOpenArtifact?: (artifact: ArtifactFile) => void
 }
 
@@ -43,34 +61,51 @@ function getFilename(target: string): string {
 }
 
 function renderActivityIcon(kind: AgentActivity['kind'], target: string, action?: string) {
-  if (kind === 'file') {
+  const isFile =
+    kind === 'file' ||
+    action === 'read_file' ||
+    action === 'write_file' ||
+    action === 'edit_file' ||
+    action === 'apply_patch' ||
+    action === 'apply_code_edits'
+
+  if (isFile) {
     const filename = getFilename(target)
     const ext = getExtension(filename)
     const icon = materialFileIcon(filename, ext)
     if (icon) return <img src={icon} alt="" draggable={false} className="agent-activity-icon-img" />
-    return <FileCode size={14} className="agent-activity-kind-icon" />
+    return <FileCode size={16} className="agent-activity-kind-icon" />
   }
-  if (kind === 'folder') {
+  if (kind === 'folder' || action === 'list_files' || action === 'list_directory' || action === 'list_dir') {
     const foldername = getFilename(target)
     const icon = materialFolderIcon(foldername, false)
     if (icon) return <img src={icon} alt="" draggable={false} className="agent-activity-icon-img" />
-    return <Folder size={14} className="agent-activity-kind-icon" />
+    return <Folder size={16} className="agent-activity-kind-icon" />
   }
   if (kind === 'calc' || action === 'calculation') {
-    return <Calculator size={14} className="agent-activity-kind-icon" />
+    return <Calculator size={16} className="agent-activity-kind-icon" />
   }
   if (kind === 'search') {
-    return <Search size={14} className="agent-activity-kind-icon" />
+    return <Search size={16} className="agent-activity-kind-icon" />
   }
   if (kind === 'terminal') {
-    return <Terminal size={14} className="agent-activity-kind-icon" />
+    return <Terminal size={16} className="agent-activity-kind-icon" />
   }
-  return <Wrench size={14} className="agent-activity-kind-icon" />
+  return <Wrench size={16} className="agent-activity-kind-icon" />
 }
 
 function extractResultPreview(action: string | undefined, result: string | undefined): string | null {
   if (!result || !result.trim() || action === 'view_image') return null
-  const firstLine = result.trim().split('\n')[0].trim()
+  // Do not show inline raw text preview for file operations (filename and diff stats are already shown)
+  if (action === 'read_file' || action === 'write_file' || action === 'edit_file' || action === 'apply_patch') return null
+  if (action === 'list_files' || action === 'list_directory' || action === 'list_dir') {
+    const summary = summarizeDirectoryListing(result)
+    if (summary) return `→ ${summary}`
+  }
+  const cleaned = cleanCommandOutput(result)
+  const firstLine = cleaned.trim().split('\n')[0].trim()
+  // Filter out JSON brackets, objects, or errors
+  if (firstLine.startsWith('[') || firstLine.startsWith('{') || firstLine.startsWith('Error:') || firstLine === '(no output)') return null
   if (action === 'calculation') {
     const eqIdx = firstLine.indexOf('=')
     if (eqIdx !== -1) {
@@ -78,7 +113,7 @@ function extractResultPreview(action: string | undefined, result: string | undef
       if (val.length > 0 && val.length < 30) return `→ ${val}`
     }
   }
-  if (firstLine.length > 0 && firstLine.length <= 35 && !firstLine.startsWith('Error:') && !firstLine.startsWith('{')) {
+  if (firstLine.length > 0 && firstLine.length <= 35) {
     return `→ ${firstLine}`
   }
   return null
@@ -86,7 +121,7 @@ function extractResultPreview(action: string | undefined, result: string | undef
 
 function renderStatusIndicator(state: AgentActivity['state']) {
   if (state === 'active') {
-    return <Loader2 size={12} className="agent-activity-status-spin" />
+    return <Loader2 size={13} className="agent-activity-status-spin" />
   }
   if (state === 'retry') {
     return <span className="agent-activity-badge retry" title="Encountered an error but agent retried">Retried</span>
@@ -94,10 +129,109 @@ function renderStatusIndicator(state: AgentActivity['state']) {
   if (state === 'error') {
     return <span className="agent-activity-badge error" title="Action failed">Failed</span>
   }
-  return <Check size={12} className="agent-activity-status-check" />
+  return <Check size={13} className="agent-activity-status-check" />
 }
 
-export function AgentActivityTable({ activityView, chatId, onOpenArtifact }: Props) {
+function DirectoryListingView({
+  entries,
+  workspacePath,
+  onReferenceFile,
+}: {
+  entries: DirectoryEntryItem[]
+  workspacePath?: string
+  onReferenceFile?: (filePath: string) => void
+}) {
+  if (entries.length === 0) {
+    return <div className="modern-directory-empty">(empty directory)</div>
+  }
+
+  const getEntryName = (e: DirectoryEntryItem): string => {
+    if (e.name) return e.name
+    if (e.path) {
+      const parts = e.path.split(/[/\\]/)
+      return parts[parts.length - 1] || e.path
+    }
+    return ''
+  }
+
+  return (
+    <div className="modern-directory-listing" role="list">
+      {entries.map((entry, idx) => {
+        const name = getEntryName(entry)
+        const kind = (entry.kind || '').toLowerCase()
+        const isDir = kind === 'directory' || kind === 'dir' || kind === 'folder'
+        const ext = isDir ? '' : getExtension(name)
+
+        let iconSrc: string | null = null
+        if (isDir) {
+          iconSrc = materialFolderIcon(name, false)
+        } else {
+          iconSrc = materialFileIcon(name, ext)
+        }
+
+        const sizeStr = !isDir ? formatFileSize(entry.size) : ''
+        const fullPath = entry.path || name
+
+        return (
+          <div
+            key={`${name}-${idx}`}
+            className={`modern-directory-item ${isDir ? 'is-directory' : 'is-file'}`}
+            role="listitem"
+            title={fullPath}
+          >
+            <span className="modern-directory-item-icon" aria-hidden="true">
+              {iconSrc ? (
+                <img src={iconSrc} alt="" draggable={false} className="agent-activity-icon-img" />
+              ) : isDir ? (
+                <Folder size={15} className="agent-activity-kind-icon" />
+              ) : (
+                <FileCode size={15} className="agent-activity-kind-icon" />
+              )}
+            </span>
+
+            <span
+              className="modern-directory-item-name"
+              draggable={!isDir}
+              onDragStart={
+                !isDir
+                  ? (e) => {
+                      e.stopPropagation()
+                      setWorkspaceDragData(e.dataTransfer, {
+                        path: fullPath,
+                        root: workspacePath,
+                        kind: 'file',
+                      })
+                    }
+                  : undefined
+              }
+            >
+              {name}{isDir ? '/' : ''}
+            </span>
+
+            {sizeStr && <span className="modern-directory-item-size">{sizeStr}</span>}
+
+            {onReferenceFile && !isDir && (
+              <button
+                type="button"
+                className="agent-activity-mention-btn modern-dir-mention-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onReferenceFile(fullPath)
+                }}
+                title={`Reference in chat: ${name}`}
+                aria-label={`Reference ${name} in chat`}
+              >
+                @
+              </button>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+export function AgentActivityTable({ activityView, progress, chatId, workspacePath, onReferenceFile, onOpenArtifact }: Props) {
   const groups: AgentActivityGroup[] = activityView.groups || groupActivities(activityView.items)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const [expandedIndices, setExpandedIndices] = useState<Record<string, boolean>>({})
@@ -117,156 +251,268 @@ export function AgentActivityTable({ activityView, chatId, onOpenArtifact }: Pro
   }
 
   const renderSingleItem = (activity: AgentActivity, itemKey: string) => {
+    if (isAskUserActivity(activity)) {
+      const isAnswered =
+        activity.state === 'done' ||
+        Boolean(activity.askUserData?.questions.some((q) => Boolean(q.answer))) ||
+        activity.target.startsWith('(Answered:') ||
+        Boolean(activity.result?.startsWith('User answered:'))
+      if (isAnswered) {
+        const questions = extractAskUserQuestions(activity)
+        if (questions.length > 0) {
+          return (
+            <AskUserActivityCard
+              key={itemKey}
+              questions={questions}
+              header={activity.askUserData?.header}
+            />
+          )
+        }
+      }
+    }
+
     const isItemExpanded = Boolean(expandedIndices[itemKey])
     const output = activity.result?.trim()
     const inlineResult = extractResultPreview(activity.action, output)
+    const isFileAction =
+      activity.kind === 'file' ||
+      activity.action === 'write_file' ||
+      activity.action === 'edit_file' ||
+      activity.action === 'read_file'
+    const isFolderAction =
+      activity.kind === 'folder' ||
+      activity.action === 'list_files' ||
+      activity.action === 'list_directory' ||
+      activity.action === 'list_dir'
+    const hasIcon = isFileAction || isFolderAction
+    const isCommand =
+      activity.action === 'run_shell' ||
+      activity.action === 'run_command' ||
+      activity.action === 'bash' ||
+      activity.kind === 'terminal'
+
+    const cleanTarget = activity.target ? activity.target.split(' #')[0].trim() : ''
+    const fileName = getFilename(cleanTarget)
+
+    const verb =
+      activity.semanticVerb ||
+      (isCommand
+        ? 'Ran'
+        : isFolderAction
+          ? 'Explored'
+          : isFileAction
+            ? activity.action === 'read_file'
+              ? 'Analyzed'
+              : 'Edited'
+            : activity.label || activity.action || 'Executed')
 
     return (
       <Fragment key={itemKey}>
         <div
-          className="agent-activity-item"
+          className={`agent-activity-item modern-timeline-row ${isItemExpanded ? 'is-expanded' : ''}`}
           data-kind={activity.kind}
           data-state={activity.state}
           style={{ cursor: output ? 'pointer' : 'default' }}
           onClick={() => output && toggleExpandItem(itemKey)}
         >
-          <span className="agent-activity-icon-wrap" aria-hidden="true">
-            {renderActivityIcon(activity.kind, activity.target, activity.action)}
-          </span>
-          <span className="agent-activity-label">
-            <span className="agent-activity-tool-name">{activity.label || activity.action}</span>
-          </span>
+          <span className="modern-timeline-verb">{verb}</span>
+
+          {hasIcon && (
+            <span className="modern-timeline-icon-wrap" aria-hidden="true">
+              {renderActivityIcon(activity.kind, cleanTarget, activity.action)}
+            </span>
+          )}
+
           <span
-            className="agent-activity-text"
-            title={activity.target}
-            style={isItemExpanded ? { whiteSpace: 'normal', wordBreak: 'break-all', overflow: 'visible', textOverflow: 'clip' } : undefined}
+            className={`agent-activity-text modern-timeline-target ${isFileAction ? 'is-file-target' : ''}`}
+            title={
+              isFileAction
+                ? `Drag file to chat or click @ to reference: ${cleanTarget}`
+                : activity.target
+            }
           >
-            <span className="agent-activity-target-text">{activity.target}</span>
+            <span
+              className={`agent-activity-target-text ${isFileAction ? 'is-file-target' : ''}`}
+              draggable={isFileAction}
+              onDragStart={
+                isFileAction
+                  ? (e) => {
+                      e.stopPropagation()
+                      setWorkspaceDragData(e.dataTransfer, {
+                        path: cleanTarget,
+                        root: workspacePath,
+                        kind: 'file',
+                      })
+                    }
+                  : undefined
+              }
+            >
+              {isFileAction ? fileName : (activity.intentTitle || activity.target)}
+            </span>
+
+            {activity.lineRange && (
+              <span className="modern-timeline-line-range">{activity.lineRange}</span>
+            )}
+
+            {activity.diffStats &&
+              (activity.diffStats.additions > 0 || activity.diffStats.deletions > 0) && (
+                <span className="modern-timeline-diff-stats">
+                  {activity.diffStats.additions > 0 && (
+                    <span className="diff-stat-add">+{activity.diffStats.additions}</span>
+                  )}
+                  {activity.diffStats.deletions > 0 && (
+                    <span className="diff-stat-del">-{activity.diffStats.deletions}</span>
+                  )}
+                </span>
+              )}
+
             {inlineResult && <span className="agent-activity-inline-result">{inlineResult}</span>}
           </span>
-          <span className="agent-activity-status-col">
+
+          <span className="agent-activity-status-col modern-timeline-status-col">
+            {onReferenceFile && isFileAction && cleanTarget && (
+              <button
+                type="button"
+                className="agent-activity-mention-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onReferenceFile(cleanTarget)
+                }}
+                title={`Reference in chat: ${fileName}`}
+                aria-label={`Reference ${fileName} in chat`}
+              >
+                @
+              </button>
+            )}
             {renderStatusIndicator(activity.state)}
             {output && (
-              <span
-                className={`agent-activity-chevron${isItemExpanded ? ' is-open' : ''}`}
+              <ChevronRight
+                size={12}
+                className={`modern-timeline-chevron${isItemExpanded ? ' is-open' : ''}`}
                 aria-hidden="true"
-              >
-                <ChevronRight size={12} strokeWidth={2.2} />
-              </span>
+              />
             )}
           </span>
         </div>
         {activity.viewedImage && (
           <div className="agent-activity-inline-preview">
-            <ViewedImage image={activity.viewedImage} chatId={chatId} variant="inline" onOpenArtifact={onOpenArtifact} />
+            <ViewedImage
+              image={activity.viewedImage}
+              chatId={chatId}
+              variant="inline"
+              onOpenArtifact={onOpenArtifact}
+            />
           </div>
         )}
         {isItemExpanded && output && (
-          <div className="agent-activity-output">
-            {output.includes('[Self-Correction Guidance]') ? (
-              <>
-                {output.split('[Self-Correction Guidance]')[0]?.trim() && (
-                  <pre>{output.split('[Self-Correction Guidance]')[0]?.trim()}</pre>
-                )}
-                <div className="diagnostic-guidance-card">
-                  <div className="diagnostic-guidance-header">
-                    <span>💡 Self-Correction Guidance</span>
-                  </div>
-                  <pre>{output.split('[Self-Correction Guidance]')[1]?.trim()}</pre>
-                </div>
-              </>
-            ) : (
-              <pre>{output}</pre>
-            )}
-          </div>
+          isMarkdownContent(activity.action, activity.target, output) ? (
+            <div className="agent-activity-thought-body modern-thought-body modern-timeline-prose">
+              {renderFormattedMessage(cleanMarkdownOutput(output)) ?? output}
+            </div>
+          ) : (
+            <div className="agent-activity-output modern-timeline-output">
+              {(() => {
+                const isDirAction =
+                  activity.action === 'list_files' ||
+                  activity.action === 'list_directory' ||
+                  activity.action === 'list_dir' ||
+                  activity.kind === 'folder'
+                const dirEntries = isDirAction ? parseDirectoryEntries(output) : null
+                if (dirEntries) {
+                  return (
+                    <DirectoryListingView
+                      entries={dirEntries}
+                      workspacePath={workspacePath}
+                      onReferenceFile={onReferenceFile}
+                    />
+                  )
+                }
+
+                if (output.includes('[Self-Correction Guidance]')) {
+                  return (
+                    <>
+                      {output.split('[Self-Correction Guidance]')[0]?.trim() && (
+                        <pre>{cleanCommandOutput(output.split('[Self-Correction Guidance]')[0]?.trim())}</pre>
+                      )}
+                      <div className="diagnostic-guidance-card">
+                        <div className="diagnostic-guidance-header">
+                          <span>💡 Self-Correction Guidance</span>
+                        </div>
+                        <pre>{output.split('[Self-Correction Guidance]')[1]?.trim()}</pre>
+                      </div>
+                    </>
+                  )
+                }
+
+                return <pre>{cleanCommandOutput(output)}</pre>
+              })()}
+            </div>
+          )
         )}
       </Fragment>
     )
   }
 
   const renderGroup = (group: AgentActivityGroup) => {
+    if (group.action === 'ask_user') {
+      const isAnswered =
+        group.state === 'done' ||
+        group.items.some(
+          (it) =>
+            Boolean(it.askUserData?.questions.some((q) => Boolean(q.answer))) ||
+            it.target.startsWith('(Answered:') ||
+            Boolean(it.result?.startsWith('User answered:')),
+        )
+      if (isAnswered) {
+        const questions = group.items.flatMap(extractAskUserQuestions)
+        if (questions.length > 0) {
+          return <AskUserActivityCard key={group.id} questions={questions} />
+        }
+      }
+    }
+
     const isGroupExpanded = Boolean(expandedGroups[group.id])
+    const verb =
+      group.semanticVerb ||
+      (group.action?.includes('shell') || group.action?.includes('command')
+        ? 'Ran'
+        : group.label || group.action || 'Executed')
 
     return (
-      <div key={group.id} className="agent-activity-group">
+      <div key={group.id} className="agent-activity-group modern-timeline-group">
         <div
-          className={`agent-activity-group-header${isGroupExpanded ? ' is-expanded' : ''}`}
+          className={`agent-activity-group-header modern-timeline-row modern-group-row${isGroupExpanded ? ' is-expanded' : ''}`}
           data-state={group.state}
           onClick={() => toggleGroup(group.id)}
         >
-          <span className="agent-activity-icon-wrap" aria-hidden="true">
-            {renderActivityIcon(group.kind, group.items[0]?.target, group.action)}
-          </span>
-          <span className="agent-activity-group-title">
+          <span className="modern-timeline-verb">{verb}</span>
+          <span className="agent-activity-group-title modern-timeline-target">
             {group.title}
           </span>
-          <span className="agent-activity-group-badges">
-            <span className="agent-activity-count-badge">
+          <span className="modern-timeline-status-col">
+            <span className="modern-timeline-count-badge">
               {group.count}
             </span>
             {renderStatusIndicator(group.state)}
-            <span
-              className={`agent-activity-chevron${isGroupExpanded ? ' is-open' : ''}`}
+            <ChevronRight
+              size={12}
+              className={`modern-timeline-chevron${isGroupExpanded ? ' is-open' : ''}`}
               aria-hidden="true"
-            >
-              <ChevronRight size={13} strokeWidth={2.2} />
-            </span>
+            />
           </span>
         </div>
 
         {isGroupExpanded && (
-          <div className="agent-activity-group-subitems">
+          <div className="agent-activity-group-subitems modern-group-subitems">
             {group.items.map((activity, itemIdx) => {
               const itemKey = `${group.id}-${itemIdx}-${activity.target}`
-              const isItemExpanded = Boolean(expandedIndices[itemKey])
-              const output = activity.result?.trim()
-              const inlineResult = extractResultPreview(activity.action, output)
-
-              return (
-                <Fragment key={itemKey}>
-                  <div
-                    className="agent-activity-subitem"
-                    data-state={activity.state}
-                    style={{ cursor: output ? 'pointer' : 'default' }}
-                    onClick={() => output && toggleExpandItem(itemKey)}
-                  >
-                    <span className="agent-activity-tree-bullet" aria-hidden="true">
-                      {itemIdx === group.items.length - 1 ? '└─' : '├─'}
-                    </span>
-                    <span
-                      className="agent-activity-subitem-target"
-                      title={activity.target}
-                    >
-                      {activity.target}
-                    </span>
-                    {inlineResult && (
-                      <span className="agent-activity-inline-result">{inlineResult}</span>
-                    )}
-                    <span className="agent-activity-subitem-status">
-                      {renderStatusIndicator(activity.state)}
-                      {output && (
-                        <span
-                          className={`agent-activity-chevron${isItemExpanded ? ' is-open' : ''}`}
-                          aria-hidden="true"
-                        >
-                          <ChevronRight size={11} strokeWidth={2.2} />
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  {activity.viewedImage && (
-                    <div className="agent-activity-inline-preview agent-activity-subitem-preview">
-                      <ViewedImage image={activity.viewedImage} chatId={chatId} variant="inline" onOpenArtifact={onOpenArtifact} />
-                    </div>
-                  )}
-                  {isItemExpanded && output && (
-                    <div className="agent-activity-output agent-activity-subitem-output">
-                      <pre>{output}</pre>
-                    </div>
-                  )}
-                </Fragment>
-              )
+              return renderSingleItem(activity, itemKey)
             })}
+            {group.action === 'mcp_tool' && progress && (
+              <div className="agent-activity-mcp-details" style={{ padding: '4px 12px 10px 24px' }}>
+                <McpToolResults progress={progress} chatId={chatId} mode="artifacts-only" />
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -274,7 +520,7 @@ export function AgentActivityTable({ activityView, chatId, onOpenArtifact }: Pro
   }
 
   return (
-    <div className="agent-activity-list">
+    <div className="agent-activity-list modern-activity-list">
       {activityView.timeline && activityView.timeline.length > 0
         ? activityView.timeline.map((item, idx) => {
             if (item.kind === 'thought') {
@@ -283,34 +529,30 @@ export function AgentActivityTable({ activityView, chatId, onOpenArtifact }: Pro
             if (item.kind === 'extendedThinking') {
               const itemKey = item.id || `ext-thought-${idx}`
               const isThoughtExpanded = expandedIndices[itemKey] ?? Boolean(item.streaming)
+              const thoughtSecs = item.elapsedMs ? `${Math.max(1, Math.round(item.elapsedMs / 1000))}s` : ''
+              const thoughtTitle = item.streaming
+                ? 'Thinking…'
+                : thoughtSecs
+                  ? `Thought for ${thoughtSecs}`
+                  : 'Thought'
+
               return (
-                <div key={itemKey} className="agent-activity-thought-step">
+                <div key={itemKey} className="agent-activity-thought-step modern-timeline-thought-item">
                   <div
-                    className={`agent-activity-thought-header${isThoughtExpanded ? ' is-expanded' : ''}`}
+                    className={`agent-activity-thought-header modern-timeline-row modern-thought-row${isThoughtExpanded ? ' is-expanded' : ''}`}
                     onClick={() => toggleExpandItem(itemKey, Boolean(item.streaming))}
                   >
-                    <span className="agent-activity-icon-wrap" aria-hidden="true">
-                      <Brain size={14} className="agent-activity-kind-icon" />
-                    </span>
-                    <span className="agent-activity-thought-title">
-                      Thought
-                      <span className="agent-activity-thought-meta">
-                        {item.streaming
-                          ? ' · Thinking…'
-                          : item.elapsedMs != null
-                            ? ` · ${(item.elapsedMs / 1000).toFixed(1)}s`
-                            : ''}
-                      </span>
-                    </span>
-                    <span
-                      className={`agent-activity-chevron${isThoughtExpanded ? ' is-open' : ''}`}
-                      aria-hidden="true"
-                    >
-                      <ChevronRight size={13} strokeWidth={2.2} />
+                    <span className="modern-timeline-thought-label">
+                      {thoughtTitle}
+                      <ChevronRight
+                        size={12}
+                        className={`modern-timeline-chevron inline-chevron${isThoughtExpanded ? ' is-open' : ''}`}
+                        aria-hidden="true"
+                      />
                     </span>
                   </div>
                   {isThoughtExpanded && (
-                    <div className="agent-activity-thought-body">
+                    <div className="agent-activity-thought-body modern-thought-body">
                       {item.streaming
                         ? <>{item.thought}<span className="agent-activity-thought-cursor">▍</span></>
                         : (renderFormattedMessage(item.thought) ?? item.thought)}

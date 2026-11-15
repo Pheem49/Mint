@@ -19,6 +19,8 @@ const MermaidCard = lazy(() => import('../components/cards/MermaidCard'))
 const UiGridCard = lazy(() => import('../components/cards/UiGridCard'))
 const UiFeatureCard = lazy(() => import('../components/cards/UiFeatureCard'))
 const UiMockupWidget = lazy(() => import('../components/cards/UiMockupWidget'))
+import { ReleaseNotesCard } from '../components/cards/ReleaseNotesCard'
+import { materialFileIcon, getExtension } from './fileIcons'
 import {
   Info,
   Lightbulb,
@@ -215,6 +217,47 @@ function highlightMentions(node: ReactNode, keyPrefix = 'm'): ReactNode {
     return parts.map((part, i) => {
       if (i % 2 === 1) {
         if (part.startsWith('@')) {
+          const rawName = part.slice(1)
+          const ext = getExtension(rawName)
+          if (ext) {
+            const iconUrl = materialFileIcon(rawName, ext)
+            return (
+              <span
+                key={`${keyPrefix}-${i}`}
+                className="chat-mention chat-file-mention"
+                title={rawName}
+              >
+                {iconUrl ? (
+                  <img
+                    src={iconUrl}
+                    alt=""
+                    width="13"
+                    height="13"
+                    style={{ width: 13, height: 13, flexShrink: 0, objectFit: 'contain' }}
+                    aria-hidden="true"
+                    draggable={false}
+                  />
+                ) : (
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ flexShrink: 0 }}
+                    aria-hidden="true"
+                  >
+                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                )}
+                <span>{rawName}</span>
+              </span>
+            )
+          }
           return (
             <span key={`${keyPrefix}-${i}`} className="chat-mention">
               {part}
@@ -259,18 +302,20 @@ function findCodeHastNode(preNode: unknown): { properties?: { className?: unknow
 /** Clones each `<li>` child with `ordered`/`index` props so `li` can render a bullet or a number without shared state. */
 function tagListItems(children: ReactNode, opts: { ordered: boolean; start?: number }): ReactNode {
   // `Children.toArray` can include stray whitespace text nodes between <li> siblings (from
-  // loose-list formatting) — those must not consume a number, so index only real elements.
+  // loose-list formatting) — filter those out so they don't produce extra blank lines in pre-wrap.
   let n = 0
-  return Children.toArray(children).map((child) => {
-    if (!isValidElement(child)) return child
-    const index = (opts.start ?? 1) + n
-    n += 1
-    return cloneElement(child as ReactElement<{ ordered?: boolean; index?: number }>, {
-      key: child.key ?? index,
-      ordered: opts.ordered,
-      index,
+  return Children.toArray(children)
+    .filter((child) => isValidElement(child) || (typeof child === 'string' && child.trim() !== ''))
+    .map((child) => {
+      if (!isValidElement(child)) return child
+      const index = (opts.start ?? 1) + n
+      n += 1
+      return cloneElement(child as ReactElement<{ ordered?: boolean; index?: number }>, {
+        key: child.key ?? index,
+        ordered: opts.ordered,
+        index,
+      })
     })
-  })
 }
 
 /** Strips leading/trailing whitespace-only text-node children (the same stray "\n" nodes
@@ -409,7 +454,7 @@ function renderAlertBox(type: string, children: ReactNode): ReactNode {
       style={{
         margin: '14px 0',
         padding: '12px 16px',
-        borderRadius: '10px',
+        borderRadius: 'var(--radius-lg, 14px)',
         borderLeft: `4px solid ${config.border}`,
         borderTop: `1px solid ${config.borderSubtle}`,
         borderRight: `1px solid ${config.borderSubtle}`,
@@ -473,7 +518,7 @@ export function ChatMediaImage({
         className="chat-media-card chat-media-card--failed"
         style={{
           margin: '6px 0 10px',
-          borderRadius: '10px',
+          borderRadius: 'var(--radius-lg, 14px)',
           padding: '10px 14px',
           border: '1px solid var(--border, rgba(255,255,255,0.12))',
           background: 'var(--panel-bg, #141416)',
@@ -495,7 +540,7 @@ export function ChatMediaImage({
               flexShrink: 0,
               fontSize: '0.78rem',
               padding: '3px 8px',
-              borderRadius: '6px',
+              borderRadius: 'var(--radius-xs, 6px)',
               background: 'var(--bg-surface-soft, rgba(255,255,255,0.06))',
               border: '1px solid var(--border, rgba(255,255,255,0.12))',
               color: 'var(--interactive-fg-hover, #38bdf8)',
@@ -528,7 +573,7 @@ export function ChatMediaImage({
       <div
         className="chat-media-card chat-media-card--thumbnail"
         data-load-stage={stage}
-        style={{ margin: '6px 0 10px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px' }}
+        style={{ margin: '6px 0 10px', borderRadius: 'var(--radius-lg, 14px)', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px' }}
       >
         <a href={pageUrl} target="_blank" rel="noopener noreferrer" title={sourceUrl ? `Open source page: ${label}` : label} style={{ display: 'flex', justifyContent: 'center', textDecoration: 'none' }}>
           <img
@@ -555,12 +600,12 @@ export function ChatMediaImage({
     )
   }
   return (
-    <div className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
+    <div className="chat-media-card" style={{ margin: '10px 0', borderRadius: 'var(--radius-xl, 18px)', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
       <img
         src={directUrl}
         alt={label}
         referrerPolicy="no-referrer"
-        style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }}
+        style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: 'var(--radius-md, 10px)' }}
         onError={handleImageError}
       />
     </div>
@@ -705,7 +750,7 @@ const mdComponents = {
     return renderCodeCard(lang, codeText)
   },
   table: ({ children }) => (
-    <div className="chat-table-container" style={{ overflowX: 'auto', margin: '14px 0', width: '100%', borderRadius: '8px', border: '1px solid var(--border-light, rgba(255, 255, 255, 0.12))', background: 'var(--panel-bg)', boxShadow: 'var(--shadow-sm, 0 4px 12px rgba(0, 0, 0, 0.15))' }}>
+    <div className="chat-table-container" style={{ overflowX: 'auto', margin: '14px 0', width: '100%', borderRadius: 'var(--radius-md, 10px)', border: '1px solid var(--border-light, rgba(255, 255, 255, 0.12))', background: 'var(--panel-bg)', boxShadow: 'var(--shadow-sm, 0 4px 12px rgba(0, 0, 0, 0.15))' }}>
       <table className="chat-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem', textAlign: 'left', lineHeight: '1.5' }}>
         {children}
       </table>
@@ -827,6 +872,14 @@ export function renderFormattedMessage(text: string, webSources: WebSearchSource
   const displayText = readableAssistantText(text.replace(/\r\n?/g, '\n'))
   if (!displayText) return null
 
+  if (displayText.trimStart().startsWith('# Release Notes')) {
+    return (
+      <div className="chat-formatted-body">
+        <ReleaseNotesCard markdown={displayText} />
+      </div>
+    )
+  }
+
   const segments = splitVideoSegments(displayText)
   const sourceByImage = new Map(
     webSources.filter((source) => source.imageUrl).map((source) => [resolveMediaUrl(source.imageUrl!), source.url]),
@@ -844,8 +897,8 @@ export function renderFormattedMessage(text: string, webSources: WebSearchSource
       {segments.map((segment, i) => {
         if (segment.type === 'video') {
           return (
-            <div key={`video-${i}`} className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: '#000' }}>
-              <video controls src={resolveMediaUrl(segment.src)} style={{ width: '100%', maxHeight: '400px', borderRadius: '8px', display: 'block' }} />
+            <div key={`video-${i}`} className="chat-media-card" style={{ margin: '10px 0', borderRadius: 'var(--radius-xl, 18px)', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: '#000' }}>
+              <video controls src={resolveMediaUrl(segment.src)} style={{ width: '100%', maxHeight: '400px', borderRadius: 'var(--radius-md, 10px)', display: 'block' }} />
             </div>
           )
         }

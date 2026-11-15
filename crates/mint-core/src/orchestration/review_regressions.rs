@@ -438,6 +438,11 @@ async fn parallel_dispatch_shows_parent_calls_before_provider_finishes() {
             "missing live {id}"
         );
     }
+    if let Ok(memory) = MemoryStore::open_default() {
+        let _ = memory.delete_chat_session("review-live-dispatch");
+        let _ = memory.delete_chat_session("review-live-dispatch::subagent::dispatch-a");
+        let _ = memory.delete_chat_session("review-live-dispatch::subagent::dispatch-b");
+    }
 }
 
 #[test]

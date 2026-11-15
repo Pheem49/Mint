@@ -8,7 +8,7 @@
 
 export interface SlashCommandExecutionResult {
   handled: boolean
-  action?: 'open_image_picker' | 'paste_image' | 'generate_veo' | 'system_message' | 'resume_session' | 'open_settings'
+  action?: 'open_image_picker' | 'paste_image' | 'generate_veo' | 'system_message' | 'resume_session' | 'open_settings' | 'start_voice'
   payload?: any
   systemText?: string
 }
@@ -44,6 +44,9 @@ export function executeSlashCommand(input: string): SlashCommandExecutionResult 
 
     case '/onboard':
       return { handled: true, action: 'open_settings' }
+
+    case '/voice':
+      return { handled: true, action: 'start_voice', payload: { mode: rest } }
 
     case '/veo': {
       if (!rest) {

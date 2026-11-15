@@ -59,7 +59,7 @@ pub fn format_workspace_with_branch(path: &Path) -> String {
 /// matching on a fixed prefix is safe — user-typed text starting with the
 /// same characters is vanishingly unlikely and, worst case, only affects
 /// display color, not the text actually sent.
-const PLACEHOLDER_PREFIXES: [&str; 2] = ["[Pasted text #", "[Image #"];
+const PLACEHOLDER_PREFIXES: [&str; 3] = ["[Pasted text #", "[Pasted Content ", "[Image #"];
 
 fn matches_placeholder_prefix(chars: &[char], i: usize) -> bool {
     PLACEHOLDER_PREFIXES.iter().any(|prefix| {
@@ -92,15 +92,90 @@ pub fn format_placeholders(s: &str) -> String {
     }
     result
 }
+
 pub fn is_thai_zero_width(c: char) -> bool {
     let cp = c as u32;
     cp == 0x0E31 || (0x0E34..=0x0E3A).contains(&cp) || (0x0E47..=0x0E4E).contains(&cp)
 }
-pub fn char_visual_width(c: char) -> usize {
-    if is_thai_zero_width(c) { 0 } else { 1 }
+
+pub fn is_cjk_wide(c: char) -> bool {
+    let val = c as u32;
+    (0x4E00..=0x9FFF).contains(&val)
+        || (0x3400..=0x4DBF).contains(&val)
+        || (0x20000..=0x2A6DF).contains(&val)
+        || (0xAC00..=0xD7AF).contains(&val)
+        || (0x3040..=0x309F).contains(&val)
+        || (0x30A0..=0x30FF).contains(&val)
 }
+
+pub fn char_visual_width(c: char) -> usize {
+    if is_thai_zero_width(c) {
+        0
+    } else if is_cjk_wide(c) {
+        2
+    } else {
+        unicode_width::UnicodeWidthChar::width(c).unwrap_or(1)
+    }
+}
+
 pub fn string_visual_width(s: &str) -> usize {
-    s.chars().map(char_visual_width).sum()
+    display_width(s)
+}
+
+/// Canonical terminal display width accounting for ANSI CSI sequences, Thai
+/// zero-width combining marks, and East-Asian / emoji wide glyphs.
+pub fn display_width(s: &str) -> usize {
+    let mut count = 0;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for c2 in chars.by_ref() {
+                if c2.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
+        if is_thai_zero_width(c) {
+            continue;
+        }
+        if is_cjk_wide(c) {
+            count += 2;
+        } else {
+            count += unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        }
+    }
+    count
+}
+
+/// Canonical width-aware string clipper with `…` ellipsis used across TUI
+/// widgets (`resume_picker`, `tool_activity`, `chat_tui`, etc.).
+pub fn truncate_to_width(text: &str, max_width: usize) -> String {
+    if display_width(text) <= max_width {
+        return text.to_owned();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    let mut result = String::new();
+    let mut width = 0usize;
+    for ch in text.chars() {
+        let ch_width = if is_thai_zero_width(ch) {
+            0
+        } else if is_cjk_wide(ch) {
+            2
+        } else {
+            unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0)
+        };
+        if width + ch_width > max_width.saturating_sub(1) {
+            break;
+        }
+        result.push(ch);
+        width += ch_width;
+    }
+    result.push('…');
+    result
 }
 pub fn active_model<'a>(provider: &str, config: &'a mint_core::MintConfig) -> &'a str {
     match provider {

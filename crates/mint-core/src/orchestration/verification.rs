@@ -10,9 +10,6 @@ pub(super) fn looks_skill_worthy(step: usize, action_counts: &BTreeMap<String, u
         "apply_patch",
         "write_file",
         "run_shell",
-        "browser_open",
-        "browser_click",
-        "browser_type",
         "dispatch_agents",
         "dispatch_subagent",
     ];

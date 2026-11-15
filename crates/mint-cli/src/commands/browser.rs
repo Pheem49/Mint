@@ -5,18 +5,15 @@ use std::path::PathBuf;
 
 #[derive(Debug, Subcommand)]
 pub enum BrowserCommand {
-    /// Run a JSON workflow in one isolated browser session (headless by default).
+    /// Run a JSON workflow in one isolated headless browser session.
     Run {
         #[arg(long)]
         file: PathBuf,
-        /// Show the browser window for this workflow.
-        #[arg(long)]
-        headed: bool,
     },
 }
 
 pub async fn handle(command: BrowserCommand, config: &MintConfig, plan_mode: bool) -> Result<()> {
-    let BrowserCommand::Run { file, headed } = command;
+    let BrowserCommand::Run { file } = command;
     let mut config = config.clone();
     if let Ok(policy) = std::env::var("MINT_BROWSER_POLICY") {
         let policy: serde_json::Value =
@@ -29,15 +26,10 @@ pub async fn handle(command: BrowserCommand, config: &MintConfig, plan_mode: boo
             }
         }
         for key in [
-            "browserAutomationEnabled",
-            "browserAgentMode",
             "browserExecutable",
-            "automationBrowser",
             "browserViewportWidth",
             "browserViewportHeight",
             "browserLaunchArgs",
-            "browserDebugUrl",
-            "browserUseExisting",
         ] {
             if !policy[key].is_null() {
                 config.extra.insert(key.into(), policy[key].clone());
@@ -52,11 +44,6 @@ pub async fn handle(command: BrowserCommand, config: &MintConfig, plan_mode: boo
         if let Some(paths) = policy.get("allowedWritePaths") {
             config.allowed_write_paths = serde_json::from_value(paths.clone())?;
         }
-    }
-    if headed {
-        config
-            .extra
-            .insert("browserAgentMode".into(), serde_json::json!("headed"));
     }
     let file = mint_core::assert_path_capability(&file, Capability::Read, &config)?;
     anyhow::ensure!(

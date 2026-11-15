@@ -140,7 +140,7 @@ export type AgentProgress =
   | { type: 'ThinkingDelta'; data: { id: string; delta: string; elapsed_ms: number } }
   | { type: 'ExtendedThinking'; data: { id?: string; thought: string; elapsed_ms?: number } }
   | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown>; subagent?: string; callId?: string } }
-  | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string; subagent?: string; callId?: string; status?: ToolStatus } }
+  | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string; subagent?: string; callId?: string; status?: ToolStatus; elapsed_ms?: number; elapsedMs?: number } }
   | { type: 'PlanUpdated'; data: { plan: ActivePlan } }
   | { type: 'RunCompleted'; data: { summary: RunTelemetrySummary } }
   | { type: 'SubagentStarted'; data: { subagent: string; profile: string; task: string } }

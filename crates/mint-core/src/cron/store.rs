@@ -270,8 +270,8 @@ impl CronStore {
 }
 
 pub fn cron_jobs_path() -> Result<PathBuf, CronError> {
-    dirs::config_dir()
-        .map(|directory| directory.join("mint").join("cron-jobs.json"))
+    crate::mint_config_dir()
+        .map(|directory| directory.join("cron-jobs.json"))
         .ok_or(CronError::ConfigDirectoryUnavailable)
 }
 

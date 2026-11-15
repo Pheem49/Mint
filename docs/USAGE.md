@@ -111,7 +111,7 @@ mint status
 mint web
 mint web --tailscale
 mint api
-mint auto
+mint browser run --file workflow.json
 mint chat "<message>"
 ```
 
@@ -134,7 +134,7 @@ mint chat "<message>"
 | `mint gateway start` | Run headless: bridges + cron, no TUI — for VPS/systemd use |
 | `mint gateway start --api-port <N>` | Same, plus the local API/WebUI on port `<N>` |
 | `mint gateway install [--system] [--now] [--memory-max <size>]` | Register `mint gateway start` as a systemd unit |
-| `mint auto` | Launch the GUI browser automation isolated port |
+| `mint browser run --file <file>` | Run a headless browser automation workflow from JSON |
 | `mint status` | Show runtime status |
 | `mint config init` | Create the local configuration file |
 | `mint config path` | Print the configuration file path |

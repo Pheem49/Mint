@@ -6,6 +6,7 @@ const StockCard = lazy(() => import('./StockCard'))
 const CalculationCard = lazy(() => import('./CalculationCard'))
 const ImageSearchCard = lazy(() => import('./ImageSearchCard'))
 const ImageGenCard = lazy(() => import('./ImageGenCard'))
+const PlanCard = lazy(() => import('./PlanCard'))
 
 export interface ToolResultCardsProps {
   progress?: AgentProgress[]
@@ -41,6 +42,7 @@ export function extractToolCardPayloads(progress?: AgentProgress[], aiText?: str
   let calcData: any = null
   let imageSearchData: any = null
   let imageGenData: any = null
+  let planData: string | null = null
 
   for (const event of progress || []) {
     if (event.type !== 'ToolEnd') continue
@@ -56,24 +58,30 @@ export function extractToolCardPayloads(progress?: AgentProgress[], aiText?: str
       imageSearchData = parseMatchedJson(res, IMAGE_SEARCH_RE)
     } else if (!skipImageGen && !imageGenData && IMAGE_GEN_ACTIONS.has(actionName)) {
       imageGenData = parseMatchedJson(res, IMAGE_GEN_RE)
+    } else if (!planData && actionName === 'exit_plan_mode') {
+      const raw = (event.data?.input as any)?.plan || (event.data as any)?.plan
+      if (typeof raw === 'string' && raw.trim()) {
+        planData = raw.trim()
+      }
     }
   }
 
-  return { weatherData, stockData, calcData, imageSearchData, imageGenData }
+  return { weatherData, stockData, calcData, imageSearchData, imageGenData, planData }
 }
 
 export const ToolResultCards = memo(function ToolResultCards({ progress, aiText }: ToolResultCardsProps) {
-  const { weatherData, stockData, calcData, imageSearchData, imageGenData } = useMemo(
+  const { weatherData, stockData, calcData, imageSearchData, imageGenData, planData } = useMemo(
     () => extractToolCardPayloads(progress, aiText),
     [progress, aiText],
   )
 
-  if (!weatherData && !stockData && !calcData && !imageSearchData && !imageGenData) {
+  if (!weatherData && !stockData && !calcData && !imageSearchData && !imageGenData && !planData) {
     return null
   }
 
   return (
     <Suspense fallback={null}>
+      {planData && <PlanCard plan={planData} />}
       {weatherData && <WeatherCard data={weatherData} />}
       {stockData && <StockCard data={stockData} />}
       {calcData && <CalculationCard data={calcData} />}

@@ -84,3 +84,6 @@ desktop.ini
 
 # Browser workflow screenshots and private import reports
 .mint/browser-runs/
+
+# Temporary tool scratchpad logs and run caches
+.mint/scratch/

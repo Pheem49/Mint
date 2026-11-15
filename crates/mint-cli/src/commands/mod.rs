@@ -118,8 +118,6 @@ pub enum Command {
         /// Optional session ID to resume directly (omitting opens the interactive picker).
         id: Option<String>,
     },
-    /// Start the browser automation environment and enable browser actions.
-    Auto,
     /// Run browser automation workflows using the shared Mint Browser engine.
     Browser {
         #[command(subcommand)]
@@ -360,7 +358,6 @@ pub async fn dispatch(cmd: Command, config: &mut MintConfig, cli: &crate::Cli) -
             .await?;
             Ok(())
         }
-        Command::Auto => agent::handle_auto().await,
         Command::Browser { command } => browser::handle(command, config, cli.plan).await,
         Command::Web {
             dev,

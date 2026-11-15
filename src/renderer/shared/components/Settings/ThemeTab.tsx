@@ -1,7 +1,7 @@
 import SelectField from '../ui/SelectField'
 import React, { useState } from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
-import { THEME_PRESETS, ACCENT_FLAVORS, ThemePreset, AccentFlavor } from '../../theme/themes'
+import { THEME_PRESETS, ACCENT_FLAVORS, TEXT_COLOR_FLAVORS, ThemePreset, AccentFlavor, TextColorFlavor } from '../../theme/themes'
 
 interface ThemeTabProps {
   config: typeof DEFAULT_CONFIG
@@ -11,6 +11,7 @@ interface ThemeTabProps {
 
 export default function ThemeTab({ config, updateField, updateFields }: ThemeTabProps) {
   const [showCustomAccent, setShowCustomAccent] = useState(false)
+  const [showCustomText, setShowCustomText] = useState(false)
 
   const isPresetActive = (preset: ThemePreset) => {
     if (config.theme !== preset.theme) return false
@@ -21,6 +22,7 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
     const patch: Partial<typeof DEFAULT_CONFIG> = {
       theme: preset.theme,
       accentColor: preset.accentColor,
+      textColor: preset.textColor || preset.systemTextColor,
       systemTextColor: preset.systemTextColor,
       chatTextColor: preset.chatTextColor,
       surfaceStyle: preset.theme === 'light' ? 'opaque' : 'glass',
@@ -30,6 +32,7 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
     } else {
       updateField('theme', preset.theme)
       updateField('accentColor', preset.accentColor)
+      updateField('textColor', patch.textColor)
       updateField('systemTextColor', preset.systemTextColor)
       updateField('chatTextColor', preset.chatTextColor)
       updateField('surfaceStyle', patch.surfaceStyle)
@@ -43,6 +46,20 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
       })
     } else {
       updateField('accentColor', flavor.color)
+    }
+  }
+
+  const handleSelectTextColor = (flavor: TextColorFlavor) => {
+    if (updateFields) {
+      updateFields({
+        textColor: flavor.color,
+        systemTextColor: flavor.color,
+        chatTextColor: flavor.color,
+      })
+    } else {
+      updateField('textColor', flavor.color)
+      updateField('systemTextColor', flavor.color)
+      updateField('chatTextColor', flavor.color)
     }
   }
 
@@ -112,6 +129,7 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
   ]
 
   const currentAccent = (config.accentColor || '').toLowerCase()
+  const currentText = (config.textColor || config.systemTextColor || '#f8fafc').toLowerCase()
   const TUI_MODES = [
     { id: 'system', name: 'Auto', description: 'Use terminal colors' },
     { id: 'dark', name: 'Dark', description: 'Dark terminal palette' },
@@ -231,13 +249,30 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
                     onClick={() => {
                       if (mode.id === 'light') {
                         if (updateFields) {
-                          updateFields({ theme: 'light', surfaceStyle: 'opaque' })
+                          updateFields({ theme: 'light', surfaceStyle: 'opaque', textColor: '#0f172a', systemTextColor: '#0f172a', chatTextColor: '#0f172a' })
                         } else {
                           updateField('theme', 'light')
                           updateField('surfaceStyle', 'opaque')
+                          updateField('textColor', '#0f172a')
+                          updateField('systemTextColor', '#0f172a')
+                          updateField('chatTextColor', '#0f172a')
                         }
                       } else {
-                        updateField('theme', mode.id)
+                        const isSwitchingFromLight = config.theme === 'light'
+                        const nextText = isSwitchingFromLight ? '#f8fafc' : (config.textColor || '#f8fafc')
+                        if (updateFields) {
+                          updateFields({
+                            theme: mode.id,
+                            ...(isSwitchingFromLight ? { textColor: nextText, systemTextColor: nextText, chatTextColor: nextText } : {})
+                          })
+                        } else {
+                          updateField('theme', mode.id)
+                          if (isSwitchingFromLight) {
+                            updateField('textColor', nextText)
+                            updateField('systemTextColor', nextText)
+                            updateField('chatTextColor', nextText)
+                          }
+                        }
                       }
                     }}
                   >
@@ -314,6 +349,74 @@ export default function ThemeTab({ config, updateField, updateFields }: ThemeTab
                   className="custom-accent-input"
                 />
                 <span className="custom-accent-value">{config.accentColor || '#10b981'}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Text color */}
+          <div className="setting-row stacked">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <label>Text color</label>
+              <button
+                type="button"
+                className="custom-accent-toggle"
+                onClick={() => setShowCustomText(!showCustomText)}
+              >
+                {showCustomText ? 'Use Curated Flavors' : 'Custom Hex...'}
+              </button>
+            </div>
+
+            {!showCustomText ? (
+              <div className="flavor-grid" role="radiogroup" aria-label="Text colors">
+                {TEXT_COLOR_FLAVORS.map((flavor) => {
+                  const isSelected = currentText === flavor.color.toLowerCase() || (flavor.id === 'white' && (currentText === '#ffffff' || currentText === '#f8fafc'))
+                  const isWhite = flavor.color.toLowerCase() === '#ffffff'
+                  return (
+                    <button
+                      key={flavor.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={isSelected}
+                      className={`flavor-card ${isSelected ? 'active' : ''}`}
+                      onClick={() => handleSelectTextColor(flavor)}
+                      title={flavor.description}
+                    >
+                      <span
+                        className="flavor-swatch"
+                        style={{
+                          background: flavor.color,
+                          border: isWhite ? '1px solid rgba(255,255,255,0.2)' : 'none',
+                        }}
+                      >
+                        {isSelected && (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={flavor.contrastText} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                          </svg>
+                        )}
+                      </span>
+                      <span className="flavor-name">{flavor.name}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="custom-accent-box">
+                <input
+                  type="color"
+                  value={config.textColor || config.systemTextColor || '#f8fafc'}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (updateFields) {
+                      updateFields({ textColor: val, systemTextColor: val, chatTextColor: val })
+                    } else {
+                      updateField('textColor', val)
+                      updateField('systemTextColor', val)
+                      updateField('chatTextColor', val)
+                    }
+                  }}
+                  className="custom-accent-input"
+                />
+                <span className="custom-accent-value">{config.textColor || config.systemTextColor || '#f8fafc'}</span>
               </div>
             )}
           </div>

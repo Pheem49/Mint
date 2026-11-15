@@ -9,7 +9,7 @@ import {
   File,
   Eye,
 } from 'lucide-react'
-import { openArtifactInMintBrowser } from '../../utils/artifactBrowser'
+import { openArtifactInBrowser } from '../../utils/artifactBrowser'
 import { runtimePlatform } from '../../platform'
 import { renderFormattedMessage } from '../../utils/markdown'
 import { ChatCodeBlock } from '../chat/ChatCodeBlock'
@@ -25,6 +25,7 @@ import {
   detectArtifactType,
   getFileLanguage,
 } from '../../utils/artifacts'
+import { setWorkspaceDragData } from '../../utils/workspaceDrag'
 
 export type { ArtifactFile, ArtifactType, ViewportMode }
 export { detectArtifactType, getFileLanguage }
@@ -75,6 +76,8 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
   const [viewport, setViewport] = useState<ViewportMode>('desktop')
   const [content, setContent] = useState<string>(artifact?.content || '')
   const [imageUrl, setImageUrl] = useState(artifact?.url || '')
+  const [mediaUrl, setMediaUrl] = useState<string>(artifact?.url || '')
+  const [mediaByteLength, setMediaByteLength] = useState<number | undefined>(artifact?.byteLength)
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [openingBrowser, setOpeningBrowser] = useState(false)
@@ -144,9 +147,28 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
       return
     }
     // Served previews load directly. Text is only needed when their Code tab is selected.
-    if (mediaPreview || artifactType === 'file' || artifactType === 'image' || (artifact?.url && activeTab === 'preview')) {
+    if (mediaPreview) {
+      if (artifact?.url) {
+        setMediaUrl(artifact.url)
+        setLoading(false)
+        return
+      }
+      setLoading(true)
+      try {
+        const media = await runtimePlatform.readWorkspaceMedia(filePath, sourceWorkspace)
+        if (requestRevision.current === revision) {
+          setMediaUrl(media.url)
+          setMediaByteLength(media.byteLength)
+        }
+      } catch (reason) {
+        if (requestRevision.current === revision) setError(reason instanceof Error ? reason.message : String(reason))
+      } finally {
+        if (requestRevision.current === revision) setLoading(false)
+      }
+      return
+    }
+    if (artifactType === 'file' || artifactType === 'image' || (artifact?.url && activeTab === 'preview')) {
       setLoading(false)
-      if (mediaPreview && !artifact?.url) setError('No media preview source is available')
       if (artifactType === 'image' && !artifact?.url) setError('No image preview URL is available')
       return
     }
@@ -168,6 +190,8 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
     setBrowserError(null)
     setContent(artifact?.content ?? '')
     setImageUrl(artifact?.url ?? '')
+    setMediaUrl(artifact?.url ?? '')
+    setMediaByteLength(artifact?.byteLength)
     setImageDimensions(null)
     setError(null)
   }, [artifact, artifactType])
@@ -199,7 +223,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
     setOpeningBrowser(true)
     setBrowserError(null)
     try {
-      await openArtifactInMintBrowser(artifact, sourceWorkspace)
+      await openArtifactInBrowser(artifact, sourceWorkspace)
     } catch (reason: unknown) {
       if (currentArtifact.current === artifact) {
         setBrowserError(reason instanceof Error ? reason.message : String(reason))
@@ -242,7 +266,25 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
           flexShrink: 0,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+        <div
+          className="artifact-preview-header-drag"
+          draggable={Boolean(filePath)}
+          onDragStart={filePath ? (event) => {
+            setWorkspaceDragData(event.dataTransfer, {
+              path: filePath,
+              root: sourceWorkspace,
+              url: imageUrl || artifact?.url,
+            })
+          } : undefined}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            minWidth: 0,
+            cursor: filePath ? 'grab' : undefined,
+          }}
+          title={filePath ? `${filePath} (Drag to chat)` : undefined}
+        >
           <span
             style={{
               display: 'inline-flex',
@@ -508,9 +550,9 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
             type="button"
             onClick={() => { void handleOpenInMintBrowser() }}
             disabled={openingBrowser}
-            aria-label="Open in Mint Browser (Mint Auto)"
+            aria-label="Open preview"
             aria-busy={openingBrowser}
-            title={openingBrowser ? 'Opening Mint Browser…' : 'Open in Mint Browser (Mint Auto)'}
+            title={openingBrowser ? 'Opening preview…' : 'Open preview'}
             style={{
               background: 'none',
               border: 'none',
@@ -528,6 +570,68 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
               <line x1="10" y1="14" x2="21" y2="3" />
             </svg>
           </button>}
+
+          {(artifact?.url || mediaUrl || content) && (
+            <button
+              type="button"
+              onClick={() => {
+                const downloadUrl = artifact?.url || mediaUrl || (content ? `data:text/plain;charset=utf-8,${encodeURIComponent(content)}` : '')
+                if (!downloadUrl) return
+                const a = document.createElement('a')
+                a.href = downloadUrl
+                a.download = fileName || 'download'
+                document.body.appendChild(a)
+                a.click()
+                document.body.removeChild(a)
+              }}
+              title={`Download ${fileName}`}
+              aria-label={`Download ${fileName}`}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-muted)',
+                padding: '5px',
+                borderRadius: 'var(--radius-xs, 4px)',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            </button>
+          )}
+
+          {(artifact?.url || mediaUrl) && (
+            <button
+              type="button"
+              onClick={() => {
+                const target = artifact?.url || mediaUrl
+                if (target) window.open(target, '_blank', 'noopener,noreferrer')
+              }}
+              title="Open in new window"
+              aria-label="Open in new window"
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-muted)',
+                padding: '5px',
+                borderRadius: 'var(--radius-xs, 4px)',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+            </button>
+          )}
 
           <button
             type="button"
@@ -554,7 +658,7 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
 
       {browserError && (
         <div role="alert" style={{ padding: '8px 14px', fontSize: '0.8rem', color: 'var(--status-error, #f87171)', flexShrink: 0 }}>
-          Could not open Mint Browser: {browserError}
+          Could not open preview: {browserError}
         </div>
       )}
 
@@ -594,10 +698,10 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
           </div>
         ) : artifactType === 'file' ? (
           <WorkspaceFileInfo key={`${sourceWorkspace}:${filePath}`} path={filePath} root={sourceWorkspace} />
-        ) : artifactType === 'pdf' && artifact.url ? (
-          <Suspense fallback={<p role="status">Loading PDF viewer…</p>}><WorkspacePdfPreview key={artifact.url} url={artifact.url} path={filePath} root={sourceWorkspace} byteLength={artifact.byteLength} range={artifact.range} /></Suspense>
-        ) : (artifactType === 'audio' || artifactType === 'video') && artifact.url ? (
-          <WorkspaceMediaPreview key={artifact.url} kind={artifactType} url={artifact.url} path={filePath} root={sourceWorkspace} mimeType={artifact.mimeType} />
+        ) : artifactType === 'pdf' && (artifact.url || mediaUrl) ? (
+          <Suspense fallback={<p role="status">Loading PDF viewer…</p>}><WorkspacePdfPreview key={artifact.url || mediaUrl} url={artifact.url || mediaUrl} path={filePath} root={sourceWorkspace} byteLength={artifact.byteLength || mediaByteLength} range={artifact.range} /></Suspense>
+        ) : (artifactType === 'audio' || artifactType === 'video') && (artifact.url || mediaUrl) ? (
+          <WorkspaceMediaPreview key={artifact.url || mediaUrl} kind={artifactType} url={artifact.url || mediaUrl} path={filePath} root={sourceWorkspace} mimeType={artifact.mimeType} />
         ) : activeTab === 'code' ? (
           <div style={{ width: '100%', height: '100%', overflow: 'auto', padding: '12px' }}>
             <ChatCodeBlock code={content} language={language} />
@@ -643,9 +747,17 @@ export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props
                   })
                 }
               }}
+              draggable
+              onDragStart={(event) => {
+                setWorkspaceDragData(event.dataTransfer, {
+                  path: filePath,
+                  root: sourceWorkspace,
+                  url: imageUrl || artifact?.url,
+                })
+              }}
               src={imageUrl || artifact.url}
               alt={fileName}
-              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', cursor: 'grab' }}
               onLoad={(e) => {
                 const img = e.currentTarget
                 if (img.naturalWidth && img.naturalHeight) {

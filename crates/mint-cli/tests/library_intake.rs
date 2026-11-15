@@ -36,6 +36,7 @@ fn cli_agent_and_plain_chat_save_attachments_before_provider_failure() {
         let output = command
             .current_dir(&root)
             .env("MINT_CONFIG_PATH", root.join("config.json"))
+            .env("MINT_CONFIG_DIR", root.join("config/mint"))
             .env("XDG_CONFIG_HOME", root.join("config"))
             .env("XDG_DATA_HOME", root.join("data"))
             .env("XDG_CACHE_HOME", root.join("cache"))

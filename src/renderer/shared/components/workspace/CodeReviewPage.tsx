@@ -13,6 +13,8 @@ import {
   folderIcon,
   documentIcon,
 } from '../../utils/fileIcons'
+import { tokenizeLine } from '../../utils/syntaxHighlight'
+import { setWorkspaceDragData } from '../../utils/workspaceDrag'
 import '../../css/code-review.css'
 
 export function undoDescription(entry: WorkspaceHistoryEntry) {
@@ -368,6 +370,16 @@ export default function CodeReviewPage({
               style={{ paddingLeft: `${depth * 14 + 10}px` }}
               onClick={() => toggleFolder(node.path)}
               aria-expanded={!isCollapsed}
+              draggable="true"
+              onDragStart={(event) => {
+                event.stopPropagation()
+                setWorkspaceDragData(event.dataTransfer, {
+                  path: node.path,
+                  root: workspacePath,
+                  kind: 'directory',
+                })
+              }}
+              title={`${node.path} (Drag to chat)`}
             >
               <span className="code-review-chevron">{isCollapsed ? '›' : '⌄'}</span>
               <span className="code-review-tree-icon material-icon folder" aria-hidden="true">
@@ -389,6 +401,7 @@ export default function CodeReviewPage({
       const ext = getExtension(node.name)
       const fileIconSrc = materialFileIcon(node.name, ext) || documentIcon
       const isCreated = Boolean(node.change?.created)
+      const targetPath = node.change?.path || node.path
 
       return (
         <button
@@ -397,7 +410,16 @@ export default function CodeReviewPage({
           className={`code-review-tree-file${isSelected ? ' is-selected' : ''}`}
           style={{ paddingLeft: `${depth * 14 + 12}px` }}
           onClick={() => setSelectedPath(node.path)}
-          title={node.path}
+          title={`${node.path} (Drag to chat)`}
+          draggable="true"
+          onDragStart={(event) => {
+            event.stopPropagation()
+            setWorkspaceDragData(event.dataTransfer, {
+              path: targetPath,
+              root: workspacePath,
+              kind: 'file',
+            })
+          }}
         >
           <span className="code-review-tree-icon material-icon file" aria-hidden="true">
             {fileIconSrc && <img src={fileIconSrc} alt="" draggable={false} />}
@@ -591,7 +613,19 @@ export default function CodeReviewPage({
                 <span className={`code-review-file-bar-status ${selectedChange.created ? 'is-created' : 'is-modified'}`}>
                   {selectedChange.created ? 'A' : 'M'}
                 </span>
-                <span className="code-review-file-bar-path" title={selectedChange.path}>
+                <span
+                  className="code-review-file-bar-path"
+                  title={`${selectedChange.path} (Drag to chat)`}
+                  draggable="true"
+                  onDragStart={(event) => {
+                    event.stopPropagation()
+                    setWorkspaceDragData(event.dataTransfer, {
+                      path: selectedChange.path,
+                      root: workspacePath,
+                      kind: 'file',
+                    })
+                  }}
+                >
                   {selectedChange.path}
                 </span>
                 <button type="button" className="review-undo-button" disabled={!canUndoFile || history.busy} title={canUndoFile ? selectedFileHistory?.label : selectedFileHistory ? 'Undo newer workspace actions first in File history.' : 'No saved undo action for this file.'} onClick={() => selectedFileHistory && requestUndo(selectedFileHistory)}>Undo edit…</button>
@@ -602,25 +636,52 @@ export default function CodeReviewPage({
               <div className="code-review-code-container">
                 {selectedChange.hunks && selectedChange.hunks.length > 0 ? (
                   selectedChange.hunks.map((hunk, hunkIdx) => {
+                    const fileExt = getExtension(selectedChange.path)
                     const oldLines = diffLines(hunk.oldText)
                     const newLines = diffLines(hunk.newText)
                     let lineCounter = 1
                     return (
                       <div className="code-review-hunk-block" key={`${selectedChange.path}-hunk-${hunkIdx}`}>
-                        {oldLines.map((line, idx) => (
-                          <div className="code-review-line is-del" key={`del-${idx}`}>
-                            <span className="code-review-gutter">{lineCounter++}</span>
-                            <span className="code-review-sign">−</span>
-                            <code className="code-review-code-text">{line || ' '}</code>
-                          </div>
-                        ))}
-                        {newLines.map((line, idx) => (
-                          <div className="code-review-line is-add" key={`add-${idx}`}>
-                            <span className="code-review-gutter">{lineCounter++}</span>
-                            <span className="code-review-sign">+</span>
-                            <code className="code-review-code-text">{line || ' '}</code>
-                          </div>
-                        ))}
+                        {oldLines.map((line, idx) => {
+                          const tokens = tokenizeLine(line, fileExt)
+                          return (
+                            <div className="code-review-line is-del" key={`del-${idx}`}>
+                              <span className="code-review-gutter">{lineCounter++}</span>
+                              <span className="code-review-sign">−</span>
+                              <code className="code-review-code-text">
+                                {tokens.length === 0 ? (
+                                  ' '
+                                ) : (
+                                  tokens.map((tok, tIdx) => (
+                                    <span key={tIdx} className={tok.type}>
+                                      {tok.text}
+                                    </span>
+                                  ))
+                                )}
+                              </code>
+                            </div>
+                          )
+                        })}
+                        {newLines.map((line, idx) => {
+                          const tokens = tokenizeLine(line, fileExt)
+                          return (
+                            <div className="code-review-line is-add" key={`add-${idx}`}>
+                              <span className="code-review-gutter">{lineCounter++}</span>
+                              <span className="code-review-sign">+</span>
+                              <code className="code-review-code-text">
+                                {tokens.length === 0 ? (
+                                  ' '
+                                ) : (
+                                  tokens.map((tok, tIdx) => (
+                                    <span key={tIdx} className={tok.type}>
+                                      {tok.text}
+                                    </span>
+                                  ))
+                                )}
+                              </code>
+                            </div>
+                          )
+                        })}
                       </div>
                     )
                   })

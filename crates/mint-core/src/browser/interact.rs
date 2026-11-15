@@ -7,8 +7,6 @@ use serde_json::{Value, json};
 
 use super::cdp::{cdp_call_raw, response_error};
 use super::input::{mouse_click, type_text_native};
-use super::lifecycle::ensure_page_open;
-use super::logging::log_action;
 use super::overlay::inject_overlay;
 
 /// Click a CSS selector element using native CDP mouse events.
@@ -19,14 +17,8 @@ use super::overlay::inject_overlay;
 pub async fn click(config: &MintConfig, selector: &str) -> Result<String, String> {
     let selector = selector.trim();
     if selector.is_empty() || selector.len() > 500 {
-        log_action(
-            "CLICK_ERROR",
-            "Browser selector must contain between 1 and 500 characters",
-        );
         return Err("browser selector must contain between 1 and 500 characters".into());
     }
-    log_action("CLICK", &format!("Clicking element '{selector}'"));
-    ensure_page_open(config).await?;
 
     // Ensure overlay exists before doing any visual interaction
     inject_overlay(config).await;
@@ -40,14 +32,8 @@ pub async fn click(config: &MintConfig, selector: &str) -> Result<String, String
 pub async fn type_text(config: &MintConfig, selector: &str, text: &str) -> Result<String, String> {
     let selector = selector.trim();
     if selector.is_empty() || selector.len() > 500 {
-        log_action(
-            "TYPE_ERROR",
-            "Browser selector must contain between 1 and 500 characters",
-        );
         return Err("browser selector must contain between 1 and 500 characters".into());
     }
-    log_action("TYPE", &format!("Typing into '{selector}'"));
-    ensure_page_open(config).await?;
 
     edit_text(config, selector, text, false).await
 }

@@ -54,7 +54,7 @@ fn thumbnails_are_generated_asynchronously_and_share_the_indexed_original() {
     }
     let (_, bytes) = store.read(&item.id, true).unwrap();
     let thumbnail = image::load_from_memory(&bytes).unwrap();
-    assert!(thumbnail.width() <= 360 && thumbnail.height() <= 360);
+    assert!(thumbnail.width() <= 800 && thumbnail.height() <= 800);
     let source = store
         .memory
         .conversation_sources("A")

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { renderHighlightedCode } from './syntaxHighlight'
+import { renderHighlightedCode, tokenizeLine } from './syntaxHighlight'
 
 describe('highlight reuse', () => {
   it('reuses unchanged code across rerenders and message remounts', () => {
@@ -18,5 +18,15 @@ describe('highlight reuse', () => {
     const first = renderHighlightedCode('const evicted = 0', 'typescript')
     for (let i = 0; i < 100; i++) renderHighlightedCode(`const other = ${i}`, 'typescript')
     expect(renderHighlightedCode('const evicted = 0', 'typescript')).not.toBe(first)
+  })
+  it('tokenizes JSX/TSX tags, attributes, and Python diff lines with appropriate tokens', () => {
+    const tsxTokens = tokenizeLine('<svg width="14" height="14">', 'tsx')
+    expect(tsxTokens.some((t) => t.type === 'token-tag' && t.text === '<')).toBe(true)
+    expect(tsxTokens.some((t) => t.type === 'token-tag' && t.text === 'svg')).toBe(true)
+    expect(tsxTokens.some((t) => t.type === 'token-property' && t.text === 'width')).toBe(true)
+    expect(tsxTokens.some((t) => t.type === 'token-string' && t.text === '"14"')).toBe(true)
+
+    const pyTokens = tokenizeLine('import os', 'py')
+    expect(pyTokens.some((t) => t.type === 'token-keyword' && t.text === 'import')).toBe(true)
   })
 })

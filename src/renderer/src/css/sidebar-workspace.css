@@ -540,7 +540,7 @@
   gap: 9px;
   padding: 0 10px;
   color: var(--text-secondary);
-  border-radius: 7px;
+  border-radius: var(--radius-sm, 8px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1809,7 +1809,7 @@
   content: '';
   position: absolute;
   inset: 8px 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-2xs, 4px);
   background: var(--border-default);
   transition: background 0.15s ease;
 }

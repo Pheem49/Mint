@@ -60,6 +60,97 @@ impl TuiTheme {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThemeTokens {
+    pub background: Color,
+    pub panel_background: Color,
+    pub user_message_background: Color,
+    pub text: Color,
+    pub muted: Color,
+    pub subtle: Color,
+    pub accent: Color,
+    pub blue: Color,
+    pub warning: Color,
+    pub error: Color,
+    pub added: Color,
+    pub removed: Color,
+    pub added_background: Color,
+    pub removed_background: Color,
+    pub watermark_mark: Color,
+    pub watermark_rim: Color,
+    pub watermark_band: Color,
+    pub watermark_orbit: Color,
+    pub selection_background: Color,
+}
+
+pub const fn theme_tokens(theme: TuiTheme) -> ThemeTokens {
+    match theme {
+        TuiTheme::Auto => ThemeTokens {
+            background: Color::Reset,
+            panel_background: Color::Reset,
+            user_message_background: USER_MESSAGE_BACKGROUND,
+            text: Color::Reset,
+            muted: MUTED,
+            subtle: SUBTLE,
+            accent: ACCENT,
+            blue: BLUE,
+            warning: WARNING,
+            error: Color::Red,
+            added: ACCENT,
+            removed: Color::Red,
+            added_background: Color::Rgb(24, 55, 37),
+            removed_background: Color::Rgb(57, 30, 30),
+            watermark_mark: WATERMARK_MARK,
+            watermark_rim: WATERMARK_RIM,
+            watermark_band: WATERMARK_BAND,
+            watermark_orbit: WATERMARK_ORBIT,
+            selection_background: SELECTION_BACKGROUND,
+        },
+        TuiTheme::Dark => ThemeTokens {
+            background: Color::Rgb(27, 30, 29),
+            panel_background: PANEL_BACKGROUND,
+            user_message_background: USER_MESSAGE_BACKGROUND,
+            text: Color::Rgb(226, 234, 228),
+            muted: Color::Rgb(134, 148, 139),
+            subtle: SUBTLE,
+            accent: ACCENT,
+            blue: Color::Rgb(126, 176, 245),
+            warning: WARNING,
+            error: Color::Rgb(238, 126, 126),
+            added: ACCENT,
+            removed: Color::Rgb(238, 126, 126),
+            added_background: Color::Rgb(24, 55, 37),
+            removed_background: Color::Rgb(57, 30, 30),
+            watermark_mark: WATERMARK_MARK,
+            watermark_rim: WATERMARK_RIM,
+            watermark_band: WATERMARK_BAND,
+            watermark_orbit: WATERMARK_ORBIT,
+            selection_background: SELECTION_BACKGROUND,
+        },
+        TuiTheme::Light => ThemeTokens {
+            background: Color::Rgb(247, 249, 246),
+            panel_background: Color::Rgb(228, 238, 230),
+            user_message_background: Color::Rgb(225, 225, 225),
+            text: Color::Rgb(35, 47, 42),
+            muted: Color::Rgb(104, 115, 108),
+            subtle: Color::Rgb(79, 92, 84),
+            accent: Color::Rgb(20, 119, 77),
+            blue: Color::Rgb(31, 94, 165),
+            warning: Color::Rgb(139, 93, 12),
+            error: Color::Rgb(171, 55, 55),
+            added: Color::Rgb(21, 111, 62),
+            removed: Color::Rgb(171, 55, 55),
+            added_background: Color::Rgb(221, 239, 225),
+            removed_background: Color::Rgb(248, 229, 229),
+            watermark_mark: Color::Rgb(20, 119, 77),
+            watermark_rim: Color::Rgb(86, 145, 122),
+            watermark_band: Color::Rgb(171, 200, 182),
+            watermark_orbit: Color::Rgb(112, 161, 132),
+            selection_background: Color::Rgb(185, 215, 196),
+        },
+    }
+}
+
 pub struct PreviewColors {
     pub background: Color,
     pub text: Color,
@@ -72,77 +163,68 @@ pub struct PreviewColors {
 }
 
 pub fn preview_colors(theme: TuiTheme) -> PreviewColors {
-    match theme {
-        TuiTheme::Auto => PreviewColors {
-            background: Color::Reset,
-            text: Color::Reset,
-            muted: MUTED,
-            keyword: BLUE,
-            added: ACCENT,
-            removed: Color::Red,
-            added_background: Color::Rgb(24, 55, 37),
-            removed_background: Color::Rgb(57, 30, 30),
+    let tokens = theme_tokens(theme);
+    PreviewColors {
+        background: match theme {
+            TuiTheme::Dark => Color::Rgb(29, 34, 33),
+            TuiTheme::Light => Color::Rgb(244, 247, 244),
+            TuiTheme::Auto => tokens.background,
         },
-        TuiTheme::Light => PreviewColors {
-            background: Color::Rgb(244, 247, 244),
-            text: Color::Rgb(35, 47, 42),
-            muted: Color::Rgb(105, 116, 109),
-            keyword: Color::Rgb(24, 99, 159),
-            added: Color::Rgb(21, 111, 62),
-            removed: Color::Rgb(171, 55, 55),
-            added_background: Color::Rgb(221, 239, 225),
-            removed_background: Color::Rgb(248, 229, 229),
+        text: tokens.text,
+        muted: match theme {
+            TuiTheme::Light => Color::Rgb(105, 116, 109),
+            _ => tokens.muted,
         },
-        TuiTheme::Dark => PreviewColors {
-            background: Color::Rgb(29, 34, 33),
-            text: Color::Rgb(226, 234, 228),
-            muted: Color::Rgb(134, 148, 139),
-            keyword: Color::Rgb(126, 176, 245),
-            added: Color::Rgb(105, 230, 166),
-            removed: Color::Rgb(238, 126, 126),
-            added_background: Color::Rgb(24, 55, 37),
-            removed_background: Color::Rgb(57, 30, 30),
+        keyword: match theme {
+            TuiTheme::Light => Color::Rgb(24, 99, 159),
+            _ => tokens.blue,
         },
+        added: tokens.added,
+        removed: tokens.removed,
+        added_background: tokens.added_background,
+        removed_background: tokens.removed_background,
     }
 }
 
 pub fn apply_tui_theme(buffer: &mut Buffer, theme: TuiTheme) {
+    let tokens = theme_tokens(theme);
     for cell in &mut buffer.content {
         match theme {
             TuiTheme::Auto => {
                 if cell.fg == Color::White && cell.bg != USER_MESSAGE_BACKGROUND {
-                    cell.fg = Color::Reset;
+                    cell.fg = tokens.text;
                 }
                 if cell.bg == PANEL_BACKGROUND {
-                    cell.bg = Color::Reset;
+                    cell.bg = tokens.panel_background;
                 }
             }
             TuiTheme::Dark => {
                 if cell.fg == Color::Reset {
-                    cell.fg = Color::Rgb(226, 234, 228);
+                    cell.fg = tokens.text;
                 }
                 if cell.bg == Color::Reset {
-                    cell.bg = Color::Rgb(27, 30, 29);
+                    cell.bg = tokens.background;
                 }
             }
             TuiTheme::Light => {
                 cell.fg = match cell.fg {
-                    Color::Reset | Color::White | Color::Black => Color::Rgb(35, 47, 42),
-                    Color::DarkGray => Color::Rgb(104, 115, 108),
-                    Color::Gray => Color::Rgb(79, 92, 84),
-                    ACCENT | WATERMARK_MARK => Color::Rgb(20, 119, 77),
-                    BLUE => Color::Rgb(31, 94, 165),
-                    WATERMARK_RIM => Color::Rgb(86, 145, 122),
-                    WATERMARK_BAND => Color::Rgb(171, 200, 182),
-                    WATERMARK_ORBIT => Color::Rgb(112, 161, 132),
-                    Color::Yellow => Color::Rgb(139, 93, 12),
+                    Color::Reset | Color::White | Color::Black => tokens.text,
+                    Color::DarkGray => tokens.muted,
+                    Color::Gray => tokens.subtle,
+                    ACCENT | WATERMARK_MARK => tokens.accent,
+                    BLUE => tokens.blue,
+                    CARD_BORDER => Color::Rgb(175, 180, 188),
+                    WATERMARK_RIM => tokens.watermark_rim,
+                    WATERMARK_BAND => tokens.watermark_band,
+                    WATERMARK_ORBIT => tokens.watermark_orbit,
+                    Color::Yellow => tokens.warning,
                     other => other,
                 };
                 cell.bg = match cell.bg {
-                    Color::Reset => Color::Rgb(247, 249, 246),
-                    PANEL_BACKGROUND => Color::Rgb(228, 238, 230),
-                    USER_MESSAGE_BACKGROUND => Color::Rgb(225, 225, 225),
-                    Color::Gray => Color::Rgb(185, 215, 196),
+                    Color::Reset => tokens.background,
+                    PANEL_BACKGROUND => tokens.panel_background,
+                    USER_MESSAGE_BACKGROUND => tokens.user_message_background,
+                    Color::Gray => tokens.selection_background,
                     other => other,
                 };
             }
@@ -164,9 +246,51 @@ pub const SELECTION_TEXT: Color = Color::Black;
 pub const SELECTION_BACKGROUND: Color = Color::Gray;
 pub const PANEL_BACKGROUND: Color = Color::Rgb(38, 48, 45); // #26302D
 pub const USER_MESSAGE_BACKGROUND: Color = Color::Rgb(64, 64, 64); // #404040
+/// Gray card surface and border tokens for framed transcript cards (e.g. Release Notes).
+pub const CARD_BACKGROUND: Color = USER_MESSAGE_BACKGROUND; // Color::Rgb(64, 64, 64) - matches user message bubble
+pub const CARD_BORDER: Color = Color::Rgb(115, 120, 130); // #737882 - clear neutral gray border
 /// Endpoints for the animated white glow used by the TUI thinking status.
 pub const THINKING_GLOW_DIM: (u8, u8, u8) = (100, 100, 110);
 pub const THINKING_GLOW_BRIGHT: (u8, u8, u8) = (255, 255, 255);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn theme_tokens_and_preview_colors_remain_aligned() {
+        for theme in [TuiTheme::Auto, TuiTheme::Dark, TuiTheme::Light] {
+            let tokens = theme_tokens(theme);
+            let preview = preview_colors(theme);
+            assert_eq!(preview.text, tokens.text);
+            assert_eq!(preview.added, tokens.added);
+            assert_eq!(preview.removed, tokens.removed);
+            assert_eq!(preview.added_background, tokens.added_background);
+            assert_eq!(preview.removed_background, tokens.removed_background);
+        }
+    }
+
+    #[test]
+    fn card_tokens_preserve_gray_background_in_auto_and_adapt_in_light() {
+        use ratatui::layout::Rect;
+
+        // In Auto theme, card background must not get cleared to Reset
+        let mut buf_auto = Buffer::empty(Rect::new(0, 0, 2, 2));
+        buf_auto[(0, 0)].set_bg(CARD_BACKGROUND).set_fg(CARD_BORDER);
+        apply_tui_theme(&mut buf_auto, TuiTheme::Auto);
+        assert_eq!(buf_auto[(0, 0)].bg, CARD_BACKGROUND);
+        assert_eq!(buf_auto[(0, 0)].fg, CARD_BORDER);
+
+        // In Light theme, card background and border adapt to light surface
+        let mut buf_light = Buffer::empty(Rect::new(0, 0, 2, 2));
+        buf_light[(0, 0)]
+            .set_bg(CARD_BACKGROUND)
+            .set_fg(CARD_BORDER);
+        apply_tui_theme(&mut buf_light, TuiTheme::Light);
+        assert_eq!(buf_light[(0, 0)].bg, Color::Rgb(225, 225, 225));
+        assert_eq!(buf_light[(0, 0)].fg, Color::Rgb(175, 180, 188));
+    }
+}
 
 pub const ANSI_RESET: &str = "\x1b[0m";
 pub const ANSI_BOLD: &str = "\x1b[1m";

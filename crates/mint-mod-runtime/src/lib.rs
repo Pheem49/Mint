@@ -384,39 +384,33 @@ pub fn preview(manifest: &Value, source: &str) -> Result<Value, String> {
     .snapshot()
 }
 
-/// Newline-delimited IPC. The parent grants capabilities; this process has no OS SDK.
-pub fn worker_main() -> Result<(), String> {
-    fn read() -> Result<Value, String> {
-        let mut line = String::new();
-        io::stdin()
-            .read_line(&mut line)
-            .map_err(|e| e.to_string())?;
-        if line.len() > 1024 * 1024 {
-            return Err("IPC request too large".into());
-        }
-        serde_json::from_str(&line).map_err(|e| e.to_string())
-    }
-    fn send(value: &Value) {
-        println!("{}", value);
-        let _ = io::stdout().flush();
-    }
+/// Runs the worker exchange loop using custom reader and sender functions.
+pub fn run_worker_loop<R, W>(read: R, send: W) -> Result<(), String>
+where
+    R: Fn() -> Result<Value, String> + Clone + Send + Sync + 'static,
+    W: Fn(Value) + Clone + Send + Sync + 'static,
+{
     let init = read()?;
+    let host_send = send.clone();
+    let host_read = read.clone();
     let engine = Engine::new(
         init["compiled"].as_str().ok_or("Missing compiled source")?,
         &init["state"],
-        |request| {
+        move |request| {
             let request = serde_json::from_str::<Value>(&request).unwrap_or(Value::Null);
-            send(&json!({"host":request}));
-            read().unwrap_or_else(|e| json!({"error":e})).to_string()
+            host_send(json!({"host":request}));
+            host_read()
+                .unwrap_or_else(|e| json!({"error":e}))
+                .to_string()
         },
     );
     let engine = match engine {
         Ok(e) => {
-            send(&json!({"ok":e.snapshot()?}));
+            send(json!({"ok":e.snapshot()?}));
             e
         }
         Err(e) => {
-            send(&json!({"error":e}));
+            send(json!({"error":e}));
             return Ok(());
         }
     };
@@ -430,14 +424,34 @@ pub fn worker_main() -> Result<(), String> {
             break;
         }
         match engine.dispatch(kind, &request["payload"]) {
-            Ok(v) => send(&json!({"ok":v})),
+            Ok(v) => send(json!({"ok":v})),
             Err(e) => {
-                send(&json!({"error":e}));
+                send(json!({"error":e}));
                 break;
             }
         }
     }
     Ok(())
+}
+
+/// Newline-delimited IPC. The parent grants capabilities; this process has no OS SDK.
+pub fn worker_main() -> Result<(), String> {
+    run_worker_loop(
+        || {
+            let mut line = String::new();
+            io::stdin()
+                .read_line(&mut line)
+                .map_err(|e| e.to_string())?;
+            if line.len() > 1024 * 1024 {
+                return Err("IPC request too large".into());
+            }
+            serde_json::from_str(&line).map_err(|e| e.to_string())
+        },
+        |value| {
+            println!("{}", value);
+            let _ = io::stdout().flush();
+        },
+    )
 }
 
 pub fn pack(manifest: &Value, source: &str, readme: &str) -> Result<Vec<u8>, String> {

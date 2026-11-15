@@ -48,7 +48,11 @@ export const ChatCodeBlock = memo(function ChatCodeBlock({ code, language }: Pro
     return code.split('\n').length
   }, [code])
 
-  const showLineNumbers = lineCount > 1
+  // Hide line numbers for short commands / snippets (5 lines or fewer).
+  // For longer code blocks (> 5 lines), show line numbers by default with optional toggle.
+  const isShortSnippet = lineCount <= 5
+  const [toggleLineNumbers, setToggleLineNumbers] = useState<boolean | null>(null)
+  const showLineNumbers = toggleLineNumbers !== null ? toggleLineNumbers : !isShortSnippet
   const highlightedCode = useMemo(
     () => renderHighlightedCode(code, cleanLang, showLineNumbers),
     [code, cleanLang, showLineNumbers],
@@ -64,6 +68,16 @@ export const ChatCodeBlock = memo(function ChatCodeBlock({ code, language }: Pro
           )}
         </div>
         <div className="chat-code-block-actions">
+          {lineCount > 5 && (
+            <button
+              type="button"
+              onClick={() => setToggleLineNumbers(prev => (prev !== null ? !prev : false))}
+              title={showLineNumbers ? 'Hide line numbers' : 'Show line numbers'}
+              className={`chat-code-action-btn chat-code-toggle-lines-btn ${showLineNumbers ? 'is-active' : ''}`}
+            >
+              <span className="chat-code-btn-label">#</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={handleDownload}

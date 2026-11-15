@@ -218,6 +218,7 @@ pub(in crate::orchestration) async fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CodePatchHunk;
 
     #[tokio::test]
     async fn skill_writes_require_separate_approval_even_when_file_edits_are_allowed() {

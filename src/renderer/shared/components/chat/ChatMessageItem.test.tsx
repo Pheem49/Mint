@@ -58,12 +58,24 @@ describe('message update isolation and TurnFileChanges deep module', () => {
       deletions: 1,
       hunks: [{ oldText: 'old', newText: 'new' }],
     }))
-    const html = renderToStaticMarkup(<TurnFileChanges changes={changes} />)
-    expect(html).toContain('1 created, 3 modified')
+    const html = renderToStaticMarkup(<TurnFileChanges changes={changes} defaultOpen={true} />)
+    expect(html).toContain('4 files changed')
     expect(html).toContain('Show 1 more file')
   })
   it('does not retain stale user actions', () => {
     expect(unchanged({ onEditMessage: () => {} })).toBe(false)
+    expect(unchanged({ onResendFrom: () => {} })).toBe(false)
+  })
+  it('renders edit action button when onResendFrom is provided', () => {
+    const html = renderToStaticMarkup(
+      <ChatMessageItem
+        {...base}
+        onResendFrom={() => {}}
+        interaction={{ ...base.interaction, userText: 'Sample prompt' }}
+      />
+    )
+    expect(html).toContain('msg-action-btn edit-btn')
+    expect(html).toContain('Edit &amp; resend')
   })
 })
 
@@ -141,5 +153,31 @@ describe('view_image results on Desktop and Web', () => {
       )
       expect(html).not.toContain('agent-activity-history')
     }
+  })
+
+  it('renders clean user prompt and collapsible AttachedDocumentCard without raw system instructions', () => {
+    const rawUserText = `@generate_harness_pdf.py ขอปรับหน่อยอะ ไฟล์ที่ลากมาวา
+
+Attached document: LICENSE.electron.txt
+Use the extracted document text below when answering. If the user asks for a summary, summarize this document.
+
+--- Extracted document text ---
+Copyright (c) Electron contributors
+Copyright (c) 2013-2020 GitHub Inc.
+--- End extracted document text ---`
+
+    const html = renderToStaticMarkup(
+      <ChatMessageItem
+        {...base}
+        interaction={{ ...base.interaction, userText: rawUserText }}
+      />
+    )
+
+    expect(html).toContain('ขอปรับหน่อยอะ ไฟล์ที่ลากมาวา')
+    expect(html).toContain('LICENSE.electron.txt')
+    expect(html).toContain('chat-attached-document-card')
+    expect(html).toContain('View content')
+    expect(html).not.toContain('Use the extracted document text below when answering.')
+    expect(html).not.toContain('--- Extracted document text ---')
   })
 })

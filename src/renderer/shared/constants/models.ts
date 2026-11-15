@@ -82,6 +82,8 @@ export function isFreeModel(modelId: string): boolean {
 }
 
 export const DEEPSEEK_MODELS = [
+  'deepseek-flash',
+  'deepseek-v4-pro',
   'deepseek-chat',
   'deepseek-reasoner',
 ] as const
@@ -227,6 +229,18 @@ export const MODEL_METADATA: Record<string, ModelMeta> = {
     supportsThinking: true,
   },
 
+  // Gemini Image Generation (Nano Banana)
+  'nano-banana-pro-preview': {
+    description: 'Google Gemini Nano Banana Pro model for AI image generation and photo editing.',
+    contextWindow: '32K Context',
+    supportsThinking: false,
+  },
+  'gemini-nano-banana-2.1': {
+    description: 'Google Gemini Nano Banana 2.1 model for fast image generation and visual editing.',
+    contextWindow: '32K Context',
+    supportsThinking: false,
+  },
+
   // Anthropic Claude
   'claude-sonnet-5': {
     description: 'Anthropic flagship hybrid model with extended thinking and deep coding comprehension.',
@@ -251,7 +265,7 @@ export const MODEL_METADATA: Record<string, ModelMeta> = {
   'claude-haiku-4.5': {
     description: 'Fast and responsive Claude model for lightweight conversational turns.',
     contextWindow: '200K Context',
-    supportsThinking: false,
+    supportsThinking: true,
   },
 
   // OpenAI
@@ -283,35 +297,137 @@ export const MODEL_METADATA: Record<string, ModelMeta> = {
   'gpt-4o': {
     description: 'OpenAI versatile multimodal model for text, vision, and high-speed chat.',
     contextWindow: '128K Context',
-    supportsThinking: false,
+    supportsThinking: true,
   },
   'gpt-4o-mini': {
     description: 'Compact and fast OpenAI model for everyday conversational tasks.',
     contextWindow: '128K Context',
-    supportsThinking: false,
+    supportsThinking: true,
   },
 
   // DeepSeek
+  'deepseek-flash': {
+    description: 'DeepSeek V4.1 Flash (1M context) supporting both thinking and fast non-thinking modes.',
+    contextWindow: '1M Context',
+    supportsThinking: true,
+  },
   'deepseek-v4-flash': {
-    description: 'High-throughput DeepSeek model built for swift responses and programming.',
-    contextWindow: '128K Context',
-    supportsThinking: false,
+    description: 'High-throughput DeepSeek V4 Flash model supporting both thinking and non-thinking modes.',
+    contextWindow: '1M Context',
+    supportsThinking: true,
   },
   'deepseek-v4-pro': {
-    description: 'Advanced DeepSeek model featuring deep multilingual and coding reasoning.',
-    contextWindow: '128K Context',
+    description: 'Advanced DeepSeek V4 Pro model (1M context) featuring deep multilingual and coding reasoning.',
+    contextWindow: '1M Context',
     supportsThinking: true,
   },
   'deepseek-reasoner': {
-    description: 'DeepSeek native reasoning model (R1 architecture) with comprehensive chain-of-thought.',
-    contextWindow: '64K Context',
+    description: 'DeepSeek native reasoning model (R1 / V3.2 thinking) with comprehensive chain-of-thought.',
+    contextWindow: '128K Context',
     supportsThinking: true,
   },
   'deepseek-chat': {
-    description: 'General-purpose DeepSeek V3 conversational and coding model.',
-    contextWindow: '64K Context',
-    supportsThinking: false,
+    description: 'General-purpose DeepSeek conversational and coding model.',
+    contextWindow: '128K Context',
+    supportsThinking: true,
   },
+}
+
+/**
+ * Returns true if the model is strictly a non-text/media/embedding model
+ * (image generation, TTS, audio transcription, embeddings) that cannot use
+ * Chain-of-Thought reasoning.
+ */
+export function isNonTextModel(modelId: string): boolean {
+  const m = modelId.trim().toLowerCase()
+  const clean = m.split('/').pop() || m
+  return (
+    clean.includes('banana') ||
+    clean.includes('imagen') ||
+    clean.includes('image') ||
+    clean.includes('dall-e') ||
+    clean.includes('flux') ||
+    clean.includes('sdxl') ||
+    clean.includes('sd3') ||
+    clean.includes('ideogram') ||
+    clean.includes('veo-') ||
+    clean.includes('tts') ||
+    clean.includes('whisper') ||
+    clean.includes('embed') ||
+    clean.includes('aqa') ||
+    clean.includes('moderation') ||
+    clean.includes('native-audio') ||
+    clean.includes('-live-') ||
+    clean.endsWith('-live')
+  )
+}
+
+/**
+ * Returns true if the provider & model expose a native API parameter for visible
+ * reasoning tokens (e.g. Gemini 2.5+/3 thinkingConfig, DeepSeek V4/R1 thinking,
+ * OpenAI o1/o3/o4/gpt-5 reasoning_effort, Claude 3.7/4/5 extended thinking).
+ * Models where this returns false can still use Thinking via Prompt-based CoT (<think>).
+ */
+export function hasNativeThinkingSupport(modelId: string, provider?: string): boolean {
+  if (isNonTextModel(modelId)) return false
+  const p = (provider || '').trim().toLowerCase()
+  const m = modelId.trim().toLowerCase()
+  const clean = m.split('/').pop() || m
+
+  if (clean.includes('gemini') || p === 'gemini') {
+    return (
+      clean.startsWith('gemini-2.5') ||
+      clean.startsWith('gemini-3') ||
+      clean.includes('thinking')
+    )
+  }
+
+  if (clean.includes('claude') || p === 'anthropic') {
+    return (
+      clean.includes('3-7') ||
+      clean.includes('3.7') ||
+      clean.includes('sonnet-4') ||
+      clean.includes('opus-4') ||
+      clean.includes('haiku-4') ||
+      clean.includes('claude-4') ||
+      clean.includes('sonnet-5') ||
+      clean.includes('opus-5') ||
+      clean.includes('haiku-5') ||
+      clean.includes('thinking')
+    )
+  }
+
+  if (clean.includes('deepseek') || p === 'deepseek') {
+    return (
+      clean.includes('reasoner') ||
+      clean.includes('r1') ||
+      clean.includes('v4') ||
+      clean.includes('flash') ||
+      clean.includes('pro') ||
+      clean.includes('thinking')
+    )
+  }
+
+  if (
+    clean.startsWith('o1') ||
+    clean.startsWith('o3') ||
+    clean.startsWith('o4') ||
+    clean.startsWith('gpt-5')
+  ) {
+    return true
+  }
+
+  return (
+    clean.includes('thinking') ||
+    clean.includes('reason') ||
+    clean.includes('qwq') ||
+    clean.includes('r1') ||
+    clean.includes('qwen3') ||
+    clean.includes('glm-5') ||
+    clean.includes('glm-4.5') ||
+    clean.includes('grok-3-mini') ||
+    clean.includes('grok-4')
+  )
 }
 
 export function getModelMetadata(modelId: string, provider?: string): ModelMeta {
@@ -331,29 +447,20 @@ export function getModelMetadata(modelId: string, provider?: string): ModelMeta 
     contextWindow = lower.includes('pro') ? '2M Context' : '1M Context'
   } else if (lower.includes('claude') || provider === 'anthropic') {
     contextWindow = '200K Context'
+  } else if (lower.includes('deepseek-flash') || lower.includes('deepseek-v4')) {
+    contextWindow = '1M Context'
   } else if (lower.includes('llama-3') || lower.includes('qwen')) {
     contextWindow = '128K Context'
   }
 
-  const supportsThinking =
-    lower.includes('reason') ||
-    lower.includes('thinking') ||
-    lower.includes('r1') ||
-    lower.includes('o1') ||
-    lower.includes('o3') ||
-    lower.includes('qwq') ||
-    lower.includes('sonnet-5') ||
-    lower.includes('opus-5') ||
-    lower.includes('3-7') ||
-    lower.includes('2.5') ||
-    lower.includes('glm') ||
-    lower.includes('deepseek') ||
-    lower.includes('qwen') ||
-    (provider === 'gemini')
+  const supportsThinking = !isNonTextModel(clean)
+  const hasNative = hasNativeThinkingSupport(clean, provider)
 
-  const description = supportsThinking
-    ? `${clean} supports advanced multi-step reasoning and dynamic thinking effort.`
-    : `${clean} is an optimized model for responsive conversational interactions.`
+  const description = !supportsThinking
+    ? `${clean} is a specialized media or embedding model.`
+    : hasNative
+    ? `${clean} supports native multi-step reasoning and dynamic thinking effort.`
+    : `${clean} is an optimized conversational model supporting prompted chain-of-thought reasoning.`
 
   return { description, contextWindow, supportsThinking }
 }

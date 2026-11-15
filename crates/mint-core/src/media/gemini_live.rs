@@ -46,6 +46,8 @@ pub enum GeminiLiveEvent {
     /// The current turn (user's utterance or the model's reply) has finished —
     /// the next `Transcript` starts a new line instead of continuing this one.
     TurnComplete,
+    /// The user barged in while the model was speaking; queued playback must stop immediately.
+    Interrupted,
     /// Progress/result of a tool call the model triggered mid-conversation.
     ToolStatus {
         action: String,
@@ -53,10 +55,116 @@ pub enum GeminiLiveEvent {
         result: Option<String>,
         error: Option<String>,
     },
+    /// Tool approval request for Web / remote sessions where approvals travel over the Live stream.
+    ApprovalRequested {
+        token: String,
+        approval: AgentApproval,
+    },
     Error {
         message: String,
     },
     Closed,
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct LiveTurnAccumulator {
+    pub(crate) user_segments: Vec<String>,
+    pub(crate) assistant_segments: Vec<String>,
+    pub(crate) tool_activity: Vec<crate::orchestration::AgentProgress>,
+}
+
+impl LiveTurnAccumulator {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.user_segments.iter().all(|s| s.trim().is_empty())
+            && self.assistant_segments.iter().all(|s| s.trim().is_empty())
+            && self.tool_activity.is_empty()
+    }
+
+    pub(crate) fn should_flush_before_user_transcript(&self) -> bool {
+        !self.assistant_segments.iter().all(|s| s.trim().is_empty())
+            || !self.tool_activity.is_empty()
+    }
+
+    pub(crate) fn push_user_transcript(&mut self, text: &str) {
+        if !text.is_empty() {
+            self.user_segments.push(text.to_string());
+        }
+    }
+
+    pub(crate) fn push_assistant_transcript(&mut self, text: &str) {
+        if !text.is_empty() {
+            self.assistant_segments.push(text.to_string());
+        }
+    }
+
+    pub(crate) fn record_tool_call(
+        &mut self,
+        call_id: Option<String>,
+        action: &str,
+        input: Value,
+        result: &str,
+        elapsed_ms: Option<u64>,
+        is_error: bool,
+    ) {
+        self.tool_activity
+            .push(crate::orchestration::AgentProgress::ToolStart {
+                call_id: call_id.clone(),
+                action: action.to_string(),
+                input: input.clone(),
+                subagent: None,
+            });
+        self.tool_activity
+            .push(crate::orchestration::AgentProgress::ToolEnd {
+                elapsed_ms,
+                call_id,
+                status: Some(if is_error {
+                    crate::integrations::mcp_result::ToolStatus::Failed
+                } else {
+                    crate::integrations::mcp_result::ToolStatus::Success
+                }),
+                action: action.to_string(),
+                input,
+                result: result.to_string(),
+                subagent: None,
+            });
+    }
+
+    pub(crate) fn flush_to_memory(
+        &mut self,
+        memory: &crate::MemoryStore,
+        chat_id: &str,
+        workspace_root: &Path,
+        model: &str,
+    ) -> Option<i64> {
+        if self.is_empty() {
+            self.user_segments.clear();
+            self.assistant_segments.clear();
+            return None;
+        }
+        let scoped_id =
+            crate::memory::scoped_chat_id(chat_id, Some(workspace_root.to_string_lossy().as_ref()));
+        let mut user_text = self.user_segments.concat().trim().to_string();
+        if user_text.is_empty() {
+            user_text = "[Voice]".to_string();
+        }
+        let mut ai_text = self.assistant_segments.concat().trim().to_string();
+        if ai_text.is_empty() && !self.tool_activity.is_empty() {
+            ai_text = "✓ Completed voice tool action.".to_string();
+        }
+        let activity = std::mem::take(&mut self.tool_activity);
+        self.user_segments.clear();
+        self.assistant_segments.clear();
+
+        let interaction_id = memory
+            .add_interaction_for_chat(&scoped_id, &user_text, &ai_text, "gemini", model)
+            .ok()?;
+        if !activity.is_empty()
+            && let Ok(activity_json) = serde_json::to_string(&activity)
+        {
+            let _ = memory.set_interaction_agent_activity_json(interaction_id, &activity_json);
+        }
+        Some(interaction_id)
+    }
 }
 
 /// Handle for pushing mic audio into a running session.
@@ -98,6 +206,11 @@ where
 
     let on_event = Arc::new(on_event);
     let session_events = Arc::clone(&on_event);
+    let turn_accumulator = Arc::new(std::sync::Mutex::new(LiveTurnAccumulator::default()));
+    let session_turn = Arc::clone(&turn_accumulator);
+    let close_workspace = workspace_root.clone();
+    let close_chat_id = chat_id.clone();
+    let close_model = resolve_live_model(&config);
     spawn_cancellable_live_session(
         chat_id.clone(),
         audio_tx,
@@ -110,13 +223,23 @@ where
                 &mut approve_cb,
                 &*session_events,
                 &mut audio_rx,
+                &session_turn,
             )
             .await
             {
                 session_events(GeminiLiveEvent::Error { message });
             }
         },
-        move || on_event(GeminiLiveEvent::Closed),
+        move || {
+            if let Ok(mut turn) = turn_accumulator.lock()
+                && !turn.is_empty()
+                && let Ok(memory) = crate::MemoryStore::open_default()
+            {
+                let _ =
+                    turn.flush_to_memory(&memory, &close_chat_id, &close_workspace, &close_model);
+            }
+            on_event(GeminiLiveEvent::Closed);
+        },
     )
 }
 
@@ -152,15 +275,13 @@ where
     }
 }
 
-/// Keep browser targeting, evidence, and recovery state for the entire voice
-/// task, including successive tool-call batches and spoken turns. Dropping the
-/// task releases its tab leases; the next voice session starts independently.
+/// Spawns a live voice task session.
 pub(crate) fn spawn_live_session<F>(future: F) -> tokio::task::JoinHandle<F::Output>
 where
     F: std::future::Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    tokio::spawn(crate::browser::run_session(future))
+    tokio::spawn(future)
 }
 
 fn resolve_api_key(config: &MintConfig) -> String {
@@ -191,27 +312,173 @@ fn resolve_live_voice(config: &MintConfig) -> String {
         .to_string()
 }
 
-fn agent_action_tool_declaration() -> Value {
+fn agent_action_fallback_declaration() -> Value {
     json!({
-        "functionDeclarations": [{
-            "name": "agent_action",
-            "description": "Execute one of Mint's built-in actions (video editing, subtitle generation, file/browser/shell operations, and more). Use this instead of describing the action in words.",
-            "parameters": {
-                "type": "OBJECT",
-                "properties": {
-                    "action": {
-                        "type": "STRING",
-                        "description": "The action name, e.g. video_trim, video_extract_audio, speech_transcribe, list_files, read_file, run_shell."
-                    },
-                    "input": {
-                        "type": "OBJECT",
-                        "description": "Arguments for the action, e.g. {\"input\": \"...\", \"output\": \"...\", \"start\": 0, \"end\": 10}."
-                    }
+        "name": "agent_action",
+        "description": "Fallback action dispatcher: execute one of Mint's built-in actions by specifying its action name and input object.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "The action name, e.g. video_trim, video_extract_audio, speech_transcribe, list_files, read_file, run_shell."
                 },
-                "required": ["action"]
-            }
-        }]
+                "input": {
+                    "type": "OBJECT",
+                    "description": "Arguments for the action, e.g. {\"input\": \"...\", \"output\": \"...\", \"start\": 0, \"end\": 10}."
+                }
+            },
+            "required": ["action"]
+        }
     })
+}
+
+fn live_tool_declarations(config: &MintConfig, workspace_root: &Path) -> Value {
+    let catalog = crate::prompts::tool_catalog::tool_catalog(config, false, workspace_root, false);
+    let mut declarations: Vec<Value> = catalog
+        .into_iter()
+        .filter(|tool| {
+            !matches!(
+                tool.name.as_str(),
+                "finish" | "enter_plan_mode" | "exit_plan_mode"
+            )
+        })
+        .map(|tool| {
+            json!({
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": crate::chat::gemini_sanitize_schema(&tool.parameters),
+            })
+        })
+        .collect();
+    declarations.push(agent_action_fallback_declaration());
+    json!({ "functionDeclarations": declarations })
+}
+
+fn resolve_live_tool_call(call: &Value) -> (String, Value) {
+    let name = call["name"].as_str().unwrap_or_default();
+    if name == "agent_action" {
+        let action = call["args"]["action"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let input = call["args"]
+            .get("input")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        (action, input)
+    } else {
+        let input = call.get("args").cloned().unwrap_or_else(|| json!({}));
+        (name.to_string(), input)
+    }
+}
+
+fn dispatch_server_content_events<Event>(value: &Value, on_event: &Event)
+where
+    Event: Fn(GeminiLiveEvent),
+{
+    if let Some(parts) = value["serverContent"]["modelTurn"]["parts"].as_array() {
+        for part in parts {
+            if let Some(data) = part["inlineData"]["data"].as_str() {
+                on_event(GeminiLiveEvent::AudioChunk {
+                    data: data.to_string(),
+                });
+            }
+        }
+    }
+    if let Some(text) = value["serverContent"]["outputTranscription"]["text"].as_str()
+        && !text.is_empty()
+    {
+        on_event(GeminiLiveEvent::Transcript {
+            role: "assistant".into(),
+            text: text.into(),
+        });
+    }
+    if let Some(text) = value["serverContent"]["inputTranscription"]["text"].as_str()
+        && !text.is_empty()
+    {
+        on_event(GeminiLiveEvent::Transcript {
+            role: "user".into(),
+            text: text.into(),
+        });
+    }
+    if value["serverContent"]["interrupted"].as_bool() == Some(true) {
+        on_event(GeminiLiveEvent::Interrupted);
+    }
+    if value["serverContent"]["turnComplete"].as_bool() == Some(true) {
+        on_event(GeminiLiveEvent::TurnComplete);
+    }
+}
+
+const MAX_LIVE_BASE_PROMPT_CHARS: usize = 12_000;
+const MAX_LIVE_MEMORY_CONTEXT_CHARS: usize = 6_000;
+const MAX_LIVE_SKILLS_CONTEXT_CHARS: usize = 4_000;
+const LIVE_VOICE_MODE_OVERRIDE: &str = "LIVE VOICE MODE OVERRIDE:\n- You are in a real-time spoken voice conversation (Gemini Live). Speak naturally and concisely to the user.\n- When the user asks you to perform an action, call the matching tool function directly (e.g. `list_files`, `read_file`, `git_status`, `web_search`, `video_trim`, `run_shell`, etc.) rather than describing the action in words.\n- Do NOT call a `finish` tool — once your tool calls complete (or if no tool is needed), simply speak your final response out loud to the user.";
+
+pub(crate) fn build_live_system_instruction(
+    config: &MintConfig,
+    workspace_root: &Path,
+    chat_id: &str,
+    memory_store: Option<&crate::MemoryStore>,
+) -> String {
+    let user_name = memory_store.and_then(|memory| memory.get_profile("name").ok().flatten());
+    let mut base_prompt =
+        crate::prompts::agent::build_system_prompt(config, false, true, user_name.as_deref(), None);
+    if base_prompt.chars().count() > MAX_LIVE_BASE_PROMPT_CHARS {
+        base_prompt = base_prompt
+            .chars()
+            .take(MAX_LIVE_BASE_PROMPT_CHARS)
+            .collect();
+    }
+
+    let mut sections = vec![base_prompt.trim().to_string()];
+
+    if let Some(memory) = memory_store {
+        let mut memory_buf = String::new();
+        crate::orchestration::append_memory_context(
+            &mut memory_buf,
+            memory,
+            chat_id,
+            Some(workspace_root.to_string_lossy().as_ref()),
+            None,
+            config.semantic_fact_recall,
+            true,
+        );
+        let trimmed_mem = memory_buf.trim();
+        if !trimmed_mem.is_empty() {
+            let mem_chars: Vec<char> = trimmed_mem.chars().collect();
+            let budgeted_mem = if mem_chars.len() > MAX_LIVE_MEMORY_CONTEXT_CHARS {
+                // Keep profile/facts at the head and the newest conversation turns at the tail.
+                let head_len = 1_500;
+                let tail_len = MAX_LIVE_MEMORY_CONTEXT_CHARS.saturating_sub(head_len + 40);
+                let head: String = mem_chars[..head_len].iter().collect();
+                let tail: String = mem_chars[mem_chars.len() - tail_len..].iter().collect();
+                format!("{head}\n...[older turns omitted]...\n{tail}")
+            } else {
+                trimmed_mem.to_string()
+            };
+            sections.push(budgeted_mem);
+        }
+    }
+
+    if let Ok(skills) = crate::skills::learned_skills_context(Some(workspace_root), Some(chat_id)) {
+        let trimmed_skills = skills.trim();
+        if !trimmed_skills.is_empty() {
+            let skill_chars: Vec<char> = trimmed_skills.chars().collect();
+            let budgeted_skills = if skill_chars.len() > MAX_LIVE_SKILLS_CONTEXT_CHARS {
+                let prefix: String = skill_chars[..MAX_LIVE_SKILLS_CONTEXT_CHARS]
+                    .iter()
+                    .collect();
+                format!("Learned skills:\n{prefix}\n...[truncated]")
+            } else {
+                format!("Learned skills:\n{trimmed_skills}")
+            };
+            sections.push(budgeted_skills);
+        }
+    }
+
+    sections.push(LIVE_VOICE_MODE_OVERRIDE.to_string());
+    sections.join("\n\n")
 }
 
 async fn run_session<Approve, Event>(
@@ -221,6 +488,7 @@ async fn run_session<Approve, Event>(
     approve_cb: &mut Approve,
     on_event: &Event,
     audio_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
+    turn_accumulator: &Arc<std::sync::Mutex<LiveTurnAccumulator>>,
 ) -> Result<(), String>
 where
     Approve: FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send,
@@ -254,46 +522,9 @@ where
     eprintln!("[gemini-live] connected, sending setup...");
     let (mut ws_write, mut ws_read) = ws_stream.split();
 
-    let user_name = crate::MemoryStore::open_default()
-        .ok()
-        .and_then(|memory| memory.get_profile("name").ok().flatten());
-
-    let mut system_instruction = format!(
-        "{}\n\nWhen the user asks you to perform an action, call the `agent_action` function with `action` set to the action name and `input` set to a JSON object of its arguments, rather than describing the action in words.",
-        crate::prompts::agent::build_system_prompt(config, false, true, user_name.as_deref(), None)
-    );
-    // Same cross-session context (saved profile/preferences + this chat's recent
-    // history) the typed-chat agent loop gets, so a Live call isn't a blank slate
-    // that's forgotten everything the user already told Mint.
-    crate::orchestration::append_memory_context(
-        &mut system_instruction,
-        chat_id,
-        Some(workspace_root.to_string_lossy().as_ref()),
-        None,
-        config.semantic_fact_recall,
-    );
-    if let Ok(skills) = crate::skills::learned_skills_context(Some(workspace_root), Some(chat_id))
-        && !skills.trim().is_empty()
-    {
-        system_instruction = format!(
-            "{}\n\nLearned skills:\n{}",
-            system_instruction.trim(),
-            skills.trim()
-        );
-    }
-    // Recent conversation history and skills have no size cap of their own (skills
-    // alone can run up to 16KB — see MAX_CONTEXT_BYTES in skills.rs) — a long chat
-    // history would otherwise bloat every Live session's setup message, adding to
-    // the delay before the model starts responding. The core instructions and tool
-    // declaration are built first, so truncating off the end only drops overflow
-    // context, never the instructions themselves.
-    const MAX_LIVE_SYSTEM_INSTRUCTION_CHARS: usize = 12_000;
-    if system_instruction.chars().count() > MAX_LIVE_SYSTEM_INSTRUCTION_CHARS {
-        system_instruction = system_instruction
-            .chars()
-            .take(MAX_LIVE_SYSTEM_INSTRUCTION_CHARS)
-            .collect();
-    }
+    let memory_store = crate::MemoryStore::open_default().ok();
+    let system_instruction =
+        build_live_system_instruction(config, workspace_root, chat_id, memory_store.as_ref());
 
     // Confirmed against a live server rejection: `responseModalities` must be nested under
     // `generationConfig` — the server explicitly rejects it at the top level of `setup`
@@ -310,7 +541,7 @@ where
                 }
             },
             "systemInstruction": { "parts": [{ "text": system_instruction }] },
-            "tools": [agent_action_tool_declaration()],
+            "tools": [live_tool_declarations(config, workspace_root)],
             "outputAudioTranscription": {},
             "inputAudioTranscription": {},
             // Default end-of-speech detection is quick to decide the user is done
@@ -424,35 +655,46 @@ where
                     return Err(message);
                 }
 
-                if let Some(parts) = value["serverContent"]["modelTurn"]["parts"].as_array() {
-                    for part in parts {
-                        if let Some(data) = part["inlineData"]["data"].as_str() {
-                            on_event(GeminiLiveEvent::AudioChunk { data: data.to_string() });
+                dispatch_server_content_events(&value, &|ev| {
+                    match &ev {
+                        GeminiLiveEvent::Transcript { role, text } => {
+                            if let Ok(mut turn) = turn_accumulator.lock() {
+                                if role == "user" {
+                                    if turn.should_flush_before_user_transcript()
+                                        && let Some(ref memory) = memory_store
+                                    {
+                                        let _ = turn.flush_to_memory(
+                                            memory,
+                                            chat_id,
+                                            workspace_root,
+                                            &model,
+                                        );
+                                    }
+                                    turn.push_user_transcript(text);
+                                } else if role == "assistant" {
+                                    turn.push_assistant_transcript(text);
+                                }
+                            }
+                            on_event(ev);
                         }
+                        GeminiLiveEvent::Interrupted | GeminiLiveEvent::TurnComplete => {
+                            if let Some(ref memory) = memory_store
+                                && let Ok(mut turn) = turn_accumulator.lock()
+                            {
+                                let _ = turn.flush_to_memory(memory, chat_id, workspace_root, &model);
+                            }
+                            on_event(ev);
+                        }
+                        _ => on_event(ev),
                     }
-                }
-                if let Some(text) = value["serverContent"]["outputTranscription"]["text"].as_str() {
-                    if !text.is_empty() {
-                        on_event(GeminiLiveEvent::Transcript { role: "assistant".into(), text: text.into() });
-                    }
-                }
-                if let Some(text) = value["serverContent"]["inputTranscription"]["text"].as_str() {
-                    if !text.is_empty() {
-                        on_event(GeminiLiveEvent::Transcript { role: "user".into(), text: text.into() });
-                    }
-                }
-                if value["serverContent"]["turnComplete"].as_bool() == Some(true)
-                    || value["serverContent"]["interrupted"].as_bool() == Some(true)
-                {
-                    on_event(GeminiLiveEvent::TurnComplete);
-                }
+                });
 
                 if let Some(calls) = value["toolCall"]["functionCalls"].as_array() {
                     for call in calls {
                         let id = call["id"].as_str().unwrap_or_default().to_string();
                         let name = call["name"].as_str().unwrap_or_default().to_string();
-                        let action = call["args"]["action"].as_str().unwrap_or_default().to_string();
-                        let input = call["args"]["input"].clone();
+                        let (action, input) = resolve_live_tool_call(call);
+                        let call_started = std::time::Instant::now();
 
                         let outcome = execute_tool_from_json(
                             workspace_root,
@@ -463,6 +705,7 @@ where
                             approve_cb,
                         )
                         .await;
+                        let elapsed_ms = Some(call_started.elapsed().as_millis() as u64);
 
                         let (result_str, error_str, response_payload) = match &outcome {
                             Ok(result) => (Some(result.clone()), None, json!({ "result": result })),
@@ -471,6 +714,20 @@ where
                                 (None, Some(message.clone()), json!({ "error": message }))
                             }
                         };
+                        if let Ok(mut turn) = turn_accumulator.lock() {
+                            let summary = result_str
+                                .as_deref()
+                                .or(error_str.as_deref())
+                                .unwrap_or_default();
+                            turn.record_tool_call(
+                                if id.is_empty() { None } else { Some(id.clone()) },
+                                &action,
+                                input.clone(),
+                                summary,
+                                elapsed_ms,
+                                error_str.is_some(),
+                            );
+                        }
                         on_event(GeminiLiveEvent::ToolStatus {
                             action: action.clone(),
                             input,
@@ -577,5 +834,298 @@ mod approval_lifecycle_tests {
             matches!(result, Ok(Ok(()))),
             "voice stop waited for transport: {result:?}"
         );
+    }
+
+    #[test]
+    fn live_tool_declarations_include_real_catalog_tools_without_unsupported_schema_fields() {
+        let config = MintConfig::default();
+        let workspace = std::path::Path::new(".");
+        let decl = live_tool_declarations(&config, workspace);
+        let funcs = decl["functionDeclarations"]
+            .as_array()
+            .expect("functionDeclarations array");
+        let names: Vec<&str> = funcs.iter().filter_map(|f| f["name"].as_str()).collect();
+
+        assert!(
+            names.contains(&"list_files"),
+            "missing list_files: {names:?}"
+        );
+        assert!(names.contains(&"read_file"), "missing read_file: {names:?}");
+        assert!(
+            names.contains(&"git_status"),
+            "missing git_status: {names:?}"
+        );
+        assert!(
+            names.contains(&"web_search"),
+            "missing web_search: {names:?}"
+        );
+        assert!(
+            names.contains(&"video_trim"),
+            "missing video_trim: {names:?}"
+        );
+        assert!(
+            names.contains(&"agent_action"),
+            "missing fallback agent_action: {names:?}"
+        );
+        assert!(
+            !names.contains(&"finish"),
+            "live voice mode must not expose finish tool"
+        );
+        assert!(
+            !names.contains(&"enter_plan_mode"),
+            "live voice mode must not expose enter_plan_mode"
+        );
+        assert!(
+            !names.contains(&"exit_plan_mode"),
+            "live voice mode must not expose exit_plan_mode"
+        );
+
+        let serialized = serde_json::to_string(&decl).unwrap();
+        assert!(
+            !serialized.contains("\"additionalProperties\""),
+            "Gemini Live tool schemas must strip additionalProperties"
+        );
+    }
+
+    #[test]
+    fn resolve_live_tool_call_handles_both_direct_tools_and_agent_action_wrapper() {
+        let direct_call = json!({
+            "id": "call-1",
+            "name": "read_file",
+            "args": { "path": "README.md", "startLine": 1 }
+        });
+        let (action, input) = resolve_live_tool_call(&direct_call);
+        assert_eq!(action, "read_file");
+        assert_eq!(input, json!({ "path": "README.md", "startLine": 1 }));
+
+        let wrapped_call = json!({
+            "id": "call-2",
+            "name": "agent_action",
+            "args": {
+                "action": "video_trim",
+                "input": { "input": "a.mp4", "output": "b.mp4", "start": 0, "end": 5 }
+            }
+        });
+        let (action2, input2) = resolve_live_tool_call(&wrapped_call);
+        assert_eq!(action2, "video_trim");
+        assert_eq!(
+            input2,
+            json!({ "input": "a.mp4", "output": "b.mp4", "start": 0, "end": 5 })
+        );
+    }
+
+    #[test]
+    fn server_content_interrupted_emits_interrupted_event_distinct_from_turn_complete() {
+        let events = std::sync::Mutex::new(Vec::new());
+        let interrupted_msg = json!({
+            "serverContent": {
+                "interrupted": true
+            }
+        });
+        dispatch_server_content_events(&interrupted_msg, &|ev| events.lock().unwrap().push(ev));
+        {
+            let recorded = events.lock().unwrap();
+            assert_eq!(recorded.len(), 1);
+            assert!(
+                matches!(recorded[0], GeminiLiveEvent::Interrupted),
+                "expected Interrupted event, got: {:?}",
+                recorded[0]
+            );
+        }
+
+        events.lock().unwrap().clear();
+        let turn_complete_msg = json!({
+            "serverContent": {
+                "turnComplete": true
+            }
+        });
+        dispatch_server_content_events(&turn_complete_msg, &|ev| events.lock().unwrap().push(ev));
+        {
+            let recorded = events.lock().unwrap();
+            assert_eq!(recorded.len(), 1);
+            assert!(
+                matches!(recorded[0], GeminiLiveEvent::TurnComplete),
+                "expected TurnComplete event, got: {:?}",
+                recorded[0]
+            );
+        }
+    }
+
+    #[test]
+    fn live_turn_accumulator_flushes_transcripts_and_tool_activity_to_memory_store() {
+        let db_path = std::env::temp_dir().join(format!(
+            "mint-live-turn-test-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+        let memory = crate::MemoryStore::open(&db_path);
+        let workspace = std::path::Path::new("/tmp/mint-live-test-ws");
+        let chat_id = "chat-live-1";
+        let model = "gemini-2.5-flash-native-audio-preview-12-2025";
+
+        let mut turn = LiveTurnAccumulator::default();
+        assert!(turn.is_empty());
+        assert_eq!(
+            turn.flush_to_memory(&memory, chat_id, workspace, model),
+            None
+        );
+
+        turn.push_user_transcript("ช่วยดูไฟล์ ");
+        turn.push_user_transcript("README ให้หน่อย");
+        turn.record_tool_call(
+            Some("call-1".to_string()),
+            "read_file",
+            json!({ "path": "README.md" }),
+            "file contents here",
+            Some(12),
+            false,
+        );
+        turn.push_assistant_transcript("อ่านไฟล์ README ");
+        turn.push_assistant_transcript("เรียบร้อยแล้วครับ");
+
+        let interaction_id = turn
+            .flush_to_memory(&memory, chat_id, workspace, model)
+            .expect("should persist non-empty turn");
+        assert!(interaction_id > 0);
+        assert!(turn.is_empty(), "accumulator must reset after flush");
+
+        let scoped_id =
+            crate::memory::scoped_chat_id(chat_id, Some(workspace.to_string_lossy().as_ref()));
+        let snapshot = memory
+            .conversation_snapshot(&scoped_id, None, 10)
+            .expect("snapshot");
+        assert_eq!(snapshot.interactions.len(), 1);
+        let saved = &snapshot.interactions[0];
+        assert_eq!(saved.user_text, "ช่วยดูไฟล์ README ให้หน่อย");
+        assert_eq!(saved.ai_text, "อ่านไฟล์ README เรียบร้อยแล้วครับ");
+        assert_eq!(saved.provider, "gemini");
+        assert_eq!(saved.model, model);
+        let activity = saved
+            .agent_activity
+            .as_ref()
+            .and_then(|v| v.as_array())
+            .expect("agent_activity should be saved as array");
+        assert_eq!(activity.len(), 2, "expected ToolStart and ToolEnd");
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn live_turn_accumulator_flushes_previous_turn_when_new_user_speech_arrives_after_assistant_reply()
+     {
+        let db_path = std::env::temp_dir().join(format!(
+            "mint-live-turn-barge-test-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+        let memory = crate::MemoryStore::open(&db_path);
+        let workspace = std::path::Path::new("/tmp/mint-live-barge-ws");
+        let chat_id = "chat-live-barge";
+        let model = "gemini-2.5-flash-native-audio-preview-12-2025";
+
+        let mut turn = LiveTurnAccumulator::default();
+        turn.push_user_transcript("สวัสดีครับ");
+        turn.push_assistant_transcript("สวัสดีครับ มีอะไรให้ช่วยไหมครับ");
+
+        // User starts speaking Turn 2 before `interrupted`/`turnComplete` arrives:
+        assert!(
+            turn.should_flush_before_user_transcript(),
+            "once assistant has replied/acted, a new user utterance after assistant output should flush Turn 1 first"
+        );
+        let first_id = turn
+            .flush_to_memory(&memory, chat_id, workspace, model)
+            .expect("should flush Turn 1");
+        assert!(first_id > 0);
+
+        turn.push_user_transcript("เดี๋ยวก่อนนะ ขอเปลี่ยนคำถาม");
+        assert!(
+            !turn.should_flush_before_user_transcript(),
+            "consecutive user fragments in Turn 2 must accumulate together"
+        );
+        turn.push_assistant_transcript("ได้ครับ ว่ามาได้เลย");
+        let second_id = turn
+            .flush_to_memory(&memory, chat_id, workspace, model)
+            .expect("should flush Turn 2");
+        assert!(second_id > first_id);
+
+        let scoped_id =
+            crate::memory::scoped_chat_id(chat_id, Some(workspace.to_string_lossy().as_ref()));
+        let snapshot = memory
+            .conversation_snapshot(&scoped_id, None, 10)
+            .expect("snapshot");
+        assert_eq!(snapshot.interactions.len(), 2);
+        assert_eq!(snapshot.interactions[0].user_text, "สวัสดีครับ");
+        assert_eq!(snapshot.interactions[0].ai_text, "สวัสดีครับ มีอะไรให้ช่วยไหมครับ");
+        assert_eq!(snapshot.interactions[1].user_text, "เดี๋ยวก่อนนะ ขอเปลี่ยนคำถาม");
+        assert_eq!(snapshot.interactions[1].ai_text, "ได้ครับ ว่ามาได้เลย");
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn approval_requested_event_serializes_with_camel_case_type() {
+        let ev = GeminiLiveEvent::ApprovalRequested {
+            token: "tok-123".to_string(),
+            approval: AgentApproval::RunShell {
+                command: "cargo test".to_string(),
+                mode: "workspace-write".to_string(),
+                background: false,
+            },
+        };
+        let v = serde_json::to_value(&ev).expect("serialize ApprovalRequested");
+        assert_eq!(v["type"], "approvalRequested");
+        assert_eq!(v["token"], "tok-123");
+        assert_eq!(v["approval"]["RunShell"]["command"], "cargo test");
+    }
+
+    #[test]
+    fn build_live_system_instruction_preserves_memory_skills_and_voice_override_under_budget() {
+        let db_path = std::env::temp_dir().join(format!(
+            "mint-live-sysprompt-test-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+        let memory = crate::MemoryStore::open(&db_path);
+        let workspace = std::path::Path::new("/tmp/mint-live-budget-ws");
+        let chat_id = "chat-budget-1";
+        let scoped =
+            crate::memory::scoped_chat_id(chat_id, Some(workspace.to_string_lossy().as_ref()));
+
+        memory.set_profile("name", "Pheem").unwrap();
+        for idx in 0..8 {
+            let filler = format!("Turn {idx}: {}", "รายละเอียดระบบเดิม ".repeat(60));
+            memory
+                .add_interaction_for_chat(&scoped, &filler, &filler, "gemini", "gemini-2.5-flash")
+                .unwrap();
+        }
+        memory
+            .add_interaction_for_chat(
+                &scoped,
+                "โปรเจกต์นี้ใช้พอร์ต 4173 นะ",
+                "รับทราบครับ พอร์ต 4173",
+                "gemini",
+                "gemini-2.5-flash",
+            )
+            .unwrap();
+
+        let config = MintConfig::default();
+        let instruction = build_live_system_instruction(&config, workspace, chat_id, Some(&memory));
+
+        assert!(
+            instruction.contains("4173"),
+            "memory context must not be truncated out by a long base prompt"
+        );
+        assert!(
+            instruction.contains("LIVE VOICE MODE OVERRIDE:"),
+            "voice mode override must always be present"
+        );
+        assert!(
+            instruction
+                .trim_end()
+                .ends_with("simply speak your final response out loud to the user."),
+            "voice mode override must be pinned at the very end of system_instruction"
+        );
+        assert!(
+            instruction.chars().count() <= 24_000,
+            "instruction should stay within total 24k char budget, got {}",
+            instruction.chars().count()
+        );
+
+        let _ = std::fs::remove_file(&db_path);
     }
 }

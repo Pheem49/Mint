@@ -3,6 +3,11 @@
   max-width: 100%;
 }
 
+.sources-block:has(.source-links-popover) {
+  position: relative;
+  z-index: 50;
+}
+
 .source-card-group {
   position: relative;
   display: flex;
@@ -11,6 +16,11 @@
   max-width: 240px;
   min-width: 160px;
   box-sizing: border-box;
+}
+
+.source-card-group.is-open,
+.source-card-group:has(.source-links-popover) {
+  z-index: 50;
 }
 
 .source-card {
@@ -28,9 +38,36 @@
   min-width: 0;
 }
 
+.source-links-popover,
 .source-card-group > .source-links-popover {
-  width: 260px;
+  width: 280px;
+  max-width: min(320px, calc(100vw - 32px));
+  max-height: 320px;
   box-sizing: border-box;
+  overflow: hidden;
+}
+
+.source-links-popover-list {
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.source-links-popover-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.source-links-popover-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.source-links-popover-list::-webkit-scrollbar-thumb {
+  background: var(--border-default, rgba(255, 255, 255, 0.15));
+  border-radius: 9999px;
+}
+
+.source-links-popover-list::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong, rgba(255, 255, 255, 0.3));
 }
 
 .sources-more-button {
@@ -78,8 +115,10 @@
     inset: 0;
   }
 
+  .source-links-popover,
   .source-card-group > .source-links-popover {
-    width: 100%;
+    width: 280px;
+    max-width: calc(100vw - 24px);
   }
 
   .sources-more-button {
