@@ -3213,11 +3213,7 @@ pub async fn handle_slash_command(
                     "Stop recording, transcribe speech, and send prompt to Mint",
                     "send",
                 ),
-                ChoiceItem::with_description(
-                    "Cancel",
-                    "Discard current voice recording",
-                    "cancel",
-                ),
+                ChoiceItem::with_description("Cancel", "Discard current voice recording", "cancel"),
             ];
             match ui.prompt_choice(
                 "🎙 Recording Voice",

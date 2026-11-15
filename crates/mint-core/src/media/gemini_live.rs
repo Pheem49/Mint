@@ -141,10 +141,8 @@ impl LiveTurnAccumulator {
             self.assistant_segments.clear();
             return None;
         }
-        let scoped_id = crate::memory::scoped_chat_id(
-            chat_id,
-            Some(workspace_root.to_string_lossy().as_ref()),
-        );
+        let scoped_id =
+            crate::memory::scoped_chat_id(chat_id, Some(workspace_root.to_string_lossy().as_ref()));
         let mut user_text = self.user_segments.concat().trim().to_string();
         if user_text.is_empty() {
             user_text = "[Voice]".to_string();
@@ -237,7 +235,8 @@ where
                 && !turn.is_empty()
                 && let Ok(memory) = crate::MemoryStore::open_default()
             {
-                let _ = turn.flush_to_memory(&memory, &close_chat_id, &close_workspace, &close_model);
+                let _ =
+                    turn.flush_to_memory(&memory, &close_chat_id, &close_workspace, &close_model);
             }
             on_event(GeminiLiveEvent::Closed);
         },
@@ -369,10 +368,7 @@ fn resolve_live_tool_call(call: &Value) -> (String, Value) {
             .unwrap_or_else(|| json!({}));
         (action, input)
     } else {
-        let input = call
-            .get("args")
-            .cloned()
-            .unwrap_or_else(|| json!({}));
+        let input = call.get("args").cloned().unwrap_or_else(|| json!({}));
         (name.to_string(), input)
     }
 }
@@ -429,7 +425,10 @@ pub(crate) fn build_live_system_instruction(
     let mut base_prompt =
         crate::prompts::agent::build_system_prompt(config, false, true, user_name.as_deref(), None);
     if base_prompt.chars().count() > MAX_LIVE_BASE_PROMPT_CHARS {
-        base_prompt = base_prompt.chars().take(MAX_LIVE_BASE_PROMPT_CHARS).collect();
+        base_prompt = base_prompt
+            .chars()
+            .take(MAX_LIVE_BASE_PROMPT_CHARS)
+            .collect();
     }
 
     let mut sections = vec![base_prompt.trim().to_string()];
@@ -467,7 +466,9 @@ pub(crate) fn build_live_system_instruction(
         if !trimmed_skills.is_empty() {
             let skill_chars: Vec<char> = trimmed_skills.chars().collect();
             let budgeted_skills = if skill_chars.len() > MAX_LIVE_SKILLS_CONTEXT_CHARS {
-                let prefix: String = skill_chars[..MAX_LIVE_SKILLS_CONTEXT_CHARS].iter().collect();
+                let prefix: String = skill_chars[..MAX_LIVE_SKILLS_CONTEXT_CHARS]
+                    .iter()
+                    .collect();
                 format!("Learned skills:\n{prefix}\n...[truncated]")
             } else {
                 format!("Learned skills:\n{trimmed_skills}")
@@ -522,12 +523,8 @@ where
     let (mut ws_write, mut ws_read) = ws_stream.split();
 
     let memory_store = crate::MemoryStore::open_default().ok();
-    let system_instruction = build_live_system_instruction(
-        config,
-        workspace_root,
-        chat_id,
-        memory_store.as_ref(),
-    );
+    let system_instruction =
+        build_live_system_instruction(config, workspace_root, chat_id, memory_store.as_ref());
 
     // Confirmed against a live server rejection: `responseModalities` must be nested under
     // `generationConfig` — the server explicitly rejects it at the top level of `setup`
@@ -847,20 +844,41 @@ mod approval_lifecycle_tests {
         let funcs = decl["functionDeclarations"]
             .as_array()
             .expect("functionDeclarations array");
-        let names: Vec<&str> = funcs
-            .iter()
-            .filter_map(|f| f["name"].as_str())
-            .collect();
+        let names: Vec<&str> = funcs.iter().filter_map(|f| f["name"].as_str()).collect();
 
-        assert!(names.contains(&"list_files"), "missing list_files: {names:?}");
+        assert!(
+            names.contains(&"list_files"),
+            "missing list_files: {names:?}"
+        );
         assert!(names.contains(&"read_file"), "missing read_file: {names:?}");
-        assert!(names.contains(&"git_status"), "missing git_status: {names:?}");
-        assert!(names.contains(&"web_search"), "missing web_search: {names:?}");
-        assert!(names.contains(&"video_trim"), "missing video_trim: {names:?}");
-        assert!(names.contains(&"agent_action"), "missing fallback agent_action: {names:?}");
-        assert!(!names.contains(&"finish"), "live voice mode must not expose finish tool");
-        assert!(!names.contains(&"enter_plan_mode"), "live voice mode must not expose enter_plan_mode");
-        assert!(!names.contains(&"exit_plan_mode"), "live voice mode must not expose exit_plan_mode");
+        assert!(
+            names.contains(&"git_status"),
+            "missing git_status: {names:?}"
+        );
+        assert!(
+            names.contains(&"web_search"),
+            "missing web_search: {names:?}"
+        );
+        assert!(
+            names.contains(&"video_trim"),
+            "missing video_trim: {names:?}"
+        );
+        assert!(
+            names.contains(&"agent_action"),
+            "missing fallback agent_action: {names:?}"
+        );
+        assert!(
+            !names.contains(&"finish"),
+            "live voice mode must not expose finish tool"
+        );
+        assert!(
+            !names.contains(&"enter_plan_mode"),
+            "live voice mode must not expose enter_plan_mode"
+        );
+        assert!(
+            !names.contains(&"exit_plan_mode"),
+            "live voice mode must not expose exit_plan_mode"
+        );
 
         let serialized = serde_json::to_string(&decl).unwrap();
         assert!(
@@ -991,7 +1009,8 @@ mod approval_lifecycle_tests {
     }
 
     #[test]
-    fn live_turn_accumulator_flushes_previous_turn_when_new_user_speech_arrives_after_assistant_reply() {
+    fn live_turn_accumulator_flushes_previous_turn_when_new_user_speech_arrives_after_assistant_reply()
+     {
         let db_path = std::env::temp_dir().join(format!(
             "mint-live-turn-barge-test-{}.sqlite3",
             uuid::Uuid::new_v4()
@@ -1033,14 +1052,8 @@ mod approval_lifecycle_tests {
             .expect("snapshot");
         assert_eq!(snapshot.interactions.len(), 2);
         assert_eq!(snapshot.interactions[0].user_text, "สวัสดีครับ");
-        assert_eq!(
-            snapshot.interactions[0].ai_text,
-            "สวัสดีครับ มีอะไรให้ช่วยไหมครับ"
-        );
-        assert_eq!(
-            snapshot.interactions[1].user_text,
-            "เดี๋ยวก่อนนะ ขอเปลี่ยนคำถาม"
-        );
+        assert_eq!(snapshot.interactions[0].ai_text, "สวัสดีครับ มีอะไรให้ช่วยไหมครับ");
+        assert_eq!(snapshot.interactions[1].user_text, "เดี๋ยวก่อนนะ ขอเปลี่ยนคำถาม");
         assert_eq!(snapshot.interactions[1].ai_text, "ได้ครับ ว่ามาได้เลย");
         let _ = std::fs::remove_file(&db_path);
     }
@@ -1077,13 +1090,7 @@ mod approval_lifecycle_tests {
         for idx in 0..8 {
             let filler = format!("Turn {idx}: {}", "รายละเอียดระบบเดิม ".repeat(60));
             memory
-                .add_interaction_for_chat(
-                    &scoped,
-                    &filler,
-                    &filler,
-                    "gemini",
-                    "gemini-2.5-flash",
-                )
+                .add_interaction_for_chat(&scoped, &filler, &filler, "gemini", "gemini-2.5-flash")
                 .unwrap();
         }
         memory
@@ -1097,8 +1104,7 @@ mod approval_lifecycle_tests {
             .unwrap();
 
         let config = MintConfig::default();
-        let instruction =
-            build_live_system_instruction(&config, workspace, chat_id, Some(&memory));
+        let instruction = build_live_system_instruction(&config, workspace, chat_id, Some(&memory));
 
         assert!(
             instruction.contains("4173"),
