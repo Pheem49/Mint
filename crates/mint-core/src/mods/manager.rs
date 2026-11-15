@@ -420,6 +420,21 @@ impl Worker {
         Ok((None, WorkerInput::Thread(to_worker_tx), from_worker_rx))
     }
 
+    fn find_mod_host(exe: &Path, name: &str) -> Option<PathBuf> {
+        let sibling = exe.parent()?.join(name);
+        if sibling.is_file() {
+            return Some(sibling);
+        }
+        // Cargo places test binaries in `target/<profile>/deps/` or
+        // `target/<profile>/build/<pkg>/<hash>/out/`, while `mint-mod-host`
+        // lives in `target/<profile>/`.
+        exe.ancestors()
+            .skip(2)
+            .take(5)
+            .map(|dir| dir.join(name))
+            .find(|candidate| candidate.is_file())
+    }
+
     fn start(
         root: &Path,
         chat: &str,
@@ -434,21 +449,9 @@ impl Worker {
         } else {
             "mint-mod-host"
         };
-        let sibling = exe
-            .parent()
-            .ok_or("Executable directory missing")?
-            .join(name);
-        let development = exe.parent().and_then(Path::parent).map(|p| p.join(name));
-        let (child, input, rx) = if sibling.is_file() {
-            Self::spawn_process(Command::new(sibling))?
-        } else if let Some(p) = development.filter(|p| p.is_file()) {
-            Self::spawn_process(Command::new(p))?
-        } else if !cfg!(test)
-            && !exe
-                .parent()
-                .and_then(Path::file_name)
-                .is_some_and(|n| n == "deps")
-        {
+        let (child, input, rx) = if let Some(host) = Self::find_mod_host(&exe, name) {
+            Self::spawn_process(Command::new(host))?
+        } else if !cfg!(test) && exe.file_stem().and_then(|s| s.to_str()) == Some("mint") {
             let mut c = Command::new(exe);
             c.arg("--mint-mod-host");
             Self::spawn_process(c)?
