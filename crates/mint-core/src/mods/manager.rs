@@ -443,7 +443,12 @@ impl Worker {
             Self::spawn_process(Command::new(sibling))?
         } else if let Some(p) = development.filter(|p| p.is_file()) {
             Self::spawn_process(Command::new(p))?
-        } else if !cfg!(test) && !exe.to_string_lossy().contains("deps") {
+        } else if !cfg!(test)
+            && !exe
+                .parent()
+                .and_then(Path::file_name)
+                .is_some_and(|n| n == "deps")
+        {
             let mut c = Command::new(exe);
             c.arg("--mint-mod-host");
             Self::spawn_process(c)?
